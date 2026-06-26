@@ -20,7 +20,7 @@ $project = (new ProjectStore(repo_path('projects')))->open($slug);
 
 $spec = $project->readJson('siteSpec.json');
 echo "# {$spec['name']}  ({$slug})\n";
-echo 'tagline: ' . ($spec['tagline'] ?? '–') . "\n";
+echo 'tagline: ' . ($spec['tagline'] ?? $spec['topic'] ?? '–') . "\n";
 echo 'vibe: ' . ($spec['visual_vibe'] ?? '–') . "\n";
 // Fonts are a design decision; they live in design.md / theme.json now, not the spec.
 $themeForFonts = json_decode($project->readText('theme/theme.json'), true);

@@ -79,7 +79,7 @@ test('design-doc throws on too-short output', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('design-doc throws when front matter color tokens are missing', function () {
+test('design-doc throws when the YAML front matter is missing entirely', function () {
     $tmp = sys_get_temp_dir() . '/builder_doc_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'x']);
@@ -88,6 +88,26 @@ test('design-doc throws when front matter color tokens are missing', function ()
     // Long enough, but no YAML front matter at all.
     $llm->queueText("## Overview\n" . str_repeat('Words about the design. ', 20)
         . "\n## Colors\nsome\n## Typography\nfonts");
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    assert_throws(function () use ($llm, $renderer, $project) {
+        (new DesignDocStep($llm, $renderer))->run($project);
+    });
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-doc throws when one front-matter color token is missing', function () {
+    $tmp = sys_get_temp_dir() . '/builder_doc_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'x']);
+    $project->writeJson('siteSpec.json', ['name' => 'X']);
+    $llm = new FakeLlm();
+    // Valid front matter and all sections, but 'accent' is dropped — this
+    // exercises the per-token color loop (not the missing-front-matter branch).
+    $body = "---\nname: X\ncolors:\n  base: \"#fff\"\n  contrast: \"#111\"\n  primary: \"#222\"\n"
+        . "  secondary: \"#333\"\ntypography:\n  heading:\n    fontFamily: A\n"
+        . "  body:\n    fontFamily: B\n---\n\n## Overview\n" . str_repeat('Design words. ', 20)
+        . "\n## Colors\nstuff\n## Typography\nfonts";
+    $llm->queueText($body);
     $renderer = new PromptRenderer(repo_path('prompts'));
     assert_throws(function () use ($llm, $renderer, $project) {
         (new DesignDocStep($llm, $renderer))->run($project);
