@@ -2,39 +2,55 @@
 
 _Source of truth for resuming after interruption. Update after every meaningful action._
 
-## Current status: Phase 0 (proxy access) — BLOCKED, awaiting user decision
+## Current status: Phase 2 (end-to-end validation) — generating 5 eval sites
 
-## Phase 0 findings (verified empirically, 2026-06-25)
+## Phase 0 — proxy access — DONE (resolved)
+Verified empirically that the wpcom AI proxy cannot reach Claude with available
+credentials (Anthropic key is not a valid proxy bearer; the only working proxy
+token is Google-Vertex-scoped). telex itself calls Anthropic directly. **User
+decision: use Anthropic-direct.** Confirmed round-trip: `claude-opus-4-8` → "pong".
 
-Goal: confirm a successful LLM round-trip. Hard gate before Phase 1.
+## Phase 1 — steps — DONE
+All 7 steps implemented, unit-tested, committed to trunk. Full sequence passes
+both a real end-to-end run and a deterministic integration test.
 
-| Attempt | Auth token | Endpoint | Result |
-|---|---|---|---|
-| Proxy chat/completions, `claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY` | wpcom ai-api-proxy | **404** `not_found_error` (key is not a valid wpcom bearer) |
-| Proxy chat/completions, claude | `GOOGLE_VERTEX_API_TOKEN` | wpcom ai-api-proxy | **404** empty |
-| Proxy `/v1/models` | `GOOGLE_VERTEX_API_TOKEN` | wpcom ai-api-proxy | **422** `ai_services_error` (token valid, routes to Google Vertex only) |
-| Proxy `/v1/messages` native, claude | `GOOGLE_VERTEX_API_TOKEN` | wpcom ai-api-proxy | **404** (forwards to Google backend) |
-| Proxy chat/completions, `gemini-2.0-flash` | `GOOGLE_VERTEX_API_TOKEN` | wpcom ai-api-proxy | **404** empty |
-| **Anthropic DIRECT** `/v1/messages`, `claude-opus-4-8` | `ANTHROPIC_API_KEY` | api.anthropic.com | ✅ **200**, text="pong", usage returned |
+| # | Step | Type | Output | Unit tests |
+|---|------|------|--------|-----------|
+| 1 | scaffold-theme | det | theme/style.css, readme.txt (placeholders) | 2 |
+| 2 | site-spec | LLM | siteSpec.json | 3 |
+| 3 | apply-identity | det | filled style.css/readme.txt | 1 |
+| 4 | design-direction | LLM | designDirection.json | 2 |
+| 5 | design-doc | LLM | design.md | 2 |
+| 6 | theme-json | LLM | theme/theme.json (v3, 5 colors, 2 fonts) | 3 |
+| 7 | landing-page | LLM | parts/header,footer + templates/index,front-page | 3 |
 
-### Conclusions
-- The wpcom AI proxy does **not** authenticate with the Anthropic API key (user's belief disproved).
-- The only proxy token available (`GOOGLE_VERTEX_API_TOKEN`) is **scoped to Google Vertex** — it cannot reach Claude/Anthropic models through the proxy.
-- telex confirms this: it calls **Anthropic directly** (`api.anthropic.com`, `x-api-key`) and uses the proxy **only** for google-vertex image gen. It never routes Claude through the proxy.
-- Anthropic-direct works today with the provisioned `ANTHROPIC_API_KEY`. Available models include `claude-opus-4-8`, `claude-opus-4-7`, `claude-sonnet-4-6`.
+**Test status: 28 unit + 2 integration = 30 passing** (`php tests/run.php`,
+`php tests/run-integration.php`). Validator: `ThemeValidator` checks files,
+theme.json v3, balanced block grammar, no leftover placeholders.
 
-### Decision needed from user
-Proxy-for-Claude is not reachable with current credentials. Options:
-1. **Use Anthropic-direct** (telex's own pattern for text). Unblocks immediately.
-2. User supplies a wpcom AI-proxy token **entitled for Anthropic** models.
+Architecture: `Env`, `Llm` (interface) + `AnthropicClient`, `Project`,
+`ProjectStore`, `PromptRenderer`, `Step` + 7 steps, `Pipeline`,
+`ThemeValidator`. Prompts in `prompts/`. Runner: `bin/build.php`.
 
-## Env keys present
-`ANTHROPIC_API_KEY` (valid, direct), `GOOGLE_VERTEX_API_TOKEN` (valid, Vertex-only proxy), `OPENAI_API_KEY`.
+### First full real run (int-climate, "Greenstead/Greener Nest" climate blog)
+scaffold 0s · site-spec 7s · apply-identity 0s · design-direction 32s ·
+design-doc 36s · theme-json 21s · landing-page 143s · **TOTAL 239s**.
+Structurally valid; front-page = 94 blocks / 301 lines.
 
-## Code so far (from prior session, pre-Phase-0)
-- `src/Env.php`, `src/LlmClient.php` (currently points at the proxy — needs rework per decision), `src/bootstrap.php`, `bin/test-llm.php`.
-- `plan/site-builder-plan.md`, `plan/steps.md`.
-- NOTE: `LlmClient` + `.env.example` reference `WPCOM_AI_TOKEN`, which does not exist / does not work. Must be reworked.
+### Known observations / candidate improvements (for Phase 2)
+- landing-page is the bottleneck (~143s, 32k token budget). Watch its share.
+- Fonts: theme.json declares font stacks but no webfont loading — Google fonts
+  won't actually load unless bundled/enqueued. Candidate: generate functions.php
+  to enqueue, or add fontFace. (Tracking; decide after eval.)
+- Per-step real integration was done cumulatively (each new LLM step's real run
+  re-runs all prior steps), which is the full-sequence-up-to-here check.
 
-## Next (once unblocked)
-Phase 1: implement steps one at a time (scaffold theme → siteSpec → identity → design direction → design.md → theme.json → landing page), test+commit each.
+## Phase 2 — end-to-end validation — IN PROGRESS
+Generate 5 sites: climate care blog, photo portfolio, pizza menu, bakery
+catalog, bicycle store. Record per-step speed + quality; adjust; re-run.
+Harness: `bin/eval.php` (writes eval/report.md).
+
+## Next
+- Build `bin/eval.php`, run 5 sites, collect timing + validation + quality notes.
+- Review outputs, fix weak spots, re-run as needed.
+- Final summary here.
