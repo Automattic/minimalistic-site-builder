@@ -1,0 +1,33 @@
+You are a WordPress block-theme developer. Build the landing page and the template parts it needs, as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters).
+
+SITE SPEC (JSON):
+{{site_spec}}
+
+THEME TOKENS (theme.json):
+{{theme_json}}
+
+DESIGN DOCUMENT (Markdown):
+{{design_md}}
+
+Return a single JSON object mapping file paths to their full file contents, with EXACTLY these keys:
+  "parts/header.html"          — site title/logo + primary navigation
+  "parts/footer.html"          — footer with site name, a few links, and a small credit line
+  "templates/index.html"       — fallback template: header part, a simple main content area, footer part
+  "templates/front-page.html"  — the landing page: header part, then each key_section from the spec in order, then footer part
+
+Rules:
+- Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, navigation, site-title, site-tagline, template-part, spacer, separator, list, query/post-template if useful).
+- Reference theme.json presets by slug:
+    colors via "backgroundColor" / "textColor" attributes using slugs: base, contrast, primary, secondary, accent
+    fonts via the "fontFamily" attribute using slugs: heading, body
+  Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2 class="...">...</h2><!-- /wp:heading -->
+- front-page.html and index.html MUST start with the header part and end with the footer part:
+    <!-- wp:template-part {"slug":"header","tagName":"header"} /-->
+    ... content ...
+    <!-- wp:template-part {"slug":"footer","tagName":"footer"} /-->
+- Build every key_section from the spec as a real, distinct section (heading + meaningful placeholder copy in the brand voice). Reserve the accent color for buttons/CTAs only.
+- Use <!-- wp:image --> with descriptive alt text (no external src) where imagery belongs.
+- Wrap content in groups with constrained layout for comfortable reading width.
+- Every block comment must be correctly closed and the HTML class names must match the block (use standard WordPress block classes).
+
+Output ONLY the JSON object.
