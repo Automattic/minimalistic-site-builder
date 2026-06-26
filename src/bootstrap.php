@@ -49,5 +49,6 @@ function build_pipeline(Llm $llm): Pipeline
     return new Pipeline([
         new ScaffoldThemeStep(),
         new SiteSpecStep($llm, $renderer),
+        new ApplyIdentityStep(),
     ]);
 }
