@@ -8,14 +8,16 @@
             "design-direction": 37.9,
             "design-doc": 32.6,
             "theme-json": 21.9,
-            "landing-page": 113.6
+            "landing-page": 113.6,
+            "finalize-theme": 0
         },
-        "total": 213.3,
+        "total": 213.4,
         "error": null,
         "problems": [],
         "metrics": {
             "name": "Greener Nest",
             "fonts": "Fraunces + Work Sans",
+            "fonts_loaded": true,
             "front_page_blocks": 83,
             "sections": 6,
             "theme_bytes": 33893
@@ -30,14 +32,16 @@
             "design-direction": 36.1,
             "design-doc": 33.4,
             "theme-json": 18.7,
-            "landing-page": 92.5
+            "landing-page": 92.5,
+            "finalize-theme": 0
         },
-        "total": 188.1,
+        "total": 188.2,
         "error": null,
         "problems": [],
         "metrics": {
             "name": "Stillrange",
-            "fonts": "Heading + Body",
+            "fonts": "Cormorant Garamond + Inter",
+            "fonts_loaded": true,
             "front_page_blocks": 58,
             "sections": 7,
             "theme_bytes": 26628
@@ -52,7 +56,8 @@
             "design-direction": 32.8,
             "design-doc": 34,
             "theme-json": 22.9,
-            "landing-page": 137.5
+            "landing-page": 137.5,
+            "finalize-theme": 0
         },
         "total": 235.4,
         "error": null,
@@ -60,6 +65,7 @@
         "metrics": {
             "name": "Forno Vero",
             "fonts": "Playfair Display + Lora",
+            "fonts_loaded": true,
             "front_page_blocks": 103,
             "sections": 7,
             "theme_bytes": 39360
@@ -74,14 +80,16 @@
             "design-direction": 33.8,
             "design-doc": 29,
             "theme-json": 18.5,
-            "landing-page": 149.3
+            "landing-page": 149.3,
+            "finalize-theme": 0
         },
-        "total": 239.1,
+        "total": 239.10000000000002,
         "error": null,
         "problems": [],
         "metrics": {
             "name": "Hearth & Crumb",
             "fonts": "Playfair Display + Source Serif Pro",
+            "fonts_loaded": true,
             "front_page_blocks": 114,
             "sections": 6,
             "theme_bytes": 39779
@@ -96,14 +104,16 @@
             "design-direction": 33.1,
             "design-doc": 32.6,
             "theme-json": 21.9,
-            "landing-page": 132
+            "landing-page": 132,
+            "finalize-theme": 0
         },
-        "total": 227.4,
+        "total": 227.3,
         "error": null,
         "problems": [],
         "metrics": {
             "name": "Verge Cycles",
             "fonts": "Archivo + Inter",
+            "fonts_loaded": true,
             "front_page_blocks": 91,
             "sections": 6,
             "theme_bytes": 36790

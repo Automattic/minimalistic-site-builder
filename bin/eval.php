@@ -23,8 +23,18 @@ const SITES = [
 ];
 
 $only = $argv[1] ?? null;
-$llm = make_llm();
 $store = new ProjectStore(repo_path('projects'));
+
+// Report-only mode: rebuild eval/report.md from projects already on disk,
+// reusing captured step timings from eval/results.json. Used after a
+// deterministic-only pipeline change so we don't re-run the LLM steps.
+if ($only === '--report') {
+    rebuild_report();
+    echo "Report rebuilt from disk into eval/report.md\n";
+    exit(0);
+}
+
+$llm = make_llm();
 
 $results = [];
 foreach (SITES as $slug => $prompt) {
@@ -68,10 +78,45 @@ foreach (SITES as $slug => $prompt) {
 write_report($results);
 echo "\nReport written to eval/report.md\n";
 
+/**
+ * Rebuild the report from on-disk projects + prior results.json (re-validating
+ * and re-collecting metrics so deterministic post-changes are reflected).
+ */
+function rebuild_report(): void
+{
+    $prior = [];
+    if (is_file(repo_path('eval/results.json'))) {
+        $prior = json_decode((string) file_get_contents(repo_path('eval/results.json')), true) ?: [];
+    }
+    $store = new ProjectStore(repo_path('projects'));
+    $results = [];
+    foreach (array_keys(SITES) as $slug) {
+        $dir = repo_path('projects/' . $slug);
+        if (!is_dir($dir)) {
+            continue;
+        }
+        $project = $store->open($slug);
+        $timings = $prior[$slug]['timings'] ?? [];
+        $timings['finalize-theme'] = $timings['finalize-theme'] ?? 0.0;
+        $results[$slug] = [
+            'prompt'   => SITES[$slug],
+            'timings'  => $timings,
+            'total'    => array_sum($timings),
+            'error'    => null,
+            'problems' => ThemeValidator::validate($project),
+            'metrics'  => collect_metrics($project),
+        ];
+    }
+    write_report($results);
+}
+
 /** @return array<string,mixed> */
 function collect_metrics(Project $project): array
 {
-    $m = ['name' => null, 'fonts' => null, 'front_page_blocks' => 0, 'sections' => 0, 'theme_bytes' => 0];
+    $m = ['name' => null, 'fonts' => null, 'fonts_loaded' => false, 'front_page_blocks' => 0, 'sections' => 0, 'theme_bytes' => 0];
+    if ($project->exists('theme/functions.php')) {
+        $m['fonts_loaded'] = str_contains($project->readText('theme/functions.php'), 'fonts.googleapis.com');
+    }
     if ($project->exists('siteSpec.json')) {
         $spec = $project->readJson('siteSpec.json');
         $m['name'] = $spec['name'] ?? null;
@@ -80,7 +125,11 @@ function collect_metrics(Project $project): array
     if ($project->exists('theme/theme.json')) {
         $t = json_decode($project->readText('theme/theme.json'), true);
         $fams = $t['settings']['typography']['fontFamilies'] ?? [];
-        $m['fonts'] = implode(' + ', array_map(fn ($f) => $f['name'] ?? $f['slug'] ?? '?', $fams));
+        // Show the primary family from each stack (more accurate than the label).
+        $m['fonts'] = implode(' + ', array_map(static function ($f) {
+            $primary = trim(explode(',', (string) ($f['fontFamily'] ?? ''))[0], " \"'");
+            return $primary !== '' ? $primary : ($f['name'] ?? '?');
+        }, $fams));
     }
     if ($project->exists('theme/templates/front-page.html')) {
         $m['front_page_blocks'] = preg_match_all('/<!--\s*wp:/', $project->readText('theme/templates/front-page.html'));
@@ -94,7 +143,7 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    $stepIds = ['scaffold-theme', 'site-spec', 'apply-identity', 'design-direction', 'design-doc', 'theme-json', 'landing-page'];
+    $stepIds = ['scaffold-theme', 'site-spec', 'apply-identity', 'design-direction', 'design-doc', 'theme-json', 'landing-page', 'finalize-theme'];
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
     $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . Env::get('LLM_MODEL', 'claude-opus-4-8') . "\n\n";
@@ -114,14 +163,15 @@ function write_report(array $results): void
 
     // Quality table.
     $md .= "\n## Quality (structural)\n\n";
-    $md .= "| Site | Name | Fonts | Sections | Front-page blocks | Theme KB | Validation |\n";
-    $md .= "|---|---|---|---|---|---|---|\n";
+    $md .= "| Site | Name | Fonts | Fonts load | Sections | Front-page blocks | Theme KB | Validation |\n";
+    $md .= "|---|---|---|---|---|---|---|---|\n";
     foreach ($results as $slug => $r) {
         $m = $r['metrics'];
         $val = $r['problems'] === [] ? '✅ valid' : '⚠️ ' . count($r['problems']);
         $md .= sprintf(
-            "| `%s` | %s | %s | %d | %d | %.1f | %s |\n",
-            $slug, $m['name'] ?? '–', $m['fonts'] ?? '–', $m['sections'],
+            "| `%s` | %s | %s | %s | %d | %d | %.1f | %s |\n",
+            $slug, $m['name'] ?? '–', $m['fonts'] ?? '–',
+            ($m['fonts_loaded'] ?? false) ? '✅' : '—', $m['sections'],
             $m['front_page_blocks'], ($m['theme_bytes'] ?? 0) / 1024, $val
         );
     }
@@ -155,6 +205,6 @@ function short(string $stepId): string
     return match ($stepId) {
         'scaffold-theme' => 'scaf', 'site-spec' => 'spec', 'apply-identity' => 'ident',
         'design-direction' => 'dir', 'design-doc' => 'doc', 'theme-json' => 'tjson',
-        'landing-page' => 'land', default => $stepId,
+        'landing-page' => 'land', 'finalize-theme' => 'fin', default => $stepId,
     };
 }
