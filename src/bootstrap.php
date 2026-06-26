@@ -9,6 +9,7 @@ declare(strict_types=1);
 $src = __DIR__;
 require_once $src . '/Env.php';
 require_once $src . '/Llm.php';
+require_once $src . '/TransientApiException.php';
 require_once $src . '/AnthropicClient.php';
 require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
