@@ -15,6 +15,7 @@ require_once $src . '/ProjectStore.php';
 require_once $src . '/PromptRenderer.php';
 require_once $src . '/Step.php';
 require_once $src . '/Pipeline.php';
+require_once $src . '/ThemeValidator.php';
 
 // Steps.
 foreach (glob($src . '/steps/*.php') ?: [] as $stepFile) {
