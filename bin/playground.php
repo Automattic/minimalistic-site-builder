@@ -47,6 +47,20 @@ if (!command_exists('npx')) {
     exit(1);
 }
 
+// Theme display name from the style.css header.
+$name = '';
+if (preg_match('/Theme Name:\s*(.+)/', (string) file_get_contents($themeDir . '/style.css'), $m)) {
+    $name = trim($m[1]);
+}
+
+// Pick a free port starting from the requested one (avoids EADDRINUSE when a
+// previous Playground is still running).
+$requestedPort = $port;
+$port = find_free_port($port);
+if ($port !== $requestedPort) {
+    fwrite(STDERR, "Port {$requestedPort} is in use — using {$port} instead.\n");
+}
+
 // Use the site name/tagline from siteSpec for the WP site title (the header's
 // site-title block reads this option, not the theme).
 $blogname = $name !== '' ? $name : $slug;
@@ -83,11 +97,6 @@ $cmd = sprintf(
     escapeshellarg($blueprintPath)
 );
 
-$name = '';
-if (preg_match('/Theme Name:\s*(.+)/', (string) file_get_contents($themeDir . '/style.css'), $m)) {
-    $name = trim($m[1]);
-}
-
 echo "Starting WordPress Playground for '{$slug}'" . ($name !== '' ? " ({$name})" : '') . "\n";
 echo "  theme:  {$themeDir}\n";
 echo "  url:    http://127.0.0.1:{$port}/\n";
@@ -100,4 +109,17 @@ exit($exit);
 function command_exists(string $bin): bool
 {
     return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
+}
+
+/** Return the first free TCP port at or after $start (gives up after 50 tries). */
+function find_free_port(int $start): int
+{
+    for ($port = $start; $port < $start + 50; $port++) {
+        $conn = @fsockopen('127.0.0.1', $port, $errno, $errstr, 0.2);
+        if ($conn === false) {
+            return $port; // nothing listening — free
+        }
+        fclose($conn);
+    }
+    return $start;
 }
