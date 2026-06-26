@@ -59,6 +59,66 @@ test('generate-images marks failed and leaves the placeholder on error', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+/** Write an images.json with $n pending placeholders and return [project, tmp]. */
+function batch_fixture(int $n): array
+{
+    $tmp = sys_get_temp_dir() . '/builder_gib_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $specs = [];
+    for ($k = 0; $k < $n; $k++) {
+        $specs[] = [
+            'filename'    => "img-{$k}.jpg",
+            'src'         => "theme:./assets/img-{$k}.jpg",
+            'description' => "image {$k}",
+            'style'       => 'photorealistic',
+            'aspectRatio' => 'landscape',
+            'prompt'      => "image {$k}. Style: photorealistic",
+            'status'      => 'pending',
+        ];
+    }
+    $project->writeJson('images.json', $specs);
+    return [$project, $tmp];
+}
+
+test('generate-images processes pending images in concurrent batches of 5', function () {
+    [$project, $tmp] = batch_fixture(7); // 7 -> batches of 5 + 2
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    // Two batches were issued, sized 5 then 2 (not 7 single calls).
+    assert_eq(2, count($images->batches), 'two batches');
+    assert_eq(5, count($images->batches[0]), 'first batch has 5');
+    assert_eq(2, count($images->batches[1]), 'second batch has 2');
+
+    // All 7 assets written and marked completed.
+    $specs = $project->readJson('images.json');
+    foreach ($specs as $s) {
+        assert_eq('completed', $s['status']);
+        assert_true($project->exists('theme/assets/' . $s['filename']), "{$s['filename']} written");
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images tolerates a partial failure within a batch', function () {
+    [$project, $tmp] = batch_fixture(3);
+    $images = new FakeImageClient('JPEGDATA');
+    $images->failPromptSubstrings = ['image 1.']; // only the middle one fails
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $specs = $project->readJson('images.json');
+    assert_eq('completed', $specs[0]['status']);
+    assert_eq('failed', $specs[1]['status']);          // the failed image is isolated
+    assert_eq('completed', $specs[2]['status']);       // others still succeed
+    assert_true($project->exists('theme/assets/img-0.jpg'));
+    assert_true(!$project->exists('theme/assets/img-1.jpg'), 'no asset for failed image');
+    assert_true($project->exists('theme/assets/img-2.jpg'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images is a no-op when there are no placeholders', function () {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

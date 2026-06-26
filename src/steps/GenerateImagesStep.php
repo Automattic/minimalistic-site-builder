@@ -18,6 +18,9 @@ declare(strict_types=1);
  */
 final class GenerateImagesStep implements Step
 {
+    /** How many images to generate concurrently per batch. */
+    private const BATCH_SIZE = 5;
+
     public function __construct(private ImageClient $images) {}
 
     public function id(): string
@@ -47,28 +50,58 @@ final class GenerateImagesStep implements Step
         }
 
         $resolved = []; // theme: src => served URL, for the markup rewrite
+
+        // Already-completed images need no work — just record them for the rewrite.
+        $pending = [];
         foreach ($specs as $i => $spec) {
             if (($spec['status'] ?? 'pending') === 'completed') {
                 $resolved[$spec['src']] = $this->servedUrl($project, $spec['filename']);
                 continue;
             }
+            $pending[$i] = $spec; // preserve the original images.json index
+        }
 
-            $filename = (string) $spec['filename'];
-            try {
-                $bytes = $this->images->generate((string) $spec['prompt'], [
-                    'aspect_ratio' => WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
-                ]);
-                $project->writeText('theme/assets/' . $filename, $bytes);
+        // Generate the pending images in concurrent batches rather than one by
+        // one: a slow Imagen round-trip per call otherwise dominates the step.
+        $batches = array_chunk($pending, self::BATCH_SIZE, true);
+        $batchCount = count($batches);
+        foreach ($batches as $b => $batch) {
+            fwrite(STDERR, sprintf("    batch %d/%d: %d image(s)\n", $b + 1, $batchCount, count($batch)));
 
-                $specs[$i]['status'] = 'completed';
-                $specs[$i]['url']    = $this->servedUrl($project, $filename);
-                $resolved[$spec['src']] = $specs[$i]['url'];
-                fwrite(STDERR, "    generated {$filename}\n");
-            } catch (Throwable $e) {
-                $specs[$i]['status'] = 'failed';
-                $specs[$i]['error']  = $e->getMessage();
-                fwrite(STDERR, "    FAILED {$filename}: {$e->getMessage()}\n");
+            // Map this batch's original indices to generation specs (order kept).
+            $indices = array_keys($batch);
+            $batchSpecs = array_map(fn (array $spec): array => [
+                'prompt'       => (string) $spec['prompt'],
+                'aspect_ratio' => WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
+            ], array_values($batch));
+
+            $results = $this->images->generateBatch($batchSpecs);
+
+            foreach ($indices as $pos => $i) {
+                $filename = (string) $specs[$i]['filename'];
+                $result = $results[$pos] ?? ['ok' => false, 'error' => 'no result returned'];
+
+                // A single image must never abort the build — isolate both a
+                // generation failure and a write failure (disk full, bad path).
+                try {
+                    if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
+                        throw new RuntimeException((string) ($result['error'] ?? 'unknown error'));
+                    }
+                    $project->writeText('theme/assets/' . $filename, (string) $result['bytes']);
+                    $specs[$i]['status'] = 'completed';
+                    $specs[$i]['url']    = $this->servedUrl($project, $filename);
+                    unset($specs[$i]['error']);
+                    $resolved[$specs[$i]['src']] = $specs[$i]['url'];
+                    fwrite(STDERR, "    generated {$filename}\n");
+                } catch (Throwable $e) {
+                    $specs[$i]['status'] = 'failed';
+                    $specs[$i]['error']  = $e->getMessage();
+                    fwrite(STDERR, "    FAILED {$filename}: {$e->getMessage()}\n");
+                }
             }
+
+            // Persist after each batch so progress survives an interruption.
+            $project->writeJson('images.json', $specs);
         }
 
         $project->writeJson('images.json', $specs);
