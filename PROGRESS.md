@@ -45,7 +45,7 @@ behind the `Llm` interface so a proxy transport can be swapped in later.
 **Architecture** (zero PHP dependencies — plain PHP + cURL):
 `Env`, `Llm` interface + `AnthropicClient`, `Project`, `ProjectStore`,
 `PromptRenderer`, `Step` + 9 steps, `Pipeline`, `ThemeValidator`.
-Prompts: `prompts/*.txt`. Runners: `bin/build.php`, `bin/eval.php`, `bin/inspect.php`.
+Prompts: `prompts/*.md`. Runners: `bin/build.php`, `bin/eval.php`, `bin/inspect.php`.
 
 **Block validation fixer** (`bin/block-fixer/`, step 8): a verbatim copy of telex's
 `server/scripts/block-fixer` lib (`blockFixer.js` + `paragraphFixer.js`) plus a

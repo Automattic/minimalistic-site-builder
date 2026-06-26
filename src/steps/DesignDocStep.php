@@ -29,7 +29,7 @@ final class DesignDocStep implements Step
         $spec = $project->readJson('siteSpec.json');
         $direction = $project->readJson('designDirection.json');
 
-        $rendered = $this->renderer->render('design-doc.txt', [
+        $rendered = $this->renderer->render('design-doc.md', [
             'site_spec'        => json_encode($spec, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'design_direction' => json_encode($direction, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ]);

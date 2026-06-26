@@ -33,7 +33,7 @@ final class ThemeJsonStep implements Step
     public function run(Project $project): void
     {
         $direction = $project->readJson('designDirection.json');
-        $rendered = $this->renderer->render('theme-json.txt', [
+        $rendered = $this->renderer->render('theme-json.md', [
             'design_md'        => $project->readText('design.md'),
             'design_direction' => json_encode($direction, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ]);

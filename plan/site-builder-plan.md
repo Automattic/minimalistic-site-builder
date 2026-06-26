@@ -52,7 +52,7 @@ builder/
    - Minimal error handling (HTTP error, invalid JSON) — fail loud, no retry loop.
 
 ### 3. Dynamic prompt rendering
-5. `PromptRenderer.php`: load a `prompts/<step>.txt` template and replace
+5. `PromptRenderer.php`: load a `prompts/<step>.md` template and replace
    `{{placeholder}}` tokens from a context array.
    - Context = initial prompt + already-saved step outputs.
    - Enforce that every required placeholder resolves (else error).

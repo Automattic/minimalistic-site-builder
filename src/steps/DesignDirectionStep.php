@@ -28,7 +28,7 @@ final class DesignDirectionStep implements Step
     public function run(Project $project): void
     {
         $spec = $project->readJson('siteSpec.json');
-        $rendered = $this->renderer->render('design-direction.txt', [
+        $rendered = $this->renderer->render('design-direction.md', [
             'site_spec' => json_encode($spec, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ]);
 

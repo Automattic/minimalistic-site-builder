@@ -35,7 +35,7 @@ final class SiteSpecStep implements Step
             throw new RuntimeException('meta.json has no "prompt"');
         }
 
-        $rendered = $this->renderer->render('site-spec.txt', ['user_prompt' => $prompt]);
+        $rendered = $this->renderer->render('site-spec.md', ['user_prompt' => $prompt]);
         $spec = $this->llm->completeJson($rendered);
 
         $spec = self::normalize($spec);
