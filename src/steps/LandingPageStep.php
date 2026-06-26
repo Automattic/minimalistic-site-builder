@@ -42,6 +42,10 @@ final class LandingPageStep implements Step
             'design_md'  => $project->readText('design.md'),
         ]);
 
+        // This is the slowest LLM step (large block-markup output); tell the user
+        // what it's producing so the build doesn't look frozen while it runs.
+        fwrite(STDERR, "    writing header, footer, index, front-page…\n");
+
         // Block markup for four files is large — give the model room.
         $files = $this->llm->completeJson($rendered, ['max_tokens' => 32000]);
 

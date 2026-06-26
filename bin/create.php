@@ -58,21 +58,30 @@ $steps = [];
 $prevIn = 0;
 $prevOut = 0;
 $wallStart = microtime(true);
-$pipeline->runThrough($project, null, function (Step $step, float $secs) use ($llm, &$prevIn, &$prevOut, &$steps) {
-    $u = $llm->usageTotals();
-    $dIn = $u['input_tokens'] - $prevIn;
-    $dOut = $u['output_tokens'] - $prevOut;
-    $prevIn = $u['input_tokens'];
-    $prevOut = $u['output_tokens'];
-    $steps[] = record_step($step->id(), $secs, $dIn, $dOut);
-    printf("  %-18s %7.1fs %10s %10s\n", $step->id(), $secs, fmt($dIn), fmt($dOut));
-});
+$pipeline->runThrough(
+    $project,
+    null,
+    function (Step $step, float $secs) use ($llm, &$prevIn, &$prevOut, &$steps) {
+        $u = $llm->usageTotals();
+        $dIn = $u['input_tokens'] - $prevIn;
+        $dOut = $u['output_tokens'] - $prevOut;
+        $prevIn = $u['input_tokens'];
+        $prevOut = $u['output_tokens'];
+        $steps[] = record_step($step->id(), $secs, $dIn, $dOut);
+        printf("  %-18s %7.1fs %10s %10s\n", $step->id(), $secs, fmt($dIn), fmt($dOut));
+    },
+    // Print a "starting" line before each step so the build never looks frozen
+    // while a long step (landing-page, image generation) is mid-flight.
+    'announce_step',
+);
 
 // Opt-in image generation: turn the AI_IMAGE placeholders into real assets.
 // It makes no LLM calls, so its token columns are a deterministic zero.
 if ($withImages) {
+    $imageStep = new GenerateImagesStep(make_image_client());
+    announce_step($imageStep);
     $start = microtime(true);
-    (new GenerateImagesStep(make_image_client()))->run($project);
+    $imageStep->run($project);
     $secs = microtime(true) - $start;
     $steps[] = record_step('generate-images', $secs, 0, 0);
     printf("  %-18s %7.1fs %10s %10s\n", 'generate-images', $secs, fmt(0), fmt(0));
@@ -132,6 +141,16 @@ exit($exit);
 function fmt(int $n): string
 {
     return number_format($n);
+}
+
+/**
+ * Print a "starting" line for a step before it runs, flushed immediately so it
+ * appears in real time even while the step blocks (long LLM / image calls).
+ */
+function announce_step(Step $step): void
+{
+    printf("  → %-16s %s…\n", $step->id(), $step->label());
+    flush();
 }
 
 /**
