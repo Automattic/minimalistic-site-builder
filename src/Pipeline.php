@@ -21,10 +21,19 @@ final class Pipeline
      * Run every step up to and including $untilId (or all steps if null).
      *
      * @param callable(Step,float):void|null $reporter called after each step with (step, seconds)
+     * @param callable(Step):void|null       $onStart  called before each step->run() with (step),
+     *                                                  so a "starting" line can be shown for long steps
      */
-    public function runThrough(Project $project, ?string $untilId = null, ?callable $reporter = null): void
-    {
+    public function runThrough(
+        Project $project,
+        ?string $untilId = null,
+        ?callable $reporter = null,
+        ?callable $onStart = null,
+    ): void {
         foreach ($this->steps as $step) {
+            if ($onStart !== null) {
+                $onStart($step);
+            }
             $start = microtime(true);
             $step->run($project);
             $elapsed = microtime(true) - $start;

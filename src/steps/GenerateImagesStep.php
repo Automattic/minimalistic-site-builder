@@ -65,6 +65,12 @@ final class GenerateImagesStep implements Step
         // one: a slow Imagen round-trip per call otherwise dominates the step.
         $batches = array_chunk($pending, self::BATCH_SIZE, true);
         $batchCount = count($batches);
+        if ($pending !== []) {
+            fwrite(STDERR, sprintf(
+                "    generating %d image(s) in %d batch(es) of up to %d…\n",
+                count($pending), $batchCount, self::BATCH_SIZE
+            ));
+        }
         foreach ($batches as $b => $batch) {
             fwrite(STDERR, sprintf("    batch %d/%d: %d image(s)\n", $b + 1, $batchCount, count($batch)));
 
