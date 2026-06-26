@@ -1,0 +1,112 @@
+{
+    "climate-care-blog": {
+        "prompt": "A climate care blog about practical, everyday home sustainability",
+        "timings": {
+            "scaffold-theme": 0,
+            "site-spec": 7.4,
+            "apply-identity": 0,
+            "design-direction": 37.9,
+            "design-doc": 32.6,
+            "theme-json": 21.9,
+            "landing-page": 113.6
+        },
+        "total": 213.3,
+        "error": null,
+        "problems": [],
+        "metrics": {
+            "name": "Greener Nest",
+            "fonts": "Fraunces + Work Sans",
+            "front_page_blocks": 83,
+            "sections": 6,
+            "theme_bytes": 33893
+        }
+    },
+    "photo-portfolio": {
+        "prompt": "A minimalist photography portfolio for a fine-art landscape photographer",
+        "timings": {
+            "scaffold-theme": 0,
+            "site-spec": 7.5,
+            "apply-identity": 0,
+            "design-direction": 36.1,
+            "design-doc": 33.4,
+            "theme-json": 18.7,
+            "landing-page": 92.5
+        },
+        "total": 188.1,
+        "error": null,
+        "problems": [],
+        "metrics": {
+            "name": "Stillrange",
+            "fonts": "Heading + Body",
+            "front_page_blocks": 58,
+            "sections": 7,
+            "theme_bytes": 26628
+        }
+    },
+    "pizza-menu": {
+        "prompt": "A single-page menu site for a wood-fired Neapolitan pizzeria",
+        "timings": {
+            "scaffold-theme": 0,
+            "site-spec": 8.2,
+            "apply-identity": 0,
+            "design-direction": 32.8,
+            "design-doc": 34,
+            "theme-json": 22.9,
+            "landing-page": 137.5
+        },
+        "total": 235.4,
+        "error": null,
+        "problems": [],
+        "metrics": {
+            "name": "Forno Vero",
+            "fonts": "Playfair Display + Lora",
+            "front_page_blocks": 103,
+            "sections": 7,
+            "theme_bytes": 39360
+        }
+    },
+    "bakery-catalog": {
+        "prompt": "A product catalog for an artisan sourdough bakery",
+        "timings": {
+            "scaffold-theme": 0,
+            "site-spec": 8.5,
+            "apply-identity": 0,
+            "design-direction": 33.8,
+            "design-doc": 29,
+            "theme-json": 18.5,
+            "landing-page": 149.3
+        },
+        "total": 239.1,
+        "error": null,
+        "problems": [],
+        "metrics": {
+            "name": "Hearth & Crumb",
+            "fonts": "Playfair Display + Source Serif Pro",
+            "front_page_blocks": 114,
+            "sections": 6,
+            "theme_bytes": 39779
+        }
+    },
+    "bicycle-store": {
+        "prompt": "An online store for a premium urban and commuter bicycle brand",
+        "timings": {
+            "scaffold-theme": 0,
+            "site-spec": 7.7,
+            "apply-identity": 0,
+            "design-direction": 33.1,
+            "design-doc": 32.6,
+            "theme-json": 21.9,
+            "landing-page": 132
+        },
+        "total": 227.4,
+        "error": null,
+        "problems": [],
+        "metrics": {
+            "name": "Verge Cycles",
+            "fonts": "Archivo + Inter",
+            "front_page_blocks": 91,
+            "sections": 6,
+            "theme_bytes": 36790
+        }
+    }
+}

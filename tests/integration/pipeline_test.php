@@ -67,6 +67,10 @@ test('full pipeline produces a structurally valid theme', function () {
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
 
+    // finalize-theme produced font loading.
+    assert_true($project->exists('theme/functions.php'), 'functions.php written');
+    assert_contains('fonts.googleapis.com', $project->readText('theme/functions.php'));
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -74,6 +78,6 @@ test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
         'scaffold-theme', 'site-spec', 'apply-identity',
-        'design-direction', 'design-doc', 'theme-json', 'landing-page',
+        'design-direction', 'design-doc', 'theme-json', 'landing-page', 'finalize-theme',
     ], $ids);
 });

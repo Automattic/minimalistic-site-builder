@@ -55,5 +55,6 @@ function build_pipeline(Llm $llm): Pipeline
         new DesignDocStep($llm, $renderer),
         new ThemeJsonStep($llm, $renderer),
         new LandingPageStep($llm, $renderer),
+        new FinalizeThemeStep(),
     ]);
 }
