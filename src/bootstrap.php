@@ -25,7 +25,7 @@ foreach (glob($src . '/steps/*.php') ?: [] as $stepFile) {
 Env::load(dirname($src) . '/.env');
 
 /** Build the production LLM transport from environment configuration. */
-function make_llm(): Llm
+function make_llm(): AnthropicClient
 {
     return new AnthropicClient(
         apiKey: Env::require('ANTHROPIC_API_KEY'),

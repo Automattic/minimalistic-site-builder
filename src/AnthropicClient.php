@@ -13,11 +13,46 @@ final class AnthropicClient implements Llm
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
 
+    private int $requests = 0;
+    private int $inputTokens = 0;
+    private int $outputTokens = 0;
+
     public function __construct(
         private string $apiKey,
         private string $model,
         private int $defaultMaxTokens = 16000,
     ) {}
+
+    /**
+     * Cumulative token usage across every request this client has made.
+     *
+     * @return array{requests:int,input_tokens:int,output_tokens:int,total_tokens:int}
+     */
+    public function usageTotals(): array
+    {
+        return [
+            'requests'      => $this->requests,
+            'input_tokens'  => $this->inputTokens,
+            'output_tokens' => $this->outputTokens,
+            'total_tokens'  => $this->inputTokens + $this->outputTokens,
+        ];
+    }
+
+    /**
+     * Pull token counts from a Messages API response. Input includes cache
+     * read/creation tokens so the total reflects everything billed.
+     *
+     * @param array<string,mixed> $response
+     * @return array{input:int,output:int}
+     */
+    public static function extractUsage(array $response): array
+    {
+        $u = $response['usage'] ?? [];
+        $input = (int) ($u['input_tokens'] ?? 0)
+            + (int) ($u['cache_read_input_tokens'] ?? 0)
+            + (int) ($u['cache_creation_input_tokens'] ?? 0);
+        return ['input' => $input, 'output' => (int) ($u['output_tokens'] ?? 0)];
+    }
 
     public function complete(string $prompt, array $opts = []): string
     {
@@ -101,6 +136,12 @@ final class AnthropicClient implements Llm
         if (!is_array($decoded)) {
             throw new RuntimeException("Invalid JSON response: {$raw}");
         }
+
+        $usage = self::extractUsage($decoded);
+        $this->requests++;
+        $this->inputTokens += $usage['input'];
+        $this->outputTokens += $usage['output'];
+
         return $decoded;
     }
 
