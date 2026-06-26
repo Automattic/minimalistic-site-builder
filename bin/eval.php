@@ -120,7 +120,7 @@ function collect_metrics(Project $project): array
     if ($project->exists('siteSpec.json')) {
         $spec = $project->readJson('siteSpec.json');
         $m['name'] = $spec['name'] ?? null;
-        $m['sections'] = is_array($spec['key_sections'] ?? null) ? count($spec['key_sections']) : 0;
+        $m['sections'] = is_array($spec['sections'] ?? null) ? count($spec['sections']) : 0;
     }
     if ($project->exists('theme/theme.json')) {
         $t = json_decode($project->readText('theme/theme.json'), true);
@@ -143,7 +143,7 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    $stepIds = ['scaffold-theme', 'site-spec', 'apply-identity', 'design-direction', 'design-doc', 'theme-json', 'landing-page', 'finalize-theme'];
+    $stepIds = ['scaffold-theme', 'site-spec', 'apply-identity', 'design-doc', 'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme'];
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
     $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . Env::get('LLM_MODEL', 'claude-opus-4-8') . "\n\n";
@@ -204,7 +204,7 @@ function short(string $stepId): string
 {
     return match ($stepId) {
         'scaffold-theme' => 'scaf', 'site-spec' => 'spec', 'apply-identity' => 'ident',
-        'design-direction' => 'dir', 'design-doc' => 'doc', 'theme-json' => 'tjson',
-        'landing-page' => 'land', 'finalize-theme' => 'fin', default => $stepId,
+        'design-doc' => 'doc', 'theme-json' => 'tjson', 'landing-page' => 'land',
+        'collect-images' => 'imgs', 'fix-blocks' => 'fix', 'finalize-theme' => 'fin', default => $stepId,
     };
 }

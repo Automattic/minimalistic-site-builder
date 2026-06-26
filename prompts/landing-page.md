@@ -13,7 +13,7 @@ Return a single JSON object mapping file paths to their full file contents, with
   "parts/header.html"          — site title/logo + primary navigation
   "parts/footer.html"          — footer with site name, a few links, and a small credit line
   "templates/index.html"       — fallback template: header part, a simple main content area, footer part
-  "templates/front-page.html"  — the landing page: header part, then each key_section from the spec in order, then footer part
+  "templates/front-page.html"  — the landing page: header part, then each section from the spec's "sections" list in order, then footer part
 
 Rules:
 - Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, navigation, site-title, site-tagline, template-part, spacer, separator, list, query/post-template if useful).
@@ -25,7 +25,7 @@ Rules:
     <!-- wp:template-part {"slug":"header","tagName":"header"} /-->
     ... content ...
     <!-- wp:template-part {"slug":"footer","tagName":"footer"} /-->
-- Build every key_section from the spec as a real, distinct section (heading + meaningful placeholder copy in the brand voice). Reserve the accent color for buttons/CTAs only.
+- Build every entry in the spec's "sections" list as a real, distinct section (heading + meaningful placeholder copy in the brand voice). Reserve the accent color for buttons/CTAs only.
 - Where imagery belongs (hero covers, feature/gallery/card images), emit a generatable AI image placeholder using ONLY the native src and alt attributes — no custom data attributes:
     src — a theme-relative path: "theme:./assets/<name>.jpg". <name> is lowercase a-z, 0-9 and hyphens only, descriptive of the image (e.g. theme:./assets/hero-mountain-dawn.jpg). Always .jpg.
     alt — the image-generation spec in this EXACT format: "AI_IMAGE: <description> | <style> | <aspect-ratio>"

@@ -36,7 +36,7 @@ final class LandingPageStep implements Step
 
     public function run(Project $project): void
     {
-        $rendered = $this->renderer->render('landing-page.txt', [
+        $rendered = $this->renderer->render('landing-page.md', [
             'site_spec'  => $project->readText('siteSpec.json'),
             'theme_json' => $project->readText('theme/theme.json'),
             'design_md'  => $project->readText('design.md'),

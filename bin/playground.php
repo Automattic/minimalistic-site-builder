@@ -69,7 +69,9 @@ $specFile = repo_path("projects/{$slug}/siteSpec.json");
 if (is_file($specFile)) {
     $spec = json_decode((string) file_get_contents($specFile), true) ?: [];
     $blogname = (string) ($spec['name'] ?? $blogname);
-    $blogdescription = (string) ($spec['tagline'] ?? '');
+    // The spec carries a tagline only when the user stated one; fall back to the
+    // factual topic so the site-tagline block is never blank.
+    $blogdescription = (string) ($spec['tagline'] ?? $spec['topic'] ?? '');
 }
 
 // Blueprint: set the site identity, activate the mounted theme, log in.

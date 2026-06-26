@@ -4,8 +4,13 @@ declare(strict_types=1);
 /**
  * Step 3 (deterministic): apply the project identity to the scaffolded theme.
  *
- * Input:  siteSpec.json (name, slug, description) + scaffolded theme files
+ * Input:  siteSpec.json (name, slug, factual fields) + scaffolded theme files
  * Output: theme/style.css and theme/readme.txt with {{placeholders}} replaced.
+ *
+ * Identity is purely factual, so it sources from siteSpec.json. The spec no
+ * longer carries a fixed "description" field, so we compose one from the
+ * factual fields that are present (description/tagline/topic), falling back to
+ * the site name.
  */
 final class ApplyIdentityStep implements Step
 {
@@ -26,7 +31,7 @@ final class ApplyIdentityStep implements Step
         $vars = [
             'THEME_NAME'  => (string) $spec['name'],
             'THEME_SLUG'  => (string) $spec['slug'],
-            'DESCRIPTION' => (string) ($spec['description'] ?? $spec['name']),
+            'DESCRIPTION' => self::description($spec),
             'AUTHOR'      => (string) ($spec['author'] ?? 'Builder'),
         ];
 
@@ -34,5 +39,21 @@ final class ApplyIdentityStep implements Step
             $filled = PromptRenderer::fill($project->readText($file), $vars);
             $project->writeText($file, $filled);
         }
+    }
+
+    /**
+     * A short theme description from whatever factual fields the spec carries.
+     *
+     * @param array<mixed> $spec
+     */
+    private static function description(array $spec): string
+    {
+        foreach (['description', 'tagline', 'topic'] as $key) {
+            $value = trim((string) ($spec[$key] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return (string) $spec['name'];
     }
 }

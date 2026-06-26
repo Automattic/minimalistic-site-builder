@@ -28,24 +28,25 @@ behind the `Llm` interface so a proxy transport can be swapped in later.
 
 8 steps, each implemented, unit-tested, and committed to trunk one per commit.
 
+The pipeline (current — see **Phase 3** below for the design-half refactor):
+
 | # | Step | Type | Input → Output |
 |---|------|------|----------------|
 | 1 | scaffold-theme   | det | — → theme/style.css, readme.txt (placeholders) |
-| 2 | site-spec        | LLM | meta.json prompt → siteSpec.json |
+| 2 | site-spec        | LLM | meta.json prompt → siteSpec.json (**factual info only** — no design) |
 | 3 | apply-identity   | det | siteSpec → filled style.css/readme.txt |
-| 4 | design-direction | LLM | siteSpec → designDirection.json |
-| 5 | design-doc       | LLM | siteSpec + direction → design.md |
-| 6 | theme-json       | LLM | design.md + direction → theme/theme.json (v3) |
-| 7 | landing-page     | LLM | theme.json + design.md + siteSpec → parts/ + templates/ (with AI_IMAGE placeholders) |
-| 8 | collect-images   | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
-| 9 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
-| 10 | finalize-theme  | det | theme.json → theme/functions.php (Google Fonts loading) |
+| 4 | design-doc       | LLM | meta.json prompt + siteSpec → design.md (**DESIGN.md standard**: YAML token front matter + body) |
+| 5 | theme-json       | LLM | design.md (front-matter tokens) → theme/theme.json (v3) |
+| 6 | landing-page     | LLM | theme.json + design.md + siteSpec → parts/ + templates/ (with AI_IMAGE placeholders) |
+| 7 | collect-images   | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
+| 8 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
+| 9 | finalize-theme   | det | theme.json → theme/functions.php (Google Fonts loading) |
 | + | generate-images  | net | images.json → theme/assets/*.jpg via WPCOM proxy (Imagen); rewrites theme: src. **Opt-in** (`--with-images` / `bin/images.php`) |
 
 **Architecture** (zero PHP dependencies — plain PHP + cURL):
 `Env`, `Llm` interface + `AnthropicClient`, `Project`, `ProjectStore`,
-`PromptRenderer`, `Step` + 9 steps, `Pipeline`, `ThemeValidator`.
-Prompts: `prompts/*.txt`. Runners: `bin/build.php`, `bin/eval.php`, `bin/inspect.php`.
+`PromptRenderer`, `Step` + the pipeline steps, `Pipeline`, `ThemeValidator`.
+Prompts: `prompts/*.md`. Runners: `bin/build.php`, `bin/eval.php`, `bin/inspect.php`.
 
 **Block validation fixer** (`bin/block-fixer/`, step 8): a verbatim copy of telex's
 `server/scripts/block-fixer` lib (`blockFixer.js` + `paragraphFixer.js`) plus a
@@ -109,9 +110,37 @@ and each `functions.php` is valid PHP. Re-ran the report (`bin/eval.php --report
 ---
 
 ## What you get per site (`projects/<slug>/`)
-`meta.json`, `siteSpec.json`, `designDirection.json`, `design.md`, and a complete
+`meta.json`, `siteSpec.json`, `design.md`, and a complete
 block theme under `theme/`: `style.css`, `readme.txt`, `theme.json`,
 `functions.php`, `parts/{header,footer}.html`, `templates/{index,front-page}.html`.
+
+---
+
+## Phase 3 — design-pipeline refactor (siteSpec → design.md)
+
+Refactored the design half of the pipeline so **facts** and **design decisions**
+are cleanly separated, the intermediate design-direction artifact is dropped, and
+the design doc follows a recognized standard.
+
+Before: `site-spec (facts + colors/typography/layout) → design-direction
+(designDirection.json) → design-doc (ad-hoc design.md)`.
+After: `site-spec (facts only) → design-doc (design.md per the DESIGN.md standard,
+from prompt + siteSpec)`.
+
+- **siteSpec.json is factual only.** Fixed properties: `name`, `slug`, `title`,
+  `site_type`, `topic`, `area`, `audience`, `visual_vibe` (a short mood phrase —
+  not concrete colors/fonts), `sections`. Any concrete facts the user stated
+  (hours, location, products…) pass through as extra keys. No `colors`,
+  `typography`, or `layout` are invented here.
+- **design.md follows the [DESIGN.md standard](https://github.com/google-labs-code/design.md):**
+  YAML front matter with `colors` (base/contrast/primary/secondary/accent),
+  `typography` (heading/body), `rounded`, `spacing`, then a Markdown body
+  (Overview, Colors, Typography, Layout, Shapes, Components, Imagery, Do's/Don'ts).
+  It is the single source of design truth. `DesignDocStep` validates the front
+  matter tokens and core sections are present.
+- **design-direction step removed.** `DesignDirectionStep` + `designDirection.json`
+  + `prompts/design-direction.md` are gone. `theme-json` now reads the exact token
+  values straight from design.md's front matter.
 
 ## Live preview
 `php bin/playground.php <slug>` boots a local WordPress Playground (via

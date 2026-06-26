@@ -14,18 +14,22 @@ test('full pipeline produces a structurally valid theme', function () {
 
     $llm = new FakeLlm();
 
-    // site-spec (json)
+    // site-spec (json) — factual info only, no design fields
     $llm->queueJson([
         'name' => 'Hearth & Crumb', 'slug' => 'hearth-crumb',
-        'description' => 'A neighborhood bakery.',
-        'colors' => ['primary' => '#8a5a2b', 'background' => '#fdf6ec', 'text' => '#2b2118', 'secondary' => '#c98', 'accent' => '#e08a3c'],
-        'typography' => ['heading' => 'Fraunces', 'body' => 'Source Sans 3'],
-        'key_sections' => ['Hero', 'Specials', 'About'],
+        'title' => 'Hearth & Crumb', 'site_type' => 'bakery storefront',
+        'topic' => 'artisan bread and pastries', 'area' => 'bakery',
+        'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
+        'sections' => ['Hero', 'Specials', 'About'],
     ]);
-    // design-direction (json)
-    $llm->queueJson(['concept' => 'Warm artisanal bakery', 'do' => ['cream backgrounds'], 'dont' => ['neon']]);
-    // design-doc (text)
-    $llm->queueText("# Hearth & Crumb — Design Document\n\n## Overview\n" . str_repeat('Warm bakery brand. ', 30));
+    // design-doc (text) — DESIGN.md standard: YAML front matter + body sections
+    $designMd = "---\nname: Hearth & Crumb\ndescription: Warm rustic bakery\n"
+        . "colors:\n  base: \"#fdf6ec\"\n  contrast: \"#2b2118\"\n  primary: \"#8a5a2b\"\n"
+        . "  secondary: \"#c98a5a\"\n  accent: \"#e08a3c\"\n"
+        . "typography:\n  heading:\n    fontFamily: Fraunces\n  body:\n    fontFamily: Source Sans 3\n---\n\n"
+        . "## Overview\n" . str_repeat('Warm bakery brand. ', 20)
+        . "\n## Colors\nCream base, cocoa contrast.\n## Typography\nFraunces + Source Sans 3.";
+    $llm->queueText($designMd);
     // theme-json (json)
     $llm->queueJson([
         'settings' => [
@@ -78,6 +82,6 @@ test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
         'scaffold-theme', 'site-spec', 'apply-identity',
-        'design-direction', 'design-doc', 'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme',
+        'design-doc', 'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme',
     ], $ids);
 });
