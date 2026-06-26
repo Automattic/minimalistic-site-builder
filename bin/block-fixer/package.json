@@ -1,0 +1,16 @@
+{
+  "name": "block-fixer",
+  "private": true,
+  "description": "WordPress block markup fixer script",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@wordpress/block-editor": "15.15.0",
+    "@wordpress/block-library": "9.42.0",
+    "@wordpress/blocks": "15.15.0",
+    "@wordpress/data": "10.42.0",
+    "@wordpress/hooks": "4.42.0",
+    "jsdom": "29.0.1"
+  }
+}

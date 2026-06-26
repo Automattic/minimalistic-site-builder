@@ -2,3 +2,4 @@
 /projects/
 eval_run.log
 .playground-blueprint.json
+/bin/block-fixer/node_modules/

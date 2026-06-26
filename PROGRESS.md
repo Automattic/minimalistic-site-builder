@@ -37,12 +37,22 @@ behind the `Llm` interface so a proxy transport can be swapped in later.
 | 5 | design-doc       | LLM | siteSpec + direction → design.md |
 | 6 | theme-json       | LLM | design.md + direction → theme/theme.json (v3) |
 | 7 | landing-page     | LLM | theme.json + design.md + siteSpec → parts/ + templates/ |
-| 8 | finalize-theme   | det | theme.json → theme/functions.php (Google Fonts loading) |
+| 8 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
+| 9 | finalize-theme   | det | theme.json → theme/functions.php (Google Fonts loading) |
 
-**Architecture** (zero dependencies — plain PHP + cURL):
+**Architecture** (zero PHP dependencies — plain PHP + cURL):
 `Env`, `Llm` interface + `AnthropicClient`, `Project`, `ProjectStore`,
-`PromptRenderer`, `Step` + 8 steps, `Pipeline`, `ThemeValidator`.
+`PromptRenderer`, `Step` + 9 steps, `Pipeline`, `ThemeValidator`.
 Prompts: `prompts/*.txt`. Runners: `bin/build.php`, `bin/eval.php`, `bin/inspect.php`.
+
+**Block validation fixer** (`bin/block-fixer/`, step 8): a verbatim copy of telex's
+`server/scripts/block-fixer` lib (`blockFixer.js` + `paragraphFixer.js`) plus a
+one-shot CLI (`fix-templates.js`). AI-generated block markup often carries
+style/attribute/element-order mismatches that trigger "unexpected or invalid
+content" in the editor/Playground; the fixer parses each `templates/*.html` and
+`parts/*.html` with `@wordpress/blocks` and re-serializes it to match WordPress
+`save()` exactly. `FixBlocksStep` shells out to Node (`node_modules` is gitignored;
+telex runs the same lib as a warm HTTP sidecar). Re-serialization is idempotent.
 
 **Tests: 30 unit + 2 integration = 32 passing.** Run with
 `php tests/run.php` and `php tests/run-integration.php`. The integration test
