@@ -21,7 +21,14 @@ $project = (new ProjectStore(repo_path('projects')))->open($slug);
 $spec = $project->readJson('siteSpec.json');
 echo "# {$spec['name']}  ({$slug})\n";
 echo 'tagline: ' . ($spec['tagline'] ?? '–') . "\n";
-echo 'fonts: ' . ($spec['typography']['heading'] ?? '?') . ' / ' . ($spec['typography']['body'] ?? '?') . "\n\n";
+echo 'vibe: ' . ($spec['visual_vibe'] ?? '–') . "\n";
+// Fonts are a design decision; they live in design.md / theme.json now, not the spec.
+$themeForFonts = json_decode($project->readText('theme/theme.json'), true);
+$specFonts = array_map(
+    static fn ($f) => trim(explode(',', (string) ($f['fontFamily'] ?? ''))[0], " \"'"),
+    $themeForFonts['settings']['typography']['fontFamilies'] ?? []
+);
+echo 'fonts: ' . ($specFonts === [] ? '?' : implode(' / ', $specFonts)) . "\n\n";
 
 $front = $project->readText('theme/templates/front-page.html');
 
@@ -65,7 +72,7 @@ $badFonts = array_diff($usedFonts, $declaredFonts);
 echo '  ' . ($badFonts === [] ? 'all fonts declared ✅' : 'UNDECLARED fonts: ' . implode(', ', $badFonts) . ' ⚠️') . "\n";
 
 echo "\n## Sections expected vs structure\n";
-echo '  key_sections (' . count($spec['key_sections'] ?? []) . "):\n";
-foreach ($spec['key_sections'] ?? [] as $s) {
+echo '  sections (' . count($spec['sections'] ?? []) . "):\n";
+foreach ($spec['sections'] ?? [] as $s) {
     echo "    - {$s}\n";
 }

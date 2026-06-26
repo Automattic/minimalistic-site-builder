@@ -5,13 +5,20 @@ declare(strict_types=1);
  * Step 2 (LLM): produce the site spec from the user's creation prompt.
  *
  * Input:  meta.json (the user prompt, seeded by the runner)
- * Output: siteSpec.json — name, slug, and all look-and-feel characteristics.
+ * Output: siteSpec.json — FACTUAL site information only (name, slug, title,
+ *         type, topic, area, audience, a short visual vibe, required sections),
+ *         plus any concrete facts the user stated. No design decisions
+ *         (colors/typography/layout) live here — those are made later in the
+ *         design document (design.md).
  *
  * This is the only step that reads the raw user prompt; everything downstream
- * derives from siteSpec.json.
+ * derives from siteSpec.json and design.md.
  */
 final class SiteSpecStep implements Step
 {
+    /** Factual properties the spec must always carry. */
+    private const REQUIRED = ['name', 'title', 'site_type', 'topic', 'area', 'audience', 'visual_vibe'];
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -43,8 +50,10 @@ final class SiteSpecStep implements Step
     }
 
     /**
-     * Validate required fields and fill safe fallbacks so downstream steps can
-     * rely on the shape.
+     * Require the fixed factual properties and normalize name/slug/sections.
+     * Any extra factual keys the model returned pass through untouched — the
+     * spec has no fixed/exhaustive schema beyond the required properties. No
+     * design fields are filled in: design lives in design.md.
      *
      * @param array<mixed> $spec
      * @return array<mixed>
@@ -60,32 +69,23 @@ final class SiteSpecStep implements Step
         $spec['name'] = $name;
         $spec['slug'] = $slug;
 
-        if (trim((string) ($spec['description'] ?? '')) === '') {
-            $spec['description'] = $name;
+        // Title falls back to the name when the model omits it.
+        if (trim((string) ($spec['title'] ?? '')) === '') {
+            $spec['title'] = $name;
         }
 
-        // Colors must exist with sane defaults so the theme always renders.
-        $colors = is_array($spec['colors'] ?? null) ? $spec['colors'] : [];
-        $spec['colors'] = $colors + [
-            'mood'       => '',
-            'primary'    => '#222222',
-            'secondary'  => '#666666',
-            'background' => '#ffffff',
-            'text'       => '#111111',
-            'accent'     => '#0a7cff',
-        ];
-
-        $typo = is_array($spec['typography'] ?? null) ? $spec['typography'] : [];
-        $spec['typography'] = $typo + [
-            'mood'    => '',
-            'heading' => 'Georgia',
-            'body'    => 'Helvetica',
-        ];
-
-        foreach (['tone', 'pages', 'key_sections'] as $listKey) {
-            if (!isset($spec[$listKey]) || !is_array($spec[$listKey])) {
-                $spec[$listKey] = [];
+        // Fill the remaining factual properties with a benign empty string so
+        // downstream consumers can rely on the keys existing.
+        foreach (self::REQUIRED as $key) {
+            if (trim((string) ($spec[$key] ?? '')) === '') {
+                $spec[$key] = '';
             }
+        }
+
+        // Sections must be a list so the design-doc / landing-page steps can
+        // iterate it.
+        if (!isset($spec['sections']) || !is_array($spec['sections'])) {
+            $spec['sections'] = [];
         }
 
         return $spec;

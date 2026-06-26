@@ -63,7 +63,6 @@ function build_pipeline(Llm $llm): Pipeline
         new ScaffoldThemeStep(),
         new SiteSpecStep($llm, $renderer),
         new ApplyIdentityStep(),
-        new DesignDirectionStep($llm, $renderer),
         new DesignDocStep($llm, $renderer),
         new ThemeJsonStep($llm, $renderer),
         new LandingPageStep($llm, $renderer),

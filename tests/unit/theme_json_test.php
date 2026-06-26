@@ -24,8 +24,7 @@ function valid_theme_payload(): array
 test('theme-json writes valid theme.json and forces version 3', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeText('design.md', '# Demo design doc with enough content to pass.');
-    $project->writeJson('designDirection.json', ['concept' => 'x']);
+    $project->writeText('design.md', "---\nname: Demo\ncolors:\n  base: \"#fff\"\n---\n\n## Overview\nDemo design doc with enough content to pass.");
 
     $llm = new FakeLlm();
     $llm->queueJson(valid_theme_payload());
@@ -46,7 +45,6 @@ test('theme-json throws when a required color slug is missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeText('design.md', '# Demo');
-    $project->writeJson('designDirection.json', ['concept' => 'x']);
 
     $payload = valid_theme_payload();
     // Drop "accent".
@@ -68,7 +66,6 @@ test('theme-json throws when a required font slug is missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeText('design.md', '# Demo');
-    $project->writeJson('designDirection.json', ['concept' => 'x']);
 
     $payload = valid_theme_payload();
     $payload['settings']['typography']['fontFamilies'] = [
