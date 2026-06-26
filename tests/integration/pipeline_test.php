@@ -78,6 +78,6 @@ test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
         'scaffold-theme', 'site-spec', 'apply-identity',
-        'design-direction', 'design-doc', 'theme-json', 'landing-page', 'fix-blocks', 'finalize-theme',
+        'design-direction', 'design-doc', 'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme',
     ], $ids);
 });

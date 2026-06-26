@@ -5,9 +5,11 @@ declare(strict_types=1);
  * One-shot: build a site from a prompt, report tokens + wall time, then boot it
  * in WordPress Playground and print the URL.
  *
- *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve]
+ *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--with-images]
  *
  * --no-serve builds and reports metrics without launching Playground.
+ * --with-images also generates real assets for the AI_IMAGE placeholders
+ *   (slow + networked; via the WPCOM proxy).
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
@@ -16,6 +18,7 @@ $prompt = null;
 $slug = null;
 $port = null;
 $serve = true;
+$withImages = false;
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
@@ -23,6 +26,8 @@ foreach (array_slice($argv, 1) as $a) {
         $port = (int) substr($a, 7);
     } elseif ($a === '--no-serve') {
         $serve = false;
+    } elseif ($a === '--with-images') {
+        $withImages = true;
     } elseif ($prompt === null) {
         $prompt = $a;
     }
@@ -58,6 +63,14 @@ $pipeline->runThrough($project, null, function (Step $step, float $secs) use ($l
     $prevOut = $u['output_tokens'];
     printf("  %-18s %7.1fs %10s %10s\n", $step->id(), $secs, fmt($dIn), fmt($dOut));
 });
+
+// Opt-in image generation: turn the AI_IMAGE placeholders into real assets.
+if ($withImages) {
+    $start = microtime(true);
+    (new GenerateImagesStep(make_image_client()))->run($project);
+    printf("  %-18s %7.1fs %10s %10s\n", 'generate-images', microtime(true) - $start, '-', '-');
+}
+
 $wall = microtime(true) - $wallStart;
 
 $u = $llm->usageTotals();

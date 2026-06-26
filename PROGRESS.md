@@ -36,9 +36,11 @@ behind the `Llm` interface so a proxy transport can be swapped in later.
 | 4 | design-direction | LLM | siteSpec → designDirection.json |
 | 5 | design-doc       | LLM | siteSpec + direction → design.md |
 | 6 | theme-json       | LLM | design.md + direction → theme/theme.json (v3) |
-| 7 | landing-page     | LLM | theme.json + design.md + siteSpec → parts/ + templates/ |
-| 8 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
-| 9 | finalize-theme   | det | theme.json → theme/functions.php (Google Fonts loading) |
+| 7 | landing-page     | LLM | theme.json + design.md + siteSpec → parts/ + templates/ (with AI_IMAGE placeholders) |
+| 8 | collect-images   | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
+| 9 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
+| 10 | finalize-theme  | det | theme.json → theme/functions.php (Google Fonts loading) |
+| + | generate-images  | net | images.json → theme/assets/*.jpg via WPCOM proxy (Imagen); rewrites theme: src. **Opt-in** (`--with-images` / `bin/images.php`) |
 
 **Architecture** (zero PHP dependencies — plain PHP + cURL):
 `Env`, `Llm` interface + `AnthropicClient`, `Project`, `ProjectStore`,
@@ -128,8 +130,13 @@ and all front-page sections present.
 3. **Single page only.** Only the front page + index fallback are generated.
    Natural extensions (same one-shot pattern): per-page templates (about, contact),
    block patterns, a richer index/query for blog/catalog sites.
-4. **Images are placeholders** (descriptive alt text, no real assets). Could wire
-   the Vertex image path (the one proxy route that works) to generate real imagery.
+4. **Images: done (opt-in).** landing-page emits telex-style `AI_IMAGE` placeholders
+   (`src="theme:./assets/x.jpg"` + `alt="AI_IMAGE: desc | style | aspect-ratio"`);
+   collect-images parses them to `images.json` (before fix-blocks, which strips
+   cover-background alts); generate-images turns them into real `theme/assets/*.jpg`
+   via the WPCOM proxy (Google Imagen) and rewrites the `theme:` refs to served
+   URLs. Gated behind `--with-images` / `bin/images.php` (slow + networked).
+   A failed image is marked `failed` and never aborts the build.
 5. **Font weights** assume 400/600/700 exist (true for all fonts picked so far).
    A font lacking one would 400 the combined request; per-family enqueue would
    isolate that if it ever happens.

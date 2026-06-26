@@ -11,6 +11,8 @@ require_once $src . '/Env.php';
 require_once $src . '/Llm.php';
 require_once $src . '/TransientApiException.php';
 require_once $src . '/AnthropicClient.php';
+require_once $src . '/ImageClient.php';
+require_once $src . '/WpcomImageClient.php';
 require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
 require_once $src . '/PromptRenderer.php';
@@ -31,6 +33,15 @@ function make_llm(): AnthropicClient
     return new AnthropicClient(
         apiKey: Env::require('ANTHROPIC_API_KEY'),
         model:  Env::get('LLM_MODEL', 'claude-opus-4-8'),
+    );
+}
+
+/** Build the image-generation transport (WPCOM AI proxy → Google Vertex Imagen). */
+function make_image_client(): ImageClient
+{
+    return new WpcomImageClient(
+        apiToken: Env::require('GOOGLE_VERTEX_API_TOKEN'),
+        model:    Env::get('IMAGE_MODEL', 'imagen-4.0-generate-001'),
     );
 }
 
@@ -56,6 +67,10 @@ function build_pipeline(Llm $llm): Pipeline
         new DesignDocStep($llm, $renderer),
         new ThemeJsonStep($llm, $renderer),
         new LandingPageStep($llm, $renderer),
+        // Collect image placeholders BEFORE fix-blocks: the block re-serializer
+        // strips the alt from wp:cover background images (core cover save()
+        // resets it to ""), which would lose every hero's AI_IMAGE spec.
+        new CollectImagesStep(),
         new FixBlocksStep(),
         new FinalizeThemeStep(),
     ]);
