@@ -8,6 +8,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
+require_once __DIR__ . '/FakeLlm.php';
 
 /** @var array<int,array{0:string,1:callable}> */
 $GLOBALS['__tests'] = [];

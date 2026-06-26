@@ -38,3 +38,16 @@ function repo_path(string $rel = ''): string
     $root = dirname(__DIR__);
     return $rel === '' ? $root : $root . '/' . ltrim($rel, '/');
 }
+
+/**
+ * Assemble the full site-creation pipeline in order. Steps are added here as
+ * they are implemented; this is the single source of step ordering.
+ */
+function build_pipeline(Llm $llm): Pipeline
+{
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    return new Pipeline([
+        new ScaffoldThemeStep(),
+        new SiteSpecStep($llm, $renderer),
+    ]);
+}
