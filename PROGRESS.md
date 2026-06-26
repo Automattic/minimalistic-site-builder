@@ -101,10 +101,18 @@ and each `functions.php` is valid PHP. Re-ran the report (`bin/eval.php --report
 block theme under `theme/`: `style.css`, `readme.txt`, `theme.json`,
 `functions.php`, `parts/{header,footer}.html`, `templates/{index,front-page}.html`.
 
+## Live preview
+`php bin/playground.php <slug>` boots a local WordPress Playground (via
+`npx @wp-playground/cli`), mounts `projects/<slug>/theme` into
+`wp-content/themes/<slug>`, sets the site title/tagline from siteSpec, activates
+the theme, and auto-logs into wp-admin. **Verified**: `bakery-catalog` renders at
+85 KB with the brand "Hearth & Crumb" in the header, both Google fonts loaded,
+and all front-page sections present.
+
 ## Remaining issues / recommendations
-1. **No live WordPress render check.** Validation is structural (block grammar,
-   theme.json, font URLs) — not yet loaded in a real WP instance. Recommend a
-   `wp-env`/Playground smoke test as the next verification layer.
+1. **Live render confirmed via Playground** (`bin/playground.php`). A scripted
+   headless smoke test (boot + assert markers + teardown) could be added to CI;
+   today it is a manual/verified command.
 2. **landing-page latency** dominates (~2 min). Options: split into per-section
    calls (parallelizable), lower effort, or a faster model for this step only.
 3. **Single page only.** Only the front page + index fallback are generated.
@@ -122,5 +130,6 @@ cp .env.example .env   # set ANTHROPIC_API_KEY
 php tests/run.php && php tests/run-integration.php
 php bin/build.php "A cozy neighborhood bakery" --slug=my-bakery
 php bin/inspect.php my-bakery
+php bin/playground.php my-bakery   # boot a local WP with the theme activated
 php bin/eval.php          # regenerate the 5 eval sites
 ```

@@ -1,3 +1,4 @@
 .env
 /projects/
 eval_run.log
+.playground-blueprint.json
