@@ -80,11 +80,20 @@ final class AnthropicClient implements Llm
             $body['system'] = $opts['system'];
         }
 
-        $res = $this->requestWithRetry($body);
+        $label = (string) ($opts['log_label'] ?? 'request');
+        try {
+            $res = $this->requestWithRetry($body);
+        } catch (\Throwable $e) {
+            // Log the failed call too, so an aborted build is still inspectable.
+            LlmLogger::log($label, $body, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
+            throw $e;
+        }
 
         $this->requests++;
         $this->inputTokens += $res['input'];
         $this->outputTokens += $res['output'];
+
+        LlmLogger::log($label, $body, $res, $res['time']);
 
         if (trim($res['text']) === '') {
             throw new RuntimeException('No text content in streamed response');
@@ -164,11 +173,20 @@ final class AnthropicClient implements Llm
             $bodies[$key] = $body;
         }
 
-        // Run them all concurrently, retrying only the transient failures.
+        // Label a call after its step's explicit log_label, else the request key
+        // (already a clean name like "header" or "section-hero").
+        $labelFor = fn (string $key): string => (string) ($requests[$key]['log_label'] ?? $key);
+
+        // Run them all concurrently, retrying only the transient failures. A
+        // request that fails for good is logged before the batch aborts, so the
+        // call that broke the build is still inspectable.
         $results = self::retryTextBatch(
             $bodies,
             fn (array $subset): array => $this->streamMulti($subset),
             [2, 5, 12],
+            function (string $key, string $error, float $time) use ($labelFor, $bodies): void {
+                LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
+            },
         );
 
         $out = [];
@@ -176,6 +194,9 @@ final class AnthropicClient implements Llm
             $this->requests++;
             $this->inputTokens += $res['input'];
             $this->outputTokens += $res['output'];
+
+            LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+
             $out[$key] = $res['text'];
         }
         return $out;
@@ -192,9 +213,10 @@ final class AnthropicClient implements Llm
      * @param array<string,array<string,mixed>> $bodies request bodies keyed by id
      * @param callable(array<string,array<string,mixed>>):array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
-     * @return array<string,array{text:string,input:int,output:int}>
+     * @param null|callable(string,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
+     * @return array<string,array{text:string,input:int,output:int,time:float}>
      */
-    public static function retryTextBatch(array $bodies, callable $transport, array $delays): array
+    public static function retryTextBatch(array $bodies, callable $transport, array $delays, ?callable $onFailure = null): array
     {
         $results = [];
         $pending = array_keys($bodies);
@@ -210,13 +232,16 @@ final class AnthropicClient implements Llm
                         'text'   => (string) ($outcome['text'] ?? ''),
                         'input'  => (int) ($outcome['input'] ?? 0),
                         'output' => (int) ($outcome['output'] ?? 0),
+                        'time'   => (float) ($outcome['time'] ?? 0),
                     ];
                 } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
                     $retry[] = $key;
                 } else {
-                    throw new RuntimeException(
-                        "Anthropic batch request '{$key}' failed: " . ($outcome['error'] ?? 'unknown')
-                    );
+                    $error = (string) ($outcome['error'] ?? 'unknown');
+                    if ($onFailure !== null) {
+                        $onFailure($key, $error, (float) ($outcome['time'] ?? 0));
+                    }
+                    throw new RuntimeException("Anthropic batch request '{$key}' failed: {$error}");
                 }
             }
 
@@ -315,9 +340,10 @@ final class AnthropicClient implements Llm
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
             $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
             curl_multi_remove_handle($multi, $ch);
             curl_close($ch);
-            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus);
+            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus, $time);
         }
 
         curl_multi_close($multi);
@@ -326,24 +352,20 @@ final class AnthropicClient implements Llm
 
     /**
      * Classify one completed streaming transfer into an outcome (never throws),
-     * so the batch orchestrator can retry transient failures. Same transient vs
-     * permanent split as streamRequest(). Pure — no I/O.
+     * so the batch orchestrator can retry the transient ones. Same transient vs
+     * permanent split as streamRequest(): connection-level cURL errors (incl. 6
+     * "could not resolve host") and 429/5xx are transient; a clean 4xx or any
+     * other cURL error is permanent and aborts the build. Pure — no I/O.
      *
-     * @return array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}
+     * @return array{ok:bool,text?:string,input?:int,output?:int,time?:float,error?:string,transient?:bool}
      */
-    private static function interpretStream(string $raw, int $errno, string $error, int $status): array
+    private static function interpretStream(string $raw, int $errno, string $error, int $status, float $time = 0.0): array
     {
-        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
-            return ['ok' => false, 'transient' => true, 'error' => "cURL ({$errno}): {$error}"];
-        }
         if ($errno !== 0) {
-            return ['ok' => false, 'transient' => false, 'error' => "cURL error ({$errno}): {$error}"];
-        }
-        if ($status === 429 || $status >= 500) {
-            return ['ok' => false, 'transient' => true, 'error' => "HTTP {$status}: " . self::truncate($raw)];
+            return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}"];
         }
         if ($status < 200 || $status >= 300) {
-            return ['ok' => false, 'transient' => false, 'error' => "HTTP {$status}: " . self::truncate($raw)];
+            return ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw)];
         }
 
         $parsed = self::parseSse($raw);
@@ -354,14 +376,36 @@ final class AnthropicClient implements Llm
         if (trim($parsed['text']) === '') {
             return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response'];
         }
-        return ['ok' => true, 'text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output']];
+        return ['ok' => true, 'text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output'], 'time' => $time];
+    }
+
+    /**
+     * Connection-level cURL failures worth retrying with backoff. 6 = could not
+     * resolve host (the DNS blip that used to abort builds), 7 = could not
+     * connect, 28 = timeout, 35 = SSL connect, 52 = empty reply, 55 = send
+     * error, 56 = recv error. Any other cURL error (bad URL, cert, etc.) is
+     * permanent. Pure.
+     */
+    private static function isTransientCurl(int $errno): bool
+    {
+        return in_array($errno, [6, 7, 28, 35, 52, 55, 56], true);
+    }
+
+    /**
+     * HTTP statuses worth retrying: 429 (rate limit) and any 5xx (server-side).
+     * A 4xx other than 429 (bad request, auth, not-found) is the caller's fault
+     * and will never succeed on retry, so it is permanent. Pure.
+     */
+    private static function isTransientStatus(int $status): bool
+    {
+        return $status === 429 || $status >= 500;
     }
 
     /**
      * Run a streaming request, retrying transient failures with backoff.
      *
      * @param array<string,mixed> $body
-     * @return array{text:string,input:int,output:int}
+     * @return array{text:string,input:int,output:int,time:float}
      */
     private function requestWithRetry(array $body): array
     {
@@ -387,8 +431,8 @@ final class AnthropicClient implements Llm
      * the SSE event stream.
      *
      * @param array<string,mixed> $body
-     * @return array{text:string,input:int,output:int}
-     * @throws TransientApiException on a retryable failure (stall, 429, 5xx, overload)
+     * @return array{text:string,input:int,output:int,time:float}
+     * @throws TransientApiException on a retryable failure (DNS, stall, 429, 5xx, overload)
      */
     private function streamRequest(array $body): array
     {
@@ -421,21 +465,24 @@ final class AnthropicClient implements Llm
         $errno  = curl_errno($ch);
         $error  = curl_error($ch);
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
         curl_close($ch);
 
-        // Connection-level failures: timeout, stall, connect/recv errors — retryable.
-        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
-            throw new TransientApiException("cURL ({$errno}): {$error}");
-        }
+        // Connection-level failures (DNS, connect, timeout, stall, dropped
+        // socket) and 429/5xx are transient — back off and retry. A clean 4xx or
+        // any other cURL error is permanent and aborts the build immediately
+        // rather than burning the backoff on something that can't recover.
         if ($errno !== 0) {
+            if (self::isTransientCurl($errno)) {
+                throw new TransientApiException("cURL ({$errno}): {$error}");
+            }
             throw new RuntimeException("cURL error ({$errno}): {$error}");
         }
-
-        if ($status === 429 || $status >= 500) {
-            throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
-        }
         if ($status < 200 || $status >= 300) {
-            throw new RuntimeException("Anthropic API HTTP {$status}: {$raw}");
+            if (self::isTransientStatus($status)) {
+                throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
+            }
+            throw new RuntimeException("Anthropic API HTTP {$status}: " . self::truncate($raw));
         }
 
         $parsed = self::parseSse($raw);
@@ -451,7 +498,7 @@ final class AnthropicClient implements Llm
             throw new TransientApiException('no text content in streamed response');
         }
 
-        return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output']];
+        return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output'], 'time' => $time];
     }
 
     /**

@@ -49,6 +49,10 @@ final class Pipeline
         ?callable $reporter = null,
         ?callable $onStart = null,
     ): void {
+        // Route every LLM transcript for this run into the project's own
+        // logs/llms/ directory (projects/<slug>/logs/llms/), not the repo root.
+        LlmLogger::setDir($project->path('logs/llms'));
+
         foreach ($this->steps as $step) {
             if ($onStart !== null) {
                 $onStart($step);

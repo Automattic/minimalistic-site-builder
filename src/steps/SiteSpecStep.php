@@ -44,7 +44,7 @@ final class SiteSpecStep implements Step
         }
 
         $rendered = $this->renderer->render('site-spec.md', ['user_prompt' => $prompt]);
-        $spec = $this->llm->completeJson($rendered, $this->llmOpts());
+        $spec = $this->llm->completeJson($rendered, $this->llmOpts(['log_label' => $this->id()]));
 
         $spec = self::normalize($spec);
         $project->writeJson('siteSpec.json', $spec);
