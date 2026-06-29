@@ -4,8 +4,9 @@ declare(strict_types=1);
 /**
  * Step (LLM): generate the block theme's theme.json.
  *
- * Input:  design.md — its YAML front matter holds the exact color/typography
- *         tokens (per the DESIGN.md standard).
+ * Input:  meta.json (user prompt) + siteSpec.json (factual info). The model
+ *         makes the design decisions (palette, typography, spacing) inline —
+ *         there is no separate design document.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the five color
@@ -33,8 +34,10 @@ final class ThemeJsonStep implements Step
 
     public function run(Project $project): void
     {
+        $meta = $project->readJson('meta.json');
         $rendered = $this->renderer->render('theme-json.md', [
-            'design_md' => $project->readText('design.md'),
+            'user_prompt' => (string) ($meta['prompt'] ?? ''),
+            'site_spec'   => $project->readText('siteSpec.json'),
         ]);
 
         $theme = $this->llm->completeJson($rendered);

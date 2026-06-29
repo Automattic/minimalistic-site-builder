@@ -35,12 +35,11 @@ The pipeline (current — see **Phase 3** below for the design-half refactor):
 | 1 | scaffold-theme   | det | — → theme/style.css, readme.txt (placeholders) |
 | 2 | site-spec        | LLM | meta.json prompt → siteSpec.json (**factual info only** — no design) |
 | 3 | apply-identity   | det | siteSpec → filled style.css/readme.txt |
-| 4 | design-doc       | LLM | meta.json prompt + siteSpec → design.md (**DESIGN.md standard**: YAML token front matter + body) |
-| 5 | theme-json       | LLM | design.md (front-matter tokens) → theme/theme.json (v3) |
-| 6 | landing-page     | LLM | theme.json + design.md + siteSpec → parts/ + templates/ (with AI_IMAGE placeholders) |
-| 7 | collect-images   | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
-| 8 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
-| 9 | finalize-theme   | det | theme.json → theme/functions.php (Google Fonts loading) |
+| 4 | theme-json       | LLM | meta.json prompt + siteSpec → theme/theme.json (v3); **design decisions made inline** (no design.md) |
+| 5 | landing-page     | LLM | meta.json prompt + siteSpec + theme.json → parts/ + templates/ (with AI_IMAGE placeholders) |
+| 6 | collect-images   | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
+| 7 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
+| 8 | finalize-theme   | det | theme.json → theme/functions.php (Google Fonts loading) |
 | + | generate-images  | net | images.json → theme/assets/*.jpg via WPCOM proxy (Imagen); rewrites theme: src. **Opt-in** (`--with-images` / `bin/images.php`) |
 
 **Architecture** (zero PHP dependencies — plain PHP + cURL):

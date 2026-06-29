@@ -1,13 +1,13 @@
-You are a WordPress block-theme developer. Build the landing page and the template parts it needs, as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters).
+You are a WordPress block-theme developer AND the design lead. Build the landing page and the template parts it needs, as Gutenberg block markup (block grammar with <!-- wp:... --> comment delimiters). There is no separate design document — infer the design intent from the brief and the theme.json tokens, and make tasteful, specific layout decisions yourself.
+
+USER PROMPT:
+"{{user_prompt}}"
 
 SITE SPEC (JSON):
 {{site_spec}}
 
 THEME TOKENS (theme.json):
 {{theme_json}}
-
-DESIGN DOCUMENT (Markdown):
-{{design_md}}
 
 Return a single JSON object mapping file paths to their full file contents, with EXACTLY these keys:
   "parts/header.html"          — site title/logo + primary navigation
