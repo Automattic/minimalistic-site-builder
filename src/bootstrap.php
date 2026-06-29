@@ -10,6 +10,7 @@ $src = __DIR__;
 require_once $src . '/Env.php';
 require_once $src . '/Llm.php';
 require_once $src . '/TransientApiException.php';
+require_once $src . '/LlmLogger.php';
 require_once $src . '/AnthropicClient.php';
 require_once $src . '/ImageClient.php';
 require_once $src . '/WpcomImageClient.php';

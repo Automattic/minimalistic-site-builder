@@ -86,6 +86,8 @@ final class AnthropicClient implements Llm
         $this->inputTokens += $res['input'];
         $this->outputTokens += $res['output'];
 
+        LlmLogger::log((string) ($opts['log_label'] ?? 'request'), $body, $res, $res['time']);
+
         if (trim($res['text']) === '') {
             throw new RuntimeException('No text content in streamed response');
         }
@@ -176,6 +178,14 @@ final class AnthropicClient implements Llm
             $this->requests++;
             $this->inputTokens += $res['input'];
             $this->outputTokens += $res['output'];
+
+            // Label the log after the call: the step's explicit log_label if it
+            // set one, else the request key — stripping the "<index>:" prefix a
+            // ConcurrentGroup adds, so the file is named e.g. section-hero.log.
+            $label = (string) ($requests[$key]['log_label']
+                ?? preg_replace('/^\d+:/', '', (string) $key));
+            LlmLogger::log($label, $bodies[$key], $res, $res['time']);
+
             $out[$key] = $res['text'];
         }
         return $out;
@@ -192,7 +202,7 @@ final class AnthropicClient implements Llm
      * @param array<string,array<string,mixed>> $bodies request bodies keyed by id
      * @param callable(array<string,array<string,mixed>>):array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
-     * @return array<string,array{text:string,input:int,output:int}>
+     * @return array<string,array{text:string,input:int,output:int,time:float}>
      */
     public static function retryTextBatch(array $bodies, callable $transport, array $delays): array
     {
@@ -210,6 +220,7 @@ final class AnthropicClient implements Llm
                         'text'   => (string) ($outcome['text'] ?? ''),
                         'input'  => (int) ($outcome['input'] ?? 0),
                         'output' => (int) ($outcome['output'] ?? 0),
+                        'time'   => (float) ($outcome['time'] ?? 0),
                     ];
                 } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
                     $retry[] = $key;
@@ -315,9 +326,10 @@ final class AnthropicClient implements Llm
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
             $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
             curl_multi_remove_handle($multi, $ch);
             curl_close($ch);
-            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus);
+            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus, $time);
         }
 
         curl_multi_close($multi);
@@ -326,42 +338,37 @@ final class AnthropicClient implements Llm
 
     /**
      * Classify one completed streaming transfer into an outcome (never throws),
-     * so the batch orchestrator can retry transient failures. Same transient vs
-     * permanent split as streamRequest(). Pure — no I/O.
+     * so the batch orchestrator can retry it. EVERY failure — any cURL error,
+     * any non-2xx status, any stream error, an empty body — is reported as
+     * transient so the orchestrator retries it with backoff rather than aborting
+     * the build. Pure — no I/O.
      *
-     * @return array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}
+     * @return array{ok:bool,text?:string,input?:int,output?:int,time?:float,error?:string,transient?:bool}
      */
-    private static function interpretStream(string $raw, int $errno, string $error, int $status): array
+    private static function interpretStream(string $raw, int $errno, string $error, int $status, float $time = 0.0): array
     {
-        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
+        if ($errno !== 0) {
             return ['ok' => false, 'transient' => true, 'error' => "cURL ({$errno}): {$error}"];
         }
-        if ($errno !== 0) {
-            return ['ok' => false, 'transient' => false, 'error' => "cURL error ({$errno}): {$error}"];
-        }
-        if ($status === 429 || $status >= 500) {
-            return ['ok' => false, 'transient' => true, 'error' => "HTTP {$status}: " . self::truncate($raw)];
-        }
         if ($status < 200 || $status >= 300) {
-            return ['ok' => false, 'transient' => false, 'error' => "HTTP {$status}: " . self::truncate($raw)];
+            return ['ok' => false, 'transient' => true, 'error' => "HTTP {$status}: " . self::truncate($raw)];
         }
 
         $parsed = self::parseSse($raw);
         if ($parsed['error'] !== null) {
-            $transient = in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true);
-            return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}"];
+            return ['ok' => false, 'transient' => true, 'error' => "stream error: {$parsed['error']}"];
         }
         if (trim($parsed['text']) === '') {
             return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response'];
         }
-        return ['ok' => true, 'text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output']];
+        return ['ok' => true, 'text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output'], 'time' => $time];
     }
 
     /**
      * Run a streaming request, retrying transient failures with backoff.
      *
      * @param array<string,mixed> $body
-     * @return array{text:string,input:int,output:int}
+     * @return array{text:string,input:int,output:int,time:float}
      */
     private function requestWithRetry(array $body): array
     {
@@ -387,8 +394,8 @@ final class AnthropicClient implements Llm
      * the SSE event stream.
      *
      * @param array<string,mixed> $body
-     * @return array{text:string,input:int,output:int}
-     * @throws TransientApiException on a retryable failure (stall, 429, 5xx, overload)
+     * @return array{text:string,input:int,output:int,time:float}
+     * @throws TransientApiException on ANY failure — all are retried with backoff
      */
     private function streamRequest(array $body): array
     {
@@ -421,29 +428,22 @@ final class AnthropicClient implements Llm
         $errno  = curl_errno($ch);
         $error  = curl_error($ch);
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
         curl_close($ch);
 
-        // Connection-level failures: timeout, stall, connect/recv errors — retryable.
-        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
+        // Every failure is retryable: any cURL error (DNS, connect, timeout,
+        // stall, dropped socket…), any non-2xx status, any stream error. We back
+        // off and retry rather than aborting the build on a transient blip.
+        if ($errno !== 0) {
             throw new TransientApiException("cURL ({$errno}): {$error}");
         }
-        if ($errno !== 0) {
-            throw new RuntimeException("cURL error ({$errno}): {$error}");
-        }
-
-        if ($status === 429 || $status >= 500) {
-            throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
-        }
         if ($status < 200 || $status >= 300) {
-            throw new RuntimeException("Anthropic API HTTP {$status}: {$raw}");
+            throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
         }
 
         $parsed = self::parseSse($raw);
         if ($parsed['error'] !== null) {
-            if (in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true)) {
-                throw new TransientApiException("stream error: {$parsed['error']}");
-            }
-            throw new RuntimeException("stream error: {$parsed['error']}");
+            throw new TransientApiException("stream error: {$parsed['error']}");
         }
         // An empty body is usually a transient hiccup (a stop with no content),
         // so retry it — matching the batch path's interpretStream().
@@ -451,7 +451,7 @@ final class AnthropicClient implements Llm
             throw new TransientApiException('no text content in streamed response');
         }
 
-        return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output']];
+        return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output'], 'time' => $time];
     }
 
     /**
