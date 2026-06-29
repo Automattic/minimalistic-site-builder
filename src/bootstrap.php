@@ -17,6 +17,8 @@ require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
 require_once $src . '/PromptRenderer.php';
 require_once $src . '/Step.php';
+require_once $src . '/ConcurrentStep.php';
+require_once $src . '/ConcurrentGroup.php';
 require_once $src . '/Pipeline.php';
 require_once $src . '/ThemeValidator.php';
 
@@ -43,7 +45,7 @@ function default_llm_model(): string
  * To pin a step in code, replace `$default` with a literal, e.g.
  *   'site-spec' => 'claude-haiku-4-5',
  * Or override any one step from the environment without touching code:
- *   LLM_MODEL_SITE_SPEC, LLM_MODEL_THEME_JSON, LLM_MODEL_LANDING_PAGE
+ *   LLM_MODEL_SITE_SPEC, LLM_MODEL_THEME_JSON, LLM_MODEL_SECTION_PLAN, LLM_MODEL_SECTIONS
  * LLM_MODEL sets the fallback for every step left at the default.
  *
  * @return array<string,string> step id => model id
@@ -54,7 +56,10 @@ function step_models(): array
     return [
         'site-spec'    => Env::get('LLM_MODEL_SITE_SPEC',    'claude-haiku-4-5'),
         'theme-json'   => Env::get('LLM_MODEL_THEME_JSON',   $default),
-        'landing-page' => Env::get('LLM_MODEL_LANDING_PAGE', $default),
+        // Planning is light and structural — cheap/fast model by default.
+        'section-plan' => Env::get('LLM_MODEL_SECTION_PLAN', 'claude-haiku-4-5'),
+        // Section markup is the quality-critical work — best model by default.
+        'sections'     => Env::get('LLM_MODEL_SECTIONS',     $default),
     ];
 }
 
@@ -95,10 +100,17 @@ function build_pipeline(Llm $llm): Pipeline
         new ScaffoldThemeStep(),
         new SiteSpecStep($llm, $renderer, $models['site-spec']),
         new ApplyIdentityStep(),
-        // No design-doc step: theme.json and the landing page are generated
-        // directly from the prompt + siteSpec, with design decisions made inline.
-        new ThemeJsonStep($llm, $renderer, $models['theme-json']),
-        new LandingPageStep($llm, $renderer, $models['landing-page']),
+        // theme.json and the section plan both derive only from the prompt +
+        // siteSpec, so run them concurrently. Design decisions are made inline;
+        // there is no separate design document.
+        new ConcurrentGroup($llm, [
+            new ThemeJsonStep($llm, $renderer, $models['theme-json']),
+            new SectionPlanStep($llm, $renderer, $models['section-plan']),
+        ]),
+        // Generate the header, footer, and every section part in one concurrent
+        // batch, then stitch them into the page deterministically.
+        new SectionsStep($llm, $renderer, $models['sections']),
+        new AssembleLandingPageStep(),
         // Collect image placeholders BEFORE fix-blocks: the block re-serializer
         // strips the alt from wp:cover background images (core cover save()
         // resets it to ""), which would lose every hero's AI_IMAGE spec.

@@ -100,7 +100,7 @@ final class SiteSpecStep implements Step
             }
         }
 
-        // Sections must be a list so the landing-page step can iterate it.
+        // Sections must be a list so the section-plan step can build on it.
         if (!isset($spec['sections']) || !is_array($spec['sections'])) {
             $spec['sections'] = [];
         }

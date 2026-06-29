@@ -4,7 +4,8 @@ declare(strict_types=1);
 /**
  * Step 8 (deterministic): repair block-validation issues in the generated markup.
  *
- * Input:  theme/templates/*.html + theme/parts/*.html (written by landing-page)
+ * Input:  theme/templates/*.html + theme/parts/*.html (written by the sections
+ *         and assemble-landing-page steps)
  * Output: the same files, re-serialized to match WordPress save() exactly.
  *
  * AI-generated block markup frequently carries style/attribute/element-order
@@ -16,6 +17,8 @@ declare(strict_types=1);
  */
 final class FixBlocksStep implements Step
 {
+    private const LOG_FILE = 'fix-blocks.log';
+
     public function id(): string
     {
         return 'fix-blocks';
@@ -58,7 +61,7 @@ final class FixBlocksStep implements Step
             throw new RuntimeException('Could not start block-fixer (proc_open failed)');
         }
 
-        $stdout = stream_get_contents($pipes[1]);
+        $stdout = (string) stream_get_contents($pipes[1]);
         fclose($pipes[1]);
         $exit = proc_close($proc);
 
@@ -67,14 +70,38 @@ final class FixBlocksStep implements Step
             @unlink($errFile);
         }
 
+        // The fixer's per-file report and the block-validation diffs it emits are
+        // verbose (hundreds of lines on a fresh build). Keep the full detail in
+        // the project log and show only a one-line summary on the console.
+        $log = rtrim($stdout);
+        if (trim($stderr) !== '') {
+            $log .= "\n\n--- stderr ---\n" . rtrim($stderr);
+        }
+        file_put_contents($project->logPath(self::LOG_FILE), $log . "\n");
+
         if ($exit !== 0) {
             throw new RuntimeException(
-                "block-fixer exited with code {$exit}.\n" . trim($stderr)
+                "block-fixer exited with code {$exit}; see logs/" . self::LOG_FILE . "\n" . trim($stderr)
             );
         }
 
-        // The fixer prints a concise per-file report on stdout; surface it.
-        echo rtrim((string) $stdout) . "\n";
+        echo '  ' . self::summaryLine($stdout) . ' (details: logs/' . self::LOG_FILE . ")\n";
+    }
+
+    /**
+     * The single human summary line the fixer prints last (e.g.
+     * "[fix-templates] 7/11 file(s) re-serialized, 14 issue(s) fixed …").
+     * Pure — unit-testable.
+     */
+    public static function summaryLine(string $stdout): string
+    {
+        foreach (array_reverse(preg_split('/\r?\n/', trim($stdout)) ?: []) as $line) {
+            $line = trim($line);
+            if (str_starts_with($line, '[fix-templates]')) {
+                return $line;
+            }
+        }
+        return 'block-fixer: no files changed';
     }
 
     /** Allow overriding the node binary via env; default to PATH lookup. */
