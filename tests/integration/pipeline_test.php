@@ -22,18 +22,6 @@ test('full pipeline produces a structurally valid theme', function () {
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
-    // design-direction (json) — the committed creative concept, runs before the
-    // concurrent group and is read by theme-json/section-plan/sections.
-    $llm->queueJson([
-        'archetype' => 'editorial-magazine',
-        'mood' => ['warm', 'rustic'],
-        'era_reference' => '1970s print editorial',
-        'color_strategy' => 'warm earthy neutrals with one electric accent',
-        'type_strategy' => 'serif display + grotesque body',
-        'shape_language' => 'sharp corners, generous whitespace',
-        'signature_move' => 'oversized section numbers',
-        'avoid' => 'centered hero with all-sans type',
-    ]);
     // Concurrent group, request order is [theme-json, section-plan]:
     // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([
@@ -56,6 +44,12 @@ test('full pipeline produces a structurally valid theme', function () {
         ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'wants_image' => true],
         ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features'],
     ]]);
+    // design-direction (raw text) — the committed creative brief, runs before the
+    // concurrent group and is read by theme-json/section-plan/sections. It uses
+    // complete() (text), so it's the first item pulled from the text queue.
+    $llm->queueText('Editorial-magazine direction: warm, rustic, 1970s print feel. '
+        . 'Earthy neutrals with one electric accent; serif display over grotesque body. '
+        . 'Avoid the centered all-sans hero.');
     // sections (raw markup) — header, footer, then one part per section, in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
     $ftr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>(c) Hearth</p><!-- /wp:paragraph --></div><!-- /wp:group -->';

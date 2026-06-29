@@ -107,11 +107,11 @@ function build_pipeline(Llm $llm): Pipeline
         new ApplyIdentityStep(),
         // Commit to ONE creative concept BEFORE theme.json / the section plan, so
         // both derive from a strong, specific direction instead of converging on
-        // safe defaults. Writes designDirection.json, read by the steps below.
+        // safe defaults. Writes designDirection.md, read by the steps below.
         new DesignDirectionStep($llm, $renderer, $models['design-direction']),
         // theme.json and the section plan both derive from the prompt + siteSpec +
         // the design direction, so run them concurrently. Design decisions are
-        // made inline, steered by designDirection.json.
+        // made inline, steered by designDirection.md.
         new ConcurrentGroup($llm, [
             new ThemeJsonStep($llm, $renderer, $models['theme-json']),
             new SectionPlanStep($llm, $renderer, $models['section-plan']),

@@ -11,27 +11,20 @@ function make_designdir_fixture(): array
     return [$project, new FakeLlm(), $tmp];
 }
 
-test('design-direction writes a normalized designDirection.json', function () {
+test('design-direction writes the freeform brief to designDirection.md', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
-    $llm->queueJson([
-        'archetype'      => 'Editorial Magazine', // slugified on the way in
-        'mood'           => ['confident', 'warm', 'spacious'],
-        'era_reference'  => '1970s print editorial',
-        'color_strategy' => 'warm earthy neutrals with one electric accent',
-        'type_strategy'  => 'high-contrast serif display + clean grotesque body',
-        'shape_language' => 'sharp corners, thin rules, generous whitespace',
-        'signature_move' => 'oversized section numbers and asymmetric margins',
-        'avoid'          => 'centered hero with all-sans type',
-    ]);
+    $brief = "Editorial-magazine direction: warm, rustic, 1970s print feel. "
+        . "Earthy neutrals with one electric accent; high-contrast serif display "
+        . "over a clean grotesque body. Sharp corners, generous whitespace, oversized "
+        . "section numbers. Avoid the centered all-sans hero.";
+    $llm->queueText($brief);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new DesignDirectionStep($llm, $renderer))->run($project);
 
-    $dir = $project->readJson('designDirection.json');
-    assert_eq('editorial-magazine', $dir['archetype']);    // slugified
-    assert_true(is_array($dir['mood']));
-    assert_eq('confident', $dir['mood'][0]);
-    assert_eq('1970s print editorial', $dir['era_reference']);
+    assert_true($project->exists('designDirection.md'), 'designDirection.md written');
+    $written = $project->readText('designDirection.md');
+    assert_contains('Editorial-magazine', $written);
 
     // The rendered prompt must carry the user's words AND the factual spec.
     assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
@@ -40,26 +33,9 @@ test('design-direction writes a normalized designDirection.json', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('design-direction tolerates a string mood and fills missing fields', function () {
+test('design-direction throws when the model returns an empty brief', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
-    $llm->queueJson(['archetype' => 'brutalist', 'mood' => 'stark']);
-    $renderer = new PromptRenderer(repo_path('prompts'));
-
-    (new DesignDirectionStep($llm, $renderer))->run($project);
-
-    $dir = $project->readJson('designDirection.json');
-    assert_eq('brutalist', $dir['archetype']);
-    assert_eq(['stark'], $dir['mood']);                    // string wrapped to list
-    foreach (['era_reference', 'color_strategy', 'type_strategy', 'shape_language', 'signature_move', 'avoid'] as $key) {
-        assert_true(array_key_exists($key, $dir), "{$key} key present");
-    }
-
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('design-direction throws when archetype missing', function () {
-    [$project, $llm, $tmp] = make_designdir_fixture();
-    $llm->queueJson(['mood' => ['bold']]); // no archetype
+    $llm->queueText("   \n  ");
     $renderer = new PromptRenderer(repo_path('prompts'));
     assert_throws(function () use ($llm, $renderer, $project) {
         (new DesignDirectionStep($llm, $renderer))->run($project);
@@ -79,7 +55,7 @@ test('design-direction throws when meta prompt missing', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('readFor returns the direction JSON when present, fallback when absent', function () {
+test('readFor returns the brief when present, fallback when absent', function () {
     $tmp = sys_get_temp_dir() . '/builder_designdir_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
 
@@ -88,9 +64,9 @@ test('readFor returns the direction JSON when present, fallback when absent', fu
     assert_true(trim($fallback) !== '', 'fallback is non-empty');
     assert_contains('avoid', strtolower($fallback));
 
-    // Present → the verbatim file content is injected.
-    $project->writeJson('designDirection.json', ['archetype' => 'dark-luxe']);
-    assert_contains('dark-luxe', DesignDirectionStep::readFor($project));
+    // Present → the verbatim brief is injected.
+    $project->writeText('designDirection.md', "Dark-luxe direction with gold accents.\n");
+    assert_contains('Dark-luxe', DesignDirectionStep::readFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -100,7 +76,7 @@ test('theme-json injects the design direction into its prompt', function () {
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('designDirection.json', ['archetype' => 'editorial-magazine']);
+    $project->writeText('designDirection.md', "Editorial-magazine direction.\n");
 
     $llm = new FakeLlm();
     $llm->queueJson(valid_theme_payload());
@@ -108,6 +84,6 @@ test('theme-json injects the design direction into its prompt', function () {
 
     (new ThemeJsonStep($llm, $renderer))->run($project);
 
-    assert_contains('editorial-magazine', $llm->calls[0]['prompt']);
+    assert_contains('Editorial-magazine', $llm->calls[0]['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
