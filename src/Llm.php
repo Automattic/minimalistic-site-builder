@@ -24,4 +24,16 @@ interface Llm
      * @return array<mixed>
      */
     public function completeJson(string $prompt, array $opts = []): array;
+
+    /**
+     * Send several JSON prompts CONCURRENTLY and return their decoded values,
+     * keyed by the same keys as the input. Each request carries its own prompt
+     * and (optionally) model/max_tokens/system, so a batch may mix models. This
+     * is how the pipeline parallelises independent LLM work (theme.json beside
+     * the section plan; every landing-page section at once).
+     *
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<string,array<mixed>> decoded JSON keyed as the input
+     */
+    public function completeJsonBatch(array $requests): array;
 }

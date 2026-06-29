@@ -22,6 +22,7 @@ test('full pipeline produces a structurally valid theme', function () {
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
+    // Concurrent group, request order is [theme-json, section-plan]:
     // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([
         'settings' => [
@@ -38,21 +39,18 @@ test('full pipeline produces a structurally valid theme', function () {
             ]],
         ],
     ]);
-    // landing-page (json map)
+    // section-plan (json) — ordered list of sections
+    $llm->queueJson(['sections' => [
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'wants_image' => true],
+        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features'],
+    ]]);
+    // sections (json) — header, footer, then one part per section, in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
     $ftr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>(c) Hearth</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
-    $front = '<!-- wp:template-part {"slug":"header","tagName":"header"} /-->' .
-        '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->' .
-        '<!-- wp:template-part {"slug":"footer","tagName":"footer"} /-->';
-    $index = '<!-- wp:template-part {"slug":"header","tagName":"header"} /-->' .
-        '<!-- wp:post-content /-->' .
-        '<!-- wp:template-part {"slug":"footer","tagName":"footer"} /-->';
-    $llm->queueJson([
-        'parts/header.html' => $hdr,
-        'parts/footer.html' => $ftr,
-        'templates/index.html' => $index,
-        'templates/front-page.html' => $front,
-    ]);
+    $llm->queueJson(['markup' => $hdr]);
+    $llm->queueJson(['markup' => $ftr]);
+    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->']);
+    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->']);
 
     build_pipeline($llm)->runThrough($project);
 
@@ -62,6 +60,16 @@ test('full pipeline produces a structurally valid theme', function () {
     // Identity propagated end to end.
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
+
+    // Sections were generated as parts and composed in order into front-page.
+    assert_true($project->exists('theme/parts/section-hero.html'), 'hero part written');
+    assert_true($project->exists('theme/parts/section-specials.html'), 'specials part written');
+    $front = $project->readText('theme/templates/front-page.html');
+    assert_contains('wp:template-part', $front);
+    assert_true(
+        strpos($front, 'section-hero') < strpos($front, 'section-specials'),
+        'sections composed in plan order'
+    );
 
     // finalize-theme produced font loading.
     assert_true($project->exists('theme/functions.php'), 'functions.php written');
@@ -74,6 +82,7 @@ test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
         'scaffold-theme', 'site-spec', 'apply-identity',
-        'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme',
+        'theme-json+section-plan', 'sections', 'assemble-landing-page',
+        'collect-images', 'fix-blocks', 'finalize-theme',
     ], $ids);
 });

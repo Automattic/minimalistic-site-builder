@@ -16,16 +16,6 @@ function sm_project(string $prefix): array
     return [$project, $tmp];
 }
 
-function sm_landing_payload(): array
-{
-    $part = '<!-- wp:template-part {"slug":"header"} /-->';
-    return [
-        'parts/header.html'         => '<!-- wp:group --><!-- /wp:group -->',
-        'parts/footer.html'         => '<!-- wp:group --><!-- /wp:group -->',
-        'templates/index.html'      => $part,
-        'templates/front-page.html' => $part,
-    ];
-}
 
 test('site-spec passes the configured model into the LLM opts', function () {
     [$project, $tmp] = sm_project('builder_sm_ss_');
@@ -64,34 +54,57 @@ test('theme-json passes the configured model into the LLM opts', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('landing-page passes the model while preserving the max_tokens budget', function () {
-    [$project, $tmp] = sm_project('builder_sm_lp_');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', ['version' => 3]);
+test('section-plan passes the configured model into every request', function () {
+    [$project, $tmp] = sm_project('builder_sm_sp_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo', 'sections' => ['Hero']]);
     $llm = new FakeLlm();
-    $llm->queueJson(sm_landing_payload());
+    $llm->queueJson(['sections' => [['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero']]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    (new LandingPageStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
+    (new SectionPlanStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
 
-    $opts = $llm->calls[0]['opts'];
-    assert_eq('claude-opus-4-8', $opts['model'] ?? null);
-    assert_eq(32000, $opts['max_tokens'] ?? null, 'token budget kept alongside model');
+    assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('landing-page keeps the max_tokens budget and no model when unset', function () {
-    [$project, $tmp] = sm_project('builder_sm_lpd_');
+test('sections passes the configured model into every part request', function () {
+    [$project, $tmp] = sm_project('builder_sm_sec_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('sections.json', ['sections' => [
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+    ]]);
     $llm = new FakeLlm();
-    $llm->queueJson(sm_landing_payload());
+    // header, footer, one section — in requests() order.
+    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
+    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
+    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->']);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    (new LandingPageStep($llm, $renderer))->run($project);
+    (new SectionsStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
 
-    $opts = $llm->calls[0]['opts'];
-    assert_eq(32000, $opts['max_tokens'] ?? null);
-    assert_true(!array_key_exists('model', $opts), 'no model key when default');
+    assert_true(count($llm->calls) === 3, 'one request per part');
+    foreach ($llm->calls as $call) {
+        assert_eq('claude-opus-4-8', $call['opts']['model'] ?? null);
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections sends no model key when none is configured', function () {
+    [$project, $tmp] = sm_project('builder_sm_secd_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('sections.json', ['sections' => [
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+    ]]);
+    $llm = new FakeLlm();
+    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
+    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
+    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->']);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    assert_true(!array_key_exists('model', $llm->calls[0]['opts']), 'no model key when default');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

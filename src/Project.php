@@ -27,6 +27,20 @@ final class Project
         return $this->path('theme' . ($rel === '' ? '' : '/' . ltrim($rel, '/')));
     }
 
+    /**
+     * Absolute path under the project's logs/ directory, creating it on demand.
+     * Steps route their verbose output here (one file per step) so the console
+     * stays a concise summary and the full detail is kept for inspection.
+     */
+    public function logPath(string $rel = ''): string
+    {
+        $dir = $this->path('logs');
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new RuntimeException("Could not create logs directory: {$dir}");
+        }
+        return $rel === '' ? $dir : $dir . '/' . ltrim($rel, '/');
+    }
+
     public function exists(string $rel): bool
     {
         return file_exists($this->path($rel));

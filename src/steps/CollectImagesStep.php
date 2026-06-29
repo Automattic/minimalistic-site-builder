@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Step (deterministic): collect the AI image placeholders the landing-page step
+ * Step (deterministic): collect the AI image placeholders the sections step
  * emitted into the theme markup, so they can be generated.
  *
  * Input:  theme/parts/*.html + theme/templates/*.html
@@ -16,7 +16,7 @@ declare(strict_types=1);
  *
  * It runs BEFORE fix-blocks on purpose: the block re-serializer strips the alt
  * from wp:cover background images, so the AI_IMAGE spec is only intact in the raw
- * landing-page output. images.json is then the durable record of what to generate.
+ * section markup. images.json is then the durable record of what to generate.
  */
 final class CollectImagesStep implements Step
 {

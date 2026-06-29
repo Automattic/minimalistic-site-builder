@@ -42,4 +42,27 @@ final class FakeLlm implements Llm
         }
         return array_shift($this->jsonQueue);
     }
+
+    /**
+     * Pull one queued JSON response per request, in the order the requests are
+     * given, keyed back as the input. Each request's meta (model/max_tokens/…)
+     * is recorded as that call's opts so model-wiring assertions still work.
+     *
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<string,array<mixed>>
+     */
+    public function completeJsonBatch(array $requests): array
+    {
+        $out = [];
+        foreach ($requests as $key => $req) {
+            $opts = $req;
+            unset($opts['prompt']);
+            $this->calls[] = ['prompt' => (string) $req['prompt'], 'opts' => $opts];
+            if ($this->jsonQueue === []) {
+                throw new RuntimeException('FakeLlm: no queued json response');
+            }
+            $out[$key] = array_shift($this->jsonQueue);
+        }
+        return $out;
+    }
 }

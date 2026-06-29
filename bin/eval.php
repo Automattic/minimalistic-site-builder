@@ -143,7 +143,7 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    $stepIds = ['scaffold-theme', 'site-spec', 'apply-identity', 'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme'];
+    $stepIds = ['scaffold-theme', 'site-spec', 'apply-identity', 'theme-json+section-plan', 'sections', 'assemble-landing-page', 'collect-images', 'fix-blocks', 'finalize-theme'];
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
     $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . Env::get('LLM_MODEL', 'claude-opus-4-8') . "\n\n";
@@ -204,7 +204,7 @@ function short(string $stepId): string
 {
     return match ($stepId) {
         'scaffold-theme' => 'scaf', 'site-spec' => 'spec', 'apply-identity' => 'ident',
-        'theme-json' => 'tjson', 'landing-page' => 'land',
+        'theme-json+section-plan' => 'tjson+plan', 'sections' => 'sect', 'assemble-landing-page' => 'asm',
         'collect-images' => 'imgs', 'fix-blocks' => 'fix', 'finalize-theme' => 'fin', default => $stepId,
     };
 }
