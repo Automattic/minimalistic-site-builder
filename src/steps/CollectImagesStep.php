@@ -7,12 +7,15 @@ declare(strict_types=1);
  *
  * Input:  theme/parts/*.html + theme/templates/*.html
  * Output: images.json — an array of image specs, one per unique asset filename:
- *           { filename, src, description, style, aspectRatio, prompt, status, sources[] }
+ *           { filename, src, subject, pageContext, style, aspectRatio, status, sources[] }
  *
  * Placeholders follow the telex convention: an <img> whose src is a theme-relative
- * "theme:./assets/<name>.jpg" path and whose alt is "AI_IMAGE: description | style |
- * aspect-ratio". This step is pure parsing — no network — so it always runs as part
- * of the build; the heavier GenerateImagesStep is opt-in.
+ * "theme:./assets/<name>.jpg" path and whose alt is "AI_IMAGE: subject | page-context
+ * | style | aspect-ratio". The subject describes what to render and from what POV; the
+ * page-context describes where/how the image is used (it is context for the generator,
+ * not part of the rendered subject — see ImagePromptComposer). This step is pure
+ * parsing — no network — so it always runs as part of the build; the heavier
+ * GenerateImagesStep is opt-in.
  *
  * It runs BEFORE fix-blocks on purpose: the block re-serializer strips the alt
  * from wp:cover background images, so the AI_IMAGE spec is only intact in the raw
@@ -96,27 +99,28 @@ final class CollectImagesStep implements Step
             $src      = $srcMatch[2];
             $filename = $srcMatch[3];
 
-            // description | style | aspect-ratio (description may itself contain pipes).
+            // subject | page-context | style | aspect-ratio. We pop the three
+            // trailing fixed fields from the end, so the subject (the lead, the
+            // only field meant to be rich) may itself contain pipes.
             $parts = explode('|', $alt);
-            if (count($parts) < 3) {
+            if (count($parts) < 4) {
                 continue;
             }
             $aspectRatio = strtolower(trim(array_pop($parts)));
             $style       = strtolower(trim(array_pop($parts)));
-            $description = trim(implode('|', $parts));
-            if ($description === '') {
+            $pageContext = trim(array_pop($parts));
+            $subject     = trim(implode('|', $parts));
+            if ($subject === '') {
                 continue;
             }
-
-            $prompt = $style !== '' ? "{$description}. Style: {$style}" : $description;
 
             $images[] = [
                 'filename'    => $filename,
                 'src'         => $src,
-                'description' => $description,
+                'subject'     => $subject,
+                'pageContext' => $pageContext,
                 'style'       => $style,
                 'aspectRatio' => $aspectRatio,
-                'prompt'      => $prompt,
             ];
         }
         return $images;

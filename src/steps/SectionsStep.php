@@ -48,6 +48,11 @@ final class SectionsStep implements Step
         // A compact outline of the whole page, so each section knows its place.
         $outline = self::outline($sections);
 
+        // The AI_IMAGE authoring rules live in their own prompt file so they stay
+        // in sync with what CollectImagesStep parses; injected into every section
+        // (a section uses them only when its "Use imagery" is yes).
+        $imageInstructions = $this->renderer->render('image-generation.md', []);
+
         $requests = [
             'header' => $this->req($this->renderer->render('header.md', [
                 'site_spec'  => $siteSpec,
@@ -72,6 +77,7 @@ final class SectionsStep implements Step
                 'section_purpose' => (string) ($section['purpose'] ?? ''),
                 'content_notes' => (string) ($section['content_notes'] ?? ''),
                 'wants_image'   => ($section['wants_image'] ?? false) ? 'yes' : 'no',
+                'image_instructions' => $imageInstructions,
             ]));
         }
 

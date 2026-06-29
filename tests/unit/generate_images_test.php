@@ -10,7 +10,7 @@ function generate_fixture(): array
     $project->writeText('theme/templates/front-page.html',
         '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div class="wp-block-cover">'
         . '<img class="wp-block-cover__image-background" src="theme:./assets/hero.jpg" '
-        . 'alt="AI_IMAGE: A bakery at dawn | photorealistic | landscape"/></div><!-- /wp:cover -->'
+        . 'alt="AI_IMAGE: A bakery at dawn | full-bleed hero with text overlay | photorealistic | landscape"/></div><!-- /wp:cover -->'
     );
     (new CollectImagesStep())->run($project);
     return [$project, $tmp];
@@ -58,18 +58,20 @@ test('generate-images prepends site name/topic/description context to each promp
     assert_contains('Hearth & Crumb', $sent);                 // site name
     assert_contains('artisan sourdough', $sent);              // topic
     assert_contains('A neighborhood bakery', $sent);          // description
-    assert_contains('A bakery at dawn', $sent);               // the image's own prompt is still there
+    assert_contains('A bakery at dawn', $sent);               // the image subject is still there
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('generate-images sends the image prompt unchanged when there is no site spec', function () {
+test('generate-images leads with the subject + style and adds the page context', function () {
     [$project, $tmp] = generate_fixture(); // fixture writes no siteSpec.json
     $images = new FakeImageClient('JPEGDATA');
 
     (new GenerateImagesStep($images))->run($project);
 
-    assert_eq('A bakery at dawn. Style: photorealistic', $images->calls[0]['prompt']);
+    $sent = $images->calls[0]['prompt'];
+    assert_contains('A bakery at dawn. Style: photorealistic', $sent);   // subject leads, style appended
+    assert_contains('full-bleed hero with text overlay', $sent);         // page context is included as guidance
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -100,10 +102,10 @@ function batch_fixture(int $n): array
         $specs[] = [
             'filename'    => "img-{$k}.jpg",
             'src'         => "theme:./assets/img-{$k}.jpg",
-            'description' => "image {$k}",
+            'subject'     => "image {$k}",
+            'pageContext' => 'content image',
             'style'       => 'photorealistic',
             'aspectRatio' => 'landscape',
-            'prompt'      => "image {$k}. Style: photorealistic",
             'status'      => 'pending',
         ];
     }

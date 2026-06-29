@@ -24,7 +24,7 @@ final class PromptRenderer
     /** @param array<string,string> $vars */
     public static function fill(string $text, array $vars): string
     {
-        $out = preg_replace_callback('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/', static function ($m) use ($vars) {
+        $out = (string) preg_replace_callback('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/', static function ($m) use ($vars) {
             $key = $m[1];
             if (!array_key_exists($key, $vars)) {
                 return $m[0]; // leave unresolved so the check below catches it
@@ -32,7 +32,8 @@ final class PromptRenderer
             return $vars[$key];
         }, $text);
 
-        $out = (string) $out;
+        // Any leftover {{...}} means an unknown placeholder — the template/wiring
+        // is wrong, so fail loud rather than send a broken prompt to the model.
         if (preg_match('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/', $out, $m)) {
             throw new RuntimeException("Unresolved placeholder in prompt: {{{$m[1]}}}");
         }
