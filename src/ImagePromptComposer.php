@@ -14,11 +14,11 @@ declare(strict_types=1);
  * "portfolio gallery card") and the SITE CONTEXT (what the whole site is about)
  * are NOT things to draw: they only steer subject choice, mood and composition.
  *
- * The exact wording and shape of the prompt live in prompts/image-prompt.md (a
- * composable template, like the other prompts) — this class only supplies the
- * values and caps the result at the model's input-token limit. Because the
- * subject leads the template, that cap sheds trailing context first and keeps
- * the subject intact.
+ * The shape of the prompt lives in prompts/image-prompt.md (a composable template
+ * with plain {{placeholders}}, like the other prompts). This class assembles the
+ * optional clauses — the style suffix and the context guidance — and caps the
+ * result at the model's input-token limit. Because the subject leads the template,
+ * that cap sheds trailing context first and keeps the subject intact.
  *
  * The aspect ratio is intentionally absent from this text — it is sent to the
  * endpoint as a structured parameter (WpcomImageClient::aspectRatio / buildBody).
@@ -42,20 +42,36 @@ final class ImagePromptComposer
     ): string {
         $renderer ??= new PromptRenderer(repo_path('prompts'));
 
+        $subject     = trim($subject);
+        $style       = trim($style);
         $pageContext = trim($pageContext);
         $siteContext = trim($siteContext);
 
+        // Style is appended to the subject as a suffix; absent when no style.
+        $styleClause = $style !== '' ? ". Style: {$style}" : '';
+
+        // Page and site context only steer mood/composition — they are NOT drawn,
+        // so they are framed as guidance and omitted entirely when there is none.
+        $sentences = [];
+        if ($pageContext !== '') {
+            $sentences[] = "This image is used as {$pageContext}.";
+        }
+        if ($siteContext !== '') {
+            $sentences[] = "This is for a site about: {$siteContext}";
+        }
+        $guidance = $sentences === [] ? '' : 'Context to guide the subject, mood and '
+            . 'composition only — do not render any of it as text or literal objects: '
+            . implode(' ', $sentences);
+
         $prompt = $renderer->render('image-prompt.md', [
-            'subject'      => trim($subject),
-            'style'        => trim($style),
-            'page_context' => $pageContext,
-            'site_context' => $siteContext,
-            // Gate for the whole guidance block: present only when there is some.
-            'has_context'  => ($pageContext !== '' || $siteContext !== '') ? 'yes' : '',
+            'subject'      => $subject,
+            'style_clause' => $styleClause,
+            'guidance'     => $guidance,
         ]);
 
-        // The template can leave surrounding whitespace; normalise then cap to the
-        // model's hard input limit (sheds trailing context first — see class doc).
+        // The template leaves a blank line that collapses when guidance is empty;
+        // normalise the surrounding whitespace then cap to the model's hard input
+        // limit (sheds trailing context first — see class doc).
         return WpcomImageClient::fitToTokens(trim($prompt), WpcomImageClient::MAX_PROMPT_TOKENS);
     }
 }
