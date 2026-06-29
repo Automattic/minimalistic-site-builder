@@ -43,6 +43,37 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images prepends site name/topic/description context to each prompt', function () {
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('siteSpec.json', [
+        'name'        => 'Hearth & Crumb',
+        'topic'       => 'artisan sourdough',
+        'description' => 'A neighborhood bakery selling sourdough and pastries.',
+    ]);
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $sent = $images->calls[0]['prompt'];
+    assert_contains('Hearth & Crumb', $sent);                 // site name
+    assert_contains('artisan sourdough', $sent);              // topic
+    assert_contains('A neighborhood bakery', $sent);          // description
+    assert_contains('A bakery at dawn', $sent);               // the image's own prompt is still there
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images sends the image prompt unchanged when there is no site spec', function () {
+    [$project, $tmp] = generate_fixture(); // fixture writes no siteSpec.json
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq('A bakery at dawn. Style: photorealistic', $images->calls[0]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images marks failed and leaves the placeholder on error', function () {
     [$project, $tmp] = generate_fixture();
     $images = new FakeImageClient('', true); // throws

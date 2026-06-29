@@ -17,7 +17,7 @@ declare(strict_types=1);
 final class SiteSpecStep implements Step
 {
     /** Factual properties the spec must always carry. */
-    private const REQUIRED = ['name', 'title', 'site_type', 'topic', 'area', 'audience', 'visual_vibe'];
+    private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe'];
 
     public function __construct(
         private Llm $llm,

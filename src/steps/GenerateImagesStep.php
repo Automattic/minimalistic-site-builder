@@ -44,6 +44,12 @@ final class GenerateImagesStep implements Step
             return;
         }
 
+        // Site-wide context (name/topic/description) prepended to every image
+        // prompt so the model grounds each image in what the site is about.
+        $siteContext = self::siteContext(
+            $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : []
+        );
+
         $assetDir = $project->themePath('assets');
         if (!is_dir($assetDir) && !mkdir($assetDir, 0775, true) && !is_dir($assetDir)) {
             throw new RuntimeException("Could not create assets directory: {$assetDir}");
@@ -77,7 +83,7 @@ final class GenerateImagesStep implements Step
             // Map this batch's original indices to generation specs (order kept).
             $indices = array_keys($batch);
             $batchSpecs = array_map(fn (array $spec): array => [
-                'prompt'       => (string) $spec['prompt'],
+                'prompt'       => WpcomImageClient::composePrompt($siteContext, (string) $spec['prompt']),
                 'aspect_ratio' => WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
             ], array_values($batch));
 
@@ -115,6 +121,37 @@ final class GenerateImagesStep implements Step
         if ($resolved !== []) {
             $this->rewriteMarkup($project, $resolved);
         }
+    }
+
+    /**
+     * A compact, factual context sentence built from the site spec's name, topic
+     * and description, prepended to each image prompt so the model knows what the
+     * site is about. Returns '' when the spec carries none of those facts.
+     *
+     * @param array<mixed> $spec
+     */
+    private static function siteContext(array $spec): string
+    {
+        $name        = trim((string) ($spec['name'] ?? ''));
+        $topic       = trim((string) ($spec['topic'] ?? ''));
+        $description = trim((string) ($spec['description'] ?? ''));
+
+        $lead = [];
+        if ($name !== '') {
+            $lead[] = "the website “{$name}”";
+        }
+        if ($topic !== '') {
+            $lead[] = "about {$topic}";
+        }
+
+        $parts = [];
+        if ($lead !== []) {
+            $parts[] = 'Image for ' . implode(' ', $lead) . '.';
+        }
+        if ($description !== '') {
+            $parts[] = $description;
+        }
+        return implode(' ', $parts);
     }
 
     /** Root-relative URL the theme's assets are served at in Playground. */
