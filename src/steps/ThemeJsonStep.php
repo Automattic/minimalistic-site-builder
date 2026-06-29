@@ -20,6 +20,7 @@ final class ThemeJsonStep implements Step
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
+        private ?string $model = null,
     ) {}
 
     public function id(): string
@@ -40,7 +41,8 @@ final class ThemeJsonStep implements Step
             'site_spec'   => $project->readText('siteSpec.json'),
         ]);
 
-        $theme = $this->llm->completeJson($rendered);
+        $opts = $this->model !== null ? ['model' => $this->model] : [];
+        $theme = $this->llm->completeJson($rendered, $opts);
 
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';

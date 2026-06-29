@@ -24,6 +24,7 @@ final class LandingPageStep implements Step
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
+        private ?string $model = null,
     ) {}
 
     public function id(): string
@@ -49,8 +50,13 @@ final class LandingPageStep implements Step
         // what it's producing so the build doesn't look frozen while it runs.
         fwrite(STDERR, "    writing header, footer, index, front-page…\n");
 
-        // Block markup for four files is large — give the model room.
-        $files = $this->llm->completeJson($rendered, ['max_tokens' => 32000]);
+        // Block markup for four files is large — give the model room. The
+        // per-step model override (when set) rides alongside the token budget.
+        $opts = ['max_tokens' => 32000];
+        if ($this->model !== null) {
+            $opts['model'] = $this->model;
+        }
+        $files = $this->llm->completeJson($rendered, $opts);
 
         foreach (self::REQUIRED_FILES as $rel) {
             $content = $files[$rel] ?? null;

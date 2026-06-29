@@ -22,6 +22,7 @@ final class SiteSpecStep implements Step
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
+        private ?string $model = null,
     ) {}
 
     public function id(): string
@@ -43,10 +44,21 @@ final class SiteSpecStep implements Step
         }
 
         $rendered = $this->renderer->render('site-spec.md', ['user_prompt' => $prompt]);
-        $spec = $this->llm->completeJson($rendered);
+        $spec = $this->llm->completeJson($rendered, $this->llmOpts());
 
         $spec = self::normalize($spec);
         $project->writeJson('siteSpec.json', $spec);
+    }
+
+    /**
+     * LLM options for this step. Adds the per-step model override when one is
+     * configured; otherwise the client falls back to its default model.
+     *
+     * @return array{model?:string}
+     */
+    private function llmOpts(): array
+    {
+        return $this->model !== null ? ['model' => $this->model] : [];
     }
 
     /**
