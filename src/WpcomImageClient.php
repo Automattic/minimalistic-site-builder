@@ -14,6 +14,12 @@ final class WpcomImageClient implements ImageClient
     private const ENDPOINT_TPL =
         'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/publishers/google/models/%s:predict';
 
+    /**
+     * Hard cap Imagen enforces on the text prompt (input tokens). We compose the
+     * site context + per-image prompt to stay safely under this.
+     */
+    public const MAX_PROMPT_TOKENS = 480;
+
     private int $requests = 0;
 
     /**
@@ -45,6 +51,68 @@ final class WpcomImageClient implements ImageClient
             'landscape' => '16:9',
             default    => preg_match('/^\d+:\d+$/', trim($keyword)) ? trim($keyword) : '16:9',
         };
+    }
+
+    /**
+     * Compose the final text prompt for Imagen: the site context (so the model
+     * knows what the site is about) followed by the per-image prompt, kept within
+     * MAX_PROMPT_TOKENS. The per-image prompt is the priority — it describes the
+     * actual image — so context is trimmed first to make room; only if the image
+     * prompt alone still exceeds the limit is it truncated as a last resort.
+     */
+    public static function composePrompt(string $context, string $imagePrompt): string
+    {
+        $context     = trim($context);
+        $imagePrompt = trim($imagePrompt);
+
+        if ($context === '') {
+            return self::truncateToTokens($imagePrompt, self::MAX_PROMPT_TOKENS);
+        }
+
+        $combined = "{$context}\n\n{$imagePrompt}";
+        if (self::estimateTokens($combined) <= self::MAX_PROMPT_TOKENS) {
+            return $combined;
+        }
+
+        // Over budget: give the image prompt priority and fit context around it.
+        $budgetForContext = self::MAX_PROMPT_TOKENS - self::estimateTokens($imagePrompt) - 1;
+        if ($budgetForContext <= 0) {
+            return self::truncateToTokens($imagePrompt, self::MAX_PROMPT_TOKENS);
+        }
+        $context = self::truncateToTokens($context, $budgetForContext);
+        return $context === '' ? $imagePrompt : "{$context}\n\n{$imagePrompt}";
+    }
+
+    /**
+     * Conservative token estimate for an Imagen text prompt. No local tokenizer
+     * is available, so over-estimate (the larger of a word- and a character-based
+     * count) to stay safely under the hard model limit.
+     */
+    public static function estimateTokens(string $text): int
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return 0;
+        }
+        $words = count(preg_split('/\s+/', $text) ?: []);
+        $chars = mb_strlen($text);
+        return (int) max((int) ceil($words * 1.4), (int) ceil($chars / 4));
+    }
+
+    /** Trim text from the end on a word boundary until it fits $maxTokens. */
+    private static function truncateToTokens(string $text, int $maxTokens): string
+    {
+        if ($maxTokens <= 0) {
+            return '';
+        }
+        if (self::estimateTokens($text) <= $maxTokens) {
+            return $text;
+        }
+        $words = preg_split('/\s+/', trim($text)) ?: [];
+        while ($words !== [] && self::estimateTokens(implode(' ', $words)) > $maxTokens) {
+            array_pop($words);
+        }
+        return rtrim(implode(' ', $words), " ,.;:—-");
     }
 
     public function generate(string $prompt, array $opts = []): string

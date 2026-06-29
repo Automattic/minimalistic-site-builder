@@ -32,7 +32,7 @@ Rules:
 - If "Use imagery" is yes, emit generatable AI image placeholders using ONLY native src and alt attributes — no custom data attributes:
     src — a theme-relative path "theme:./assets/<name>.jpg" where <name> is lowercase a-z, 0-9 and hyphens, unique and descriptive. Always .jpg.
     alt — the generation spec in this EXACT format: "AI_IMAGE: <description> | <style> | <aspect-ratio>"
-      <description>: 1-3 specific sentences (composition, colors, mood, subject).
+      <description>: 1-3 specific sentences (composition, colors, mood, subject) — this is the generation prompt. Start with where and how the image is used, since you are placing it and know its role: name this section ("{{section_title}}") and its purpose (e.g. "Full-bleed hero background for the {{section_title}} section, with the headline overlaid on top —" or "Gallery card in the {{section_title}} section —"), then describe the image. For cover/hero backgrounds, state that text is overlaid and ask for the focal subject off-center with calm, low-detail areas so the overlaid text stays legible. When several images sit together in this section, make each describe a distinct subject so they don't read alike.
       <style>: one of photorealistic, digital-art, illustration, minimalist, flat-design, 3d-render, abstract, watercolor.
       <aspect-ratio>: one of square (1:1), landscape (16:9, use for heroes/banners), portrait (9:16).
     For wp:cover backgrounds, set the SAME "theme:./assets/<name>.jpg" on BOTH the block's "url" attribute and the inner <img class="wp-block-cover__image-background"> src, and put the AI_IMAGE spec in that img's alt.

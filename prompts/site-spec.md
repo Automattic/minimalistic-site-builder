@@ -10,6 +10,7 @@ Always include exactly these fixed properties:
   "name": string,            // short brand/site name
   "slug": string,            // lowercase, hyphenated, url-safe
   "title": string,           // the main site title / headline (what visitors see first)
+  "description": string,     // one factual sentence describing what the site is and what it offers
   "site_type": string,       // kind of site, e.g. "business storefront", "blog", "portfolio", "menu", "landing page"
   "topic": string,           // what the site is about, in one short phrase
   "area": string,            // business type / domain / category, e.g. "bakery", "climate advocacy", "bicycle retail"
