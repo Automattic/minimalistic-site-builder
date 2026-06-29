@@ -44,13 +44,13 @@ test('full pipeline produces a structurally valid theme', function () {
         ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'wants_image' => true],
         ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features'],
     ]]);
-    // sections (json) — header, footer, then one part per section, in requests() order
+    // sections (raw markup) — header, footer, then one part per section, in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
     $ftr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>(c) Hearth</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
-    $llm->queueJson(['markup' => $hdr]);
-    $llm->queueJson(['markup' => $ftr]);
-    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->']);
-    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->']);
+    $llm->queueText($hdr);
+    $llm->queueText($ftr);
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->');
 
     build_pipeline($llm)->runThrough($project);
 

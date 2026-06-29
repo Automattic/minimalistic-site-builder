@@ -9,9 +9,6 @@ THEME TOKENS (theme.json):
 PAGE OUTLINE (the sections the nav may link to):
 {{outline}}
 
-Return a single JSON object with EXACTLY this shape:
-{ "markup": "<!-- wp:group ... -->...<!-- /wp:group -->" }
-
 Rules:
 - The header has the site title (wp:site-title) or logo on one side and a primary wp:navigation on the other, in a single top-level wp:group with a row/flex layout and space-between justification.
 - Use valid CORE block markup only (group, site-title, site-logo, navigation, buttons/button, image).
@@ -19,4 +16,4 @@ Rules:
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Every block comment must be correctly closed and HTML class names must match the block.
 
-Output ONLY the JSON object.
+Output ONLY the block markup, starting with "<!-- wp:" — no JSON, no prose, no markdown code fences.

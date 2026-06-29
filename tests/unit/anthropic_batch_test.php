@@ -79,3 +79,32 @@ test('retryTextBatch throws immediately on a permanent failure', function () {
     });
     assert_eq(1, $calls, 'permanent failure tried exactly once');
 });
+
+test('concurrencyWindows caps each window at 5 and preserves keys in order', function () {
+    $bodies = [];
+    for ($i = 0; $i < 12; $i++) {
+        $bodies["r{$i}"] = ['prompt' => "P{$i}"];
+    }
+
+    $windows = AnthropicClient::concurrencyWindows($bodies);
+
+    assert_eq([5, 5, 2], array_map('count', $windows), 'no more than 5 in flight per window');
+    foreach ($windows as $window) {
+        assert_true(count($window) <= 5, 'window within the cap');
+    }
+
+    // Every request appears exactly once, with its key and order intact.
+    $flat = [];
+    foreach ($windows as $window) {
+        $flat += $window;
+    }
+    assert_eq(array_keys($bodies), array_keys($flat), 'keys preserved across windows');
+    assert_eq(['prompt' => 'P7'], $flat['r7'], 'request body intact');
+});
+
+test('concurrencyWindows leaves a small batch as a single window', function () {
+    $bodies = ['a' => [], 'b' => [], 'c' => []];
+    $windows = AnthropicClient::concurrencyWindows($bodies);
+    assert_eq(1, count($windows), 'a sub-cap batch is one window');
+    assert_eq(['a', 'b', 'c'], array_keys($windows[0]));
+});

@@ -50,10 +50,16 @@ The pipeline (current — see **Phase 3** below for the design-half refactor):
 `Pipeline`, `ThemeValidator`.
 Prompts: `prompts/*.md`. Runners: `bin/build.php`, `bin/eval.php`, `bin/inspect.php`.
 
-**Concurrency.** LLM work is parallelised via `Llm::completeJsonBatch()` — an
-Anthropic `curl_multi` transport (mirroring `WpcomImageClient`'s image batching,
-reusing `parseSse`; the pure `AnthropicClient::retryTextBatch()` retries only
-transient failures and aborts the batch on a permanent one). A `ConcurrentStep`
+**Concurrency.** LLM work is parallelised via a shared `curl_multi` transport
+(mirroring `WpcomImageClient`'s image batching, reusing `parseSse`; the pure
+`AnthropicClient::retryTextBatch()` retries only transient failures and aborts
+the batch on a permanent one). Two batch entry points sit on top of it:
+`Llm::completeJsonBatch()` for structured steps (theme.json, the section plan)
+and `Llm::completeBatch()` for steps whose answer IS the payload — the section
+parts return raw block markup verbatim rather than escaping it inside a JSON
+string (brittle + wasteful). The transport runs at most `MAX_CONCURRENCY` (5)
+requests in flight at once — a wide fan-out (every landing-page part) is split
+into ordered windows so it never trips the API's rate limits. A `ConcurrentStep`
 exposes `requests()`/`consume()` so its prompts can be fired together; a
 `ConcurrentGroup` (itself a `Step`) merges several steps' requests into one batch.
 This overlaps theme-json beside the section plan, and generates every landing-page

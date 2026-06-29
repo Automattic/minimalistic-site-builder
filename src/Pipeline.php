@@ -18,6 +18,25 @@ final class Pipeline
     }
 
     /**
+     * Every id `--until` accepts: each step id, plus each member id of a
+     * concurrent group (whose own id is its members joined by '+'). So
+     * `--until=theme-json` is a valid stop even though it runs inside the
+     * `theme-json+section-plan` group.
+     *
+     * @return string[]
+     */
+    public function stopIds(): array
+    {
+        $ids = [];
+        foreach ($this->steps as $step) {
+            foreach (explode('+', $step->id()) as $part) {
+                $ids[] = $part;
+            }
+        }
+        return $ids;
+    }
+
+    /**
      * Run every step up to and including $untilId (or all steps if null).
      *
      * @param callable(Step,float):void|null $reporter called after each step with (step, seconds)
@@ -40,7 +59,10 @@ final class Pipeline
             if ($reporter !== null) {
                 $reporter($step, $elapsed);
             }
-            if ($untilId !== null && $step->id() === $untilId) {
+            // Stop after this step if its id matches — or, for a concurrent
+            // group, if $untilId names one of its members (you can't stop
+            // mid-group, so it stops once the whole group has run).
+            if ($untilId !== null && in_array($untilId, explode('+', $step->id()), true)) {
                 return;
             }
         }

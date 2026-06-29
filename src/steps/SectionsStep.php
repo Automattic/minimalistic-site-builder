@@ -14,8 +14,11 @@ declare(strict_types=1);
  * (for coherence) plus its own brief, so the model focuses on one section at a
  * time and they all run concurrently. The assemble step then composes them.
  * Image placeholders use the same AI_IMAGE convention collect-images parses.
+ *
+ * Each part's response IS the block markup (raw text, via completeBatch) — not
+ * JSON-wrapped — so the model never has to escape its HTML into a JSON string.
  */
-final class SectionsStep implements ConcurrentStep
+final class SectionsStep implements Step
 {
     /** Prefix for a section part's request key, filename, and template-part slug. */
     public const SECTION_PREFIX = 'section-';
@@ -75,22 +78,25 @@ final class SectionsStep implements ConcurrentStep
         return $requests;
     }
 
-    public function consume(Project $project, array $results): void
+    public function run(Project $project): void
     {
-        foreach ($results as $key => $data) {
+        $parts = $this->llm->completeBatch($this->requests($project));
+
+        // Validate EVERY part before writing any, so one bad part doesn't leave
+        // a half-written set of files on disk (the build aborts either way).
+        $files = [];
+        foreach ($parts as $key => $text) {
             $rel = match (true) {
                 $key === 'header' => 'parts/header.html',
                 $key === 'footer' => 'parts/footer.html',
                 default           => 'parts/' . $key . '.html', // section-<slug>
             };
-            $markup = self::markup($data, $key);
+            $files[$rel] = self::markup($text, $key);
+        }
+
+        foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
-    }
-
-    public function run(Project $project): void
-    {
-        $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
     }
 
     /**
@@ -126,21 +132,27 @@ final class SectionsStep implements ConcurrentStep
     }
 
     /**
-     * Extract and validate one part's block markup from its model output. The
-     * model returns { "markup": "<!-- wp:... -->" }. Pure — unit-testable.
-     *
-     * @param array<mixed> $data
+     * Validate one part's raw block-markup response. The model returns the
+     * markup verbatim; we defensively strip a stray ```…``` code fence if one
+     * slipped in, then require it to actually be block markup. Pure — testable.
      */
-    public static function markup(array $data, string $key): string
+    public static function markup(string $text, string $key): string
     {
-        $markup = $data['markup'] ?? null;
-        if (!is_string($markup) || trim($markup) === '') {
-            throw new RuntimeException("sections: part '{$key}' has no markup");
-        }
-        if (!str_contains($markup, 'wp:')) {
+        $markup = self::stripFences(trim($text));
+        if ($markup === '' || !str_contains($markup, 'wp:')) {
             throw new RuntimeException("sections: part '{$key}' is not block markup");
         }
         return rtrim($markup);
+    }
+
+    /** Strip a leading/trailing markdown code fence if the model added one. */
+    private static function stripFences(string $text): string
+    {
+        if (str_starts_with($text, '```')) {
+            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
+            $text = preg_replace('/\n```$/', '', (string) $text);
+        }
+        return trim((string) $text);
     }
 
     /**

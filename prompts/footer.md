@@ -9,9 +9,6 @@ THEME TOKENS (theme.json):
 PAGE OUTLINE (for context):
 {{outline}}
 
-Return a single JSON object with EXACTLY this shape:
-{ "markup": "<!-- wp:group ... -->...<!-- /wp:group -->" }
-
 Rules:
 - The footer shows the site name, a few useful links (and contact facts from the spec where given), and a small credit line, in a single top-level wp:group.
 - Use valid CORE block markup only (group, columns/column, site-title, paragraph, navigation, list, social-links if useful).
@@ -19,4 +16,4 @@ Rules:
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Every block comment must be correctly closed and HTML class names must match the block.
 
-Output ONLY the JSON object.
+Output ONLY the block markup, starting with "<!-- wp:" — no JSON, no prose, no markdown code fences.

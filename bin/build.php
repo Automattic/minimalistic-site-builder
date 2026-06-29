@@ -9,6 +9,10 @@ declare(strict_types=1);
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
  * printing per-step timing. Re-running reuses the same project directory.
  *
+ * --until=<step-id> stops after that step (an unknown id errors with the list).
+ * Steps that run concurrently share one id (e.g. theme-json+section-plan), but
+ * --until also accepts a member id (theme-json) and stops once the group is done.
+ *
  * --with-images additionally generates the AI image placeholders into real
  * assets via the WPCOM AI proxy (slow + networked; off by default).
  *
@@ -49,6 +53,18 @@ if ($prompt === null || trim($prompt) === '') {
 
 $slug ??= $prompt;
 
+$llm = make_llm();
+$pipeline = build_pipeline($llm);
+
+// Validate --until BEFORE creating the project, so an unknown id fails loud
+// (instead of silently running the whole build) without leaving a stray project
+// directory behind. Group members are valid stops too (see Pipeline::stopIds).
+if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
+    fwrite(STDERR, "Unknown --until step '{$until}'. Valid steps:\n  "
+        . implode("\n  ", $pipeline->stopIds()) . "\n");
+    exit(1);
+}
+
 $store = new ProjectStore(repo_path('projects'));
 $project = $store->create($slug);
 
@@ -59,9 +75,6 @@ $project->writeJson('meta.json', [
     'provisional_slug' => $project->slug(),
     'created_at'       => gmdate('c'),
 ]);
-
-$llm = make_llm();
-$pipeline = build_pipeline($llm);
 
 echo "Building '{$project->slug()}'\n";
 $total = 0.0;

@@ -13,6 +13,14 @@ final class AnthropicClient implements Llm
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
 
+    /**
+     * Most concurrent in-flight requests per batch. A landing page can fan out
+     * to ~10 parts (header, footer, and every section); firing them all at once
+     * risks tripping the API's concurrent-request / rate limits, so we run them
+     * in windows of this size. Within a window they still overlap fully.
+     */
+    private const MAX_CONCURRENCY = 5;
+
     private int $requests = 0;
     private int $inputTokens = 0;
     private int $outputTokens = 0;
@@ -102,6 +110,33 @@ final class AnthropicClient implements Llm
 
     public function completeJsonBatch(array $requests): array
     {
+        $out = [];
+        foreach ($this->textBatch($requests, true) as $key => $text) {
+            $data = json_decode(self::stripFences($text), true);
+            if (!is_array($data)) {
+                throw new RuntimeException("batch request '{$key}': expected JSON, got: {$text}");
+            }
+            $out[$key] = $data;
+        }
+        return $out;
+    }
+
+    public function completeBatch(array $requests): array
+    {
+        return $this->textBatch($requests, false);
+    }
+
+    /**
+     * Shared concurrent-batch transport for both completeJsonBatch (JSON) and
+     * completeBatch (raw text). Builds one Messages body per request, runs them
+     * concurrently retrying only transient failures, accrues token usage, and
+     * returns each request's raw assistant text keyed as the input.
+     *
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<string,string> raw text keyed as the input
+     */
+    private function textBatch(array $requests, bool $json): array
+    {
         if ($requests === []) {
             return [];
         }
@@ -110,18 +145,23 @@ final class AnthropicClient implements Llm
         // token budget, so a single batch can mix (e.g. Haiku plan + Opus theme).
         $bodies = [];
         foreach ($requests as $key => $req) {
-            $system = ($req['system'] ?? '')
-                . "\nRespond with a single valid JSON value and nothing else. "
-                . 'No prose, no markdown fences.';
-            $bodies[$key] = [
+            $system = (string) ($req['system'] ?? '');
+            if ($json) {
+                $system .= "\nRespond with a single valid JSON value and nothing else. "
+                    . 'No prose, no markdown fences.';
+            }
+            $body = [
                 'model'      => $req['model'] ?? $this->model,
                 'max_tokens' => $req['max_tokens'] ?? $this->defaultMaxTokens,
                 'stream'     => true,
-                'system'     => $system,
                 'messages'   => [
                     ['role' => 'user', 'content' => (string) $req['prompt']],
                 ],
             ];
+            if (trim($system) !== '') {
+                $body['system'] = $system;
+            }
+            $bodies[$key] = $body;
         }
 
         // Run them all concurrently, retrying only the transient failures.
@@ -136,12 +176,7 @@ final class AnthropicClient implements Llm
             $this->requests++;
             $this->inputTokens += $res['input'];
             $this->outputTokens += $res['output'];
-
-            $data = json_decode(self::stripFences($res['text']), true);
-            if (!is_array($data)) {
-                throw new RuntimeException("batch request '{$key}': expected JSON, got: {$res['text']}");
-            }
-            $out[$key] = $data;
+            $out[$key] = $res['text'];
         }
         return $out;
     }
@@ -199,15 +234,45 @@ final class AnthropicClient implements Llm
     }
 
     /**
-     * Run a set of streaming Messages requests concurrently with curl_multi and
-     * classify each transfer. Pure transport — no retry, no request counting,
-     * no throwing on a single failure (the orchestrator decides). Mirrors
-     * WpcomImageClient::multiRequest but assembles the SSE body per handle.
+     * Run a set of streaming Messages requests, at most MAX_CONCURRENCY in
+     * flight at once, and classify each transfer. Pure transport — no retry, no
+     * request counting, no throwing on a single failure (the orchestrator
+     * decides). Bounding concurrency keeps a wide fan-out (every landing-page
+     * part at once) from tripping the API's rate limits.
      *
      * @param array<string,array<string,mixed>> $bodies request body keyed by id
      * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}>
      */
     private function streamMulti(array $bodies): array
+    {
+        $out = [];
+        foreach (self::concurrencyWindows($bodies) as $chunk) {
+            $out += $this->streamChunk($chunk);
+        }
+        return $out;
+    }
+
+    /**
+     * Split a batch into ordered windows of at most MAX_CONCURRENCY requests,
+     * preserving keys, so the transport runs each window concurrently and no
+     * more than MAX_CONCURRENCY transfers are ever in flight. Pure — unit-testable.
+     *
+     * @param array<string,array<string,mixed>> $bodies request body keyed by id
+     * @return array<int,array<string,array<string,mixed>>>
+     */
+    public static function concurrencyWindows(array $bodies): array
+    {
+        return array_chunk($bodies, self::MAX_CONCURRENCY, true);
+    }
+
+    /**
+     * Run one window of streaming requests concurrently with curl_multi and
+     * assemble each SSE body per handle. Mirrors WpcomImageClient::multiRequest.
+     *
+     * @param array<string,array<string,mixed>> $bodies request body keyed by id
+     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}>
+     */
+    private function streamChunk(array $bodies): array
     {
         $multi = curl_multi_init();
         $handles = [];
@@ -379,6 +444,11 @@ final class AnthropicClient implements Llm
                 throw new TransientApiException("stream error: {$parsed['error']}");
             }
             throw new RuntimeException("stream error: {$parsed['error']}");
+        }
+        // An empty body is usually a transient hiccup (a stop with no content),
+        // so retry it — matching the batch path's interpretStream().
+        if (trim($parsed['text']) === '') {
+            throw new TransientApiException('no text content in streamed response');
         }
 
         return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output']];

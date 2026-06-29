@@ -16,9 +16,6 @@ SECTION TO BUILD:
   Notes:    {{content_notes}}
   Use imagery: {{wants_image}}
 
-Return a single JSON object with EXACTLY this shape:
-{ "markup": "<!-- wp:group ... -->...<!-- /wp:group -->" }
-
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
 - Wrap the whole section in a single top-level <!-- wp:group --> with a constrained or full layout, so it drops cleanly into the page in order.
@@ -39,4 +36,4 @@ Rules:
     Images shown together in a row/grid (cards, team, gallery) MUST share the same aspect-ratio. Every image filename must be unique.
 - Every block comment must be correctly closed and the HTML class names must match the block (standard WordPress block classes).
 
-Output ONLY the JSON object.
+Output ONLY the block markup, starting with "<!-- wp:" — no JSON, no prose, no markdown code fences.

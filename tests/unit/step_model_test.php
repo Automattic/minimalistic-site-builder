@@ -76,9 +76,9 @@ test('sections passes the configured model into every part request', function ()
     ]]);
     $llm = new FakeLlm();
     // header, footer, one section — in requests() order.
-    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
-    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
-    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->']);
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
@@ -98,9 +98,9 @@ test('sections sends no model key when none is configured', function () {
         ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
     ]]);
     $llm = new FakeLlm();
-    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
-    $llm->queueJson(['markup' => '<!-- wp:group --><!-- /wp:group -->']);
-    $llm->queueJson(['markup' => '<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->']);
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);

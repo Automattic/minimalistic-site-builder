@@ -65,4 +65,26 @@ final class FakeLlm implements Llm
         }
         return $out;
     }
+
+    /**
+     * Pull one queued TEXT response per request, in order, keyed back as the
+     * input. Records each call's meta as opts so model-wiring assertions work.
+     *
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<string,string>
+     */
+    public function completeBatch(array $requests): array
+    {
+        $out = [];
+        foreach ($requests as $key => $req) {
+            $opts = $req;
+            unset($opts['prompt']);
+            $this->calls[] = ['prompt' => (string) $req['prompt'], 'opts' => $opts];
+            if ($this->textQueue === []) {
+                throw new RuntimeException('FakeLlm: no queued text response');
+            }
+            $out[$key] = array_shift($this->textQueue);
+        }
+        return $out;
+    }
 }
