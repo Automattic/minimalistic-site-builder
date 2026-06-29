@@ -79,34 +79,22 @@ test('retryBatch does not retry permanent failures', function () {
 });
 
 /**
- * Prompt composition + the 480-token input cap (WpcomImageClient::composePrompt).
+ * The 480-token input cap (WpcomImageClient::fitToTokens). ImagePromptComposer
+ * leans on this to keep a fully-composed prompt under the model's hard limit.
  */
 
-test('composePrompt prepends site context to the image prompt', function () {
-    $out = WpcomImageClient::composePrompt('Image for the website “Acme”. A bakery.', 'A sourdough loaf. Style: photorealistic');
-    assert_contains('Image for the website “Acme”', $out);
-    assert_contains('A sourdough loaf. Style: photorealistic', $out);
+test('fitToTokens returns the text unchanged when it is within the cap', function () {
+    $text = 'A sourdough loaf on a board. Style: photorealistic';
+    assert_eq($text, WpcomImageClient::fitToTokens($text, WpcomImageClient::MAX_PROMPT_TOKENS));
 });
 
-test('composePrompt with empty context returns the image prompt unchanged', function () {
-    assert_eq('A sourdough loaf.', WpcomImageClient::composePrompt('', 'A sourdough loaf.'));
-});
-
-test('composePrompt keeps the whole prompt within the 480-token model limit', function () {
-    $hugeContext = str_repeat('context word ', 2000);          // far over budget
-    $imagePrompt = 'A specific sourdough loaf on a board. Style: photorealistic';
-
-    $out = WpcomImageClient::composePrompt($hugeContext, $imagePrompt);
+test('fitToTokens trims from the end to fit the cap, keeping the lead intact', function () {
+    $lead = 'A specific sourdough loaf on a floured board';
+    $text = $lead . ' ' . str_repeat('trailing context word ', 2000); // far over budget
+    $out = WpcomImageClient::fitToTokens($text, WpcomImageClient::MAX_PROMPT_TOKENS);
 
     assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
-    // The per-image prompt is the priority and is preserved in full.
-    assert_contains($imagePrompt, $out);
-});
-
-test('composePrompt truncates the image prompt when it alone exceeds the limit', function () {
-    $imagePrompt = str_repeat('loaf ', 2000); // image prompt itself over budget, no context
-    $out = WpcomImageClient::composePrompt('', $imagePrompt);
-    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_contains($lead, $out);                  // the leading text survives
     assert_true($out !== '', 'still returns something');
 });
 

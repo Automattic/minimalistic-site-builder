@@ -54,36 +54,6 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * Compose the final text prompt for Imagen: the site context (so the model
-     * knows what the site is about) followed by the per-image prompt, kept within
-     * MAX_PROMPT_TOKENS. The per-image prompt is the priority — it describes the
-     * actual image — so context is trimmed first to make room; only if the image
-     * prompt alone still exceeds the limit is it truncated as a last resort.
-     */
-    public static function composePrompt(string $context, string $imagePrompt): string
-    {
-        $context     = trim($context);
-        $imagePrompt = trim($imagePrompt);
-
-        if ($context === '') {
-            return self::truncateToTokens($imagePrompt, self::MAX_PROMPT_TOKENS);
-        }
-
-        $combined = "{$context}\n\n{$imagePrompt}";
-        if (self::estimateTokens($combined) <= self::MAX_PROMPT_TOKENS) {
-            return $combined;
-        }
-
-        // Over budget: give the image prompt priority and fit context around it.
-        $budgetForContext = self::MAX_PROMPT_TOKENS - self::estimateTokens($imagePrompt) - 1;
-        if ($budgetForContext <= 0) {
-            return self::truncateToTokens($imagePrompt, self::MAX_PROMPT_TOKENS);
-        }
-        $context = self::truncateToTokens($context, $budgetForContext);
-        return $context === '' ? $imagePrompt : "{$context}\n\n{$imagePrompt}";
-    }
-
-    /**
      * Conservative token estimate for an Imagen text prompt. No local tokenizer
      * is available, so over-estimate (the larger of a word- and a character-based
      * count) to stay safely under the hard model limit.
@@ -99,8 +69,13 @@ final class WpcomImageClient implements ImageClient
         return (int) max((int) ceil($words * 1.4), (int) ceil($chars / 4));
     }
 
-    /** Trim text from the end on a word boundary until it fits $maxTokens. */
-    private static function truncateToTokens(string $text, int $maxTokens): string
+    /**
+     * Trim text from the end on a word boundary until it fits $maxTokens. Public
+     * so ImagePromptComposer can cap a fully-composed prompt at MAX_PROMPT_TOKENS;
+     * because the subject leads the prompt, trimming from the end sheds the
+     * trailing context first and preserves the subject.
+     */
+    public static function fitToTokens(string $text, int $maxTokens): string
     {
         if ($maxTokens <= 0) {
             return '';

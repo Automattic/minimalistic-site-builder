@@ -13,6 +13,7 @@ require_once $src . '/TransientApiException.php';
 require_once $src . '/AnthropicClient.php';
 require_once $src . '/ImageClient.php';
 require_once $src . '/WpcomImageClient.php';
+require_once $src . '/ImagePromptComposer.php';
 require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
 require_once $src . '/PromptRenderer.php';

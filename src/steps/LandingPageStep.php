@@ -40,10 +40,14 @@ final class LandingPageStep implements Step
     public function run(Project $project): void
     {
         $meta = $project->readJson('meta.json');
+        // The image-generation guidance lives in its own prompt file so it can be
+        // maintained independently and reused by other steps; inject it verbatim.
+        $imageInstructions = $this->renderer->render('image-generation.md', []);
         $rendered = $this->renderer->render('landing-page.md', [
-            'user_prompt' => (string) ($meta['prompt'] ?? ''),
-            'site_spec'   => $project->readText('siteSpec.json'),
-            'theme_json'  => $project->readText('theme/theme.json'),
+            'user_prompt'        => (string) ($meta['prompt'] ?? ''),
+            'site_spec'          => $project->readText('siteSpec.json'),
+            'theme_json'         => $project->readText('theme/theme.json'),
+            'image_instructions' => $imageInstructions,
         ]);
 
         // This is the slowest LLM step (large block-markup output); tell the user

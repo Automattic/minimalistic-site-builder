@@ -83,7 +83,12 @@ final class GenerateImagesStep implements Step
             // Map this batch's original indices to generation specs (order kept).
             $indices = array_keys($batch);
             $batchSpecs = array_map(fn (array $spec): array => [
-                'prompt'       => WpcomImageClient::composePrompt($siteContext, (string) $spec['prompt']),
+                'prompt'       => ImagePromptComposer::compose(
+                    (string) ($spec['subject'] ?? ''),
+                    (string) ($spec['pageContext'] ?? ''),
+                    (string) ($spec['style'] ?? ''),
+                    $siteContext,
+                ),
                 'aspect_ratio' => WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
             ], array_values($batch));
 
@@ -126,11 +131,13 @@ final class GenerateImagesStep implements Step
     /**
      * A compact, factual context sentence built from the site spec's name, topic
      * and description, prepended to each image prompt so the model knows what the
-     * site is about. Returns '' when the spec carries none of those facts.
+     * site is about. Returns '' when the spec carries none of those facts. Public
+     * so tools (e.g. the image-prompt debugger) can reproduce the exact context
+     * the step feeds into ImagePromptComposer.
      *
      * @param array<mixed> $spec
      */
-    private static function siteContext(array $spec): string
+    public static function siteContext(array $spec): string
     {
         $name        = trim((string) ($spec['name'] ?? ''));
         $topic       = trim((string) ($spec['topic'] ?? ''));
