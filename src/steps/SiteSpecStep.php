@@ -51,14 +51,19 @@ final class SiteSpecStep implements Step
     }
 
     /**
-     * LLM options for this step. Adds the per-step model override when one is
-     * configured; otherwise the client falls back to its default model.
+     * Merge the per-step model override into a set of LLM options. When no
+     * model is configured the opts pass through unchanged and the client falls
+     * back to its default model. Shared shape across every LLM step.
      *
-     * @return array{model?:string}
+     * @param array<string,mixed> $opts
+     * @return array<string,mixed>
      */
-    private function llmOpts(): array
+    private function llmOpts(array $opts = []): array
     {
-        return $this->model !== null ? ['model' => $this->model] : [];
+        if ($this->model !== null) {
+            $opts['model'] = $this->model;
+        }
+        return $opts;
     }
 
     /**
