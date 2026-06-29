@@ -13,6 +13,14 @@ final class AnthropicClient implements Llm
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
 
+    /**
+     * Most concurrent in-flight requests per batch. A landing page can fan out
+     * to ~10 parts (header, footer, and every section); firing them all at once
+     * risks tripping the API's concurrent-request / rate limits, so we run them
+     * in windows of this size. Within a window they still overlap fully.
+     */
+    private const MAX_CONCURRENCY = 5;
+
     private int $requests = 0;
     private int $inputTokens = 0;
     private int $outputTokens = 0;
@@ -98,6 +106,255 @@ final class AnthropicClient implements Llm
             throw new RuntimeException("Expected JSON, got: {$text}");
         }
         return $data;
+    }
+
+    public function completeJsonBatch(array $requests): array
+    {
+        $out = [];
+        foreach ($this->textBatch($requests, true) as $key => $text) {
+            $data = json_decode(self::stripFences($text), true);
+            if (!is_array($data)) {
+                throw new RuntimeException("batch request '{$key}': expected JSON, got: {$text}");
+            }
+            $out[$key] = $data;
+        }
+        return $out;
+    }
+
+    public function completeBatch(array $requests): array
+    {
+        return $this->textBatch($requests, false);
+    }
+
+    /**
+     * Shared concurrent-batch transport for both completeJsonBatch (JSON) and
+     * completeBatch (raw text). Builds one Messages body per request, runs them
+     * concurrently retrying only transient failures, accrues token usage, and
+     * returns each request's raw assistant text keyed as the input.
+     *
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<string,string> raw text keyed as the input
+     */
+    private function textBatch(array $requests, bool $json): array
+    {
+        if ($requests === []) {
+            return [];
+        }
+
+        // Build one Messages body per request. Each may pin its own model and
+        // token budget, so a single batch can mix (e.g. Haiku plan + Opus theme).
+        $bodies = [];
+        foreach ($requests as $key => $req) {
+            $system = (string) ($req['system'] ?? '');
+            if ($json) {
+                $system .= "\nRespond with a single valid JSON value and nothing else. "
+                    . 'No prose, no markdown fences.';
+            }
+            $body = [
+                'model'      => $req['model'] ?? $this->model,
+                'max_tokens' => $req['max_tokens'] ?? $this->defaultMaxTokens,
+                'stream'     => true,
+                'messages'   => [
+                    ['role' => 'user', 'content' => (string) $req['prompt']],
+                ],
+            ];
+            if (trim($system) !== '') {
+                $body['system'] = $system;
+            }
+            $bodies[$key] = $body;
+        }
+
+        // Run them all concurrently, retrying only the transient failures.
+        $results = self::retryTextBatch(
+            $bodies,
+            fn (array $subset): array => $this->streamMulti($subset),
+            [2, 5, 12],
+        );
+
+        $out = [];
+        foreach ($results as $key => $res) {
+            $this->requests++;
+            $this->inputTokens += $res['input'];
+            $this->outputTokens += $res['output'];
+            $out[$key] = $res['text'];
+        }
+        return $out;
+    }
+
+    /**
+     * Drive a batched transport to completion, retrying ONLY the transient
+     * failures with backoff. Pure orchestration (the transport does the I/O,
+     * sleep() paces the rounds) so it is unit-testable with a fake transport and
+     * zero delays. Unlike the image batch, a permanently failing request aborts
+     * the whole batch — a missing section or theme would break the build, so we
+     * fail loud rather than return a partial set.
+     *
+     * @param array<string,array<string,mixed>> $bodies request bodies keyed by id
+     * @param callable(array<string,array<string,mixed>>):array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}> $transport
+     * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
+     * @return array<string,array{text:string,input:int,output:int}>
+     */
+    public static function retryTextBatch(array $bodies, callable $transport, array $delays): array
+    {
+        $results = [];
+        $pending = array_keys($bodies);
+        $attempt = 0;
+
+        while ($pending !== []) {
+            $outcomes = $transport(array_intersect_key($bodies, array_flip($pending)));
+
+            $retry = [];
+            foreach ($outcomes as $key => $outcome) {
+                if ($outcome['ok']) {
+                    $results[$key] = [
+                        'text'   => (string) ($outcome['text'] ?? ''),
+                        'input'  => (int) ($outcome['input'] ?? 0),
+                        'output' => (int) ($outcome['output'] ?? 0),
+                    ];
+                } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
+                    $retry[] = $key;
+                } else {
+                    throw new RuntimeException(
+                        "Anthropic batch request '{$key}' failed: " . ($outcome['error'] ?? 'unknown')
+                    );
+                }
+            }
+
+            $pending = $retry;
+            if ($pending !== []) {
+                $wait = $delays[$attempt];
+                $attempt++;
+                fwrite(STDERR, '    (transient API error on ' . count($pending)
+                    . " request(s); retry {$attempt} in {$wait}s)\n");
+                sleep($wait);
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Run a set of streaming Messages requests, at most MAX_CONCURRENCY in
+     * flight at once, and classify each transfer. Pure transport — no retry, no
+     * request counting, no throwing on a single failure (the orchestrator
+     * decides). Bounding concurrency keeps a wide fan-out (every landing-page
+     * part at once) from tripping the API's rate limits.
+     *
+     * @param array<string,array<string,mixed>> $bodies request body keyed by id
+     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}>
+     */
+    private function streamMulti(array $bodies): array
+    {
+        $out = [];
+        foreach (self::concurrencyWindows($bodies) as $chunk) {
+            $out += $this->streamChunk($chunk);
+        }
+        return $out;
+    }
+
+    /**
+     * Split a batch into ordered windows of at most MAX_CONCURRENCY requests,
+     * preserving keys, so the transport runs each window concurrently and no
+     * more than MAX_CONCURRENCY transfers are ever in flight. Pure — unit-testable.
+     *
+     * @param array<string,array<string,mixed>> $bodies request body keyed by id
+     * @return array<int,array<string,array<string,mixed>>>
+     */
+    public static function concurrencyWindows(array $bodies): array
+    {
+        return array_chunk($bodies, self::MAX_CONCURRENCY, true);
+    }
+
+    /**
+     * Run one window of streaming requests concurrently with curl_multi and
+     * assemble each SSE body per handle. Mirrors WpcomImageClient::multiRequest.
+     *
+     * @param array<string,array<string,mixed>> $bodies request body keyed by id
+     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}>
+     */
+    private function streamChunk(array $bodies): array
+    {
+        $multi = curl_multi_init();
+        $handles = [];
+        $raw = [];
+        foreach ($bodies as $key => $body) {
+            $raw[$key] = '';
+            $ch = curl_init(self::ENDPOINT);
+            curl_setopt_array($ch, [
+                CURLOPT_POST          => true,
+                CURLOPT_HTTPHEADER    => [
+                    'x-api-key: ' . $this->apiKey,
+                    'anthropic-version: ' . self::API_VERSION,
+                    'content-type: application/json',
+                    'accept: text/event-stream',
+                ],
+                CURLOPT_POSTFIELDS    => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                CURLOPT_TIMEOUT       => 600,
+                CURLOPT_LOW_SPEED_LIMIT => 1,
+                CURLOPT_LOW_SPEED_TIME  => 90,
+                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key) {
+                    $raw[$key] .= $chunk;
+                    return strlen($chunk);
+                },
+            ]);
+            $handles[$key] = $ch;
+            curl_multi_add_handle($multi, $ch);
+        }
+
+        // Drive all transfers to completion (see WpcomImageClient::multiRequest
+        // for why the -1 guard against a busy-spin during DNS is needed).
+        do {
+            $status = curl_multi_exec($multi, $running);
+            if ($running && curl_multi_select($multi, 1.0) === -1) {
+                usleep(1000);
+            }
+        } while ($running && $status === CURLM_OK);
+
+        $out = [];
+        foreach ($handles as $key => $ch) {
+            $errno  = curl_errno($ch);
+            $error  = curl_error($ch);
+            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_multi_remove_handle($multi, $ch);
+            curl_close($ch);
+            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus);
+        }
+
+        curl_multi_close($multi);
+        return $out;
+    }
+
+    /**
+     * Classify one completed streaming transfer into an outcome (never throws),
+     * so the batch orchestrator can retry transient failures. Same transient vs
+     * permanent split as streamRequest(). Pure — no I/O.
+     *
+     * @return array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}
+     */
+    private static function interpretStream(string $raw, int $errno, string $error, int $status): array
+    {
+        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
+            return ['ok' => false, 'transient' => true, 'error' => "cURL ({$errno}): {$error}"];
+        }
+        if ($errno !== 0) {
+            return ['ok' => false, 'transient' => false, 'error' => "cURL error ({$errno}): {$error}"];
+        }
+        if ($status === 429 || $status >= 500) {
+            return ['ok' => false, 'transient' => true, 'error' => "HTTP {$status}: " . self::truncate($raw)];
+        }
+        if ($status < 200 || $status >= 300) {
+            return ['ok' => false, 'transient' => false, 'error' => "HTTP {$status}: " . self::truncate($raw)];
+        }
+
+        $parsed = self::parseSse($raw);
+        if ($parsed['error'] !== null) {
+            $transient = in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true);
+            return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}"];
+        }
+        if (trim($parsed['text']) === '') {
+            return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response'];
+        }
+        return ['ok' => true, 'text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output']];
     }
 
     /**
@@ -187,6 +444,11 @@ final class AnthropicClient implements Llm
                 throw new TransientApiException("stream error: {$parsed['error']}");
             }
             throw new RuntimeException("stream error: {$parsed['error']}");
+        }
+        // An empty body is usually a transient hiccup (a stop with no content),
+        // so retry it — matching the batch path's interpretStream().
+        if (trim($parsed['text']) === '') {
+            throw new TransientApiException('no text content in streamed response');
         }
 
         return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output']];

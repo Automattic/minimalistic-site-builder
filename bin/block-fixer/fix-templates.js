@@ -107,6 +107,7 @@ function main() {
 
   let totalFiles = 0;
   let totalChanged = 0;
+  let totalIssues = 0;
   const report = [];
 
   for (const themeDir of themeDirs) {
@@ -128,15 +129,17 @@ function main() {
       totalFiles++;
       const result = fixBlocksInTemplate(original);
 
+      const issues = result.fixedIssues || [];
       if (result.changed) {
         fs.writeFileSync(file, result.html, 'utf-8');
         totalChanged++;
+        totalIssues += issues.length;
       }
 
       report.push({
         file: rel,
         status: result.changed ? 'fixed' : 'ok',
-        issues: result.fixedIssues || [],
+        issues,
       });
     }
   }
@@ -150,8 +153,8 @@ function main() {
     }
   }
   out(
-    `\n[fix-templates] ${totalChanged}/${totalFiles} file(s) re-serialized` +
-      ` across ${themeDirs.length} theme(s).`
+    `\n[fix-templates] ${totalChanged}/${totalFiles} file(s) re-serialized,` +
+      ` ${totalIssues} issue(s) fixed across ${themeDirs.length} theme(s).`
   );
 }
 

@@ -35,17 +35,36 @@ The pipeline (current — see **Phase 3** below for the design-half refactor):
 | 1 | scaffold-theme   | det | — → theme/style.css, readme.txt (placeholders) |
 | 2 | site-spec        | LLM | meta.json prompt → siteSpec.json (**factual info only** — no design) |
 | 3 | apply-identity   | det | siteSpec → filled style.css/readme.txt |
-| 4 | theme-json       | LLM | meta.json prompt + siteSpec → theme/theme.json (v3); **design decisions made inline** (no design.md) |
-| 5 | landing-page     | LLM | meta.json prompt + siteSpec + theme.json → parts/ + templates/ (with AI_IMAGE placeholders) |
-| 6 | collect-images   | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
-| 7 | fix-blocks       | det | templates/ + parts/ → same files re-serialized (block validation) |
-| 8 | finalize-theme   | det | theme.json → theme/functions.php (Google Fonts loading) |
+| 4a | theme-json    | LLM | meta.json prompt + siteSpec → theme/theme.json (v3); **design decisions made inline** (no design.md) |
+| 4b | section-plan  | LLM | meta.json prompt + siteSpec → sections.json (ordered section briefs). **Runs concurrently with theme-json** (`ConcurrentGroup`, one batched call) |
+| 5 | sections        | LLM | siteSpec + theme.json + sections.json → parts/{header,footer,section-*}.html. **One concurrent batch — every part generated in parallel** (with AI_IMAGE placeholders) |
+| 6 | assemble-landing-page | det | sections.json + parts/ → templates/{front-page,index}.html (compose template parts in order) + theme.json templateParts |
+| 7 | collect-images  | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
+| 8 | fix-blocks      | det | templates/ + parts/ → same files re-serialized (block validation) |
+| 9 | finalize-theme  | det | theme.json → theme/functions.php (Google Fonts loading) |
 | + | generate-images  | net | images.json → theme/assets/*.jpg via WPCOM proxy (Imagen); rewrites theme: src. **Opt-in** (`--with-images` / `bin/images.php`) |
 
 **Architecture** (zero PHP dependencies — plain PHP + cURL):
 `Env`, `Llm` interface + `AnthropicClient`, `Project`, `ProjectStore`,
-`PromptRenderer`, `Step` + the pipeline steps, `Pipeline`, `ThemeValidator`.
+`PromptRenderer`, `Step`/`ConcurrentStep` + the pipeline steps, `ConcurrentGroup`,
+`Pipeline`, `ThemeValidator`.
 Prompts: `prompts/*.md`. Runners: `bin/build.php`, `bin/eval.php`, `bin/inspect.php`.
+
+**Concurrency.** LLM work is parallelised via a shared `curl_multi` transport
+(mirroring `WpcomImageClient`'s image batching, reusing `parseSse`; the pure
+`AnthropicClient::retryTextBatch()` retries only transient failures and aborts
+the batch on a permanent one). Two batch entry points sit on top of it:
+`Llm::completeJsonBatch()` for structured steps (theme.json, the section plan)
+and `Llm::completeBatch()` for steps whose answer IS the payload — the section
+parts return raw block markup verbatim rather than escaping it inside a JSON
+string (brittle + wasteful). The transport runs at most `MAX_CONCURRENCY` (5)
+requests in flight at once — a wide fan-out (every landing-page part) is split
+into ordered windows so it never trips the API's rate limits. A `ConcurrentStep`
+exposes `requests()`/`consume()` so its prompts can be fired together; a
+`ConcurrentGroup` (itself a `Step`) merges several steps' requests into one batch.
+This overlaps theme-json beside the section plan, and generates every landing-page
+part (header, footer, each section) at once — replacing the old single
+landing-page mega-call that dominated build time.
 
 **Block validation fixer** (`bin/block-fixer/`, step 8): a verbatim copy of telex's
 `server/scripts/block-fixer` lib (`blockFixer.js` + `paragraphFixer.js`) plus a
@@ -56,7 +75,7 @@ content" in the editor/Playground; the fixer parses each `templates/*.html` and
 `save()` exactly. `FixBlocksStep` shells out to Node (`node_modules` is gitignored;
 telex runs the same lib as a warm HTTP sidecar). Re-serialization is idempotent.
 
-**Tests: 30 unit + 2 integration = 32 passing.** Run with
+**Tests: 62 unit + 2 integration = 64 passing.** Run with
 `php tests/run.php` and `php tests/run-integration.php`. The integration test
 runs the real `Pipeline` with a `FakeLlm` and asserts the output passes
 `ThemeValidator` (files present, theme.json v3, balanced block grammar, no
@@ -153,8 +172,11 @@ and all front-page sections present.
 1. **Live render confirmed via Playground** (`bin/playground.php`). A scripted
    headless smoke test (boot + assert markers + teardown) could be added to CI;
    today it is a manual/verified command.
-2. **landing-page latency** dominates (~2 min). Options: split into per-section
-   calls (parallelizable), lower effort, or a faster model for this step only.
+2. ~~**landing-page latency** dominates (~2 min).~~ **Done.** The landing-page
+   mega-call was split into a concurrent `section-plan` (beside theme-json) plus a
+   per-section `sections` batch (header, footer, every section in parallel) and a
+   deterministic `assemble-landing-page` compose step. Each section is a template
+   part; the page composes them in plan order.
 3. **Single page only.** Only the front page + index fallback are generated.
    Natural extensions (same one-shot pattern): per-page templates (about, contact),
    block patterns, a richer index/query for blog/catalog sites.

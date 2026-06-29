@@ -12,10 +12,11 @@ declare(strict_types=1);
  * Validates the structure the templates depend on (version 3, the five color
  * slugs, the two font slugs) and fails loud if the model drifts from it.
  */
-final class ThemeJsonStep implements Step
+final class ThemeJsonStep implements ConcurrentStep
 {
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
+    private const REQ = 'theme-json';
 
     public function __construct(
         private Llm $llm,
@@ -33,7 +34,7 @@ final class ThemeJsonStep implements Step
         return 'Generate theme.json';
     }
 
-    public function run(Project $project): void
+    public function requests(Project $project): array
     {
         $meta = $project->readJson('meta.json');
         $rendered = $this->renderer->render('theme-json.md', [
@@ -41,7 +42,15 @@ final class ThemeJsonStep implements Step
             'site_spec'   => $project->readText('siteSpec.json'),
         ]);
 
-        $theme = $this->llm->completeJson($rendered, $this->llmOpts());
+        return [self::REQ => $this->req($rendered)];
+    }
+
+    public function consume(Project $project, array $results): void
+    {
+        $theme = $results[self::REQ] ?? null;
+        if (!is_array($theme)) {
+            throw new RuntimeException('theme-json: missing model output');
+        }
 
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
@@ -53,20 +62,26 @@ final class ThemeJsonStep implements Step
         $project->writeJson('theme/theme.json', $theme);
     }
 
+    public function run(Project $project): void
+    {
+        $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+    }
+
     /**
-     * Merge the per-step model override into a set of LLM options. When no
-     * model is configured the opts pass through unchanged and the client falls
-     * back to its default model. Shared shape across every LLM step.
+     * Build one batch request, attaching the per-step model override only when
+     * configured (so the client falls back to its default model otherwise).
+     * Shared shape across every concurrent LLM step.
      *
-     * @param array<string,mixed> $opts
+     * @param array<string,mixed> $extra
      * @return array<string,mixed>
      */
-    private function llmOpts(array $opts = []): array
+    private function req(string $prompt, array $extra = []): array
     {
+        $req = ['prompt' => $prompt] + $extra;
         if ($this->model !== null) {
-            $opts['model'] = $this->model;
+            $req['model'] = $this->model;
         }
-        return $opts;
+        return $req;
     }
 
     /** @param array<mixed> $theme */
