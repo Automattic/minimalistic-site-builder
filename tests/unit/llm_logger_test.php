@@ -95,6 +95,35 @@ test('log prefixes files with the call order, restarting per run', function () {
     exec('rm -rf ' . escapeshellarg($dir));
 });
 
+test('format renders the error instead of a response for a failed call', function () {
+    $out = LlmLogger::format('section-hero', ['model' => 'claude-opus-4-8'], ['text' => '', 'input' => 0, 'output' => 0], 19.0, 'HTTP 400: invalid_request');
+
+    assert_contains('Status       : FAILED', $out);
+    assert_contains('ERROR', $out);
+    assert_contains('HTTP 400: invalid_request', $out, 'the failure message is included');
+    assert_true(strpos($out, 'RESPONSE') === false, 'a failed call has no RESPONSE section');
+});
+
+test('format marks a successful call OK', function () {
+    $out = LlmLogger::format('header', ['model' => 'm'], ['text' => 'ok', 'input' => 1, 'output' => 2], 0.5);
+    assert_contains('Status       : OK', $out);
+    assert_contains('RESPONSE', $out);
+});
+
+test('log writes a -failed file for a failed call', function () {
+    $dir = ll_tmpdir() . '/failed';
+    LlmLogger::setDir($dir);
+
+    LlmLogger::log('section-hero', ['model' => 'm'], ['text' => '', 'input' => 0, 'output' => 0], 19.0, 'HTTP 400: invalid_request');
+
+    $path = "{$dir}/01-section-hero-failed.log";
+    assert_true(file_exists($path), 'a failed call is logged as <label>-failed.log');
+    assert_contains('Status       : FAILED', (string) file_get_contents($path));
+
+    LlmLogger::setDir(null);
+    exec('rm -rf ' . escapeshellarg($dir));
+});
+
 test('log is a no-op when no project directory is set', function () {
     LlmLogger::setDir(null);
     // Must not throw and must not write anywhere (no repo-root fallback).

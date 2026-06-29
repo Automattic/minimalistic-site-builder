@@ -80,6 +80,40 @@ test('retryTextBatch throws immediately on a permanent failure', function () {
     assert_eq(1, $calls, 'permanent failure tried exactly once');
 });
 
+test('retryTextBatch reports a permanent failure to onFailure before aborting', function () {
+    $bodies = ['a' => [], 'b' => []];
+    $transport = function (array $subset) {
+        $out = [];
+        foreach ($subset as $k => $_) {
+            $out[$k] = $k === 'b'
+                ? ['ok' => false, 'transient' => false, 'error' => 'HTTP 400', 'time' => 1.5]
+                : ['ok' => true, 'text' => 'X', 'input' => 0, 'output' => 0];
+        }
+        return $out;
+    };
+
+    $reported = [];
+    assert_throws(function () use ($bodies, $transport, &$reported) {
+        AnthropicClient::retryTextBatch($bodies, $transport, [0, 0], function ($key, $error, $time) use (&$reported) {
+            $reported[] = [$key, $error, $time];
+        });
+    });
+    assert_eq([['b', 'HTTP 400', 1.5]], $reported, 'the failing call is handed to onFailure with key, error, and time');
+});
+
+test('retryTextBatch also reports a transient failure that exhausts its retries', function () {
+    $bodies = ['a' => []];
+    $transport = fn (array $subset) => ['a' => ['ok' => false, 'transient' => true, 'error' => 'always down']];
+
+    $reported = [];
+    assert_throws(function () use ($bodies, $transport, &$reported) {
+        AnthropicClient::retryTextBatch($bodies, $transport, [0, 0], function ($key, $error) use (&$reported) {
+            $reported[] = [$key, $error];
+        });
+    });
+    assert_eq([['a', 'always down']], $reported, 'a call that gives up after retries is reported once');
+});
+
 test('concurrencyWindows caps each window at 5 and preserves keys in order', function () {
     $bodies = [];
     for ($i = 0; $i < 12; $i++) {
