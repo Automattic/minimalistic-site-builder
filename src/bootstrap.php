@@ -57,6 +57,9 @@ function step_models(): array
     $default = default_llm_model();
     return [
         'site-spec'    => Env::get('LLM_MODEL_SITE_SPEC',    'claude-haiku-4-5'),
+        // Design direction is the creative seed every later step builds on, so
+        // it runs on the best model by default; override to trade cost/quality.
+        'design-direction' => Env::get('LLM_MODEL_DESIGN_DIRECTION', $default),
         'theme-json'   => Env::get('LLM_MODEL_THEME_JSON',   $default),
         // Planning is light and structural — cheap/fast model by default.
         'section-plan' => Env::get('LLM_MODEL_SECTION_PLAN', 'claude-haiku-4-5'),
@@ -102,9 +105,13 @@ function build_pipeline(Llm $llm): Pipeline
         new ScaffoldThemeStep(),
         new SiteSpecStep($llm, $renderer, $models['site-spec']),
         new ApplyIdentityStep(),
-        // theme.json and the section plan both derive only from the prompt +
-        // siteSpec, so run them concurrently. Design decisions are made inline;
-        // there is no separate design document.
+        // Commit to ONE creative concept BEFORE theme.json / the section plan, so
+        // both derive from a strong, specific direction instead of converging on
+        // safe defaults. Writes designDirection.json, read by the steps below.
+        new DesignDirectionStep($llm, $renderer, $models['design-direction']),
+        // theme.json and the section plan both derive from the prompt + siteSpec +
+        // the design direction, so run them concurrently. Design decisions are
+        // made inline, steered by designDirection.json.
         new ConcurrentGroup($llm, [
             new ThemeJsonStep($llm, $renderer, $models['theme-json']),
             new SectionPlanStep($llm, $renderer, $models['section-plan']),

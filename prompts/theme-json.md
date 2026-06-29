@@ -6,7 +6,10 @@ USER PROMPT:
 SITE SPEC (JSON — factual info about the site, no design):
 {{site_spec}}
 
-Make opinionated, specific design choices that genuinely fit this site's topic, area, audience, and visual vibe — not generic defaults. Pick colors and a font pairing that feel designed for THIS brand.
+DESIGN DIRECTION (the committed creative concept for THIS site — let it drive every choice below):
+{{design_direction}}
+
+Make opinionated, specific design choices that genuinely fit this site's topic, area, audience, and visual vibe — not generic defaults. Translate the DESIGN DIRECTION into concrete tokens: the palette must express its color_strategy, the font pairing its type_strategy, and the spacing/shapes its shape_language. Honor its "avoid" note. Pick colors and a font pairing that feel designed for THIS brand.
 
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 

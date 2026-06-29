@@ -38,8 +38,9 @@ final class ThemeJsonStep implements ConcurrentStep
     {
         $meta = $project->readJson('meta.json');
         $rendered = $this->renderer->render('theme-json.md', [
-            'user_prompt' => (string) ($meta['prompt'] ?? ''),
-            'site_spec'   => $project->readText('siteSpec.json'),
+            'user_prompt'      => (string) ($meta['prompt'] ?? ''),
+            'site_spec'        => $project->readText('siteSpec.json'),
+            'design_direction' => DesignDirectionStep::readFor($project),
         ]);
 
         return [self::REQ => $this->req($rendered)];

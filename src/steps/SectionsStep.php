@@ -53,6 +53,10 @@ final class SectionsStep implements Step
         // (a section uses them only when its "Use imagery" is yes).
         $imageInstructions = $this->renderer->render('image-generation.md', []);
 
+        // The committed creative concept, shared by every section so the whole
+        // page honors one direction (shape language, signature move, mood).
+        $designDirection = DesignDirectionStep::readFor($project);
+
         $requests = [
             'header' => $this->req($this->renderer->render('header.md', [
                 'site_spec'  => $siteSpec,
@@ -69,9 +73,10 @@ final class SectionsStep implements Step
         foreach ($sections as $section) {
             $key = self::SECTION_PREFIX . $section['slug'];
             $requests[$key] = $this->req($this->renderer->render('section.md', [
-                'site_spec'     => $siteSpec,
-                'theme_json'    => $themeJson,
-                'outline'       => $outline,
+                'site_spec'        => $siteSpec,
+                'theme_json'       => $themeJson,
+                'design_direction' => $designDirection,
+                'outline'          => $outline,
                 'section_title' => (string) ($section['title'] ?? ''),
                 'section_type'  => (string) ($section['type'] ?? 'content'),
                 'section_purpose' => (string) ($section['purpose'] ?? ''),

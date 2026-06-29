@@ -22,6 +22,18 @@ test('full pipeline produces a structurally valid theme', function () {
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
+    // design-direction (json) — the committed creative concept, runs before the
+    // concurrent group and is read by theme-json/section-plan/sections.
+    $llm->queueJson([
+        'archetype' => 'editorial-magazine',
+        'mood' => ['warm', 'rustic'],
+        'era_reference' => '1970s print editorial',
+        'color_strategy' => 'warm earthy neutrals with one electric accent',
+        'type_strategy' => 'serif display + grotesque body',
+        'shape_language' => 'sharp corners, generous whitespace',
+        'signature_move' => 'oversized section numbers',
+        'avoid' => 'centered hero with all-sans type',
+    ]);
     // Concurrent group, request order is [theme-json, section-plan]:
     // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([
@@ -81,7 +93,7 @@ test('full pipeline produces a structurally valid theme', function () {
 test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
-        'scaffold-theme', 'site-spec', 'apply-identity',
+        'scaffold-theme', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+section-plan', 'sections', 'assemble-landing-page',
         'collect-images', 'fix-blocks', 'finalize-theme',
     ], $ids);
