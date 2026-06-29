@@ -47,10 +47,14 @@ $project->writeJson('meta.json', [
 $llm = make_llm();
 $pipeline = build_pipeline($llm);
 
+// step id => model, so the report can show which model each LLM step ran on.
+// Deterministic steps aren't in this map and render as "—".
+$models = step_models();
+
 echo "Building '{$project->slug()}'\n";
 echo "  prompt: {$prompt}\n\n";
-printf("  %-18s %8s %10s %10s\n", 'step', 'time', 'in-tok', 'out-tok');
-printf("  %-18s %8s %10s %10s\n", str_repeat('-', 18), str_repeat('-', 8), str_repeat('-', 10), str_repeat('-', 10));
+printf("  %-18s %8s %10s %10s  %s\n", 'step', 'time', 'in-tok', 'out-tok', 'model');
+printf("  %-18s %8s %10s %10s  %s\n", str_repeat('-', 18), str_repeat('-', 8), str_repeat('-', 10), str_repeat('-', 10), str_repeat('-', 24));
 
 // Per-step records (id, seconds, input/output token deltas) accumulated as the
 // build runs, so a consolidated report can be printed and persisted at the end.
@@ -61,14 +65,15 @@ $wallStart = microtime(true);
 $pipeline->runThrough(
     $project,
     null,
-    function (Step $step, float $secs) use ($llm, &$prevIn, &$prevOut, &$steps) {
+    function (Step $step, float $secs) use ($llm, $models, &$prevIn, &$prevOut, &$steps) {
         $u = $llm->usageTotals();
         $dIn = $u['input_tokens'] - $prevIn;
         $dOut = $u['output_tokens'] - $prevOut;
         $prevIn = $u['input_tokens'];
         $prevOut = $u['output_tokens'];
-        $steps[] = record_step($step->id(), $secs, $dIn, $dOut);
-        printf("  %-18s %7.1fs %10s %10s\n", $step->id(), $secs, fmt($dIn), fmt($dOut));
+        $model = $models[$step->id()] ?? null;
+        $steps[] = record_step($step->id(), $secs, $dIn, $dOut, $model);
+        printf("  %-18s %7.1fs %10s %10s  %s\n", $step->id(), $secs, fmt($dIn), fmt($dOut), $model ?? '—');
     },
     // Print a "starting" line before each step so the build never looks frozen
     // while a long step (landing-page, image generation) is mid-flight.
@@ -84,7 +89,7 @@ if ($withImages) {
     $imageStep->run($project);
     $secs = microtime(true) - $start;
     $steps[] = record_step('generate-images', $secs, 0, 0);
-    printf("  %-18s %7.1fs %10s %10s\n", 'generate-images', $secs, fmt(0), fmt(0));
+    printf("  %-18s %7.1fs %10s %10s  %s\n", 'generate-images', $secs, fmt(0), fmt(0), '—');
 }
 
 $wall = microtime(true) - $wallStart;
@@ -94,12 +99,12 @@ $u = $llm->usageTotals();
 // went, so the user doesn't have to scan the rows that scrolled by during the build.
 echo "\n";
 echo "  ── per-step report ──────────────────────────────────────────────\n";
-printf("  %-18s %8s %10s %10s %10s\n", 'step', 'time', 'in-tok', 'out-tok', 'total');
-printf("  %-18s %8s %10s %10s %10s\n", str_repeat('-', 18), str_repeat('-', 8), str_repeat('-', 10), str_repeat('-', 10), str_repeat('-', 10));
+printf("  %-18s %8s %10s %10s %10s  %s\n", 'step', 'time', 'in-tok', 'out-tok', 'total', 'model');
+printf("  %-18s %8s %10s %10s %10s  %s\n", str_repeat('-', 18), str_repeat('-', 8), str_repeat('-', 10), str_repeat('-', 10), str_repeat('-', 10), str_repeat('-', 24));
 foreach ($steps as $s) {
     printf(
-        "  %-18s %7.1fs %10s %10s %10s\n",
-        $s['id'], $s['seconds'], fmt($s['input_tokens']), fmt($s['output_tokens']), fmt($s['total_tokens'])
+        "  %-18s %7.1fs %10s %10s %10s  %s\n",
+        $s['id'], $s['seconds'], fmt($s['input_tokens']), fmt($s['output_tokens']), fmt($s['total_tokens']), $s['model'] ?? '—'
     );
 }
 
@@ -121,7 +126,10 @@ $project->writeJson('build-stats.json', [
     'input_tokens'  => $u['input_tokens'],
     'output_tokens' => $u['output_tokens'],
     'total_tokens'  => $u['total_tokens'],
-    'model'         => Env::get('LLM_MODEL', 'claude-opus-4-8'),
+    // Default model plus the per-step model map, so a run's exact model mix is
+    // recoverable when comparing quality across builds.
+    'model'         => default_llm_model(),
+    'step_models'   => $models,
     'built_at'      => gmdate('c'),
     'steps'         => $steps,
 ]);
@@ -156,10 +164,11 @@ function announce_step(Step $step): void
 /**
  * One per-step record for the final report and build-stats.json. Token counts
  * are always present (a deterministic, non-LLM step records 0, not blank).
+ * `model` is the model an LLM step ran on, or null for deterministic steps.
  *
- * @return array{id:string,seconds:float,input_tokens:int,output_tokens:int,total_tokens:int}
+ * @return array{id:string,seconds:float,input_tokens:int,output_tokens:int,total_tokens:int,model:?string}
  */
-function record_step(string $id, float $seconds, int $in, int $out): array
+function record_step(string $id, float $seconds, int $in, int $out, ?string $model = null): array
 {
     return [
         'id'            => $id,
@@ -167,5 +176,6 @@ function record_step(string $id, float $seconds, int $in, int $out): array
         'input_tokens'  => $in,
         'output_tokens' => $out,
         'total_tokens'  => $in + $out,
+        'model'         => $model,
     ];
 }

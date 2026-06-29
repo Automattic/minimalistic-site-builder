@@ -20,6 +20,7 @@ final class ThemeJsonStep implements Step
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
+        private ?string $model = null,
     ) {}
 
     public function id(): string
@@ -40,7 +41,7 @@ final class ThemeJsonStep implements Step
             'site_spec'   => $project->readText('siteSpec.json'),
         ]);
 
-        $theme = $this->llm->completeJson($rendered);
+        $theme = $this->llm->completeJson($rendered, $this->llmOpts());
 
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
@@ -50,6 +51,22 @@ final class ThemeJsonStep implements Step
         self::assertFonts($theme);
 
         $project->writeJson('theme/theme.json', $theme);
+    }
+
+    /**
+     * Merge the per-step model override into a set of LLM options. When no
+     * model is configured the opts pass through unchanged and the client falls
+     * back to its default model. Shared shape across every LLM step.
+     *
+     * @param array<string,mixed> $opts
+     * @return array<string,mixed>
+     */
+    private function llmOpts(array $opts = []): array
+    {
+        if ($this->model !== null) {
+            $opts['model'] = $this->model;
+        }
+        return $opts;
     }
 
     /** @param array<mixed> $theme */

@@ -24,6 +24,7 @@ final class LandingPageStep implements Step
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
+        private ?string $model = null,
     ) {}
 
     public function id(): string
@@ -49,8 +50,9 @@ final class LandingPageStep implements Step
         // what it's producing so the build doesn't look frozen while it runs.
         fwrite(STDERR, "    writing header, footer, index, front-page…\n");
 
-        // Block markup for four files is large — give the model room.
-        $files = $this->llm->completeJson($rendered, ['max_tokens' => 32000]);
+        // Block markup for four files is large — give the model room. The
+        // per-step model override (when set) rides alongside the token budget.
+        $files = $this->llm->completeJson($rendered, $this->llmOpts(['max_tokens' => 32000]));
 
         foreach (self::REQUIRED_FILES as $rel) {
             $content = $files[$rel] ?? null;
@@ -70,5 +72,21 @@ final class LandingPageStep implements Step
                 throw new RuntimeException("{$tpl} does not include template parts");
             }
         }
+    }
+
+    /**
+     * Merge the per-step model override into a set of LLM options. When no
+     * model is configured the opts pass through unchanged and the client falls
+     * back to its default model. Shared shape across every LLM step.
+     *
+     * @param array<string,mixed> $opts
+     * @return array<string,mixed>
+     */
+    private function llmOpts(array $opts = []): array
+    {
+        if ($this->model !== null) {
+            $opts['model'] = $this->model;
+        }
+        return $opts;
     }
 }
