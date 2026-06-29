@@ -77,3 +77,40 @@ test('retryBatch does not retry permanent failures', function () {
     assert_eq(false, $out['results'][0]['ok']);
     assert_eq('HTTP 400', $out['results'][0]['error']);
 });
+
+/**
+ * Prompt composition + the 480-token input cap (WpcomImageClient::composePrompt).
+ */
+
+test('composePrompt prepends site context to the image prompt', function () {
+    $out = WpcomImageClient::composePrompt('Image for the website “Acme”. A bakery.', 'A sourdough loaf. Style: photorealistic');
+    assert_contains('Image for the website “Acme”', $out);
+    assert_contains('A sourdough loaf. Style: photorealistic', $out);
+});
+
+test('composePrompt with empty context returns the image prompt unchanged', function () {
+    assert_eq('A sourdough loaf.', WpcomImageClient::composePrompt('', 'A sourdough loaf.'));
+});
+
+test('composePrompt keeps the whole prompt within the 480-token model limit', function () {
+    $hugeContext = str_repeat('context word ', 2000);          // far over budget
+    $imagePrompt = 'A specific sourdough loaf on a board. Style: photorealistic';
+
+    $out = WpcomImageClient::composePrompt($hugeContext, $imagePrompt);
+
+    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    // The per-image prompt is the priority and is preserved in full.
+    assert_contains($imagePrompt, $out);
+});
+
+test('composePrompt truncates the image prompt when it alone exceeds the limit', function () {
+    $imagePrompt = str_repeat('loaf ', 2000); // image prompt itself over budget, no context
+    $out = WpcomImageClient::composePrompt('', $imagePrompt);
+    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_true($out !== '', 'still returns something');
+});
+
+test('estimateTokens is conservative and grows with length', function () {
+    assert_eq(0, WpcomImageClient::estimateTokens('   '));
+    assert_true(WpcomImageClient::estimateTokens('a b c d e') >= 5, 'at least one token per short word');
+});
