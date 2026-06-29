@@ -5,8 +5,8 @@ function landing_fixture(): array
 {
     $tmp = sys_get_temp_dir() . '/builder_lp_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo', 'sections' => ['Hero', 'About']]);
-    $project->writeText('design.md', '# Demo design');
     $project->writeJson('theme/theme.json', ['version' => 3]);
     return [$project, $tmp];
 }

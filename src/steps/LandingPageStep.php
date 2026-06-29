@@ -4,7 +4,9 @@ declare(strict_types=1);
 /**
  * Step 7 (LLM): build the landing page and the template parts it needs.
  *
- * Input:  theme/theme.json + design.md + siteSpec.json
+ * Input:  meta.json (user prompt) + siteSpec.json + theme/theme.json. The model
+ *         infers design intent from the brief and the theme tokens — there is no
+ *         separate design document.
  * Output: theme/templates/{front-page,index}.html and theme/parts/{header,footer}.html
  *
  * The model returns a JSON map of theme-relative path => block markup; we
@@ -36,10 +38,11 @@ final class LandingPageStep implements Step
 
     public function run(Project $project): void
     {
+        $meta = $project->readJson('meta.json');
         $rendered = $this->renderer->render('landing-page.md', [
-            'site_spec'  => $project->readText('siteSpec.json'),
-            'theme_json' => $project->readText('theme/theme.json'),
-            'design_md'  => $project->readText('design.md'),
+            'user_prompt' => (string) ($meta['prompt'] ?? ''),
+            'site_spec'   => $project->readText('siteSpec.json'),
+            'theme_json'  => $project->readText('theme/theme.json'),
         ]);
 
         // This is the slowest LLM step (large block-markup output); tell the user

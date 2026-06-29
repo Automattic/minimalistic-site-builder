@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /**
  * A single project on disk: projects/<slug>/. All artifacts (meta.json,
- * siteSpec.json, design.md, theme/...) live under its root. Files are the
+ * siteSpec.json, theme/...) live under its root. Files are the
  * source of truth passed between steps.
  */
 final class Project

@@ -24,7 +24,8 @@ function valid_theme_payload(): array
 test('theme-json writes valid theme.json and forces version 3', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeText('design.md', "---\nname: Demo\ncolors:\n  base: \"#fff\"\n---\n\n## Overview\nDemo design doc with enough content to pass.");
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo', 'visual_vibe' => 'warm and rustic']);
 
     $llm = new FakeLlm();
     $llm->queueJson(valid_theme_payload());
@@ -44,7 +45,8 @@ test('theme-json writes valid theme.json and forces version 3', function () {
 test('theme-json throws when a required color slug is missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeText('design.md', '# Demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
 
     $payload = valid_theme_payload();
     // Drop "accent".
@@ -65,7 +67,8 @@ test('theme-json throws when a required color slug is missing', function () {
 test('theme-json throws when a required font slug is missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeText('design.md', '# Demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
 
     $payload = valid_theme_payload();
     $payload['settings']['typography']['fontFamilies'] = [

@@ -63,7 +63,8 @@ function build_pipeline(Llm $llm): Pipeline
         new ScaffoldThemeStep(),
         new SiteSpecStep($llm, $renderer),
         new ApplyIdentityStep(),
-        new DesignDocStep($llm, $renderer),
+        // No design-doc step: theme.json and the landing page are generated
+        // directly from the prompt + siteSpec, with design decisions made inline.
         new ThemeJsonStep($llm, $renderer),
         new LandingPageStep($llm, $renderer),
         // Collect image placeholders BEFORE fix-blocks: the block re-serializer

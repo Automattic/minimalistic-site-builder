@@ -8,11 +8,11 @@ declare(strict_types=1);
  * Output: siteSpec.json — FACTUAL site information only (name, slug, title,
  *         type, topic, area, audience, a short visual vibe, required sections),
  *         plus any concrete facts the user stated. No design decisions
- *         (colors/typography/layout) live here — those are made later in the
- *         design document (design.md).
+ *         (colors/typography/layout) live here — those are made later, inline,
+ *         by the theme-json and landing-page steps.
  *
- * This is the only step that reads the raw user prompt; everything downstream
- * derives from siteSpec.json and design.md.
+ * The user prompt and this spec are the inputs the theme-json and landing-page
+ * steps build the design from.
  */
 final class SiteSpecStep implements Step
 {
@@ -53,7 +53,8 @@ final class SiteSpecStep implements Step
      * Require the fixed factual properties and normalize name/slug/sections.
      * Any extra factual keys the model returned pass through untouched — the
      * spec has no fixed/exhaustive schema beyond the required properties. No
-     * design fields are filled in: design lives in design.md.
+     * design fields are filled in: design is decided later by the theme-json
+     * and landing-page steps.
      *
      * @param array<mixed> $spec
      * @return array<mixed>
@@ -82,8 +83,7 @@ final class SiteSpecStep implements Step
             }
         }
 
-        // Sections must be a list so the design-doc / landing-page steps can
-        // iterate it.
+        // Sections must be a list so the landing-page step can iterate it.
         if (!isset($spec['sections']) || !is_array($spec['sections'])) {
             $spec['sections'] = [];
         }

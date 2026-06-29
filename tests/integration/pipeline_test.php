@@ -22,15 +22,7 @@ test('full pipeline produces a structurally valid theme', function () {
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
-    // design-doc (text) — DESIGN.md standard: YAML front matter + body sections
-    $designMd = "---\nname: Hearth & Crumb\ndescription: Warm rustic bakery\n"
-        . "colors:\n  base: \"#fdf6ec\"\n  contrast: \"#2b2118\"\n  primary: \"#8a5a2b\"\n"
-        . "  secondary: \"#c98a5a\"\n  accent: \"#e08a3c\"\n"
-        . "typography:\n  heading:\n    fontFamily: Fraunces\n  body:\n    fontFamily: Source Sans 3\n---\n\n"
-        . "## Overview\n" . str_repeat('Warm bakery brand. ', 20)
-        . "\n## Colors\nCream base, cocoa contrast.\n## Typography\nFraunces + Source Sans 3.";
-    $llm->queueText($designMd);
-    // theme-json (json)
+    // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([
         'settings' => [
             'color' => ['palette' => [
@@ -82,6 +74,6 @@ test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
         'scaffold-theme', 'site-spec', 'apply-identity',
-        'design-doc', 'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme',
+        'theme-json', 'landing-page', 'collect-images', 'fix-blocks', 'finalize-theme',
     ], $ids);
 });

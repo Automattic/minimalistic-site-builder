@@ -22,7 +22,7 @@ $spec = $project->readJson('siteSpec.json');
 echo "# {$spec['name']}  ({$slug})\n";
 echo 'tagline: ' . ($spec['tagline'] ?? $spec['topic'] ?? '–') . "\n";
 echo 'vibe: ' . ($spec['visual_vibe'] ?? '–') . "\n";
-// Fonts are a design decision; they live in design.md / theme.json now, not the spec.
+// Fonts are a design decision; they live in theme.json now, not the spec.
 $themeForFonts = json_decode($project->readText('theme/theme.json'), true);
 $specFonts = array_map(
     static fn ($f) => trim(explode(',', (string) ($f['fontFamily'] ?? ''))[0], " \"'"),
