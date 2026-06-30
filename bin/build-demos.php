@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--only=<slug>] [--no-serve]
+ *   php bin/build-demos.php [--with-images] [--only=<slug>] [--serve [--port=<n>]] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -17,11 +17,12 @@ declare(strict_types=1);
  * Options:
  *   --with-images   also generate the AI_IMAGE placeholders into real assets.
  *   --only=<slug>   build only the entry whose slug matches.
- *   --no-serve      build only, don't boot WordPress Playground previews.
- *                   (Default is also no-serve for a batch run; pass --serve to
- *                   boot each site on consecutive ports 9400, 9401, …)
- *   --serve         boot each built site in WordPress Playground after building.
- *   --port=<n>      first Playground port (default 9400; increments per site).
+ *   --serve         after building, preview each site in WordPress Playground,
+ *                   one at a time (foreground; Ctrl-C a preview to move on to
+ *                   the next). Off by default for a batch run.
+ *   --no-serve      build only, don't boot any previews (the default).
+ *   --port=<n>      Playground port for previews (default 9400; playground.php
+ *                   auto-bumps to the next free port if it's busy).
  *   --file=<path>   override the prompts file (default eval/theme-prompts.json).
  */
 
@@ -71,7 +72,13 @@ $store = new ProjectStore(repo_path('projects'));
 $built = [];
 $failures = 0;
 foreach ($entries as $i => $entry) {
-    $prompt = (string) $entry['prompt'];
+    $prompt = trim((string) ($entry['prompt'] ?? ''));
+    if ($prompt === '') {
+        $label = (string) ($entry['id'] ?? $entry['slug'] ?? '#' . ($i + 1));
+        fwrite(STDERR, "  ✗ SKIPPED: prompt entry '{$label}' has no prompt text\n");
+        $failures++;
+        continue;
+    }
     $baseSlug = ProjectStore::slugify((string) ($entry['slug'] ?? $prompt));
     $slug = next_free_slug($store, $baseSlug);
 
@@ -134,16 +141,17 @@ foreach ($built as $b) {
     printf("  %-32s %6.1fs  %s\n", $b['slug'], $b['seconds'], $b['path']);
 }
 
-// Optionally boot each built site in WordPress Playground on consecutive ports.
+// Optionally preview each built site in WordPress Playground. Each instance runs
+// in the foreground (it's a long-lived server), so they're shown one at a time:
+// Ctrl-C the current preview to advance to the next. They all reuse the same
+// --port — by the time one starts the previous has been stopped — and
+// playground.php auto-bumps if that port is somehow still busy.
 if ($serve && $built !== []) {
-    echo "\nStarting previews…\n";
-    foreach ($built as $j => $b) {
+    echo "\nStarting previews (Ctrl-C each to move to the next)…\n";
+    foreach ($built as $b) {
         $cmd = 'php ' . escapeshellarg(repo_path('bin/playground.php'))
             . ' ' . escapeshellarg($b['slug'])
-            . ' --port=' . ($port + $j);
-        echo "  " . $b['slug'] . " → http://localhost:" . ($port + $j) . "\n";
-        // Each Playground process is foregrounded in turn; Ctrl-C one to move on
-        // to the next, or run `php bin/playground.php <slug> --port=<n>` manually.
+            . ' --port=' . $port;
         passthru($cmd, $exit);
         if ($exit !== 0) {
             fwrite(STDERR, "  preview failed for {$b['slug']} (exit {$exit})\n");

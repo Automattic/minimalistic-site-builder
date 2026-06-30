@@ -1,5 +1,5 @@
 {
-  "$comment": "Demo prompts persisted as inputs for building demo websites. Each build produced from these prompts serves as testing evidence for pipeline/theme changes. Run a build with: php bin/build.php \"<prompt>\" (or feed the slug to bin/eval.php).",
+  "$comment": "Demo prompts persisted as inputs for building demo websites. Each build produced from these prompts serves as testing evidence for pipeline/theme changes. Build them all with: php bin/build-demos.php (or just one with --only=<slug>).",
   "version": 1,
   "prompts": [
     {
