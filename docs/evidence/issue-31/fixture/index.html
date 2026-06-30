@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lazy-load screenshot test</title>
+<style>
+  body { font: 24px/1.4 system-ui, sans-serif; margin: 0; background: #f4f4f4; color: #222; }
+  header { background: #111; color: #fff; padding: 40px; text-align: center; }
+  section { padding: 60px 40px; }
+  .label { font-size: 32px; font-weight: 700; margin-bottom: 16px; }
+  img { display: block; width: 900px; max-width: 100%; height: 500px;
+        background: #ddd; border: 2px dashed #aaa; object-fit: cover; }
+</style>
+</head>
+<body>
+<header><h1>Tall page with lazy-loaded images</h1></header>
+<!--
+  Real-world lazy-load: images carry their URL in data-src and are blank until
+  an IntersectionObserver swaps it into src when they scroll into view. Without
+  a scrolling pass before capture, the lower images never get a src.
+-->
+<div id="content"></div>
+<script>
+  const content = document.getElementById('content');
+  for (let i = 0; i < 7; i++) {
+    const sec = document.createElement('section');
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = 'Section ' + (i + 1);
+    const img = document.createElement('img');
+    img.alt = 'Image ' + (i + 1);
+    img.dataset.src = 'img/img' + i + '.png';
+    sec.appendChild(label);
+    sec.appendChild(img);
+    content.appendChild(sec);
+  }
+  const io = new IntersectionObserver((entries, obs) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        e.target.src = e.target.dataset.src;
+        obs.unobserve(e.target);
+      }
+    }
+  }, { rootMargin: '0px' });
+  document.querySelectorAll('img[data-src]').forEach((img) => io.observe(img));
+</script>
+</body>
+</html>

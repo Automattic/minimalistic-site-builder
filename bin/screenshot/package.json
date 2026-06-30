@@ -1,0 +1,8 @@
+{
+  "name": "screenshot",
+  "private": true,
+  "description": "Full-page screenshot capture that scrolls to trigger lazy-loaded images",
+  "dependencies": {
+    "playwright-core": "1.61.1"
+  }
+}
