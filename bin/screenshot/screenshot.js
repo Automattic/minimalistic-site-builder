@@ -22,7 +22,7 @@
  * bin/playground.php.
  *
  * Options:
- *   --width=<px>     Viewport width (default 1280).
+ *   --width=<px>     Viewport width (default 1366).
  *   --no-scroll      Skip the lazy-load scroll/wait (reproduces the old bug).
  *   --chrome=<path>  Chrome/Chromium executable (or set CHROME env var).
  *   --timeout=<ms>   Per-image load wait budget (default 15000).
@@ -31,7 +31,7 @@
 const { chromium } = require('playwright-core');
 
 function parseArgs(argv) {
-  const opts = { width: 1280, scroll: true, timeout: 15000, chrome: process.env.CHROME };
+  const opts = { width: 1366, scroll: true, timeout: 15000, chrome: process.env.CHROME };
   const positional = [];
   for (const a of argv) {
     if (a === '--no-scroll') opts.scroll = false;
@@ -115,7 +115,7 @@ async function main() {
   if (!opts.url || !opts.out) {
     process.stderr.write(
       'Usage: node bin/screenshot/screenshot.js <url> <outfile.png> ' +
-      '[--width=1280] [--no-scroll] [--chrome=<path>] [--timeout=15000]\n');
+      '[--width=1366] [--no-scroll] [--chrome=<path>] [--timeout=15000]\n');
     process.exit(1);
   }
 
