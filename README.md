@@ -9,10 +9,17 @@ emits into real assets via Google Imagen (through the WPCOM AI proxy).
 ```bash
 cp .env.example .env
 # then fill in ANTHROPIC_API_KEY (and GOOGLE_VERTEX_API_TOKEN for image generation)
+
+npm install   # once; installs the Node helper tools under bin/ (block-fixer, screenshot)
 ```
 
 Requires PHP 8.1+ (no Composer — the source set is loaded explicitly by
-`src/bootstrap.php`).
+`src/bootstrap.php`) and Node 18+.
+
+The `bin/` helper tools (`bin/block-fixer`, `bin/screenshot`) are npm
+workspaces, so a single `npm install` at the repo root installs all of them.
+The block-fixer runs as a standard step of `bin/build.php`, so this install is
+required for a normal build — not optional.
 
 ## Build a site
 
@@ -92,7 +99,7 @@ actually fetched and rendered — a plain `fullPage` capture leaves them as empt
 boxes (see [issue #31](docs/evidence/issue-31/README.md)).
 
 ```bash
-cd bin/screenshot && npm install   # once; uses your system Chrome, no download
+npm install   # once, at the repo root; uses your system Chrome, no download
 node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
 ```
 
