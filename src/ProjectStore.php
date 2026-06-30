@@ -33,6 +33,23 @@ final class ProjectStore
     }
 
     /**
+     * First unused slug for a new project: the given base if its folder is free,
+     * otherwise base2, base3, … — so callers never overwrite an existing project.
+     * The base is slugified first, matching create()/open().
+     */
+    public function freeSlug(string $base): string
+    {
+        $base = self::slugify($base);
+        $slug = $base;
+        $n = 2;
+        while (is_dir($this->baseDir . '/' . $slug)) {
+            $slug = $base . $n;
+            $n++;
+        }
+        return $slug;
+    }
+
+    /**
      * Filesystem- and URL-safe slug: lowercase, alnum + single hyphens,
      * trimmed, capped. Always returns a non-empty string.
      */

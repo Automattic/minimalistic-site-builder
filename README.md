@@ -26,6 +26,31 @@ per-step times and token spend, totals, and the image tally — to
 `projects/<slug>/logs/project.log` (the same summary printed to the terminal).
 Run the unit tests with `php tests/run.php`.
 
+## Build the demo set
+
+`eval/theme-prompts.json` holds a persisted set of demo prompts. Build them all
+in one command — useful as testing evidence for pipeline/theme changes:
+
+```bash
+php bin/build-demos.php --with-images   # build every demo, with generated images
+```
+
+After each build, the home page is booted headless in WordPress Playground and a
+full-page screenshot is saved to `projects/<slug>/logs/home.png`. Re-runs never
+overwrite prior output — each build goes to the next free slug (`tbilisi-tavern`
+→ `tbilisi-tavern2` → …).
+
+Needs `ANTHROPIC_API_KEY` and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js
+(for Playground) and a Chrome/Chromium binary (for the screenshot).
+
+Useful variants:
+
+```bash
+php bin/build-demos.php --with-images --only=tbilisi-tavern   # just one demo
+php bin/build-demos.php --with-images --no-screenshot         # skip the screenshots
+php bin/build-demos.php --with-images --serve                 # open each in Playground afterward
+```
+
 ## Image prompt debugger
 
 A standalone page for iterating on `AI_IMAGE` prompts **without building a whole

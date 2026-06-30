@@ -1,0 +1,27 @@
+{
+  "$comment": "Demo prompts persisted as inputs for building demo websites. Each build produced from these prompts serves as testing evidence for pipeline/theme changes. Build them all with: php bin/build-demos.php (or just one with --only=<slug>).",
+  "version": 1,
+  "prompts": [
+    {
+      "id": "photo-journalism-portfolio",
+      "slug": "photo-journalism-portfolio",
+      "site_type": "portfolio",
+      "prompt": "Create a minimalist theme for my photo-journalism website for my portfolio. I'm an Argentinean photo-journalist based in Buenos Aires. I covered the most important social and political events of the country in the last 20 years.",
+      "notes": "Minimalist portfolio; expect heavy use of full-bleed image blocks / galleries and AI_IMAGE placeholders."
+    },
+    {
+      "id": "tbilisi-tavern",
+      "slug": "tbilisi-tavern",
+      "site_type": "restaurant",
+      "prompt": "Create a theme for the website of my classic Georgian restautant called \"Tbilisi Tavern\" it's a traditional resutaurant located in Tbilisi Old Town and it serves classic gerorgian and caucasus dishes.",
+      "notes": "Restaurant storefront; expect Menu / About / Visit sections. Prompt typos (restautant/gerorgian) preserved verbatim as user input."
+    },
+    {
+      "id": "naturaleza-sabia",
+      "slug": "naturaleza-sabia",
+      "site_type": "restaurant",
+      "prompt": "Create a website for my vegetarian restaurant called \"Naturaleza Sabia\" located in the old San Telmo neighborhood in Buenos Aires, Argentina. We serve vegetarian versions of Argentinean traditional dishes. Everything should be in english, our restaurant website is for international tourists.",
+      "notes": "Restaurant storefront; locale San Telmo, Buenos Aires. All output copy must be in English despite Argentinean context."
+    }
+  ]
+}

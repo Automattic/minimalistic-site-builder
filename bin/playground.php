@@ -92,8 +92,13 @@ file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JS
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 
+// `start` is the recommended (and fast) Playground CLI command; --skip-browser
+// keeps it headless-friendly (it opens a browser tab by default). --no-auto-mount
+// disables auto-detecting a project from the cwd (the repo root, which is not a
+// WP project) — we specify exactly what to mount with --mount, and the CLI's own
+// help recommends pairing --mount with --no-auto-mount for deterministic mounts.
 $cmd = sprintf(
-    'npx --yes @wp-playground/cli@latest server --port=%d --mount=%s --blueprint=%s',
+    'npx --yes @wp-playground/cli@latest start --skip-browser --no-auto-mount --port=%d --mount=%s --blueprint=%s',
     $port,
     escapeshellarg($mount),
     escapeshellarg($blueprintPath)
