@@ -81,6 +81,7 @@ final class SectionsStep implements Step
                 'outline'          => $outline,
                 'section_title' => (string) ($section['title'] ?? ''),
                 'section_type'  => (string) ($section['type'] ?? 'content'),
+                'section_layout' => SectionPlanStep::layout($section['layout'] ?? null),
                 'section_purpose' => (string) ($section['purpose'] ?? ''),
                 'content_notes' => (string) ($section['content_notes'] ?? ''),
                 'wants_image'   => ($section['wants_image'] ?? false) ? 'yes' : 'no',
