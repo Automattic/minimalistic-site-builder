@@ -48,21 +48,85 @@ final class ThemeJsonStep implements ConcurrentStep
         return [self::REQ => $this->withModel(['prompt' => $rendered])];
     }
 
+    /** How many times to re-ask the model to fix a contrast-failing palette. */
+    private const MAX_CONTRAST_RETRIES = 2;
+
     public function consume(Project $project, array $results): void
     {
         $theme = $results[self::REQ] ?? null;
         if (!is_array($theme)) {
             throw new RuntimeException('theme-json: missing model output');
         }
+        $theme = self::finalize($theme);
 
-        // Force the schema fields and validate the contract templates rely on.
-        $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
-        $theme['version'] = 3;
+        // Validator V1 — WCAG contrast, computed at token-generation time (not
+        // trusted to the model). Tokens are locked here and every section trusts
+        // them, so a failing palette must be fixed BEFORE any layout is composed.
+        // We re-ask the model with the exact failing pairs fed back, up to a
+        // bound; the result is recorded either way as an audit trail of the gate.
+        $violations = ContrastValidator::validate($theme);
+        $attempts = 0;
+        while ($violations !== [] && $attempts < self::MAX_CONTRAST_RETRIES) {
+            $attempts++;
+            $theme = self::finalize($this->regenerateForContrast($project, $theme, $violations));
+            $violations = ContrastValidator::validate($theme);
+        }
 
-        self::assertColors($theme);
-        self::assertFonts($theme);
+        $project->writeJson('logs/contrast-check.json', [
+            'passed'     => $violations === [],
+            'attempts'   => $attempts,
+            'violations' => $violations,
+        ]);
+        if ($violations !== []) {
+            // After exhausting retries we keep the best palette and proceed, but
+            // make the failure loud so it isn't silently shipped.
+            fwrite(STDERR, "  [V1] contrast still failing after {$attempts} retr"
+                . ($attempts === 1 ? 'y' : 'ies') . ":\n    - "
+                . implode("\n    - ", $violations) . "\n");
+        }
 
         $project->writeJson('theme/theme.json', $theme);
+    }
+
+    /** Force the schema fields and validate the contract templates rely on. */
+    private static function finalize(array $theme): array
+    {
+        $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
+        $theme['version'] = 3;
+        self::assertColors($theme);
+        self::assertFonts($theme);
+        return $theme;
+    }
+
+    /**
+     * Re-ask the model to fix a contrast-failing palette: the original prompt
+     * plus the current (failing) palette and the exact violations, instructing it
+     * to regenerate the full theme.json adjusting ONLY the palette lightness so
+     * every pair clears AA while keeping the committed design intent.
+     *
+     * @param array<mixed> $theme
+     * @param string[]     $violations
+     * @return array<mixed>
+     */
+    private function regenerateForContrast(Project $project, array $theme, array $violations): array
+    {
+        $basePrompt = $this->requests($project)[self::REQ]['prompt'];
+        $palette = json_encode(
+            $theme['settings']['color']['palette'] ?? [],
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
+        );
+        $correction = "\n\n---\nCONTRAST FIX REQUIRED. The palette you produced FAILS computed WCAG-AA contrast:\n- "
+            . implode("\n- ", $violations)
+            . "\n\nCurrent (failing) palette:\n{$palette}\n\n"
+            . "Regenerate the COMPLETE theme.json. Keep the committed design intent (the same hues / mood), "
+            . "but adjust the palette's LIGHTNESS so EVERY pair above clears 4.5:1 (aim 7:1) — push darks deeper "
+            . "and lights lighter; no two text/background slugs may be near-matches. Output ONLY the theme.json JSON.";
+
+        $fixed = $this->llm->completeJson(
+            $basePrompt . $correction,
+            $this->withModel(['log_label' => $this->id() . '-contrast-fix'])
+        );
+        return is_array($fixed) ? $fixed : $theme;
     }
 
     public function run(Project $project): void

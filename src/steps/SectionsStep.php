@@ -83,6 +83,7 @@ final class SectionsStep implements Step
                 'section_type'  => (string) ($section['type'] ?? 'content'),
                 'section_purpose' => (string) ($section['purpose'] ?? ''),
                 'content_notes' => (string) ($section['content_notes'] ?? ''),
+                'section_pattern' => (string) ($section['pattern'] ?? 'none'),
                 'wants_image'   => ($section['wants_image'] ?? false) ? 'yes' : 'no',
                 'image_instructions' => $imageInstructions,
             ])]);

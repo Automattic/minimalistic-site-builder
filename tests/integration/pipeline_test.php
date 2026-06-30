@@ -26,12 +26,15 @@ test('full pipeline produces a structurally valid theme', function () {
     // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([
         'settings' => [
+            // High-contrast earthy palette (passes computed V1 WCAG-AA: every
+            // text slug is a deep tone on the cream base, accent is dark enough
+            // for base-colored button labels to clear 4.5:1).
             'color' => ['palette' => [
                 ['slug' => 'base', 'color' => '#fdf6ec', 'name' => 'Base'],
                 ['slug' => 'contrast', 'color' => '#2b2118', 'name' => 'Contrast'],
-                ['slug' => 'primary', 'color' => '#8a5a2b', 'name' => 'Primary'],
-                ['slug' => 'secondary', 'color' => '#cc9988', 'name' => 'Secondary'],
-                ['slug' => 'accent', 'color' => '#e08a3c', 'name' => 'Accent'],
+                ['slug' => 'primary', 'color' => '#6b3f1d', 'name' => 'Primary'],
+                ['slug' => 'secondary', 'color' => '#5a4a3a', 'name' => 'Secondary'],
+                ['slug' => 'accent', 'color' => '#9a3412', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
                 ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],
@@ -88,7 +91,7 @@ test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
         'scaffold-theme', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+section-plan', 'sections', 'assemble-landing-page',
-        'collect-images', 'fix-blocks', 'finalize-theme',
+        'theme-json+section-plan', 'frame-css', 'sections', 'assemble-landing-page',
+        'collect-images', 'fix-blocks', 'finalize-theme', 'validate-design',
     ], $ids);
 });

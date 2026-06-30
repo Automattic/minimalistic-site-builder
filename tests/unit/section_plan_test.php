@@ -18,6 +18,22 @@ test('SectionPlanStep::normalize forces unique, file-safe slugs and fills defaul
     assert_eq(['hero', 'our-story', 'hero-2'], $slugs);
     assert_eq('hero', $sections[0]['type'], 'type preserved');
     assert_eq(false, $sections[0]['wants_image'], 'wants_image defaults to false');
+    assert_eq('none', $sections[0]['pattern'], 'pattern defaults to none');
+});
+
+test('SectionPlanStep::normalize accepts known CSS-catalog patterns and rejects others', function () {
+    $sections = SectionPlanStep::normalize([
+        ['slug' => 'a', 'pattern' => 'scroll-row'],
+        ['slug' => 'b', 'pattern' => 'scroll_row'],   // underscore tolerated
+        ['slug' => 'c', 'pattern' => 'Stacked Cards'], // spaces + case tolerated
+        ['slug' => 'd', 'pattern' => 'rainbow'],       // unknown -> none
+        ['slug' => 'e'],                               // missing -> none
+    ]);
+    assert_eq('scroll-row', $sections[0]['pattern']);
+    assert_eq('scroll-row', $sections[1]['pattern']);
+    assert_eq('stacked-cards', $sections[2]['pattern']);
+    assert_eq('none', $sections[3]['pattern']);
+    assert_eq('none', $sections[4]['pattern']);
 });
 
 test('section-plan writes sections.json', function () {

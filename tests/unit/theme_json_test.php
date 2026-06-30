@@ -6,12 +6,14 @@ function valid_theme_payload(): array
     return [
         'version' => 2, // should be forced to 3
         'settings' => [
+            // High-contrast palette (passes computed V1 WCAG-AA): deep tones on
+            // a white base, accent dark enough for base-colored button labels.
             'color' => ['palette' => [
-                ['slug' => 'base', 'color' => '#fff', 'name' => 'Base'],
-                ['slug' => 'contrast', 'color' => '#111', 'name' => 'Contrast'],
-                ['slug' => 'primary', 'color' => '#2f6b4f', 'name' => 'Primary'],
-                ['slug' => 'secondary', 'color' => '#a7c4a0', 'name' => 'Secondary'],
-                ['slug' => 'accent', 'color' => '#d98c3f', 'name' => 'Accent'],
+                ['slug' => 'base', 'color' => '#ffffff', 'name' => 'Base'],
+                ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+                ['slug' => 'primary', 'color' => '#1f4d2e', 'name' => 'Primary'],
+                ['slug' => 'secondary', 'color' => '#444444', 'name' => 'Secondary'],
+                ['slug' => 'accent', 'color' => '#b3471a', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
                 ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],

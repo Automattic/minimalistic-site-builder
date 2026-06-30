@@ -212,3 +212,54 @@ php bin/eval.php                   # regenerate the 5 eval sites
 19,068 in + 24,505 out = 43,573 tokens** on claude-opus-4-8, served at the
 printed URL with the theme active and fonts loaded. Flags: `--slug=`, `--port=`,
 `--no-serve` (build + metrics only).
+
+---
+
+## Phase 4 — design-intelligence extraction (Telex's quality mechanisms)
+
+Ported four of Telex's five design-quality mechanisms (the multi-candidate design
+gate is deliberately dropped — we commit to ONE direction and execute it well),
+per `docs/design-intelligence-extraction-spec.md`.
+
+**Shared prompt-pack (anti-"AI-slop" manifesto).** A `{{> partials/…}}` include
+mechanism in `PromptRenderer` lets every design step compose the same
+battle-tested wording instead of drifting copies:
+- `prompts/partials/aesthetics.md` — senior-design-director persona + Design
+  Thinking (commit to a BOLD direction) + the Frontend Aesthetics manifesto
+  (**banned fonts**: Inter/Roboto/Arial/Open Sans/system + don't reflexively reach
+  for Space Grotesk; grounded 6-step type scale capped ~3.5rem; line-height rules;
+  dominant-color-plus-accent; **banned palettes**: purple-on-white, safe
+  blue-and-gray corporate; one orchestrated page-load reveal; no emojis → SVG only)
+  + the topic-grounding rule ("swap the topic and it should break").
+- `prompts/partials/section-patterns.md` — 6–8 section rhythm + the CSS pattern
+  catalog (marquee, scroll-row, sticky-rail, stacked-cards, color-block, sticker).
+- `prompts/partials/color-discipline.md` / `layout-discipline.md` — the
+  paired-color + token-slug + grid/flex-gap + section-alignment rules, injected
+  into the section/header/footer prompts.
+
+**Tokens-first + mechanical validators as a hard gate.**
+- **V1 — WCAG contrast, computed (`ContrastValidator`).** Run inside `ThemeJsonStep`
+  at token-generation time (not trusted to the model): body/heading/muted-on-base
+  and the button label pairing must clear 4.5:1, with a ~25-step lightness-delta
+  guard. On failure the step re-asks the model with the exact failing pairs fed
+  back (bounded retries) and records the outcome to `logs/contrast-check.json`.
+- **V2–V5 — markup contract (`DesignValidator` + `ValidateDesignStep`).** Lints the
+  finished block markup for paired color (bg⇒text, border⇒border-color, buttons set
+  both), grid/flex `blockGap`, token discipline (no raw hex / px / font literals),
+  and section alignment (every top-level section declares `align:full|wide`).
+  Writes `logs/design-validation.md`; reports by default, `BUILDER_STRICT_DESIGN=1`
+  makes it throw.
+
+**Frame.** A deterministic `FrameCssStep` bakes the CSS pattern-catalog classes +
+one staggered page-load reveal (reduced-motion aware) into `style.css`, all
+referencing theme.json tokens via `var(--wp--preset--…)` — so the classes the
+section prompts hook into by `className` always exist.
+
+**Pipeline now:** site-spec → design-direction → [theme-json (V1 gate) ‖
+section-plan] → frame-css → sections → assemble → collect-images → fix-blocks →
+finalize → validate-design (V2–V5).
+
+Tests: 16 new unit tests (contrast math + palette validation, the V2–V5 markup
+checks + block-attr extractor, the prompt-include mechanism, pattern
+normalization) and the integration step-order/contrast assertions updated —
+**127 unit + 2 integration passing.**

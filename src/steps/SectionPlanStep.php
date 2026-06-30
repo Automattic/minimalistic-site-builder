@@ -107,9 +107,26 @@ final class SectionPlanStep implements ConcurrentStep
                 'type'          => trim((string) ($section['type'] ?? 'content')),
                 'purpose'       => trim((string) ($section['purpose'] ?? '')),
                 'content_notes' => trim((string) ($section['content_notes'] ?? '')),
+                // Optional CSS-catalog pattern hint (marquee, scroll-row, …); the
+                // section step turns it into the matching className. Defaults to
+                // "none" so the section uses a standard layout.
+                'pattern'       => self::normalizePattern($section['pattern'] ?? null),
                 'wants_image'   => (bool) ($section['wants_image'] ?? false),
             ];
         }
         return $out;
+    }
+
+    /** CSS-catalog patterns the section step knows how to render (matches style.css classes). */
+    private const PATTERNS = ['marquee', 'scroll-row', 'sticky-rail', 'stacked-cards', 'color-block', 'sticker'];
+
+    /**
+     * Normalize a model-supplied pattern hint to one of the known catalog
+     * patterns, or "none". Tolerates underscores/spaces (scroll_row, "scroll row").
+     */
+    private static function normalizePattern(mixed $raw): string
+    {
+        $p = str_replace([' ', '_'], '-', strtolower(trim((string) $raw)));
+        return in_array($p, self::PATTERNS, true) ? $p : 'none';
     }
 }

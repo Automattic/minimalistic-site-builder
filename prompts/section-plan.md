@@ -9,7 +9,9 @@ SITE SPEC (JSON):
 DESIGN DIRECTION (the committed creative concept for THIS site — let it shape the section ideas and flow):
 {{design_direction}}
 
-Use the spec's "sections" list as a starting point, but improve it: add, reorder, split, or rename sections so the page is richer and flows well. Let the design direction's signature device and mood inform which sections you choose and how they're framed. Aim for 5 to 8 sections.
+{{> partials/section-patterns.md}}
+
+Use the spec's "sections" list as a starting point, but improve it: add, reorder, split, or rename sections so the page is richer and flows well. Let the design direction's signature device and mood inform which sections you choose and how they're framed. **Aim for 6 to 8 sections** — agency-grade homepages run 6–8; a thin 3-section page is a failure here.
 
 Return a single JSON object with this exact shape:
 {
@@ -20,6 +22,7 @@ Return a single JSON object with this exact shape:
       "type": "one of: hero, features, about, services, gallery, testimonials, pricing, team, faq, cta, contact, content",
       "purpose": "1 sentence: what this section is for and what the visitor should take away",
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
+      "pattern": "optional: one CSS-catalog pattern this section should use — one of: marquee, scroll-row, sticky-rail, stacked-cards, color-block, sticker, or omit for a standard layout",
       "wants_image": true
     }
   ]
@@ -27,6 +30,7 @@ Return a single JSON object with this exact shape:
 
 Rules:
 - The FIRST section must be a "hero" and the LAST should be a strong call-to-action ("cta" or "contact").
+- Plan for **structural variety**: across the page, at least TWO sections should use a CSS-catalog `pattern` (not every section a plain centered column grid). Pick patterns that fit the content — a menu/portfolio/testimonials reads well as `scroll-row` or `stacked-cards`; a tagline or hours band as `marquee`; alternate full-bleed `color-block` bands so the page isn't a uniform white run.
 - "slug" is lowercase a-z, 0-9 and hyphens only, unique across the list, and descriptive (e.g. "hero", "menu-highlights", "meet-the-team").
 - Set "wants_image" to true only where imagery genuinely strengthens the section (hero, gallery, feature cards, team), false for text-heavy sections (faq, simple cta).
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.

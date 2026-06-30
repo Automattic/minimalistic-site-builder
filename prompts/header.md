@@ -9,6 +9,8 @@ THEME TOKENS (theme.json):
 PAGE OUTLINE (the sections the nav may link to):
 {{outline}}
 
+{{> partials/color-discipline.md}}
+
 Rules:
 - The header has the site title (wp:site-title) or logo on one side and a primary wp:navigation on the other, in a single top-level wp:group with a row/flex layout and space-between justification.
 - Use valid CORE block markup only (group, site-title, site-logo, navigation, buttons/button, image).

@@ -6,6 +6,13 @@ declare(strict_types=1);
  * from a context map. Every placeholder must resolve — an unresolved one means a
  * step's context wiring is wrong, so we fail loud rather than send a broken
  * prompt to the model.
+ *
+ * Templates may also pull in shared fragments with an include directive,
+ * `{{> partials/name.md}}` (path relative to the prompts/ directory). Includes
+ * are expanded recursively BEFORE variable substitution, so the shared
+ * design-intelligence blocks (the anti-AI-slop manifesto, the CSS pattern
+ * catalog, the color-pairing discipline) live in one place and every design
+ * step composes the same battle-tested wording instead of drifting copies.
  */
 final class PromptRenderer
 {
@@ -18,7 +25,27 @@ final class PromptRenderer
         if (!is_file($file)) {
             throw new RuntimeException("Missing prompt template: {$file}");
         }
-        return self::fill((string) file_get_contents($file), $vars);
+        $text = $this->expandIncludes((string) file_get_contents($file), $file, 0);
+        return self::fill($text, $vars);
+    }
+
+    /**
+     * Recursively splice `{{> path}}` includes (relative to promptDir). The
+     * directive's `>` keeps it distinct from a `{{var}}` placeholder, so the
+     * variable pass never sees it. Bounded depth guards against an include cycle.
+     */
+    private function expandIncludes(string $text, string $sourceFile, int $depth): string
+    {
+        if ($depth > 10) {
+            throw new RuntimeException("Prompt include nesting too deep (cycle?) at {$sourceFile}");
+        }
+        return (string) preg_replace_callback('/\{\{>\s*([^}\s]+)\s*\}\}/', function ($m) use ($depth) {
+            $inc = $this->promptDir . '/' . $m[1];
+            if (!is_file($inc)) {
+                throw new RuntimeException("Missing prompt include: {$inc}");
+            }
+            return $this->expandIncludes((string) file_get_contents($inc), $inc, $depth + 1);
+        }, $text);
     }
 
     /** @param array<string,string> $vars */

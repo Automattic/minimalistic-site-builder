@@ -25,6 +25,8 @@ require_once $src . '/ConcurrentGroup.php';
 require_once $src . '/Pipeline.php';
 require_once $src . '/BuildReport.php';
 require_once $src . '/ThemeValidator.php';
+require_once $src . '/ContrastValidator.php';
+require_once $src . '/DesignValidator.php';
 
 // Steps.
 foreach (glob($src . '/steps/*.php') ?: [] as $stepFile) {
@@ -121,6 +123,11 @@ function build_pipeline(Llm $llm): Pipeline
             new ThemeJsonStep($llm, $renderer, $models['theme-json']),
             new SectionPlanStep($llm, $renderer, $models['section-plan']),
         ]),
+        // Frame: bake the design system's CSS into style.css (the orchestrated
+        // page-load reveal + the CSS pattern-catalog classes the sections hook
+        // into by className). Deterministic and token-referencing; runs once the
+        // tokens are locked so the catalog is in place before sections compose.
+        new FrameCssStep(),
         // Generate the header, footer, and every section part in one concurrent
         // batch, then stitch them into the page deterministically.
         new SectionsStep($llm, $renderer, $models['sections']),
@@ -131,5 +138,8 @@ function build_pipeline(Llm $llm): Pipeline
         new CollectImagesStep(),
         new FixBlocksStep(),
         new FinalizeThemeStep(),
+        // Hard gate: validators V2–V5 over the finished markup (V1 contrast ran
+        // at token time inside theme-json). Writes logs/design-validation.md.
+        new ValidateDesignStep(),
     ]);
 }
