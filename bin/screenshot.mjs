@@ -34,7 +34,13 @@ const waiters = new Map(); // event method -> resolver
 const cleanup = async () => {
   try { ws?.close(); } catch {}
   chrome.kill('SIGKILL');
-  await rm(profile, { recursive: true, force: true });
+  // Best-effort temp-profile removal. Chrome may still be flushing files to the
+  // profile as we delete it (a SIGKILL'd process isn't reaped synchronously),
+  // which races rmdir into ENOTEMPTY. Retry a few times, and never let a cleanup
+  // failure mask an otherwise-successful capture — it's just a /tmp dir.
+  try {
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {}
 };
 const fail = async (msg) => { console.error(msg); await cleanup(); process.exit(1); };
 
