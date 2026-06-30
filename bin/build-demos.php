@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--only=<slug>] [--serve [--port=<n>]] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--serve [--port=<n>]] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -14,9 +14,14 @@ declare(strict_types=1);
  * Builds run sequentially (not concurrently) so per-step timing is clean and a
  * single failure doesn't abort the others mid-flight.
  *
+ * After each successful build the home page is captured to a full-page
+ * screenshot at projects/<slug>/logs/home.png (headless Playground + Chrome),
+ * as visual testing evidence. Disable with --no-screenshot.
+ *
  * Options:
  *   --with-images   also generate the AI_IMAGE placeholders into real assets.
  *   --only=<slug>   build only the entry whose slug matches.
+ *   --no-screenshot skip the post-build home-page screenshot (on by default).
  *   --serve         after building, preview each site in WordPress Playground,
  *                   one at a time (foreground; Ctrl-C a preview to move on to
  *                   the next). Off by default for a batch run.
@@ -31,6 +36,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
 $withImages = false;
 $only = null;
 $serve = false;
+$screenshot = true;
 $port = 9400;
 $file = repo_path('eval/theme-prompts.json');
 foreach (array_slice($argv, 1) as $a) {
@@ -40,9 +46,11 @@ foreach (array_slice($argv, 1) as $a) {
     elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
     elseif ($a === '--no-serve') { $serve = false; }
     elseif ($a === '--serve') { $serve = true; }
+    elseif ($a === '--no-screenshot') { $screenshot = false; }
+    elseif ($a === '--screenshot') { $screenshot = true; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
         exit(1);
     }
 }
@@ -129,7 +137,31 @@ foreach ($entries as $i => $entry) {
 
     printf("  %-22s %6.1fs\n", 'TOTAL', $total);
     echo "  Output: {$project->path()}\n";
-    $built[] = ['slug' => $project->slug(), 'path' => $project->path(), 'seconds' => round($total, 1)];
+
+    // Capture a full-page screenshot of the home page as visual testing
+    // evidence (projects/<slug>/logs/home.png). Boots the site headless in
+    // Playground, shoots, tears down. A failure here doesn't fail the build —
+    // the theme is the artefact; the screenshot is a bonus record.
+    $shotPath = null;
+    if ($screenshot) {
+        $shotPath = $project->logPath('home.png');
+        $cmd = 'php ' . escapeshellarg(repo_path('bin/screenshot.php'))
+            . ' ' . escapeshellarg($project->slug())
+            . ' --port=' . $port
+            . ' --out=' . escapeshellarg($shotPath);
+        passthru($cmd, $shotExit);
+        if ($shotExit !== 0) {
+            fwrite(STDERR, "  (screenshot failed — continuing)\n");
+            $shotPath = null;
+        }
+    }
+
+    $built[] = [
+        'slug'       => $project->slug(),
+        'path'       => $project->path(),
+        'seconds'    => round($total, 1),
+        'screenshot' => $shotPath,
+    ];
 }
 
 // Summary — the at-a-glance record of what this command produced, suitable as
@@ -139,6 +171,9 @@ if ($failures > 0) { echo " ({$failures} failed)"; }
 echo " ─────────────────────────────────────\n";
 foreach ($built as $b) {
     printf("  %-32s %6.1fs  %s\n", $b['slug'], $b['seconds'], $b['path']);
+    if (($b['screenshot'] ?? null) !== null) {
+        echo "      ↳ screenshot: {$b['screenshot']}\n";
+    }
 }
 
 // Optionally preview each built site in WordPress Playground. Each instance runs

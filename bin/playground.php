@@ -92,8 +92,10 @@ file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JS
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 
+// `start` is the recommended (and fast) Playground CLI command; --skip-browser
+// keeps it headless-friendly (it opens a browser tab by default).
 $cmd = sprintf(
-    'npx --yes @wp-playground/cli@latest server --port=%d --mount=%s --blueprint=%s',
+    'npx --yes @wp-playground/cli@latest start --skip-browser --port=%d --mount=%s --blueprint=%s',
     $port,
     escapeshellarg($mount),
     escapeshellarg($blueprintPath)
