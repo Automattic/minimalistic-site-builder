@@ -58,9 +58,21 @@ final class DesignDirectionStep implements Step
             throw new RuntimeException('meta.json has no "prompt"');
         }
 
+        // Sample a per-build creative seed once and persist it in meta.json, so
+        // the build's design direction is decorrelated from other builds AND the
+        // chosen seed is inspectable/reproducible after the fact. A seed already
+        // in meta.json (e.g. set by the caller) is honored rather than redrawn.
+        $seed = trim((string) ($meta['creative_seed'] ?? ''));
+        if ($seed === '') {
+            $seed = CreativeSeed::sample();
+            $meta['creative_seed'] = $seed;
+            $project->writeJson('meta.json', $meta);
+        }
+
         $rendered = $this->renderer->render('design-direction.md', [
-            'user_prompt' => $prompt,
-            'site_spec'   => $project->readText('siteSpec.json'),
+            'user_prompt'   => $prompt,
+            'site_spec'     => $project->readText('siteSpec.json'),
+            'creative_seed' => $seed,
         ]);
         $brief = trim($this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()])));
         if ($brief === '') {

@@ -18,6 +18,7 @@ require_once $src . '/ImagePromptComposer.php';
 require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
 require_once $src . '/PromptRenderer.php';
+require_once $src . '/CreativeSeed.php';
 require_once $src . '/ModelOption.php';
 require_once $src . '/Step.php';
 require_once $src . '/ConcurrentStep.php';

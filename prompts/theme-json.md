@@ -11,6 +11,8 @@ DESIGN DIRECTION (the committed creative concept for THIS site — let it drive 
 
 Make opinionated, specific design choices that genuinely fit this site's topic, area, audience, and visual vibe — not generic defaults. Translate the DESIGN DIRECTION into concrete tokens: the palette must express its stated palette approach, the font pairing its type pairing, and the spacing/shapes its shape language. Steer clear of the cliché it calls out avoiding. Pick colors and a font pairing that feel designed for THIS brand.
 
+Do NOT default to the safe attractor: avoid an all-sans-serif pairing and a blue/teal palette unless the brand truly demands it. Commit to ONE bold, specific idea from the design direction and carry it through palette, typography, and shape language so the whole theme reads as a deliberate point of view — not a tasteful default.
+
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 
 - Top-level: "$schema": "https://schemas.wp.org/trunk/theme.json", "version": 3.
