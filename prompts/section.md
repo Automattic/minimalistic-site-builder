@@ -6,6 +6,9 @@ SITE SPEC (JSON):
 THEME TOKENS (theme.json):
 {{theme_json}}
 
+DESIGN DIRECTION (the committed creative concept for THIS site — honor its shape language and signature device in the layout):
+{{design_direction}}
+
 THE FULL PAGE OUTLINE (for context — build ONLY the section marked below):
 {{outline}}
 

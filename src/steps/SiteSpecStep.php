@@ -16,6 +16,8 @@ declare(strict_types=1);
  */
 final class SiteSpecStep implements Step
 {
+    use ModelOption;
+
     /** Factual properties the spec must always carry. */
     private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe'];
 
@@ -44,26 +46,10 @@ final class SiteSpecStep implements Step
         }
 
         $rendered = $this->renderer->render('site-spec.md', ['user_prompt' => $prompt]);
-        $spec = $this->llm->completeJson($rendered, $this->llmOpts(['log_label' => $this->id()]));
+        $spec = $this->llm->completeJson($rendered, $this->withModel(['log_label' => $this->id()]));
 
         $spec = self::normalize($spec);
         $project->writeJson('siteSpec.json', $spec);
-    }
-
-    /**
-     * Merge the per-step model override into a set of LLM options. When no
-     * model is configured the opts pass through unchanged and the client falls
-     * back to its default model. Shared shape across every LLM step.
-     *
-     * @param array<string,mixed> $opts
-     * @return array<string,mixed>
-     */
-    private function llmOpts(array $opts = []): array
-    {
-        if ($this->model !== null) {
-            $opts['model'] = $this->model;
-        }
-        return $opts;
     }
 
     /**
