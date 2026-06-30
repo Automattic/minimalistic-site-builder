@@ -3,6 +3,6 @@
   "private": true,
   "description": "Full-page screenshot capture that scrolls to trigger lazy-loaded images",
   "dependencies": {
-    "puppeteer-core": "25.2.1"
+    "playwright-core": "1.61.1"
   }
 }

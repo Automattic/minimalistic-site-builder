@@ -17,6 +17,10 @@
  * eager, then wait for all `document.images` to actually finish decoding. Only
  * then do we screenshot.
  *
+ * Driven with Playwright (playwright-core) against the system Chrome — no
+ * bundled-browser download — so it can screenshot a generated theme served by
+ * bin/playground.php.
+ *
  * Options:
  *   --width=<px>     Viewport width (default 1280).
  *   --no-scroll      Skip the lazy-load scroll/wait (reproduces the old bug).
@@ -24,7 +28,7 @@
  *   --timeout=<ms>   Per-image load wait budget (default 15000).
  */
 
-const puppeteer = require('puppeteer-core');
+const { chromium } = require('playwright-core');
 
 function parseArgs(argv) {
   const opts = { width: 1280, scroll: true, timeout: 15000, chrome: process.env.CHROME };
@@ -115,15 +119,14 @@ async function main() {
     process.exit(1);
   }
 
-  const browser = await puppeteer.launch({
+  const browser = await chromium.launch({
     executablePath: findChrome(opts.chrome),
-    headless: 'new',
+    headless: true,
     args: ['--no-sandbox', '--disable-gpu', '--hide-scrollbars'],
   });
   try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: opts.width, height: 900, deviceScaleFactor: 1 });
-    await page.goto(opts.url, { waitUntil: 'networkidle2', timeout: 60000 });
+    const page = await browser.newPage({ viewport: { width: opts.width, height: 900 } });
+    await page.goto(opts.url, { waitUntil: 'networkidle', timeout: 60000 });
 
     if (opts.scroll) {
       await autoScroll(page);
