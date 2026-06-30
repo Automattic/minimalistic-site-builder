@@ -7,7 +7,8 @@ declare(strict_types=1);
  *   php bin/build.php "A cozy neighborhood bakery" [--slug=my-slug] [--until=step-id] [--with-images] [--port=9400] [--no-serve]
  *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
- * printing per-step timing. Re-running reuses the same project directory.
+ * printing per-step timing and token spend and writing the full run overview to
+ * projects/<slug>/logs/project.log. Re-running reuses the same project directory.
  *
  * --until=<step-id> stops after that step (an unknown id errors with the list).
  * Steps that run concurrently share one id (e.g. theme-json+section-plan), but
@@ -77,10 +78,21 @@ $project->writeJson('meta.json', [
 ]);
 
 echo "Building '{$project->slug()}'\n";
-$total = 0.0;
-$pipeline->runThrough($project, $until, function (Step $step, float $secs) use (&$total) {
-    $total += $secs;
-    printf("  %-22s %6.1fs\n", $step->id(), $secs);
+
+$report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c'));
+
+// Attribute token spend to each step by diffing the client's cumulative usage
+// totals before and after it ran (the reporter fires once a step completes).
+$prevIn = 0;
+$prevOut = 0;
+$pipeline->runThrough($project, $until, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
+    $u = $llm->usageTotals();
+    $inDelta = $u['input_tokens'] - $prevIn;
+    $outDelta = $u['output_tokens'] - $prevOut;
+    $prevIn = $u['input_tokens'];
+    $prevOut = $u['output_tokens'];
+    $report->addStep($step->id(), $secs, $inDelta, $outDelta);
+    echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
 });
 
 // Image generation is opt-in: slow and networked, so it runs only on request
@@ -90,11 +102,35 @@ if ($withImages && $until === null) {
     $start = microtime(true);
     $step->run($project);
     $secs = microtime(true) - $start;
-    $total += $secs;
-    printf("  %-22s %6.1fs\n", $step->id(), $secs);
+    // Image generation uses the Vertex proxy, not Claude, so it spends no LLM
+    // tokens; the row records its wall time, and the tally comes from images.json.
+    $report->addStep($step->id(), $secs, 0, 0);
+    echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+
+    $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
+    $generated = 0;
+    $failed = 0;
+    foreach ($specs as $spec) {
+        match ($spec['status'] ?? '') {
+            'completed' => $generated++,
+            'failed'    => $failed++,
+            default     => null,
+        };
+    }
+    $report->setImages($generated, $failed, count($specs));
 }
 
-printf("  %-22s %6.1fs\n", 'TOTAL', $total);
+$report->setRequestCount($llm->usageTotals()['requests']);
+
+echo $report->totalLine(), "\n";
+if (($imagesLine = $report->imagesLine()) !== null) {
+    echo $imagesLine, "\n";
+}
+
+// Persist the full run overview alongside the per-call LLM transcripts, so a
+// finished project carries its own step-by-step timing/token/image accounting.
+$project->writeText('logs/project.log', $report->render());
+
 echo "Output: {$project->path()}\n";
 
 // Boot the site in WordPress Playground and print the URL. Skipped when the
