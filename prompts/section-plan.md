@@ -9,7 +9,7 @@ SITE SPEC (JSON):
 DESIGN DIRECTION (the committed creative concept for THIS site — let it shape the section ideas and flow):
 {{design_direction}}
 
-Use the spec's "sections" list as a starting point, but improve it: add, reorder, split, or rename sections so the page is richer and flows well. Let the design direction's signature_move and mood inform which sections you choose and how they're framed. Aim for 5 to 8 sections.
+Use the spec's "sections" list as a starting point, but improve it: add, reorder, split, or rename sections so the page is richer and flows well. Let the design direction's signature device and mood inform which sections you choose and how they're framed. Aim for 5 to 8 sections.
 
 Return a single JSON object with this exact shape:
 {

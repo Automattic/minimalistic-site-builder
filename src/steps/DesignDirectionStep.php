@@ -19,10 +19,12 @@ declare(strict_types=1);
  */
 final class DesignDirectionStep implements Step
 {
+    use ModelOption;
+
     /**
      * Injected into downstream prompts when no designDirection.md exists yet
-     * (a step run in isolation, or older projects). Keeps the creative intent
-     * alive instead of silently reverting to defaults.
+     * (a step run in isolation). Keeps the creative intent alive instead of
+     * silently reverting to defaults.
      */
     private const FALLBACK = '(No explicit design direction was provided. Make bold, '
         . 'specific, non-generic design choices that fit the brand, and consciously avoid '
@@ -60,7 +62,7 @@ final class DesignDirectionStep implements Step
             'user_prompt' => $prompt,
             'site_spec'   => $project->readText('siteSpec.json'),
         ]);
-        $brief = trim($this->llm->complete($rendered, $this->llmOpts(['log_label' => $this->id()])));
+        $brief = trim($this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()])));
         if ($brief === '') {
             throw new RuntimeException('design-direction: model returned an empty brief');
         }
@@ -78,20 +80,5 @@ final class DesignDirectionStep implements Step
         return $project->exists(self::FILE)
             ? trim($project->readText(self::FILE))
             : self::FALLBACK;
-    }
-
-    /**
-     * Merge the per-step model override into a set of LLM options. Shared shape
-     * across every LLM step.
-     *
-     * @param array<string,mixed> $opts
-     * @return array<string,mixed>
-     */
-    private function llmOpts(array $opts = []): array
-    {
-        if ($this->model !== null) {
-            $opts['model'] = $this->model;
-        }
-        return $opts;
     }
 }

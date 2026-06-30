@@ -18,6 +18,7 @@ require_once $src . '/ImagePromptComposer.php';
 require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
 require_once $src . '/PromptRenderer.php';
+require_once $src . '/ModelOption.php';
 require_once $src . '/Step.php';
 require_once $src . '/ConcurrentStep.php';
 require_once $src . '/ConcurrentGroup.php';
@@ -108,6 +109,9 @@ function build_pipeline(Llm $llm): Pipeline
         // Commit to ONE creative concept BEFORE theme.json / the section plan, so
         // both derive from a strong, specific direction instead of converging on
         // safe defaults. Writes designDirection.md, read by the steps below.
+        // Tradeoff: this is an extra serial LLM round-trip on the critical path
+        // (the concurrent group now depends on its output) — a deliberate cost
+        // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
         new DesignDirectionStep($llm, $renderer, $models['design-direction']),
         // theme.json and the section plan both derive from the prompt + siteSpec +
         // the design direction, so run them concurrently. Design decisions are

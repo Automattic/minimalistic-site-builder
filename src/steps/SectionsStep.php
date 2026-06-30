@@ -20,6 +20,8 @@ declare(strict_types=1);
  */
 final class SectionsStep implements Step
 {
+    use ModelOption;
+
     /** Prefix for a section part's request key, filename, and template-part slug. */
     public const SECTION_PREFIX = 'section-';
 
@@ -54,25 +56,25 @@ final class SectionsStep implements Step
         $imageInstructions = $this->renderer->render('image-generation.md', []);
 
         // The committed creative concept, shared by every section so the whole
-        // page honors one direction (shape language, signature move, mood).
+        // page honors one direction (shape language, signature device, mood).
         $designDirection = DesignDirectionStep::readFor($project);
 
         $requests = [
-            'header' => $this->req($this->renderer->render('header.md', [
+            'header' => $this->withModel(['prompt' => $this->renderer->render('header.md', [
                 'site_spec'  => $siteSpec,
                 'theme_json' => $themeJson,
                 'outline'    => $outline,
-            ])),
-            'footer' => $this->req($this->renderer->render('footer.md', [
+            ])]),
+            'footer' => $this->withModel(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'  => $siteSpec,
                 'theme_json' => $themeJson,
                 'outline'    => $outline,
-            ])),
+            ])]),
         ];
 
         foreach ($sections as $section) {
             $key = self::SECTION_PREFIX . $section['slug'];
-            $requests[$key] = $this->req($this->renderer->render('section.md', [
+            $requests[$key] = $this->withModel(['prompt' => $this->renderer->render('section.md', [
                 'site_spec'        => $siteSpec,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
@@ -83,7 +85,7 @@ final class SectionsStep implements Step
                 'content_notes' => (string) ($section['content_notes'] ?? ''),
                 'wants_image'   => ($section['wants_image'] ?? false) ? 'yes' : 'no',
                 'image_instructions' => $imageInstructions,
-            ]));
+            ])]);
         }
 
         return $requests;
@@ -164,21 +166,5 @@ final class SectionsStep implements Step
             $text = preg_replace('/\n```$/', '', (string) $text);
         }
         return trim((string) $text);
-    }
-
-    /**
-     * Build one batch request, attaching the per-step model override only when
-     * configured. Shared shape across every concurrent LLM step.
-     *
-     * @param array<string,mixed> $extra
-     * @return array<string,mixed>
-     */
-    private function req(string $prompt, array $extra = []): array
-    {
-        $req = ['prompt' => $prompt] + $extra;
-        if ($this->model !== null) {
-            $req['model'] = $this->model;
-        }
-        return $req;
     }
 }

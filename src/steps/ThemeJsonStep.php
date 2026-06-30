@@ -14,6 +14,8 @@ declare(strict_types=1);
  */
 final class ThemeJsonStep implements ConcurrentStep
 {
+    use ModelOption;
+
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
     private const REQ = 'theme-json';
@@ -43,7 +45,7 @@ final class ThemeJsonStep implements ConcurrentStep
             'design_direction' => DesignDirectionStep::readFor($project),
         ]);
 
-        return [self::REQ => $this->req($rendered)];
+        return [self::REQ => $this->withModel(['prompt' => $rendered])];
     }
 
     public function consume(Project $project, array $results): void
@@ -66,23 +68,6 @@ final class ThemeJsonStep implements ConcurrentStep
     public function run(Project $project): void
     {
         $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
-    }
-
-    /**
-     * Build one batch request, attaching the per-step model override only when
-     * configured (so the client falls back to its default model otherwise).
-     * Shared shape across every concurrent LLM step.
-     *
-     * @param array<string,mixed> $extra
-     * @return array<string,mixed>
-     */
-    private function req(string $prompt, array $extra = []): array
-    {
-        $req = ['prompt' => $prompt] + $extra;
-        if ($this->model !== null) {
-            $req['model'] = $this->model;
-        }
-        return $req;
     }
 
     /** @param array<mixed> $theme */
