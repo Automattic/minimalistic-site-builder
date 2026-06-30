@@ -15,6 +15,8 @@ declare(strict_types=1);
  */
 final class SectionPlanStep implements ConcurrentStep
 {
+    use ModelOption;
+
     private const REQ = 'section-plan';
 
     public function __construct(
@@ -37,15 +39,12 @@ final class SectionPlanStep implements ConcurrentStep
     {
         $meta = $project->readJson('meta.json');
         $rendered = $this->renderer->render('section-plan.md', [
-            'user_prompt' => (string) ($meta['prompt'] ?? ''),
-            'site_spec'   => $project->readText('siteSpec.json'),
+            'user_prompt'      => (string) ($meta['prompt'] ?? ''),
+            'site_spec'        => $project->readText('siteSpec.json'),
+            'design_direction' => DesignDirectionStep::readFor($project),
         ]);
 
-        $req = ['prompt' => $rendered];
-        if ($this->model !== null) {
-            $req['model'] = $this->model;
-        }
-        return [self::REQ => $req];
+        return [self::REQ => $this->withModel(['prompt' => $rendered])];
     }
 
     public function consume(Project $project, array $results): void

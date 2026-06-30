@@ -41,6 +41,32 @@ test('site-spec sends no model key when none is configured', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('design-direction passes the configured model into the LLM opts', function () {
+    [$project, $tmp] = sm_project('builder_sm_dd_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $llm = new FakeLlm();
+    $llm->queueText('Brutalist direction: raw concrete palette, mono type.');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new DesignDirectionStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
+
+    assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction sends no model key when none is configured', function () {
+    [$project, $tmp] = sm_project('builder_sm_ddd_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $llm = new FakeLlm();
+    $llm->queueText('Brutalist direction: raw concrete palette, mono type.');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_true(!array_key_exists('model', $llm->calls[0]['opts']), 'no model key when default');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json passes the configured model into the LLM opts', function () {
     [$project, $tmp] = sm_project('builder_sm_tj_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
