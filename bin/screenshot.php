@@ -109,7 +109,12 @@ while (time() < $deadline) {
     // Playground prints this exact line once it is actually serving; it carries
     // the real port. (The site's `/` answers 302, not 200, so polling for a 200
     // would never succeed — the log line is the reliable readiness signal.)
+    // Strip ANSI colour codes first: the CLI wraps "Ready!" and the URL in
+    // colour escapes when stdout is a TTY (and some envs force colour even when
+    // it isn't, e.g. FORCE_COLOR). Those escape sequences sit between "Ready!"
+    // and the URL and would break a naive \s+ match — so remove them up front.
     $log = is_file($serverLog) ? (string) file_get_contents($serverLog) : '';
+    $log = preg_replace('~\x1b\[[0-9;]*m~', '', $log) ?? $log;
     if (preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $log, $m)) {
         $baseUrl = $m[1] . '/';
         break;

@@ -14,6 +14,9 @@ declare(strict_types=1);
  * Builds run sequentially (not concurrently) so per-step timing is clean and a
  * single failure doesn't abort the others mid-flight.
  *
+ * Each build writes its run overview (per-step timing + token spend) to
+ * projects/<slug>/logs/project.log, exactly like a single bin/build.php run.
+ *
  * After each successful build the home page is captured to a full-page
  * screenshot at projects/<slug>/logs/home.png (headless Playground + Chrome),
  * as visual testing evidence. Disable with --no-screenshot.
@@ -21,7 +24,8 @@ declare(strict_types=1);
  * Options:
  *   --with-images   also generate the AI_IMAGE placeholders into real assets.
  *   --only=<slug>   build only the entry whose slug matches.
- *   --no-screenshot skip the post-build home-page screenshot (on by default).
+ *   --screenshot    capture the post-build home-page screenshot (the default).
+ *   --no-screenshot skip the post-build home-page screenshot.
  *   --serve         after building, preview each site in WordPress Playground,
  *                   one at a time (foreground; Ctrl-C a preview to move on to
  *                   the next). Off by default for a batch run.
@@ -88,14 +92,17 @@ foreach ($entries as $i => $entry) {
         continue;
     }
     $baseSlug = ProjectStore::slugify((string) ($entry['slug'] ?? $prompt));
-    $slug = next_free_slug($store, $baseSlug);
+    $slug = $store->freeSlug($baseSlug);
 
     $project = $store->create($slug);
+    $createdAt = gmdate('c');
     $project->writeJson('meta.json', [
         'prompt'           => $prompt,
         'provisional_slug' => $project->slug(),
-        'created_at'       => gmdate('c'),
-        'demo_source'      => $file,
+        'created_at'       => $createdAt,
+        // Absolute path so a built project stays traceable to its source prompt
+        // file regardless of where the command was invoked from.
+        'demo_source'      => realpath($file) ?: $file,
         'demo_id'          => $entry['id'] ?? $baseSlug,
     ]);
 
@@ -105,12 +112,26 @@ foreach ($entries as $i => $entry) {
     }
     echo "  prompt: {$prompt}\n";
 
-    $total = 0.0;
+    // One BuildReport per demo, written to its own logs/project.log — same
+    // accounting bin/build.php produces for a single build. The LLM client's
+    // usage totals are cumulative across the whole batch, so baseline them at
+    // the start of each demo and diff per step.
+    $report = new BuildReport($prompt, $project->slug(), $project->path(), $createdAt);
+    $base = $llm->usageTotals();
+    $prevIn = $base['input_tokens'];
+    $prevOut = $base['output_tokens'];
+    $reqStart = $base['requests'];
+
     $error = null;
     try {
-        $pipeline->runThrough($project, null, function (Step $step, float $secs) use (&$total) {
-            $total += $secs;
-            printf("  %-22s %6.1fs\n", $step->id(), $secs);
+        $pipeline->runThrough($project, null, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
+            $u = $llm->usageTotals();
+            $inDelta = $u['input_tokens'] - $prevIn;
+            $outDelta = $u['output_tokens'] - $prevOut;
+            $prevIn = $u['input_tokens'];
+            $prevOut = $u['output_tokens'];
+            $report->addStep($step->id(), $secs, $inDelta, $outDelta);
+            echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
         });
     } catch (Throwable $e) {
         $error = $e->getMessage();
@@ -122,8 +143,21 @@ foreach ($entries as $i => $entry) {
         try {
             $step->run($project);
             $secs = microtime(true) - $start;
-            $total += $secs;
-            printf("  %-22s %6.1fs\n", $step->id(), $secs);
+            // Image generation uses the Vertex proxy, not Claude — no LLM tokens.
+            $report->addStep($step->id(), $secs, 0, 0);
+            echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+
+            $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
+            $generated = 0;
+            $failed = 0;
+            foreach ($specs as $spec) {
+                match ($spec['status'] ?? '') {
+                    'completed' => $generated++,
+                    'failed'    => $failed++,
+                    default     => null,
+                };
+            }
+            $report->setImages($generated, $failed, count($specs));
         } catch (Throwable $e) {
             $error = 'image step: ' . $e->getMessage();
         }
@@ -135,7 +169,13 @@ foreach ($entries as $i => $entry) {
         continue;
     }
 
-    printf("  %-22s %6.1fs\n", 'TOTAL', $total);
+    $report->setRequestCount($llm->usageTotals()['requests'] - $reqStart);
+    echo $report->totalLine(), "\n";
+    if (($imagesLine = $report->imagesLine()) !== null) {
+        echo $imagesLine, "\n";
+    }
+    $project->writeText('logs/project.log', $report->render());
+    $total = $report->totalSecs();
     echo "  Output: {$project->path()}\n";
 
     // Capture a full-page screenshot of the home page as visual testing
@@ -195,18 +235,3 @@ if ($serve && $built !== []) {
 }
 
 exit($failures > 0 ? 1 : 0);
-
-/**
- * Return the first unused folder slug for a project: baseSlug if free, else
- * baseSlug2, baseSlug3, … — so a re-run never collides with prior evidence.
- */
-function next_free_slug(ProjectStore $store, string $baseSlug): string
-{
-    $slug = $baseSlug;
-    $n = 2;
-    while (is_dir(repo_path('projects/' . $slug))) {
-        $slug = $baseSlug . $n;
-        $n++;
-    }
-    return $slug;
-}
