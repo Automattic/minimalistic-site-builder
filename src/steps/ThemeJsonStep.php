@@ -9,13 +9,20 @@ declare(strict_types=1);
  *         there is no separate design document.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
- * Validates the structure the templates depend on (version 3, the five color
- * slugs, the two font slugs) and fails loud if the model drifts from it.
+ * Validates the structure the templates depend on (version 3, the five required
+ * color slugs, the two required font slugs) and fails loud if the model drifts
+ * from it. The required slugs are a MINIMUM contract, not an exact one: the
+ * model may add expressive extras (a surface/muted color, a third display/mono
+ * font) for variety, so the checks below are subset checks — extras pass, only
+ * a missing required slug fails.
  */
 final class ThemeJsonStep implements ConcurrentStep
 {
     use ModelOption;
 
+    // The guaranteed-present slugs downstream parts/header/footer reference. The
+    // model may add more (extra palette tints, a third font); these are just the
+    // floor every theme must clear.
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
     private const REQ = 'theme-json';

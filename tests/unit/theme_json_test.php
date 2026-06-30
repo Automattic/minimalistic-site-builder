@@ -42,6 +42,34 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json accepts extra palette colors and a third font (loosened contract)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A dark-luxe jewellery brand']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $payload = valid_theme_payload();
+    // Required five + two expressive extras.
+    $payload['settings']['color']['palette'][] = ['slug' => 'surface', 'color' => '#f4efe7', 'name' => 'Surface'];
+    $payload['settings']['color']['palette'][] = ['slug' => 'muted', 'color' => '#dcd6cc', 'name' => 'Muted'];
+    // Required two + an optional display face.
+    $payload['settings']['typography']['fontFamilies'][] = ['slug' => 'display', 'fontFamily' => 'Bodoni Moda, serif', 'name' => 'Display'];
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new ThemeJsonStep($llm, $renderer))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    $colorSlugs = array_column($theme['settings']['color']['palette'], 'slug');
+    $fontSlugs = array_column($theme['settings']['typography']['fontFamilies'], 'slug');
+    assert_eq(['base', 'contrast', 'primary', 'secondary', 'accent', 'surface', 'muted'], $colorSlugs);
+    assert_eq(['heading', 'body', 'display'], $fontSlugs, 'optional third font preserved');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json throws when a required color slug is missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
