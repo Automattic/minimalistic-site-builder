@@ -1,0 +1,10 @@
+{
+  "name": "builder2-bin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Root manifest for the Node helper tools under bin/ (installed together via npm workspaces).",
+  "workspaces": [
+    "bin/screenshot",
+    "bin/block-fixer"
+  ]
+}

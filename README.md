@@ -9,10 +9,17 @@ emits into real assets via Google Imagen (through the WPCOM AI proxy).
 ```bash
 cp .env.example .env
 # then fill in ANTHROPIC_API_KEY (and GOOGLE_VERTEX_API_TOKEN for image generation)
+
+npm install   # once; installs the Node helper tools under bin/ (block-fixer, screenshot)
 ```
 
 Requires PHP 8.1+ (no Composer — the source set is loaded explicitly by
-`src/bootstrap.php`).
+`src/bootstrap.php`) and Node 18+.
+
+The `bin/` helper tools (`bin/block-fixer`, `bin/screenshot`) are npm
+workspaces, so a single `npm install` at the repo root installs all of them.
+The block-fixer runs as a standard step of `bin/build.php`, so this install is
+required for a normal build — not optional.
 
 ## Build a site
 
@@ -82,3 +89,19 @@ images) — without it, the cards report a generation error.
 - If the port is already in use (e.g. an SSH tunnel is holding it), pick another:
   `php -S localhost:8090 bin/image-debug.php`, and forward that port to your
   browser if you're on a remote host.
+
+## Full-page screenshots
+
+`bin/screenshot/screenshot.js` captures a full-page screenshot of any URL (e.g.
+a generated theme served via `bin/playground.php`). It scrolls the page
+top-to-bottom before capturing so lazy-loaded images far down a tall page are
+actually fetched and rendered — a plain `fullPage` capture leaves them as empty
+boxes (see [issue #31](docs/evidence/issue-31/README.md)).
+
+```bash
+npm install   # once, at the repo root; uses your system Chrome, no download
+node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
+```
+
+Pass `--width=<px>`, `--chrome=<path>` (or set `CHROME`), and `--no-scroll` to
+reproduce the old un-scrolled behaviour.

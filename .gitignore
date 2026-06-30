@@ -2,4 +2,5 @@
 /projects/
 eval_run.log
 .playground-blueprint.json
-/bin/block-fixer/node_modules/
+/node_modules/
+docs/evidence/issue-31/fixture/img/
