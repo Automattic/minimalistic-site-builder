@@ -33,6 +33,10 @@ per-step times and token spend, totals, and the image tally — to
 `projects/<slug>/logs/project.log` (the same summary printed to the terminal).
 Run the unit tests with `php tests/run.php`.
 
+Model and sampling settings are configurable in `.env`: `LLM_MODEL_*` selects
+per-step models and `LLM_TEMPERATURE_*` controls per-step temperature. The
+project log records both, which is useful when comparing palette/design runs.
+
 ## Build the demo set
 
 `eval/theme-prompts.json` holds a persisted set of demo prompts. Build them all

@@ -27,6 +27,8 @@ final class BuildReport
     private int $imagesTotal = 0;
 
     private int $requests = 0;
+    /** @var array<string,array{model:?string,temperature:?float}> */
+    private array $llmConfig = [];
 
     public function __construct(
         private string $prompt,
@@ -58,6 +60,24 @@ final class BuildReport
     public function setRequestCount(int $requests): void
     {
         $this->requests = $requests;
+    }
+
+    /**
+     * Record the LLM configuration used by each LLM-backed step so visual
+     * evidence can be compared against the actual model and sampling settings.
+     *
+     * @param array<string,string> $models
+     * @param array<string,float> $temperatures
+     */
+    public function setLlmConfig(array $models, array $temperatures): void
+    {
+        $ids = array_unique(array_merge(array_keys($models), array_keys($temperatures)));
+        foreach ($ids as $id) {
+            $this->llmConfig[$id] = [
+                'model'       => $models[$id] ?? null,
+                'temperature' => $temperatures[$id] ?? null,
+            ];
+        }
     }
 
     public function totalSecs(): float
@@ -150,6 +170,18 @@ final class BuildReport
         $lines[] = $this->totalLine();
         $lines[] = '';
         $lines[] = 'LLM requests : ' . $this->requests;
+        if ($this->llmConfig !== []) {
+            $lines[] = 'LLM config   :';
+            foreach ($this->llmConfig as $id => $cfg) {
+                $temp = $cfg['temperature'] === null ? '—' : self::formatTemperature($cfg['temperature']);
+                $lines[] = sprintf(
+                    '  %-18s model=%s temperature=%s',
+                    $id,
+                    $cfg['model'] ?? '—',
+                    $temp
+                );
+            }
+        }
         if (($img = $this->imagesLine()) !== null) {
             $lines[] = $img;
         }
@@ -157,5 +189,11 @@ final class BuildReport
         $lines[] = '';
 
         return implode("\n", $lines);
+    }
+
+    private static function formatTemperature(float $temperature): string
+    {
+        $formatted = rtrim(rtrim(number_format($temperature, 2, '.', ''), '0'), '.');
+        return str_contains($formatted, '.') ? $formatted : $formatted . '.0';
     }
 }

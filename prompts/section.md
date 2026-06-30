@@ -24,7 +24,7 @@ Rules:
 - Wrap the whole section in a single top-level <!-- wp:group --> with a constrained or full layout, so it drops cleanly into the page in order.
 - Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, list, separator, spacer; query/post-template only if useful).
 - Reference theme.json presets by slug:
-    colors via "backgroundColor" / "textColor" using slugs: base, contrast, primary, secondary, accent
+    colors via "backgroundColor" / "textColor" using declared theme.json palette slugs. Required slugs always exist: base, contrast, primary, secondary, accent. If theme.json declares extras such as surface, muted, wash, ink, or a second accent, use them where they make panels, dividers, callouts, or image captions more expressive.
     fonts via "fontFamily" using slugs: heading, body
   Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2 class="wp-block-heading has-heading-font-family has-primary-color has-text-color">…</h2><!-- /wp:heading -->
 - Reserve the accent color for buttons/CTAs only.

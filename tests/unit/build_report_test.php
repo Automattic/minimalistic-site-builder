@@ -47,3 +47,17 @@ test('build-report renders a full document with header, table, totals and images
     assert_contains('LLM requests : 4', $out);
     assert_contains('Images: 2 generated, 0 failed (2 total)', $out);
 });
+
+test('build-report records llm model and temperature config', function () {
+    $r = new BuildReport('A cozy bakery', 'cozy-bakery', '/tmp/cozy-bakery', '2026-06-30T00:00:00+00:00');
+    $r->setRequestCount(1);
+    $r->setLlmConfig(
+        ['theme-json' => 'claude-opus-4-8'],
+        ['theme-json' => 1.0],
+    );
+
+    $out = $r->render();
+    assert_contains('LLM config', $out);
+    assert_contains('theme-json', $out);
+    assert_contains('model=claude-opus-4-8 temperature=1.0', $out);
+});

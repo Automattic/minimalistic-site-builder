@@ -30,8 +30,8 @@ test('full pipeline produces a structurally valid theme', function () {
                 ['slug' => 'base', 'color' => '#fdf6ec', 'name' => 'Base'],
                 ['slug' => 'contrast', 'color' => '#2b2118', 'name' => 'Contrast'],
                 ['slug' => 'primary', 'color' => '#8a5a2b', 'name' => 'Primary'],
-                ['slug' => 'secondary', 'color' => '#cc9988', 'name' => 'Secondary'],
-                ['slug' => 'accent', 'color' => '#e08a3c', 'name' => 'Accent'],
+                ['slug' => 'secondary', 'color' => '#6f8a3a', 'name' => 'Secondary'],
+                ['slug' => 'accent', 'color' => '#c44732', 'name' => 'Accent'],
             ]],
             'typography' => ['fontFamilies' => [
                 ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],

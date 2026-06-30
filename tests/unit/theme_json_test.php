@@ -92,6 +92,80 @@ test('theme-json throws when a required color slug is missing', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json throws when brand colors collapse to mostly neutral palette', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A documentary photojournalism portfolio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['color']['palette'] = [
+        ['slug' => 'base', 'color' => '#F7F6F2', 'name' => 'Paper White'],
+        ['slug' => 'contrast', 'color' => '#16161A', 'name' => 'Ink Black'],
+        ['slug' => 'primary', 'color' => '#2B2B2E', 'name' => 'Archive Charcoal'],
+        ['slug' => 'secondary', 'color' => '#8A8A86', 'name' => 'Silver Gray'],
+        ['slug' => 'accent', 'color' => '#C4341B', 'name' => 'Pampas Red'],
+    ];
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    assert_throws(function () use ($llm, $renderer, $project) {
+        (new ThemeJsonStep($llm, $renderer))->run($project);
+    });
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json allows a neutral palette when the user explicitly asks for black and white', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A black and white documentary photography portfolio']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['color']['palette'] = [
+        ['slug' => 'base', 'color' => '#F7F6F2', 'name' => 'Paper White'],
+        ['slug' => 'contrast', 'color' => '#16161A', 'name' => 'Ink Black'],
+        ['slug' => 'primary', 'color' => '#2B2B2E', 'name' => 'Archive Charcoal'],
+        ['slug' => 'secondary', 'color' => '#8A8A86', 'name' => 'Silver Gray'],
+        ['slug' => 'accent', 'color' => '#C4341B', 'name' => 'Pampas Red'],
+    ];
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new ThemeJsonStep($llm, $renderer))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq('#2B2B2E', $theme['settings']['color']['palette'][2]['color']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json throws when brand colors are chromatic but too close in hue', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A vibrant restaurant']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['color']['palette'] = [
+        ['slug' => 'base', 'color' => '#FFF8EE', 'name' => 'Warm Paper'],
+        ['slug' => 'contrast', 'color' => '#20140F', 'name' => 'Ink'],
+        ['slug' => 'primary', 'color' => '#C44722', 'name' => 'Tomato'],
+        ['slug' => 'secondary', 'color' => '#D95A2A', 'name' => 'Tangerine'],
+        ['slug' => 'accent', 'color' => '#B83C20', 'name' => 'Chili'],
+    ];
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    assert_throws(function () use ($llm, $renderer, $project) {
+        (new ThemeJsonStep($llm, $renderer))->run($project);
+    });
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json throws when a required font slug is missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

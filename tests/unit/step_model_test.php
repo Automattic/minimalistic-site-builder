@@ -80,6 +80,19 @@ test('theme-json passes the configured model into the LLM opts', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json passes the configured temperature into the LLM opts', function () {
+    [$project, $tmp] = sm_project('builder_sm_tjt_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new ThemeJsonStep($llm, $renderer, 'claude-sonnet-4-6', 0.9))->run($project);
+
+    assert_eq(0.9, $llm->calls[0]['opts']['temperature'] ?? null);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('section-plan passes the configured model into every request', function () {
     [$project, $tmp] = sm_project('builder_sm_sp_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo', 'sections' => ['Hero']]);

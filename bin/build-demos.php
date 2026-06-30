@@ -79,6 +79,8 @@ if ($only !== null && $entries === []) {
 
 $llm = make_llm();
 $pipeline = build_pipeline($llm);
+$models = step_models();
+$temperatures = step_temperatures();
 $store = new ProjectStore(repo_path('projects'));
 
 $built = [];
@@ -117,6 +119,7 @@ foreach ($entries as $i => $entry) {
     // usage totals are cumulative across the whole batch, so baseline them at
     // the start of each demo and diff per step.
     $report = new BuildReport($prompt, $project->slug(), $project->path(), $createdAt);
+    $report->setLlmConfig($models, $temperatures);
     $base = $llm->usageTotals();
     $prevIn = $base['input_tokens'];
     $prevOut = $base['output_tokens'];

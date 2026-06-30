@@ -11,6 +11,8 @@ DESIGN DIRECTION (the committed creative concept for THIS site — let it drive 
 
 Make opinionated, specific design choices that genuinely fit this site's topic, area, audience, and visual vibe — not generic defaults. Translate the DESIGN DIRECTION into concrete tokens: the palette must express its stated palette approach, the font pairing its type pairing, and the spacing/shapes its shape language. Steer clear of the cliché it calls out avoiding. Pick colors and a font pairing that feel designed for THIS brand.
 
+Color quality bar: this theme must have a visible palette, not just paper/ink/grays plus one tiny accent. Unless the USER PROMPT explicitly asks for monochrome, black-and-white, or grayscale, choose at least two chromatic hue families across "primary", "secondary", and "accent". Neutrals belong in "base", "contrast", and optional utility colors like "surface" or "muted"; do not use charcoal/gray/bone aliases for both primary and secondary. If the brand calls for restraint, use low-volume chromatic colors (e.g. oxidized blue, olive, burgundy, ochre, moss, clay, plum) instead of achromatic grays.
+
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 
 - Top-level: "$schema": "https://schemas.wp.org/trunk/theme.json", "version": 3.
@@ -18,10 +20,10 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
 - settings.color.palette: an array that MUST include AT LEAST these five required slugs (downstream templates reference them by name, so they must always exist), each a valid #RRGGBB hex you choose:
     "base"      = page background (body text on it must have strong contrast)
     "contrast"  = body text color
-    "primary"   = main brand color (headings, structure)
-    "secondary" = supporting color (metadata, captions)
-    "accent"    = reserved for CTAs / interaction only
-  Give each a human "name". You MAY add extra palette entries when the design calls for them — e.g. "surface" (a card/panel tint distinct from base), "muted" (a faint divider/background), or a second accent — each with its own slug, name and hex. Add them only when they earn their place; don't pad the palette.
+    "primary"   = main chromatic brand color (headings, structure)
+    "secondary" = supporting chromatic color (metadata, captions, panels)
+    "accent"    = reserved for CTAs / interaction only, distinct from primary/secondary
+  Give each a human "name". You SHOULD add extra palette entries when they help the design render visibly — e.g. "surface" (a card/panel tint distinct from base), "muted" (a faint divider/background), "ink", "wash", or a second accent — each with its own slug, name and hex. Add them only when they earn their place; don't pad the palette. Any extra slug you add must be intended for downstream blocks to use.
 - settings.typography.fluid: true.
 - settings.typography.fontFamilies: an array that MUST include AT LEAST these two required slugs:
     "heading" — a real, commonly available web/Google font that fits the brand, first, then web-safe fallbacks

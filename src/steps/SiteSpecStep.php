@@ -25,6 +25,7 @@ final class SiteSpecStep implements Step
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string

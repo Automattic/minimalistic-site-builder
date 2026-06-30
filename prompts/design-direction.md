@@ -10,9 +10,11 @@ Pick a design direction that genuinely fits this site's topic, area, audience, a
 
 Anchor the look in ONE clear aesthetic — for example (not exhaustive, pick what fits or name your own): brutalist, editorial-magazine, swiss-grid, retro-print, art-deco, neo-brutalist, organic-hand-drawn, maximalist-memphis, dark-luxe, minimalist-mono, playful-pop, technical-blueprint.
 
+Do not use "photography/images provide the color" as a shortcut. Unless the USER PROMPT explicitly asks for monochrome, black-and-white, or grayscale, the brief must include a real chromatic palette strategy with at least two hue families beyond neutrals. Restrained is fine; achromatic sameness is not.
+
 Write a short, vivid design brief in markdown — a few sentences or tight bullets, no more than ~150 words. It must cover, concretely and specific to THIS site:
 - the committed aesthetic / mood / era it evokes
-- the palette approach (temperature, contrast, how the accent is used — describe the strategy, not hex codes)
+- the palette approach (temperature, contrast, at least two chromatic hue families, and how the accent is used — describe the strategy, not hex codes)
 - the type pairing approach (e.g. high-contrast serif display + clean grotesque body — describe it, don't name final fonts)
 - the shape language (corners, rules, density, whitespace)
 - one signature design device that makes the site memorable

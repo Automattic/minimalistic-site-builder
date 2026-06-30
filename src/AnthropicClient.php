@@ -76,6 +76,9 @@ final class AnthropicClient implements Llm
                 ['role' => 'user', 'content' => $prompt],
             ],
         ];
+        if (isset($opts['temperature'])) {
+            $body['temperature'] = (float) $opts['temperature'];
+        }
         if (isset($opts['system'])) {
             $body['system'] = $opts['system'];
         }
@@ -141,7 +144,7 @@ final class AnthropicClient implements Llm
      * concurrently retrying only transient failures, accrues token usage, and
      * returns each request's raw assistant text keyed as the input.
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
      * @return array<string,string> raw text keyed as the input
      */
     private function textBatch(array $requests, bool $json): array
@@ -167,6 +170,9 @@ final class AnthropicClient implements Llm
                     ['role' => 'user', 'content' => (string) $req['prompt']],
                 ],
             ];
+            if (isset($req['temperature'])) {
+                $body['temperature'] = (float) $req['temperature'];
+            }
             if (trim($system) !== '') {
                 $body['system'] = $system;
             }

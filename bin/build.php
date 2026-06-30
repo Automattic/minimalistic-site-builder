@@ -56,6 +56,8 @@ $slug ??= $prompt;
 
 $llm = make_llm();
 $pipeline = build_pipeline($llm);
+$models = step_models();
+$temperatures = step_temperatures();
 
 // Validate --until BEFORE creating the project, so an unknown id fails loud
 // (instead of silently running the whole build) without leaving a stray project
@@ -80,6 +82,7 @@ $project->writeJson('meta.json', [
 echo "Building '{$project->slug()}'\n";
 
 $report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c'));
+$report->setLlmConfig($models, $temperatures);
 
 // Attribute token spend to each step by diffing the client's cumulative usage
 // totals before and after it ran (the reporter fires once a step completes).
