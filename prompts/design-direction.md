@@ -8,6 +8,8 @@ SITE SPEC (JSON — factual info about the site, no design):
 
 Pick a design direction that genuinely fits this site's topic, area, audience, and vibe — then COMMIT to it. Do not hedge toward safe, generic defaults. Deliberately avoid the single most obvious, overused treatment for this kind of site (e.g. a centered hero + all-sans-serif + blue/teal palette) unless the brand truly demands it. Two different sites should never receive the same direction.
 
+CREATIVE SEED FOR THIS BUILD: lean toward a "{{creative_seed}}" sensibility. Treat this as a tie-breaker that pushes you off the default attractor — let it color the aesthetic, palette temperature, type, and shape language wherever it can plausibly fit the brand. If it genuinely clashes with this specific site, pick a different distinctive direction rather than forcing it — but do NOT fall back to the generic default. The goal is that the same site prompt, built twice, lands on visibly different directions.
+
 Anchor the look in ONE clear aesthetic — for example (not exhaustive, pick what fits or name your own): brutalist, editorial-magazine, swiss-grid, retro-print, art-deco, neo-brutalist, organic-hand-drawn, maximalist-memphis, dark-luxe, minimalist-mono, playful-pop, technical-blueprint.
 
 Write a short, vivid design brief in markdown — a few sentences or tight bullets, no more than ~150 words. It must cover, concretely and specific to THIS site:
