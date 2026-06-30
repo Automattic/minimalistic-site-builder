@@ -21,7 +21,10 @@ php bin/build.php "A cozy neighborhood bakery"
 php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate images
 ```
 
-Output lands in `projects/<slug>/`. Run the unit tests with `php tests/run.php`.
+Output lands in `projects/<slug>/`. Each build also writes a run overview —
+per-step times and token spend, totals, and the image tally — to
+`projects/<slug>/logs/project.log` (the same summary printed to the terminal).
+Run the unit tests with `php tests/run.php`.
 
 ## Image prompt debugger
 
