@@ -23,6 +23,7 @@ require_once $src . '/Step.php';
 require_once $src . '/ConcurrentStep.php';
 require_once $src . '/ConcurrentGroup.php';
 require_once $src . '/Pipeline.php';
+require_once $src . '/BuildReport.php';
 require_once $src . '/ThemeValidator.php';
 
 // Steps.
