@@ -18,6 +18,24 @@ test('SectionPlanStep::normalize forces unique, file-safe slugs and fills defaul
     assert_eq(['hero', 'our-story', 'hero-2'], $slugs);
     assert_eq('hero', $sections[0]['type'], 'type preserved');
     assert_eq(false, $sections[0]['wants_image'], 'wants_image defaults to false');
+    assert_eq('centered', $sections[0]['layout'], 'layout defaults to centered when omitted');
+});
+
+test('SectionPlanStep::layout keeps known treatments and falls back to centered', function () {
+    assert_eq('image-left', SectionPlanStep::layout('image-left'));
+    assert_eq('full-bleed', SectionPlanStep::layout('Full-Bleed'), 'case-insensitive');
+    assert_eq('split-screen', SectionPlanStep::layout('  split-screen  '), 'trimmed');
+    assert_eq('centered', SectionPlanStep::layout('diagonal-collage'), 'unknown -> centered');
+    assert_eq('centered', SectionPlanStep::layout(null), 'missing -> centered');
+});
+
+test('SectionPlanStep::normalize preserves a valid requested layout', function () {
+    $sections = SectionPlanStep::normalize([
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout' => 'full-bleed'],
+        ['slug' => 'work', 'title' => 'Work', 'type' => 'gallery', 'layout' => 'asymmetric-grid'],
+    ]);
+    assert_eq('full-bleed', $sections[0]['layout']);
+    assert_eq('asymmetric-grid', $sections[1]['layout']);
 });
 
 test('section-plan writes sections.json', function () {

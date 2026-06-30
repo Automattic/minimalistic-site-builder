@@ -19,6 +19,16 @@ final class SectionPlanStep implements ConcurrentStep
 
     private const REQ = 'section-plan';
 
+    /**
+     * The structural treatments a section may request. Kept in sync with the
+     * enum in prompts/section-plan.md and the per-treatment guidance in
+     * prompts/section.md. "centered" is the neutral default fallback.
+     */
+    public const LAYOUTS = [
+        'image-left', 'image-right', 'full-bleed', 'split-screen',
+        'asymmetric-grid', 'centered', 'overlap', 'stacked-cards',
+    ];
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -105,11 +115,29 @@ final class SectionPlanStep implements ConcurrentStep
                 'slug'          => $slug,
                 'title'         => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
                 'type'          => trim((string) ($section['type'] ?? 'content')),
+                // Structural treatment for this section. Defaults to "centered"
+                // (the neutral stack) when the planner omits it, so the renderer
+                // can always rely on the key being present.
+                'layout'        => self::layout($section['layout'] ?? null),
                 'purpose'       => trim((string) ($section['purpose'] ?? '')),
                 'content_notes' => trim((string) ($section['content_notes'] ?? '')),
                 'wants_image'   => (bool) ($section['wants_image'] ?? false),
             ];
         }
         return $out;
+    }
+
+    /**
+     * Normalize a section's requested layout to one of the known treatments,
+     * falling back to "centered" for anything missing or unrecognized. Keeping
+     * it to a closed set means prompts/section.md can give concrete guidance for
+     * every value the renderer might see. Pure — unit-testable.
+     *
+     * @param mixed $raw
+     */
+    public static function layout($raw): string
+    {
+        $layout = strtolower(trim((string) $raw));
+        return in_array($layout, self::LAYOUTS, true) ? $layout : 'centered';
     }
 }
