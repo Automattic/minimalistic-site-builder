@@ -6,7 +6,7 @@
 //
 //   node bin/screenshot.mjs <url> <out.png> [chromeBinary]
 //
-// Width defaults to 1280 (override with SHOT_WIDTH). Exits non-zero on failure.
+// Width defaults to 1366 (override with SHOT_WIDTH). Exits non-zero on failure.
 
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
@@ -19,7 +19,7 @@ if (!url || !out) {
   console.error('Usage: node bin/screenshot.mjs <url> <out.png> [chromeBinary]');
   process.exit(2);
 }
-const width = parseInt(process.env.SHOT_WIDTH || '1280', 10);
+const width = parseInt(process.env.SHOT_WIDTH || '1366', 10);
 
 const profile = await mkdtemp(join(tmpdir(), 'shot-'));
 const chrome = spawn(chromeBin, [
