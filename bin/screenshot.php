@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Boot a built project in WordPress Playground (headless), capture a full-page
  * screenshot of its home page, and save it under the project's logs/ directory.
  *
- *   php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240]
+ *   php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--keep-alive]
  *
  * Reuses bin/playground.php to start the server (so the same blueprint, theme
  * mount and site options apply), waits until it reports ready, screenshots `/`
@@ -18,6 +18,9 @@ declare(strict_types=1);
  *   --out=<path>   screenshot destination (default projects/<slug>/logs/home.png).
  *   --timeout=<s>  seconds to wait for the server to come up (default 240; the
  *                  first run downloads WordPress, which is slow).
+ *   --keep-alive   after the screenshot, leave Playground running in the
+ *                  foreground (don't tear it down) so the site can be inspected
+ *                  in a browser. Ctrl-C to stop the server.
  *
  * Requires Node.js (npx, for Playground) and a Chrome/Chromium binary. Override
  * the browser with CHROME_BIN; width with SHOT_WIDTH (see bin/screenshot.mjs).
@@ -29,20 +32,22 @@ $slug = null;
 $port = 9400;
 $out = null;
 $timeout = 240;
+$keepAlive = false;
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
     elseif (str_starts_with($a, '--out=')) { $out = substr($a, 6); }
     elseif (str_starts_with($a, '--timeout=')) { $timeout = (int) substr($a, 10); }
+    elseif ($a === '--keep-alive') { $keepAlive = true; }
     elseif ($slug === null && !str_starts_with($a, '--')) { $slug = $a; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240]\n");
+        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--keep-alive]\n");
         exit(1);
     }
 }
 
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240]\n");
+    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--keep-alive]\n");
     exit(1);
 }
 
@@ -139,6 +144,19 @@ if ($exit === 0 && is_file($out)) {
     echo "Saved screenshot: {$out}\n";
 } else {
     fwrite(STDERR, "Screenshot failed (exit {$exit}).\n");
+}
+
+// --keep-alive: hold the (already-running) Playground server open in the
+// foreground so the freshly built site can be inspected in a browser, instead
+// of tearing it down the instant the screenshot lands. The server keeps serving
+// for as long as this process lives; block here until the user interrupts with
+// Ctrl-C, which fires the registered shutdown handler and stops the server.
+if ($keepAlive && is_resource($proc) && $baseUrl !== null) {
+    echo "\nKeeping Playground alive — open {$baseUrl} (Ctrl-C to stop)\n";
+    echo "  admin: {$baseUrl}wp-admin/ (auto-logged in)\n";
+    while (proc_get_status($proc)['running'] ?? false) {
+        sleep(1);
+    }
 }
 
 exit($exit);

@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--serve [--port=<n>]] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--keep-alive] [--serve [--port=<n>]] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -26,6 +26,12 @@ declare(strict_types=1);
  *   --only=<slug>   build only the entry whose slug matches.
  *   --screenshot    capture the post-build home-page screenshot (the default).
  *   --no-screenshot skip the post-build home-page screenshot.
+ *   --keep-alive    after each build, leave its WordPress Playground server
+ *                   running in the foreground so the site can be inspected in a
+ *                   browser (Ctrl-C to stop and move on). Reuses the screenshot
+ *                   server when screenshots are on; otherwise boots one. Unlike
+ *                   --serve this holds the server open as each site finishes,
+ *                   rather than only after the whole batch.
  *   --serve         after building, preview each site in WordPress Playground,
  *                   one at a time (foreground; Ctrl-C a preview to move on to
  *                   the next). Off by default for a batch run.
@@ -41,6 +47,7 @@ $withImages = false;
 $only = null;
 $serve = false;
 $screenshot = true;
+$keepAlive = false;
 $port = 9400;
 $file = repo_path('eval/theme-prompts.json');
 foreach (array_slice($argv, 1) as $a) {
@@ -50,11 +57,12 @@ foreach (array_slice($argv, 1) as $a) {
     elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
     elseif ($a === '--no-serve') { $serve = false; }
     elseif ($a === '--serve') { $serve = true; }
+    elseif ($a === '--keep-alive') { $keepAlive = true; }
     elseif ($a === '--no-screenshot') { $screenshot = false; }
     elseif ($a === '--screenshot') { $screenshot = true; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--no-screenshot] [--keep-alive] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
         exit(1);
     }
 }
@@ -188,12 +196,25 @@ foreach ($entries as $i => $entry) {
         $cmd = 'php ' . escapeshellarg(repo_path('bin/screenshot.php'))
             . ' ' . escapeshellarg($project->slug())
             . ' --port=' . $port
-            . ' --out=' . escapeshellarg($shotPath);
+            . ' --out=' . escapeshellarg($shotPath)
+            // Reuse the screenshot's server for inspection — it holds the site
+            // open in the foreground until Ctrl-C, so the exit code reflects the
+            // interrupt rather than the (already-saved) shot. Don't treat that
+            // as a screenshot failure when --keep-alive is on.
+            . ($keepAlive ? ' --keep-alive' : '');
         passthru($cmd, $shotExit);
-        if ($shotExit !== 0) {
+        if (!$keepAlive && $shotExit !== 0) {
             fwrite(STDERR, "  (screenshot failed — continuing)\n");
             $shotPath = null;
         }
+    } elseif ($keepAlive) {
+        // No screenshot to reuse — boot a Playground server directly and hold it
+        // open in the foreground for inspection (Ctrl-C to stop and continue).
+        echo "  Serving '{$project->slug()}' for inspection (Ctrl-C to continue)…\n";
+        $cmd = 'php ' . escapeshellarg(repo_path('bin/playground.php'))
+            . ' ' . escapeshellarg($project->slug())
+            . ' --port=' . $port;
+        passthru($cmd);
     }
 
     $built[] = [
