@@ -57,3 +57,19 @@ images) — without it, the cards report a generation error.
 - If the port is already in use (e.g. an SSH tunnel is holding it), pick another:
   `php -S localhost:8090 bin/image-debug.php`, and forward that port to your
   browser if you're on a remote host.
+
+## Full-page screenshots
+
+`bin/screenshot/screenshot.js` captures a full-page screenshot of any URL (e.g.
+a generated theme served via `bin/playground.php`). It scrolls the page
+top-to-bottom before capturing so lazy-loaded images far down a tall page are
+actually fetched and rendered — a plain `fullPage` capture leaves them as empty
+boxes (see [issue #31](docs/evidence/issue-31/README.md)).
+
+```bash
+cd bin/screenshot && npm install   # once; uses your system Chrome, no download
+node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
+```
+
+Pass `--width=<px>`, `--chrome=<path>` (or set `CHROME`), and `--no-scroll` to
+reproduce the old un-scrolled behaviour.
