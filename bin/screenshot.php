@@ -9,9 +9,9 @@ declare(strict_types=1);
  *
  * Reuses bin/playground.php to start the server (so the same blueprint, theme
  * mount and site options apply), waits until it reports ready, screenshots `/`
- * via bin/screenshot.mjs (system Chrome over DevTools — no extra deps), then
- * shuts the server down. The image is written to projects/<slug>/logs/home.png
- * by default, serving as visual testing evidence alongside the per-step logs.
+ * via bin/screenshot/screenshot.js (Playwright + system Chrome; scrolls the page
+ * so lazy-loaded images render), then shuts the server down. The image is written
+ * to projects/<slug>/logs/home.png by default, as visual evidence alongside logs.
  *
  * Options:
  *   --port=<n>     port to boot Playground on (default 9400; auto-bumped if busy).
@@ -19,8 +19,9 @@ declare(strict_types=1);
  *   --timeout=<s>  seconds to wait for the server to come up (default 240; the
  *                  first run downloads WordPress, which is slow).
  *
- * Requires Node.js (npx, for Playground) and a Chrome/Chromium binary. Override
- * the browser with CHROME_BIN; width with SHOT_WIDTH (see bin/screenshot.mjs).
+ * Requires Node.js (npx, for Playground; playwright-core under bin/screenshot)
+ * and a Chrome/Chromium binary. Override the browser with CHROME_BIN; width with
+ * SHOT_WIDTH (see bin/screenshot/screenshot.js).
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
@@ -130,9 +131,16 @@ if ($baseUrl === null) {
 }
 
 echo "Capturing {$baseUrl} → {$out}\n";
-$shot = 'node ' . escapeshellarg(repo_path('bin/screenshot.mjs'))
+// Use the lazy-load-aware capturer (bin/screenshot/screenshot.js): it scrolls the
+// whole page to trip every lazy-load trigger and waits for all images to decode
+// before shooting, so AI_IMAGE assets far down a tall homepage actually render
+// (the old bin/screenshot.mjs grabbed the full height without scrolling, leaving
+// lazy images as empty boxes). Width honors SHOT_WIDTH for back-compat.
+$width = (int) (getenv('SHOT_WIDTH') ?: 1280);
+$shot = 'node ' . escapeshellarg(repo_path('bin/screenshot/screenshot.js'))
     . ' ' . escapeshellarg($baseUrl) . ' ' . escapeshellarg($out)
-    . ' ' . escapeshellarg($chrome);
+    . ' --width=' . $width
+    . ' --chrome=' . escapeshellarg($chrome);
 passthru($shot, $exit);
 
 if ($exit === 0 && is_file($out)) {
@@ -173,7 +181,11 @@ function command_exists(string $bin): bool
     return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
 }
 
-/** First available Chrome/Chromium binary (CHROME_BIN wins), or null. */
+/**
+ * First available Chrome/Chromium binary as an ABSOLUTE path (CHROME_BIN wins),
+ * or null. Playwright's executablePath needs a real path, not a bare command
+ * name resolved via PATH — so resolve bare names with `command -v`.
+ */
 function chrome_binary(): ?string
 {
     $candidates = array_filter([
@@ -181,8 +193,15 @@ function chrome_binary(): ?string
         'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
     ]);
     foreach ($candidates as $bin) {
-        if (str_contains($bin, '/') ? is_executable($bin) : command_exists($bin)) {
-            return $bin;
+        if (str_contains($bin, '/')) {
+            if (is_executable($bin)) {
+                return $bin;
+            }
+            continue;
+        }
+        $resolved = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
+        if ($resolved !== '') {
+            return $resolved;
         }
     }
     return null;
