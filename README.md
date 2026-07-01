@@ -44,8 +44,8 @@ php bin/build-demos.php --with-images   # build every demo, with generated image
 
 After each build, the home page is booted headless in WordPress Playground and a
 full-page screenshot is saved to `projects/<slug>/logs/home.png`. Re-runs never
-overwrite prior output — each build goes to the next free slug (`tbilisi-tavern`
-→ `tbilisi-tavern2` → …).
+overwrite prior output — each build goes to the next free slug (`tbilisi`
+→ `tbilisi2` → …).
 
 Needs `ANTHROPIC_API_KEY` and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js
 (for Playground) and a Chrome/Chromium binary (for the screenshot).
@@ -53,10 +53,16 @@ Needs `ANTHROPIC_API_KEY` and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js
 Useful variants:
 
 ```bash
-php bin/build-demos.php --with-images --only=tbilisi-tavern   # just one demo
+php bin/build-demos.php --with-images --only=tbilisi   # just one demo
 php bin/build-demos.php --with-images --no-screenshot         # skip the screenshots
 php bin/build-demos.php --with-images --serve                 # open each in Playground afterward
+php bin/build-demos.php --with-images --keep-alive            # leave Playground running as each site finishes
 ```
+
+`--keep-alive` holds each site's Playground server open in the foreground as it
+finishes building, so you can inspect it in a browser (Ctrl-C to stop and move
+on to the next). Unlike `--serve`, which previews only after the whole batch, it
+keeps the server up the moment each site is done.
 
 ## Image prompt debugger
 
