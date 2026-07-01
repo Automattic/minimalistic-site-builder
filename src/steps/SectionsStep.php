@@ -28,6 +28,7 @@ final class SectionsStep implements Step
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
+        private ThemeKnowledge $knowledge,
         private ?string $model = null,
     ) {}
 
@@ -64,23 +65,30 @@ final class SectionsStep implements Step
                 'site_spec'  => $siteSpec,
                 'theme_json' => $themeJson,
                 'outline'    => $outline,
+                'insights'   => $this->knowledge->playbook('header'),
+                'examples'   => $this->knowledge->examples('header'),
             ])]),
             'footer' => $this->withModel(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'  => $siteSpec,
                 'theme_json' => $themeJson,
                 'outline'    => $outline,
+                'insights'   => $this->knowledge->playbook('footer'),
+                'examples'   => $this->knowledge->examples('footer'),
             ])]),
         ];
 
         foreach ($sections as $section) {
             $key = self::SECTION_PREFIX . $section['slug'];
+            $type = (string) ($section['type'] ?? 'content');
             $requests[$key] = $this->withModel(['prompt' => $this->renderer->render('section.md', [
                 'site_spec'        => $siteSpec,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
                 'outline'          => $outline,
+                'insights'         => $this->knowledge->playbook($type),
+                'examples'         => $this->knowledge->examples($type),
                 'section_title' => (string) ($section['title'] ?? ''),
-                'section_type'  => (string) ($section['type'] ?? 'content'),
+                'section_type'  => $type,
                 'section_purpose' => (string) ($section['purpose'] ?? ''),
                 'content_notes' => (string) ($section['content_notes'] ?? ''),
                 'wants_image'   => ($section['wants_image'] ?? false) ? 'yes' : 'no',

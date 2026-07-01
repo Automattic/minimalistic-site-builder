@@ -9,6 +9,12 @@ THEME TOKENS (theme.json):
 PAGE OUTLINE (for context):
 {{outline}}
 
+DESIGN PLAYBOOK (distilled conventions for this part — guidance, the Rules below still win):
+{{insights}}
+
+REFERENCE EXAMPLES (real footers from strong themes; study structure/tokens, don't copy content):
+{{examples}}
+
 Rules:
 - The footer shows the site name, a few useful links (and contact facts from the spec where given), and a small credit line, in a single top-level wp:group.
 - Use valid CORE block markup only (group, columns/column, site-title, paragraph, navigation, list, social-links if useful).

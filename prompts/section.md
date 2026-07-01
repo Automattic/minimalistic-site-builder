@@ -12,6 +12,12 @@ DESIGN DIRECTION (the committed creative concept for THIS site — honor its sha
 THE FULL PAGE OUTLINE (for context — build ONLY the section marked below):
 {{outline}}
 
+DESIGN PLAYBOOK (distilled conventions for this section type — guidance, the Rules below still win; may be empty):
+{{insights}}
+
+REFERENCE EXAMPLES (real sections of this type from strong themes; study structure/tokens, don't copy content; may be empty):
+{{examples}}
+
 SECTION TO BUILD:
   Title:    {{section_title}}
   Type:     {{section_type}}

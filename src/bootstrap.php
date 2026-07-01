@@ -18,6 +18,7 @@ require_once $src . '/ImagePromptComposer.php';
 require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
 require_once $src . '/PromptRenderer.php';
+require_once $src . '/ThemeKnowledge.php';
 require_once $src . '/ModelOption.php';
 require_once $src . '/Step.php';
 require_once $src . '/ConcurrentStep.php';
@@ -68,6 +69,17 @@ function step_models(): array
         // Section markup is the quality-critical work — best model by default.
         'sections'     => Env::get('LLM_MODEL_SECTIONS',     $default),
     ];
+}
+
+/**
+ * The design-knowledge loader pointed at the themer repo (insights + corpus
+ * examples). Reads THEMER_ROOT (default to the co-located checkout). When that
+ * path is absent the loader degrades to empty strings and builds proceed
+ * unchanged — see src/ThemeKnowledge.php.
+ */
+function make_theme_knowledge(): ThemeKnowledge
+{
+    return new ThemeKnowledge(Env::get('THEMER_ROOT', '/home/matias/dev/a8c/themer'));
 }
 
 /** Build the production LLM transport from environment configuration. */
@@ -122,8 +134,10 @@ function build_pipeline(Llm $llm): Pipeline
             new SectionPlanStep($llm, $renderer, $models['section-plan']),
         ]),
         // Generate the header, footer, and every section part in one concurrent
-        // batch, then stitch them into the page deterministically.
-        new SectionsStep($llm, $renderer, $models['sections']),
+        // batch, then stitch them into the page deterministically. Each part call
+        // is fed the matching design playbook + few-shot examples from the themer
+        // repo (empty when that repo is absent).
+        new SectionsStep($llm, $renderer, make_theme_knowledge(), $models['sections']),
         new AssembleLandingPageStep(),
         // Collect image placeholders BEFORE fix-blocks: the block re-serializer
         // strips the alt from wp:cover background images (core cover save()

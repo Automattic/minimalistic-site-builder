@@ -22,7 +22,7 @@ function sections_fixture(): array
 test('sections requests one part per header/footer/section', function () {
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
-    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer, new ThemeKnowledge(null)))->requests($project);
 
     assert_eq(['header', 'footer', 'section-hero', 'section-about'], array_keys($reqs));
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -37,7 +37,7 @@ test('sections writes header, footer and a part per section', function () {
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    (new SectionsStep($llm, $renderer))->run($project);
+    (new SectionsStep($llm, $renderer, new ThemeKnowledge(null)))->run($project);
 
     foreach (['parts/header.html', 'parts/footer.html', 'parts/section-hero.html', 'parts/section-about.html'] as $rel) {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
@@ -55,7 +55,7 @@ test('sections strips a stray markdown code fence from a part response', functio
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    (new SectionsStep($llm, $renderer))->run($project);
+    (new SectionsStep($llm, $renderer, new ThemeKnowledge(null)))->run($project);
 
     $header = $project->readText('theme/parts/header.html');
     assert_true(!str_contains($header, '```'), 'code fence stripped');
@@ -73,7 +73,7 @@ test('sections throws when a part has no block markup', function () {
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     assert_throws(function () use ($llm, $renderer, $project) {
-        (new SectionsStep($llm, $renderer))->run($project);
+        (new SectionsStep($llm, $renderer, new ThemeKnowledge(null)))->run($project);
     });
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -88,7 +88,7 @@ test('sections writes nothing when any part is invalid (no partial output)', fun
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     assert_throws(function () use ($llm, $renderer, $project) {
-        (new SectionsStep($llm, $renderer))->run($project);
+        (new SectionsStep($llm, $renderer, new ThemeKnowledge(null)))->run($project);
     });
     // The valid header/footer must NOT have been written before the bad part threw.
     assert_true(!$project->exists('theme/parts/header.html'), 'no part written when a sibling is invalid');

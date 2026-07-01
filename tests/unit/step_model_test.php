@@ -107,7 +107,7 @@ test('sections passes the configured model into every part request', function ()
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    (new SectionsStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
+    (new SectionsStep($llm, $renderer, new ThemeKnowledge(null), 'claude-opus-4-8'))->run($project);
 
     assert_true(count($llm->calls) === 3, 'one request per part');
     foreach ($llm->calls as $call) {
@@ -129,7 +129,7 @@ test('sections sends no model key when none is configured', function () {
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    (new SectionsStep($llm, $renderer))->run($project);
+    (new SectionsStep($llm, $renderer, new ThemeKnowledge(null)))->run($project);
 
     assert_true(!array_key_exists('model', $llm->calls[0]['opts']), 'no model key when default');
     exec('rm -rf ' . escapeshellarg($tmp));
