@@ -21,6 +21,11 @@ final class FakeImageClient implements ImageClient
     /** Prompt substrings that should fail generation (for partial-failure tests). */
     public array $failPromptSubstrings = [];
 
+    public function model(): string
+    {
+        return 'fake-image-model';
+    }
+
     public function generate(string $prompt, array $opts = []): string
     {
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];

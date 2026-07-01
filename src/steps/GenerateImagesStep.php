@@ -44,6 +44,12 @@ final class GenerateImagesStep implements Step
             return;
         }
 
+        // Route this run's image-request transcripts into the project's own
+        // logs/images/ directory (projects/<slug>/logs/images/) — the sibling of
+        // logs/llms/. Set here (not in Pipeline) so bin/images.php, which runs
+        // this step directly, logs too.
+        ImageLogger::setDir($project->logPath('images'));
+
         // Site-wide context (name/topic/description) prepended to every image
         // prompt so the model grounds each image in what the site is about.
         $siteContext = self::siteContext(
@@ -98,6 +104,17 @@ final class GenerateImagesStep implements Step
                 $filename = (string) $specs[$i]['filename'];
                 $result = $results[$pos] ?? ['ok' => false, 'error' => 'no result returned'];
 
+                // The full prompt + every parameter that shaped this request,
+                // logged below whether it succeeds or fails.
+                $logRequest = [
+                    'model'        => $this->images->model(),
+                    'prompt'       => (string) $batchSpecs[$pos]['prompt'],
+                    'aspect_ratio' => (string) $batchSpecs[$pos]['aspect_ratio'],
+                    'subject'      => (string) ($specs[$i]['subject'] ?? ''),
+                    'page_context' => (string) ($specs[$i]['pageContext'] ?? ''),
+                    'style'        => (string) ($specs[$i]['style'] ?? ''),
+                ];
+
                 // A single image must never abort the build — isolate both a
                 // generation failure and a write failure (disk full, bad path).
                 try {
@@ -110,10 +127,15 @@ final class GenerateImagesStep implements Step
                     unset($specs[$i]['error']);
                     $resolved[$specs[$i]['src']] = $specs[$i]['url'];
                     fwrite(STDERR, "    generated {$filename}\n");
+                    ImageLogger::log($filename, $logRequest, [
+                        'path'  => 'theme/assets/' . $filename,
+                        'bytes' => strlen((string) $result['bytes']),
+                    ]);
                 } catch (Throwable $e) {
                     $specs[$i]['status'] = 'failed';
                     $specs[$i]['error']  = $e->getMessage();
                     fwrite(STDERR, "    FAILED {$filename}: {$e->getMessage()}\n");
+                    ImageLogger::log($filename, $logRequest, [], $e->getMessage());
                 }
             }
 
