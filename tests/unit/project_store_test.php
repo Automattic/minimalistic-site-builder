@@ -7,6 +7,16 @@ test('slugify lowercases, hyphenates and trims', function () {
     assert_eq('naturaleza-sabia', ProjectStore::slugify('Naturaleza Sabia'));
 });
 
+test('randomSlug is a short, slug-safe two-word name', function () {
+    for ($i = 0; $i < 50; $i++) {
+        $slug = ProjectStore::randomSlug();
+        // adjective-noun, all lowercase alnum + a single hyphen, and stable
+        // under slugify() (so create()/freeSlug() never rewrite it).
+        assert_true((bool) preg_match('/^[a-z]+-[a-z]+$/', $slug), "unexpected slug: {$slug}");
+        assert_eq($slug, ProjectStore::slugify($slug));
+    }
+});
+
 test('freeSlug returns the base slug when its folder is free', function () {
     $base = sys_get_temp_dir() . '/builder-store-' . getmypid() . '-' . uniqid();
     mkdir($base, 0775, true);

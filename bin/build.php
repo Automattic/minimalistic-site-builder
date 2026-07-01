@@ -8,7 +8,9 @@ declare(strict_types=1);
  *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
  * printing per-step timing and token spend and writing the full run overview to
- * projects/<slug>/logs/project.log. Re-running reuses the same project directory.
+ * projects/<slug>/logs/project.log. Without --slug the folder gets a short
+ * arbitrary name (e.g. "amber-otter"); pass --slug to target a fixed directory
+ * and reuse it across re-runs.
  *
  * --until=<step-id> stops after that step (an unknown id errors with the list).
  * Steps that run concurrently share one id (e.g. theme-json+section-plan), but
@@ -52,8 +54,6 @@ if ($prompt === null || trim($prompt) === '') {
     exit(1);
 }
 
-$slug ??= $prompt;
-
 $llm = make_llm();
 $pipeline = build_pipeline($llm);
 
@@ -67,6 +67,12 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
 }
 
 $store = new ProjectStore(repo_path('projects'));
+
+// Without an explicit --slug, name the folder with a short arbitrary slug
+// (e.g. "amber-otter") rather than echoing the whole prompt. freeSlug() adds
+// the same repetition protection demo builds get, so a repeat name never
+// overwrites an existing project.
+$slug ??= $store->freeSlug(ProjectStore::randomSlug());
 $project = $store->create($slug);
 
 // Seed meta.json (provisional slug = directory name; the canonical site slug

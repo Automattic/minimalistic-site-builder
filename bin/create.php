@@ -38,8 +38,12 @@ if ($prompt === null || trim($prompt) === '') {
     exit(1);
 }
 
-$slug ??= $prompt;
-$project = (new ProjectStore(repo_path('projects')))->create($slug);
+$store = new ProjectStore(repo_path('projects'));
+// Without an explicit --slug, name the folder with a short arbitrary slug
+// (e.g. "amber-otter") rather than echoing the whole prompt. freeSlug() adds
+// repetition protection so a repeat name never overwrites an existing project.
+$slug ??= $store->freeSlug(ProjectStore::randomSlug());
+$project = $store->create($slug);
 $project->writeJson('meta.json', [
     'prompt' => $prompt, 'provisional_slug' => $project->slug(), 'created_at' => gmdate('c'),
 ]);

@@ -50,6 +50,30 @@ final class ProjectStore
     }
 
     /**
+     * A short, arbitrary, human-friendly slug like "amber-otter" or
+     * "brisk-harbor". Used when a project is created from a prompt without an
+     * explicit slug, so the folder name stays short and memorable instead of
+     * echoing the whole prompt. Collisions are possible, so callers should wrap
+     * this in freeSlug() for the same repetition protection demo builds get.
+     */
+    public static function randomSlug(): string
+    {
+        $adjectives = [
+            'amber', 'azure', 'brisk', 'calm', 'clever', 'coral', 'crisp',
+            'dapper', 'dusky', 'eager', 'fleet', 'gentle', 'golden', 'jolly',
+            'lucid', 'mellow', 'nimble', 'olive', 'plucky', 'quiet', 'rustic',
+            'silver', 'sunny', 'swift', 'teal', 'vivid', 'warm', 'zesty',
+        ];
+        $nouns = [
+            'otter', 'harbor', 'meadow', 'falcon', 'cedar', 'lantern', 'pebble',
+            'willow', 'comet', 'ember', 'grove', 'heron', 'maple', 'brook',
+            'canyon', 'dune', 'fjord', 'garden', 'island', 'lagoon', 'orchard',
+            'ridge', 'summit', 'thicket', 'valley', 'harvest', 'beacon', 'anchor',
+        ];
+        return $adjectives[array_rand($adjectives)] . '-' . $nouns[array_rand($nouns)];
+    }
+
+    /**
      * Filesystem- and URL-safe slug: lowercase, alnum + single hyphens,
      * trimmed, capped. Always returns a non-empty string.
      */
