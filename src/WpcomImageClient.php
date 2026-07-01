@@ -39,6 +39,12 @@ final class WpcomImageClient implements ImageClient
         return $this->requests;
     }
 
+    /** The Imagen model this client generates with (used for request logging). */
+    public function model(): string
+    {
+        return $this->model;
+    }
+
     /**
      * Map the prompt's aspect-ratio keyword to the Imagen ratio string.
      * Accepts either a keyword (square/landscape/portrait) or a ratio as-is.

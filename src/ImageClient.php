@@ -17,6 +17,12 @@ interface ImageClient
     public function generate(string $prompt, array $opts = []): string;
 
     /**
+     * The model identifier this client generates with (e.g.
+     * "imagen-4.0-generate-001"). Used for request logging.
+     */
+    public function model(): string;
+
+    /**
      * Generate several images concurrently. Implementations should issue the
      * requests together (not one-at-a-time) and tolerate partial failure: one
      * image failing must not abort the others.
