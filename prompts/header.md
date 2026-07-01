@@ -11,7 +11,9 @@ PAGE OUTLINE (the sections the nav may link to):
 
 Rules:
 - The header has the site title (wp:site-title) or logo on one side and a primary wp:navigation on the other, in a single top-level wp:group with a row/flex layout and space-between justification.
-- Use valid CORE block markup only (group, site-title, site-logo, navigation, buttons/button, image).
+- Navigation default: the `wp:navigation` should contain `<!-- wp:page-list /-->` so it auto-reflects the site's pages — do NOT hand-author `wp:navigation-link` entries unless a curated menu is clearly wanted.
+- Consider a sticky header when it suits the design (e.g. `"style":{"position":{"type":"sticky","top":"0px"}}` on the top-level group), so the nav stays available as the visitor scrolls.
+- Use valid CORE block markup only (group, site-title, site-logo, navigation, page-list, buttons/button, image).
 - Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body). Reserve accent for a CTA button only.
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Every block comment must be correctly closed and HTML class names must match the block.

@@ -9,7 +9,15 @@ SITE SPEC (JSON):
 DESIGN DIRECTION (the committed creative concept for THIS site — let it shape the section ideas and flow):
 {{design_direction}}
 
-Use the spec's "sections" list as a starting point, but improve it: add, reorder, split, or rename sections so the page is richer and flows well. Let the design direction's signature device and mood inform which sections you choose and how they're framed. Aim for 5 to 8 sections.
+This single landing page is the site's centerpiece — give it the most creative energy: a strong hero, at least 3 unique, image-rich content sections, and a compelling closing CTA. Use the spec's "sections" list as a starting point, but improve it: add, reorder, split, or rename sections so the page is richer and flows well. Let the design direction's signature device and mood inform which sections you choose and how they're framed. Aim for 5 to 8 sections.
+
+Tailor the section choice to the site's `site_type` / `area`, for example:
+- portfolio → project or photo gallery, selected work, about the maker
+- SaaS / product → feature grids, how-it-works, pricing tiers
+- restaurant → menu highlights, about/story, reservations or visit
+- agency → case-study cards, services grid, client logos
+- blog / news → latest posts, categories, featured story
+Pick what genuinely fits THIS site rather than a rigid template.
 
 Return a single JSON object with this exact shape:
 {
