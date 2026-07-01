@@ -17,7 +17,6 @@ test('SectionPlanStep::normalize forces unique, file-safe slugs and fills defaul
     $slugs = array_column($sections, 'slug');
     assert_eq(['hero', 'our-story', 'hero-2'], $slugs);
     assert_eq('hero', $sections[0]['type'], 'type preserved');
-    assert_eq(false, $sections[0]['wants_image'], 'wants_image defaults to false');
 });
 
 test('section-plan writes sections.json', function () {
@@ -28,7 +27,7 @@ test('section-plan writes sections.json', function () {
 
     $llm = new FakeLlm();
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'wants_image' => true],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
         ['slug' => 'about', 'title' => 'About', 'type' => 'about'],
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -38,7 +37,6 @@ test('section-plan writes sections.json', function () {
     $plan = $project->readJson('sections.json');
     assert_eq(2, count($plan['sections']));
     assert_eq('hero', $plan['sections'][0]['slug']);
-    assert_eq(true, $plan['sections'][0]['wants_image']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

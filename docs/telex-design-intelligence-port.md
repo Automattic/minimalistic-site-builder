@@ -282,7 +282,7 @@ builder has only the landing page:
   blog → latest posts) — Telex's examples at lines 191–197.
 - Let the design direction's **signature device and mood** drive which sections
   exist and how they're framed (builder already says this — reinforce).
-- Keep `wants_image` discipline (only where imagery genuinely helps).
+- Imagery discipline lives in the section-generation step (only where imagery genuinely helps) rather than a per-section plan flag.
 
 ### 4.6 `prompts/image-generation.md`
 

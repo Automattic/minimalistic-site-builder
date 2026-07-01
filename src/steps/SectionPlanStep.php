@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Input:  meta.json (user prompt) + siteSpec.json. Runs alongside theme-json
  *         (both depend only on the brief + spec) in a ConcurrentGroup.
  * Output: sections.json — { "sections": [ { slug, title, type, purpose,
- *         content_notes, wants_image } ] }, in display order.
+ *         content_notes } ] }, in display order.
  *
  * This enriches siteSpec's flat "sections" string list into a concrete brief per
  * section, which the sections step then generates independently and in parallel,
@@ -107,7 +107,6 @@ final class SectionPlanStep implements ConcurrentStep
                 'type'          => trim((string) ($section['type'] ?? 'content')),
                 'purpose'       => trim((string) ($section['purpose'] ?? '')),
                 'content_notes' => trim((string) ($section['content_notes'] ?? '')),
-                'wants_image'   => (bool) ($section['wants_image'] ?? false),
             ];
         }
         return $out;

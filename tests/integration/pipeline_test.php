@@ -41,7 +41,7 @@ test('full pipeline produces a structurally valid theme', function () {
     ]);
     // section-plan (json) — ordered list of sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'wants_image' => true],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
         ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features'],
     ]]);
     // design-direction (raw text) — the committed creative brief, runs before the
