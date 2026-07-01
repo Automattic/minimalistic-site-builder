@@ -149,13 +149,7 @@ final class LlmLogger
             'Tokens       : ' . sprintf('%d in + %d out = %d total', $input, $output, $input + $output),
         ]);
 
-        $body = json_encode(
-            $request,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
-        );
-        if ($body === false) {
-            $body = '(unencodable request)';
-        }
+        $body = self::renderRequest($request);
 
         return implode("\n", [
             $header,
@@ -170,5 +164,106 @@ final class LlmLogger
             $rule,
             '',
         ]);
+    }
+
+    /**
+     * Render the request in a human-readable way: the small scalar params
+     * (model, max_tokens, …) as compact JSON, then the `system` prompt and each
+     * `message` as actual multi-line text with real line breaks — so the prompt
+     * reads like prose instead of one long JSON string full of escaped "\n".
+     * Pure — unit-testable.
+     *
+     * @param array<string,mixed> $request
+     */
+    public static function renderRequest(array $request): string
+    {
+        // Pull out the bulky, prose-like fields so we can render them as text;
+        // everything else (model, max_tokens, stream, temperature, …) stays as
+        // a compact JSON block at the top.
+        $system   = $request['system']   ?? null;
+        $messages = $request['messages'] ?? null;
+        $tools    = $request['tools']    ?? null;
+        unset($request['system'], $request['messages'], $request['tools']);
+
+        $parts = [];
+
+        if ($request !== []) {
+            $params = json_encode(
+                $request,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
+            $parts[] = $params === false ? '(unencodable params)' : $params;
+        }
+
+        if ($system !== null && $system !== '') {
+            $parts[] = "### SYSTEM\n" . self::renderContent($system);
+        }
+
+        if (is_array($messages)) {
+            foreach ($messages as $i => $message) {
+                $role = is_array($message) ? (string) ($message['role'] ?? 'unknown') : 'unknown';
+                $content = is_array($message) ? ($message['content'] ?? '') : $message;
+                $parts[] = sprintf("### MESSAGE %d [%s]\n%s", $i + 1, strtoupper($role), self::renderContent($content));
+            }
+        }
+
+        if ($tools !== null && $tools !== []) {
+            $toolsJson = json_encode($tools, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $parts[] = "### TOOLS\n" . ($toolsJson === false ? '(unencodable tools)' : $toolsJson);
+        }
+
+        return implode("\n\n", $parts);
+    }
+
+    /**
+     * Render a message/system `content` value as readable text. A plain string
+     * comes through verbatim (real newlines intact); the content-block array
+     * form (text / tool_use / tool_result / image) is flattened block by block.
+     * Pure.
+     *
+     * @param mixed $content
+     */
+    public static function renderContent($content): string
+    {
+        if (is_string($content)) {
+            return $content;
+        }
+        if (!is_array($content)) {
+            return (string) json_encode($content, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+
+        $blocks = [];
+        foreach ($content as $block) {
+            if (is_string($block)) {
+                $blocks[] = $block;
+                continue;
+            }
+            if (!is_array($block)) {
+                $blocks[] = (string) json_encode($block, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                continue;
+            }
+            $type = (string) ($block['type'] ?? '');
+            switch ($type) {
+                case 'text':
+                    $blocks[] = (string) ($block['text'] ?? '');
+                    break;
+                case 'image':
+                    $src = $block['source'] ?? [];
+                    $kind = is_array($src) ? (string) ($src['media_type'] ?? $src['type'] ?? 'image') : 'image';
+                    $blocks[] = "[image: {$kind}]";
+                    break;
+                case 'tool_use':
+                    $name = (string) ($block['name'] ?? '');
+                    $input = json_encode($block['input'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    $blocks[] = "[tool_use: {$name}]\n" . ($input === false ? '' : $input);
+                    break;
+                case 'tool_result':
+                    $blocks[] = "[tool_result]\n" . self::renderContent($block['content'] ?? '');
+                    break;
+                default:
+                    $blocks[] = (string) json_encode($block, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            }
+        }
+        return implode("\n", $blocks);
     }
 }

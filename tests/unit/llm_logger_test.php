@@ -58,6 +58,34 @@ test('format renders summary header, request, and response', function () {
     assert_contains('<!-- wp:group -->', $out, 'full response text is included');
 });
 
+test('format renders message content as readable multi-line text, not escaped JSON', function () {
+    $request = [
+        'model'    => 'claude-opus-4-8',
+        'system'   => "You are the design lead.\nBe tasteful.",
+        'messages' => [['role' => 'user', 'content' => "Line one\nLine two"]],
+    ];
+    $out = LlmLogger::format('section-hero', $request, ['text' => 'ok', 'input' => 1, 'output' => 2], 1.0);
+
+    assert_contains("### SYSTEM\nYou are the design lead.\nBe tasteful.", $out, 'system prompt keeps real newlines');
+    assert_contains("### MESSAGE 1 [USER]\nLine one\nLine two", $out, 'user content keeps real newlines');
+    assert_true(strpos($out, 'Line one\nLine two') === false, 'no escaped \\n in the rendered prompt');
+    assert_contains('"model": "claude-opus-4-8"', $out, 'scalar params still shown as JSON');
+});
+
+test('renderContent flattens content blocks (text, tool_use, image)', function () {
+    $content = [
+        ['type' => 'text', 'text' => 'hello'],
+        ['type' => 'tool_use', 'name' => 'get_theme', 'input' => ['slug' => 'x']],
+        ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => 'image/png']],
+    ];
+    $out = LlmLogger::renderContent($content);
+
+    assert_contains('hello', $out);
+    assert_contains('[tool_use: get_theme]', $out);
+    assert_contains('"slug": "x"', $out);
+    assert_contains('[image: image/png]', $out);
+});
+
 test('log writes a file to the configured directory and is reversible', function () {
     $dir = ll_tmpdir() . '/llms';
     LlmLogger::setDir($dir);
