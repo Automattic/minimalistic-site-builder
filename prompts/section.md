@@ -39,6 +39,10 @@ Section discipline:
 Hero layout variety (if this is the hero section):
 - Do NOT default to "text left, image right." Pick the composition the DESIGN DIRECTION committed to, from this menu: full-bleed background image with overlaid text; left-aligned image; centered/stacked; asymmetric/grid-breaking; partial coverage (~60–70% width); split-diagonal; framed/inset.
 - Express a full-bleed hero as a `wp:cover` (align:"full") with an inner `wp-block-cover__image-background` — see the IMAGE INSTRUCTIONS pattern below.
+- A full-bleed hero BACKGROUND image (the `wp-block-cover__image-background`) MUST be `landscape` — never `square` or `portrait` — so it fills the banner cleanly. A `framed`/inset or foreground image inside the hero (e.g. a portrait in a contained frame, or a second image layered over the background) is free to be `portrait` or `square` — pick the aspect ratio that fits its own slot, and let the frame follow that aspect rather than cropping the image toward a different shape.
+
+Text orientation (all sections):
+- Keep all headline and body copy horizontal. NEVER rotate reading text — no `writing-mode: vertical-rl`/`vertical-lr`, no `transform: rotate` on headings, paragraphs, or the hero H1. Vertical orientation is allowed ONLY for a tiny decorative label or eyebrow (e.g. a frame number or single short word), never for a heading or a sentence.
 
 Visual richness beyond the one hero image — build atmosphere with tokens, NOT extra photos and NOT `<style>` tags:
 - Use theme.json gradient and shadow presets (`"gradient":"<slug>"` on cover/group backgrounds; the shadow presets for depth), color blocks, typographic scale, decorative borders (`"style":{"border":{...}}`), and spacing rhythm via inline `style` on group/heading wrappers.

@@ -27,9 +27,11 @@ AI_IMAGE: subject | page-context | style | aspect-ratio
 The filename is extracted from the `src` attribute automatically. Keep `subject` and `page-context` as two distinct fields — do not fold the placement into the subject.
 
 **Aspect ratio options:**
-- `square`: 1:1 ratio (1024x1024)
-- `landscape`: 16:9 ratio (1792x1024) — use for hero images, banners
-- `portrait`: 9:16 ratio (1024x1792) — use for tall images
+- `square`: 1:1 ratio (1024x1024) — only when the layout slot is genuinely 1:1
+- `landscape`: 16:9 ratio (1792x1024) — usually for hero and banner images; also the default for wide feature/gallery rows
+- `portrait`: 9:16 ratio (1024x1792) — usually for tall images
+
+A full-bleed hero/cover BACKGROUND image MUST be `landscape` — never `square` or `portrait` — so it fills the wide banner without being cropped. This applies only to the background: a `framed` or foreground image inside the hero (e.g. a portrait shot in a contained frame, or a second image layered over the background) picks whatever aspect ratio fits its own slot. Generally, match each image's aspect ratio to the shape of the slot it fills so it is not cropped toward an unintended shape.
 
 **Grid and row consistency:**
 When creating multiple images that will be displayed together in a row or grid (e.g. team members, product cards, blog post thumbnails, gallery items), ALL images in that group MUST use the same aspect ratio and orientation. This ensures visual alignment and a cohesive layout. For example, if you have three cards in a row, all three images should be `landscape`, `portrait`, or `square` — never a mix.
