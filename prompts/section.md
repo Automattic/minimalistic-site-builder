@@ -17,7 +17,6 @@ SECTION TO BUILD:
   Type:     {{section_type}}
   Purpose:  {{section_purpose}}
   Notes:    {{content_notes}}
-  Use imagery: {{wants_image}}
 
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
@@ -52,7 +51,7 @@ Equal-height card rows (features, services, team, pricing, gallery cards) — us
 - For a bottom-aligned CTA, wrap it in `wp:buttons` with `"className":"cta-bottom"`.
   (The supporting `.equal-cards` / `.cta-bottom` CSS already ships in the theme's style.css — just use these class hooks; do NOT add `<style>` tags.)
 
-- If "Use imagery" is yes, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS below. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
+- Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS below. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
 - Every block comment must be correctly closed and the HTML class names must match the block (standard WordPress block classes).
 
 IMAGE INSTRUCTIONS:
