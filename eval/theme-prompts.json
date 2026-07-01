@@ -6,7 +6,7 @@
       "id": "portfolio",
       "slug": "portfolio",
       "site_type": "portfolio",
-      "prompt": "I need a theme for my personal portfolio. It should be elegant and modern.",
+      "prompt": "Create a minimalist theme for my photo-journalism website for my portfolio. I'm an Argentinean photo-journalist based in Buenos Aires. I covered the most important social and political events of the country in the last 20 years.",
       "notes": "Minimalist portfolio; expect heavy use of full-bleed image blocks / galleries and AI_IMAGE placeholders."
     },
     {
