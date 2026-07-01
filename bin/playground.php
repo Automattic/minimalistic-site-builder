@@ -97,12 +97,29 @@ $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 // disables auto-detecting a project from the cwd (the repo root, which is not a
 // WP project) — we specify exactly what to mount with --mount, and the CLI's own
 // help recommends pairing --mount with --no-auto-mount for deterministic mounts.
+//
+// --reset wipes the persisted site directory before booting. Without it the theme
+// silently fails to activate with "Stylesheet is missing": Playground persists the
+// site under ~/.wordpress-playground/sites/<sha256(cwd)> and writes the *mount
+// point* wp-content/themes/<slug> to disk as an empty folder (the bind-mounted
+// theme content itself is never persisted). On the next boot that persisted empty
+// folder shadows our theme --mount, so WordPress sees a theme dir with no
+// style.css. Resetting guarantees the mounted theme is the only thing at that path.
 $cmd = sprintf(
-    'npx --yes @wp-playground/cli@latest start --skip-browser --no-auto-mount --port=%d --mount=%s --blueprint=%s',
+    'npx --yes @wp-playground/cli@latest start --skip-browser --no-auto-mount --reset --port=%d --mount=%s --blueprint=%s',
     $port,
     escapeshellarg($mount),
     escapeshellarg($blueprintPath)
 );
+
+// The site id is sha256(cwd) when --no-auto-mount is set, so launching every
+// project from the repo root funnels them all into ONE shared persisted site
+// (whose themes/ then accumulates a stale empty folder per project, and whose
+// --reset would clobber another project's still-running --keep-alive server).
+// Launch from the project directory instead: each project gets its own site id,
+// so --reset only ever touches this project's own site. Paths above are absolute,
+// so the cwd change is safe.
+chdir(repo_path("projects/{$slug}"));
 
 echo "Starting WordPress Playground for '{$slug}'" . ($name !== '' ? " ({$name})" : '') . "\n";
 echo "  theme:  {$themeDir}\n";
