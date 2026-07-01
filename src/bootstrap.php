@@ -121,6 +121,10 @@ function build_pipeline(Llm $llm): Pipeline
             new ThemeJsonStep($llm, $renderer, $models['theme-json']),
             new SectionPlanStep($llm, $renderer, $models['section-plan']),
         ]),
+        // theme.json only names the heading/body families; nothing loads them.
+        // Write a functions.php that enqueues them from Google Fonts so the
+        // chosen typography actually renders (front end + editor).
+        new FontsStep(),
         // Generate the header, footer, and every section part in one concurrent
         // batch, then stitch them into the page deterministically.
         new SectionsStep($llm, $renderer, $models['sections']),

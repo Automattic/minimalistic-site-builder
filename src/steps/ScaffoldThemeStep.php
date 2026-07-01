@@ -42,6 +42,26 @@ final class ScaffoldThemeStep implements Step
         Text Domain: {{THEME_SLUG}}
         */
 
+        /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
+        .equal-cards > .wp-block-column {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 0;
+        }
+        .equal-cards > .wp-block-column > .wp-block-group {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+        }
+        .equal-cards .cta-bottom {
+            margin-top: auto;
+            justify-content: center;
+        }
+
+        .wp-site-blocks > footer {
+            margin-block-start: 0;
+        }
+
         CSS;
 
     private const README = <<<TXT
