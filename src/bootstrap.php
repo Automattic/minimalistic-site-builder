@@ -50,7 +50,8 @@ function default_llm_model(): string
  * To pin a step in code, replace `$default` with a literal, e.g.
  *   'site-spec' => 'claude-haiku-4-5',
  * Or override any one step from the environment without touching code:
- *   LLM_MODEL_SITE_SPEC, LLM_MODEL_THEME_JSON, LLM_MODEL_SECTION_PLAN, LLM_MODEL_SECTIONS
+ *   LLM_MODEL_REFINE_PROMPT, LLM_MODEL_SITE_SPEC, LLM_MODEL_THEME_JSON,
+ *   LLM_MODEL_SECTION_PLAN, LLM_MODEL_SECTIONS
  * LLM_MODEL sets the fallback for every step left at the default.
  *
  * @return array<string,string> step id => model id
@@ -59,6 +60,8 @@ function step_models(): array
 {
     $default = default_llm_model();
     return [
+        // Fast, cheap prompt clean-up at the very start — small model by default.
+        'refine-prompt' => Env::get('LLM_MODEL_REFINE_PROMPT', 'claude-haiku-4-5'),
         'site-spec'    => Env::get('LLM_MODEL_SITE_SPEC',    'claude-haiku-4-5'),
         // Design direction is the creative seed every later step builds on, so
         // it runs on the best model by default; override to trade cost/quality.
@@ -106,6 +109,11 @@ function build_pipeline(Llm $llm): Pipeline
     $models = step_models();
     return new Pipeline([
         new ScaffoldThemeStep(),
+        // Cheap, fast first pass on a small model: expand short/vague prompts and
+        // normalize the brief before any expensive step reads it. Rewrites the
+        // `prompt` in meta.json (original kept as `original_prompt`), so every
+        // step below benefits with no further wiring.
+        new RefinePromptStep($llm, $renderer, $models['refine-prompt']),
         new SiteSpecStep($llm, $renderer, $models['site-spec']),
         new ApplyIdentityStep(),
         // Commit to ONE creative concept BEFORE theme.json / the section plan, so

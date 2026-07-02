@@ -8,14 +8,19 @@ declare(strict_types=1);
  * Input:  meta.json (the user prompt) + siteSpec.json (factual info).
  * Output: designDirection.md — a short freeform design brief (markdown).
  *
+ * The model is asked for FOUR distinct visual directions in one call; this step
+ * then picks ONE of them at random. Generating a spread and sampling from it —
+ * rather than asking for a single "best" concept — is the deliberate injection of
+ * variety: it widens the creative range and stops repeated builds of the same
+ * brief from converging on the model's one safe favourite.
+ *
  * This is the single source of design intent. The theme-json, section-plan and
  * section steps all read it (via DesignDirectionStep::readFor) and let it drive
- * their choices, so two sites diverge in concept — not just in hex values. It is
- * the deliberate counter to designs converging on safe, generic defaults.
+ * their choices, so two sites diverge in concept — not just in hex values.
  *
- * The brief is freeform prose, not JSON: nothing downstream parses it — it's
- * produced by a model and consumed by a model (spliced into the design prompts),
- * so structure would only add escaping friction without buying anything.
+ * Only the chosen direction is persisted, as freeform prose: nothing downstream
+ * parses it — it's produced by a model and consumed by a model (spliced into the
+ * design prompts), so structure would only add escaping friction downstream.
  */
 final class DesignDirectionStep implements Step
 {
@@ -62,12 +67,34 @@ final class DesignDirectionStep implements Step
             'user_prompt' => $prompt,
             'site_spec'   => $project->readText('siteSpec.json'),
         ]);
-        $brief = trim($this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()])));
-        if ($brief === '') {
-            throw new RuntimeException('design-direction: model returned an empty brief');
+        $payload = $this->llm->completeJson($rendered, $this->withModel(['log_label' => $this->id()]));
+
+        // Keep only well-formed directions (a description is what downstream needs;
+        // the title is a nice-to-have label).
+        $directions = array_values(array_filter(
+            is_array($payload['directions'] ?? null) ? $payload['directions'] : [],
+            static fn ($d): bool => is_array($d) && trim((string) ($d['description'] ?? '')) !== '',
+        ));
+        if ($directions === []) {
+            throw new RuntimeException('design-direction: model returned no usable directions');
         }
 
-        $project->writeText(self::FILE, $brief . "\n");
+        // Sample ONE direction at random — the deliberate variety injection.
+        $chosen = $directions[random_int(0, count($directions) - 1)];
+
+        $project->writeText(self::FILE, self::format($chosen) . "\n");
+    }
+
+    /**
+     * Render one chosen direction as the freeform markdown brief downstream reads.
+     *
+     * @param array<string,mixed> $direction
+     */
+    private static function format(array $direction): string
+    {
+        $title = trim((string) ($direction['title'] ?? ''));
+        $description = trim((string) $direction['description']);
+        return $title === '' ? $description : "# {$title}\n\n{$description}";
     }
 
     /**

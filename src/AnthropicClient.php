@@ -108,10 +108,9 @@ final class AnthropicClient implements Llm
             . "\nRespond with a single valid JSON value and nothing else. "
             . 'No prose, no markdown fences.';
         $text = $this->complete($prompt, $opts);
-        $json = self::stripFences($text);
 
-        $data = json_decode($json, true);
-        if (!is_array($data)) {
+        $data = self::decodeJson($text);
+        if ($data === null) {
             throw new RuntimeException("Expected JSON, got: {$text}");
         }
         return $data;
@@ -121,8 +120,8 @@ final class AnthropicClient implements Llm
     {
         $out = [];
         foreach ($this->textBatch($requests, true) as $key => $text) {
-            $data = json_decode(self::stripFences($text), true);
-            if (!is_array($data)) {
+            $data = self::decodeJson($text);
+            if ($data === null) {
                 throw new RuntimeException("batch request '{$key}': expected JSON, got: {$text}");
             }
             $out[$key] = $data;
@@ -566,5 +565,66 @@ final class AnthropicClient implements Llm
             $text = preg_replace('/\n```$/', '', (string) $text);
         }
         return trim((string) $text);
+    }
+
+    /**
+     * Decode assistant text into a JSON array, tolerating the two mistakes models
+     * make most often: wrapping the value in ```json fences, and leaving trailing
+     * commas before a closing } or ]. Strict json_decode is tried first; only if
+     * that fails do we attempt the trailing-comma repair, so well-formed output is
+     * never altered. Returns null when the text isn't recoverable JSON.
+     *
+     * @return array<mixed>|null
+     */
+    public static function decodeJson(string $text): ?array
+    {
+        $json = self::stripFences($text);
+        $data = json_decode($json, true);
+        if (!is_array($data)) {
+            $data = json_decode(self::stripTrailingCommas($json), true);
+        }
+        return is_array($data) ? $data : null;
+    }
+
+    /**
+     * Remove commas that sit immediately before a closing } or ] (ignoring
+     * whitespace) — invalid JSON that LLMs emit routinely. Walks the string
+     * tracking string/escape state so commas inside string values are left
+     * untouched.
+     */
+    private static function stripTrailingCommas(string $json): string
+    {
+        $out = '';
+        $len = strlen($json);
+        $inStr = false;
+        for ($i = 0; $i < $len; $i++) {
+            $ch = $json[$i];
+            if ($inStr) {
+                $out .= $ch;
+                if ($ch === '\\' && $i + 1 < $len) {
+                    $out .= $json[$i + 1]; // copy the escaped char verbatim
+                    $i++;
+                } elseif ($ch === '"') {
+                    $inStr = false;
+                }
+                continue;
+            }
+            if ($ch === '"') {
+                $inStr = true;
+                $out .= $ch;
+                continue;
+            }
+            if ($ch === ',') {
+                $j = $i + 1;
+                while ($j < $len && ctype_space($json[$j])) {
+                    $j++;
+                }
+                if ($j < $len && ($json[$j] === '}' || $json[$j] === ']')) {
+                    continue; // drop the trailing comma
+                }
+            }
+            $out .= $ch;
+        }
+        return $out;
     }
 }
