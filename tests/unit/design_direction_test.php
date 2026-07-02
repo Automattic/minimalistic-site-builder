@@ -11,20 +11,25 @@ function make_designdir_fixture(): array
     return [$project, new FakeLlm(), $tmp];
 }
 
-test('design-direction writes the freeform brief to designDirection.md', function () {
+test('design-direction picks one of the four directions and writes it to designDirection.md', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
-    $brief = "Editorial-magazine direction: warm, rustic, 1970s print feel. "
-        . "Earthy neutrals with one electric accent; high-contrast serif display "
-        . "over a clean grotesque body. Sharp corners, generous whitespace, oversized "
-        . "section numbers. Avoid the centered all-sans hero.";
-    $llm->queueText($brief);
+    $llm->queueJson(['directions' => [
+        ['title' => 'Hearth & Grain',  'description' => 'Editorial-magazine warmth, 1970s print feel.'],
+        ['title' => 'Flour & Steel',   'description' => 'Industrial-utilitarian bakery, raw concrete tones.'],
+        ['title' => 'Sugar Bloom',     'description' => 'Playful-pop pastels with oversized display type.'],
+        ['title' => 'Midnight Levain', 'description' => 'Dark-luxe patisserie, gold on near-black.'],
+    ]]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new DesignDirectionStep($llm, $renderer))->run($project);
 
     assert_true($project->exists('designDirection.md'), 'designDirection.md written');
     $written = $project->readText('designDirection.md');
-    assert_contains('Editorial-magazine', $written);
+    // Exactly one of the four directions is persisted (title heading + description).
+    $titles = ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain'];
+    $matched = array_values(array_filter($titles, fn ($t) => str_contains($written, $t)));
+    assert_true(count($matched) === 1, 'exactly one direction is chosen');
+    assert_contains('# ', $written); // the title is rendered as a heading
 
     // The rendered prompt must carry the user's words AND the factual spec.
     assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
@@ -33,9 +38,9 @@ test('design-direction writes the freeform brief to designDirection.md', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('design-direction throws when the model returns an empty brief', function () {
+test('design-direction throws when the model returns no usable directions', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
-    $llm->queueText("   \n  ");
+    $llm->queueJson(['directions' => [['title' => 'Empty', 'description' => '   ']]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
     assert_throws(function () use ($llm, $renderer, $project) {
         (new DesignDirectionStep($llm, $renderer))->run($project);

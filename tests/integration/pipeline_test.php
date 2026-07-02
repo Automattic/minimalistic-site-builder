@@ -14,6 +14,8 @@ test('full pipeline produces a structurally valid theme', function () {
 
     $llm = new FakeLlm();
 
+    // refine-prompt (text) — fast small-model clean-up of the raw prompt, runs first
+    $llm->queueText('A cozy neighborhood bakery selling artisan bread and pastries to local residents, with a warm and rustic feel.');
     // site-spec (json) — factual info only, no design fields
     $llm->queueJson([
         'name' => 'Hearth & Crumb', 'slug' => 'hearth-crumb',
@@ -22,6 +24,15 @@ test('full pipeline produces a structurally valid theme', function () {
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
+    // design-direction (json) — the model returns 4 candidate directions and the
+    // step samples ONE at random. Runs after site-spec, before the concurrent
+    // group, and is read by theme-json/section-plan/sections.
+    $llm->queueJson(['directions' => [
+        ['title' => 'Hearth & Grain',  'description' => 'Editorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.'],
+        ['title' => 'Flour & Steel',   'description' => 'Industrial-utilitarian bakery, raw concrete tones and stencilled type.'],
+        ['title' => 'Sugar Bloom',     'description' => 'Playful-pop pastels with oversized display type and rounded frames.'],
+        ['title' => 'Midnight Levain', 'description' => 'Dark-luxe patisserie, gold on near-black with fine serif detailing.'],
+    ]]);
     // Concurrent group, request order is [theme-json, section-plan]:
     // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([
@@ -44,12 +55,6 @@ test('full pipeline produces a structurally valid theme', function () {
         ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
         ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features'],
     ]]);
-    // design-direction (raw text) — the committed creative brief, runs before the
-    // concurrent group and is read by theme-json/section-plan/sections. It uses
-    // complete() (text), so it's the first item pulled from the text queue.
-    $llm->queueText('Editorial-magazine direction: warm, rustic, 1970s print feel. '
-        . 'Earthy neutrals with one electric accent; serif display over grotesque body. '
-        . 'Avoid the centered all-sans hero.');
     // sections (raw markup) — header, footer, then one part per section, in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
     $ftr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>(c) Hearth</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
@@ -87,8 +92,8 @@ test('full pipeline produces a structurally valid theme', function () {
 test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
-        'scaffold-theme', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+section-plan', 'sections', 'assemble-landing-page',
+        'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'theme-json+section-plan', 'enqueue-fonts', 'sections', 'assemble-landing-page',
         'collect-images', 'fix-blocks', 'finalize-theme',
     ], $ids);
 });
