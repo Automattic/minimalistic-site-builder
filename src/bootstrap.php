@@ -86,6 +86,14 @@ function step_models(): array
  * run slightly hot for compositional range while staying reliable at emitting
  * valid block markup.
  *
+ * Caveat: the API REMOVED sampling parameters on Claude Opus 4.7/4.8 and
+ * Fable (a request carrying temperature 400s), so these values only take
+ * effect on models that still support sampling (Haiku 4.5, Sonnet 4.6,
+ * Opus <= 4.6). AnthropicClient omits temperature for the sampling-less
+ * models — see AnthropicClient::supportsSampling() — so a step left on the
+ * Opus 4.8 default gets its diversity from the prompt-level mechanisms
+ * (candidate spread + history + judge) instead.
+ *
  * Override any one step from the environment without touching code:
  *   LLM_TEMPERATURE_DESIGN_DIRECTION=0.7, LLM_TEMPERATURE_SECTIONS=1.0, …
  * LLM_TEMPERATURE sets the value for every step without a per-step override.
