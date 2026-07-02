@@ -142,3 +142,27 @@ test('concurrencyWindows leaves a small batch as a single window', function () {
     assert_eq(1, count($windows), 'a sub-cap batch is one window');
     assert_eq(['a', 'b', 'c'], array_keys($windows[0]));
 });
+
+test('bodyFor sends temperature only when set and applies model/token defaults', function () {
+    $body = AnthropicClient::bodyFor(
+        ['prompt' => 'Hi', 'temperature' => 1.0, 'system' => 'Be terse.'],
+        'claude-opus-4-8',
+        16000,
+    );
+    assert_eq('claude-opus-4-8', $body['model']);
+    assert_eq(16000, $body['max_tokens']);
+    assert_eq(1.0, $body['temperature']);
+    assert_eq('Be terse.', $body['system']);
+    assert_eq(true, $body['stream']);
+    assert_eq('Hi', $body['messages'][0]['content']);
+
+    $body = AnthropicClient::bodyFor(
+        ['prompt' => 'Hi', 'model' => 'claude-haiku-4-5', 'max_tokens' => 512],
+        'claude-opus-4-8',
+        16000,
+    );
+    assert_eq('claude-haiku-4-5', $body['model']);
+    assert_eq(512, $body['max_tokens']);
+    assert_true(!array_key_exists('temperature', $body), 'no temperature key when unset');
+    assert_true(!array_key_exists('system', $body), 'no system key when empty');
+});

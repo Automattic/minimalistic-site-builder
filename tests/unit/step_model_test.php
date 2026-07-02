@@ -134,3 +134,91 @@ test('sections sends no model key when none is configured', function () {
     assert_true(!array_key_exists('model', $llm->calls[0]['opts']), 'no model key when default');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('design-direction passes the configured temperature into the LLM opts', function () {
+    [$project, $tmp] = sm_project('builder_sm_ddt_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $llm = new FakeLlm();
+    // A single candidate → no judge call, so only the generation opts matter.
+    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction.']]]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new DesignDirectionStep($llm, $renderer, null, 1.0))->run($project);
+
+    assert_eq(1.0, $llm->calls[0]['opts']['temperature'] ?? null);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction sends no temperature key when none is configured', function () {
+    [$project, $tmp] = sm_project('builder_sm_ddtd_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $llm = new FakeLlm();
+    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction.']]]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_true(!array_key_exists('temperature', $llm->calls[0]['opts']), 'no temperature key when default');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections passes the configured temperature into every part request', function () {
+    [$project, $tmp] = sm_project('builder_sm_sect_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('sections.json', ['sections' => [
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+    ]]);
+    $llm = new FakeLlm();
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer, null, 0.9))->run($project);
+
+    assert_true(count($llm->calls) === 3, 'one request per part');
+    foreach ($llm->calls as $call) {
+        assert_eq(0.9, $call['opts']['temperature'] ?? null);
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json passes the configured temperature into its request', function () {
+    [$project, $tmp] = sm_project('builder_sm_tjt_');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new ThemeJsonStep($llm, $renderer, null, 0.8))->run($project);
+
+    assert_eq(0.8, $llm->calls[0]['opts']['temperature'] ?? null);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('step_temperatures defaults: hot design-direction and sections, env override wins', function () {
+    $temps = step_temperatures();
+    assert_eq(1.0, $temps['design-direction']);
+    assert_eq(0.9, $temps['sections']);
+    assert_eq(null, $temps['theme-json']);
+
+    putenv('LLM_TEMPERATURE_SECTIONS=0.5');
+    putenv('LLM_TEMPERATURE=0.3');
+    try {
+        $temps = step_temperatures();
+        assert_eq(0.5, $temps['sections'], 'per-step env wins');
+        assert_eq(0.3, $temps['design-direction'], 'global env replaces the code default');
+        assert_eq(0.3, $temps['theme-json'], 'global env applies to unset steps');
+    } finally {
+        putenv('LLM_TEMPERATURE_SECTIONS');
+        putenv('LLM_TEMPERATURE');
+    }
+
+    putenv('LLM_TEMPERATURE=hot'); // non-numeric → ignored
+    try {
+        assert_eq(1.0, step_temperatures()['design-direction']);
+    } finally {
+        putenv('LLM_TEMPERATURE');
+    }
+});

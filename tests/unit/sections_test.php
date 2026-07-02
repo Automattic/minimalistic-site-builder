@@ -30,7 +30,10 @@ test('sections requests one part per header/footer/section', function () {
 
 test('sections passes the design direction and hero brief to header and footer prompts', function () {
     [$project, $tmp] = sections_fixture();
-    $project->writeText('designDirection.md', "# Archivo Silencioso\n\nFull-bleed black-and-white photography, chrome-less.\n");
+    $project->writeJson('designDirection.json', [
+        'title'       => 'Archivo Silencioso',
+        'description' => 'Full-bleed black-and-white photography, chrome-less.',
+    ]);
     $project->writeJson('sections.json', ['sections' => [
         ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.'],
         ['slug' => 'about', 'title' => 'About', 'type' => 'about'],

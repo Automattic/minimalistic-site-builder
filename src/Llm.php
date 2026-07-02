@@ -12,7 +12,7 @@ interface Llm
     /**
      * Send one prompt, return the assistant's text.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float} $opts
      */
     public function complete(string $prompt, array $opts = []): string;
 
@@ -20,7 +20,7 @@ interface Llm
      * Send one prompt that must return a JSON value, decode and return it.
      * Tolerates ```json fenced blocks.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float} $opts
      * @return array<mixed>
      */
     public function completeJson(string $prompt, array $opts = []): array;
@@ -32,7 +32,7 @@ interface Llm
      * is how the pipeline parallelises independent LLM work (theme.json beside
      * the section plan; every landing-page section at once).
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
      * @return array<string,array<mixed>> decoded JSON keyed as the input
      */
     public function completeJsonBatch(array $requests): array;
@@ -44,7 +44,7 @@ interface Llm
      * markup), so the model returns it verbatim instead of escaping it inside a
      * JSON string (which is brittle and wastes tokens).
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
      * @return array<string,string> raw assistant text keyed as the input
      */
     public function completeBatch(array $requests): array;

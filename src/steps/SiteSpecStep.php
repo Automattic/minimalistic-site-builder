@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 final class SiteSpecStep implements Step
 {
-    use ModelOption;
+    use LlmOptions;
 
     /** Factual properties the spec must always carry. */
     private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe'];
@@ -25,6 +25,7 @@ final class SiteSpecStep implements Step
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string
@@ -46,7 +47,7 @@ final class SiteSpecStep implements Step
         }
 
         $rendered = $this->renderer->render('site-spec.md', ['user_prompt' => $prompt]);
-        $spec = $this->llm->completeJson($rendered, $this->withModel(['log_label' => $this->id()]));
+        $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
 
         $spec = self::normalize($spec);
         $project->writeJson('siteSpec.json', $spec);

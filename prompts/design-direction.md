@@ -7,6 +7,10 @@ You are a senior design director at a top creative agency. Your task: generate 4
 Factual info about the site (JSON — no design guidance). Use it to ground every direction in the site's real topic, audience, and offering:
 {{site_spec}}
 
+## Recently Used Directions — do NOT repeat these
+Directions chosen for recent builds (possibly for other sites). Every candidate you generate must diverge from them: do not reuse their concepts, their heading/body font pairs, their palette fingerprints, or their hero compositions — unless the user's brief explicitly demands one of them.
+{{recent_directions}}
+
 ## Design Grounding
 Think like a specialist designer hired for this exact brief. Ground each direction in real-world visual traditions connected to the site's topic — the materials, spaces, cultural references, and design conventions of its industry. A Georgian restaurant evokes Caucasus earth tones and ornate patterns; a photojournalist portfolio evokes high-contrast editorial layouts and documentary rawness. Directions should feel researched, not generated from a generic style menu.
 
@@ -65,6 +69,14 @@ Do NOT generate directions that feel like generic AI output:
 
 **Each direction must be completely self-contained.** It will be sent to a separate model call in isolation — never alongside the other directions. Do not reference other directions ("same as direction 1", "takes the same DNA"). Describe all visual choices explicitly rather than assuming shared context.
 
+Besides the vivid narrative, each direction commits to explicit structured fields. Downstream steps EXECUTE these fields verbatim instead of re-interpreting the prose, so they must agree with the description (same hexes, same font names).
+
+- `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = reserved for CTAs/interaction.
+- `type`: the heading and body families WITH weights. Both MUST be real Google Fonts families spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts by name, and a family that isn't there gets silently downgraded to a fallback. Design within that constraint: never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
+- `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
+- `signature_device`: the ONE repeated visual motif that makes the direction recognizable on every section (e.g. "hairline rules with page folios", "oversized year numerals in the margins", "duotone image blocks with offset borders").
+- `hero_composition`: the composition archetype the hero commits to, in one concrete sentence (e.g. "full-bleed landscape photo, headline pinned lower-left, nav reduced to a wordmark and one link").
+
 Respond with ONLY a JSON object. No explanation, no commentary, no text before or after.
 
 ```json
@@ -73,7 +85,20 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
     {
       "title": "Short Evocative Title (2-4 words, topic-grounded — e.g., 'Forge & Flame' for a blacksmith, not 'Bold Modern')",
       "description": "A rich, vivid paragraph describing the complete design vision including the hero section composition. Paint the picture: what does a visitor feel the moment they land? Describe the hero layout cinematically — how is space used, where does imagery sit, how does typography interact with visuals? Then flow into the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes.",
-      "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above — e.g. 'monochrome documentary, visible 35mm grain, charcoal midtones, available light, no saturated color'."
+      "palette": {
+        "base": "#RRGGBB",
+        "contrast": "#RRGGBB",
+        "primary": "#RRGGBB",
+        "secondary": "#RRGGBB",
+        "accent": "#RRGGBB"
+      },
+      "type": {
+        "heading": "Exact Google Fonts family + weights, e.g. 'Fraunces 700/900 — swaggering display serif'",
+        "body": "Exact Google Fonts family + weights, e.g. 'Source Sans 3 400/600'"
+      },
+      "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above — e.g. 'monochrome documentary, visible 35mm grain, charcoal midtones, available light, no saturated color'.",
+      "signature_device": "The one repeated visual motif, one concrete sentence.",
+      "hero_composition": "The hero's composition archetype, one concrete sentence."
     }
   ]
 }

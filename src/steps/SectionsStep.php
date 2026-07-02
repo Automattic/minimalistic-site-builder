@@ -20,7 +20,7 @@ declare(strict_types=1);
  */
 final class SectionsStep implements Step
 {
-    use ModelOption;
+    use LlmOptions;
 
     /** Prefix for a section part's request key, filename, and template-part slug. */
     public const SECTION_PREFIX = 'section-';
@@ -29,6 +29,7 @@ final class SectionsStep implements Step
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string
@@ -60,14 +61,14 @@ final class SectionsStep implements Step
         $designDirection = DesignDirectionStep::readFor($project);
 
         $requests = [
-            'header' => $this->withModel(['prompt' => $this->renderer->render('header.md', [
+            'header' => $this->withOptions(['prompt' => $this->renderer->render('header.md', [
                 'site_spec'        => $siteSpec,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
                 'hero_brief'       => self::heroBrief($sections),
                 'outline'          => $outline,
             ])]),
-            'footer' => $this->withModel(['prompt' => $this->renderer->render('footer.md', [
+            'footer' => $this->withOptions(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'        => $siteSpec,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
@@ -77,7 +78,7 @@ final class SectionsStep implements Step
 
         foreach ($sections as $section) {
             $key = self::SECTION_PREFIX . $section['slug'];
-            $requests[$key] = $this->withModel(['prompt' => $this->renderer->render('section.md', [
+            $requests[$key] = $this->withOptions(['prompt' => $this->renderer->render('section.md', [
                 'site_spec'        => $siteSpec,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,

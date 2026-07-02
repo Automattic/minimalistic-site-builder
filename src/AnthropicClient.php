@@ -68,17 +68,7 @@ final class AnthropicClient implements Llm
         // connection is detected quickly (and retried) instead of blocking the
         // full timeout, and long generations never hit an idle-connection
         // timeout.
-        $body = [
-            'model'      => $opts['model'] ?? $this->model,
-            'max_tokens' => $opts['max_tokens'] ?? $this->defaultMaxTokens,
-            'stream'     => true,
-            'messages'   => [
-                ['role' => 'user', 'content' => $prompt],
-            ],
-        ];
-        if (isset($opts['system'])) {
-            $body['system'] = $opts['system'];
-        }
+        $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens);
 
         $label = (string) ($opts['log_label'] ?? 'request');
         try {
@@ -149,8 +139,9 @@ final class AnthropicClient implements Llm
             return [];
         }
 
-        // Build one Messages body per request. Each may pin its own model and
-        // token budget, so a single batch can mix (e.g. Haiku plan + Opus theme).
+        // Build one Messages body per request. Each may pin its own model,
+        // temperature and token budget, so a single batch can mix (e.g. Haiku
+        // plan + Opus theme).
         $bodies = [];
         foreach ($requests as $key => $req) {
             $system = (string) ($req['system'] ?? '');
@@ -158,18 +149,7 @@ final class AnthropicClient implements Llm
                 $system .= "\nRespond with a single valid JSON value and nothing else. "
                     . 'No prose, no markdown fences.';
             }
-            $body = [
-                'model'      => $req['model'] ?? $this->model,
-                'max_tokens' => $req['max_tokens'] ?? $this->defaultMaxTokens,
-                'stream'     => true,
-                'messages'   => [
-                    ['role' => 'user', 'content' => (string) $req['prompt']],
-                ],
-            ];
-            if (trim($system) !== '') {
-                $body['system'] = $system;
-            }
-            $bodies[$key] = $body;
+            $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens);
         }
 
         // Label a call after its step's explicit log_label, else the request key
@@ -199,6 +179,36 @@ final class AnthropicClient implements Llm
             $out[$key] = $res['text'];
         }
         return $out;
+    }
+
+    /**
+     * Build one streaming Messages API request body from a request spec — the
+     * single place the optional per-request knobs (model, max_tokens,
+     * temperature, system) are mapped onto the wire format, shared by the
+     * single-call and batch paths. Temperature is only sent when the caller
+     * set one, so an unset step keeps the API's default sampling. Pure —
+     * unit-testable.
+     *
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
+     * @return array<string,mixed>
+     */
+    public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array
+    {
+        $body = [
+            'model'      => $req['model'] ?? $defaultModel,
+            'max_tokens' => $req['max_tokens'] ?? $defaultMaxTokens,
+            'stream'     => true,
+            'messages'   => [
+                ['role' => 'user', 'content' => (string) $req['prompt']],
+            ],
+        ];
+        if (isset($req['temperature'])) {
+            $body['temperature'] = (float) $req['temperature'];
+        }
+        if (trim((string) ($req['system'] ?? '')) !== '') {
+            $body['system'] = $req['system'];
+        }
+        return $body;
     }
 
     /**

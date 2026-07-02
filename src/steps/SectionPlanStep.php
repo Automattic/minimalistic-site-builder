@@ -15,7 +15,7 @@ declare(strict_types=1);
  */
 final class SectionPlanStep implements ConcurrentStep
 {
-    use ModelOption;
+    use LlmOptions;
 
     private const REQ = 'section-plan';
 
@@ -23,6 +23,7 @@ final class SectionPlanStep implements ConcurrentStep
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string
@@ -44,7 +45,7 @@ final class SectionPlanStep implements ConcurrentStep
             'design_direction' => DesignDirectionStep::readFor($project),
         ]);
 
-        return [self::REQ => $this->withModel(['prompt' => $rendered])];
+        return [self::REQ => $this->withOptions(['prompt' => $rendered])];
     }
 
     public function consume(Project $project, array $results): void
