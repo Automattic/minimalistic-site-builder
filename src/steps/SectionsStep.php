@@ -61,14 +61,17 @@ final class SectionsStep implements Step
 
         $requests = [
             'header' => $this->withModel(['prompt' => $this->renderer->render('header.md', [
-                'site_spec'  => $siteSpec,
-                'theme_json' => $themeJson,
-                'outline'    => $outline,
+                'site_spec'        => $siteSpec,
+                'theme_json'       => $themeJson,
+                'design_direction' => $designDirection,
+                'hero_brief'       => self::heroBrief($sections),
+                'outline'          => $outline,
             ])]),
             'footer' => $this->withModel(['prompt' => $this->renderer->render('footer.md', [
-                'site_spec'  => $siteSpec,
-                'theme_json' => $themeJson,
-                'outline'    => $outline,
+                'site_spec'        => $siteSpec,
+                'theme_json'       => $themeJson,
+                'design_direction' => $designDirection,
+                'outline'          => $outline,
             ])]),
         ];
 
@@ -141,6 +144,37 @@ final class SectionsStep implements Step
             $lines[] = ($n + 1) . ". {$title} ({$type})";
         }
         return implode("\n", $lines);
+    }
+
+    /**
+     * A plain-text brief of the planned hero section (from sections.json), so
+     * the header prompt can pick the archetype that fits what it will sit
+     * directly above — or float on top of. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     */
+    public static function heroBrief(array $sections): string
+    {
+        $hero = null;
+        foreach ($sections as $s) {
+            if ((string) ($s['type'] ?? '') === 'hero') {
+                $hero = $s;
+                break;
+            }
+        }
+        $hero ??= $sections[0] ?? null;
+        if (!is_array($hero)) {
+            return '(No hero section planned.)';
+        }
+
+        $lines = [];
+        foreach (['title' => 'Title', 'type' => 'Type', 'purpose' => 'Purpose', 'content_notes' => 'Notes'] as $key => $label) {
+            $value = trim((string) ($hero[$key] ?? ''));
+            if ($value !== '') {
+                $lines[] = "{$label}: {$value}";
+            }
+        }
+        return $lines === [] ? '(No hero section planned.)' : implode("\n", $lines);
     }
 
     /**
