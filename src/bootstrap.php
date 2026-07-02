@@ -51,7 +51,8 @@ function default_llm_model(): string
  *   'site-spec' => 'claude-haiku-4-5',
  * Or override any one step from the environment without touching code:
  *   LLM_MODEL_REFINE_PROMPT, LLM_MODEL_SITE_SPEC, LLM_MODEL_THEME_JSON,
- *   LLM_MODEL_SECTION_PLAN, LLM_MODEL_SECTIONS, LLM_MODEL_PAGE_STYLES
+ *   LLM_MODEL_SECTION_PLAN, LLM_MODEL_SECTIONS, LLM_MODEL_PAGE_STYLES,
+ *   LLM_MODEL_FONTS_PHP
  * LLM_MODEL sets the fallback for every step left at the default.
  *
  * @return array<string,string> step id => model id
@@ -74,6 +75,9 @@ function step_models(): array
         // One small CSS appendix, but it must satisfy a strict validator and
         // carry the direction's mood — best model by default; cheap to override.
         'page-styles'  => Env::get('LLM_MODEL_PAGE_STYLES',  $default),
+        // One small PHP module behind a strict validator with a deterministic
+        // fallback; the model's value-add is design-led weight/axis choices.
+        'fonts-php'    => Env::get('LLM_MODEL_FONTS_PHP',    $default),
     ];
 }
 
@@ -146,9 +150,13 @@ function build_pipeline(Llm $llm): Pipeline
         // layout utility classes survived, and appends their CSS to style.css —
         // a file the fixer never touches, so nothing here can be stripped.
         new PageStylesStep($llm, $renderer, $models['page-styles']),
-        // Sole owner of functions.php: enqueues style.css and the Google Fonts
-        // at the weights the design uses — LAST, so the scan sees the final
-        // theme.json and the fixed markup.
+        // Also after fix-blocks: writes fonts.php from the design direction,
+        // validated against a deterministic scan of the final theme.json +
+        // markup (every family/weight/italic the build uses MUST be requested;
+        // scan-built fallback otherwise).
+        new FontsPhpStep($llm, $renderer, $models['fonts-php']),
+        // Sole owner of functions.php: the deterministic loader that enqueues
+        // style.css and require_once's the generated fonts.php.
         new FinalizeThemeStep(),
     ]);
 }

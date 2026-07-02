@@ -75,6 +75,14 @@ test('full pipeline produces a structurally valid theme', function () {
         ".hover-lift {\n    transition: transform 0.25s ease;\n}\n"
         . ".hover-lift:hover {\n    transform: translateY(-6px);\n    box-shadow: var(--wp--preset--shadow--natural);\n}"
     );
+    // fonts-php (text) — the generated fonts module; must cover the scanned
+    // 400/700 floor for both theme.json families or the step falls back.
+    $llm->queueText(
+        "<?php\nadd_action('enqueue_block_assets', function () {\n"
+        . "    wp_enqueue_style('preconnect-gfonts', 'https://fonts.gstatic.com', array(), null);\n"
+        . "    wp_enqueue_style('demo-fonts', 'https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700&family=Source+Sans+3:wght@400;700&display=swap', array(), null);\n"
+        . "});\n"
+    );
 
     build_pipeline($llm)->runThrough($project);
 
@@ -105,12 +113,14 @@ test('full pipeline produces a structurally valid theme', function () {
         'appendix appended after the theme header'
     );
 
-    // finalize-theme produced font loading AND the style.css enqueue (block
-    // themes don't load style.css automatically, so without it the utility
-    // CSS above would never apply).
-    assert_true($project->exists('theme/functions.php'), 'functions.php written');
-    assert_contains('fonts.googleapis.com', $project->readText('theme/functions.php'));
-    assert_contains('get_stylesheet_uri()', $project->readText('theme/functions.php'));
+    // fonts-php accepted the model's module; finalize-theme wrote the
+    // deterministic loader that enqueues style.css (block themes don't load
+    // it automatically) and require_once's fonts.php.
+    assert_contains('fonts.googleapis.com', $project->readText('theme/fonts.php'));
+    $functions = $project->readText('theme/functions.php');
+    assert_contains('get_stylesheet_uri()', $functions);
+    assert_contains("require_once __DIR__ . '/fonts.php'", $functions);
+    assert_true(!str_contains($functions, 'googleapis'), 'fonts stay in fonts.php');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -120,6 +130,6 @@ test('pipeline step order is correct', function () {
     assert_eq([
         'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+section-plan', 'sections', 'assemble-landing-page',
-        'collect-images', 'fix-blocks', 'page-styles', 'finalize-theme',
+        'collect-images', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
     ], $ids);
 });
