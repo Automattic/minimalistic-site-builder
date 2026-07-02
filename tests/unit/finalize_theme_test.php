@@ -21,7 +21,10 @@ test('finalize-theme enqueues google fonts for real families', function () {
     (new FinalizeThemeStep())->run($project);
 
     $php = $project->readText('theme/functions.php');
-    assert_contains('wp_enqueue_style', $php);
+    // Block themes don't load style.css automatically; the enqueue is what
+    // makes the utility CSS (equal-cards, layout utilities) actually apply.
+    assert_contains("wp_enqueue_style('forno-vero-style', get_stylesheet_uri()", $php);
+    assert_contains("add_editor_style('style.css')", $php);
     assert_contains('fonts.googleapis.com/css2', $php);
     assert_contains('family=Playfair+Display:wght@400;600;700', $php);
     assert_contains('family=Source+Serif+Pro:wght@400;600;700', $php);
@@ -44,6 +47,7 @@ test('finalize-theme skips generic/system families', function () {
     (new FinalizeThemeStep())->run($project);
     $php = $project->readText('theme/functions.php');
     assert_true(!str_contains($php, 'googleapis'), 'no google fonts for system families');
+    assert_contains('get_stylesheet_uri()', $php, 'style.css enqueued even without webfonts');
     // Still valid PHP.
     $rc = 0;
     exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $o, $rc);

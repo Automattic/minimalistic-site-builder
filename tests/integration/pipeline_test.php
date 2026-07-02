@@ -105,9 +105,12 @@ test('full pipeline produces a structurally valid theme', function () {
         'appendix appended after the theme header'
     );
 
-    // finalize-theme produced font loading.
+    // finalize-theme produced font loading AND the style.css enqueue (block
+    // themes don't load style.css automatically, so without it the utility
+    // CSS above would never apply).
     assert_true($project->exists('theme/functions.php'), 'functions.php written');
     assert_contains('fonts.googleapis.com', $project->readText('theme/functions.php'));
+    assert_contains('get_stylesheet_uri()', $project->readText('theme/functions.php'));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

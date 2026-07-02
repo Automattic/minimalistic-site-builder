@@ -5,13 +5,16 @@ declare(strict_types=1);
  * Step 8 (deterministic): make the theme actually render as designed.
  *
  * Input:  theme/theme.json
- * Output: theme/functions.php that enqueues the chosen heading/body fonts from
- *         Google Fonts, so the declared font stacks resolve to real webfonts
- *         instead of generic serif/sans fallbacks.
- *
- * Without this, theme.json names fonts (e.g. "Fraunces, serif") that the browser
- * cannot load, so every site falls back to system fonts — the biggest gap the
- * Phase 2 eval surfaced.
+ * Output: theme/functions.php that
+ *         - enqueues style.css: WordPress does NOT load a block theme's
+ *           style.css automatically (it only reads the header for metadata),
+ *           so the utility CSS shipped there — .equal-cards, .header-overlay,
+ *           and the page-styles layout appendix — would silently never apply
+ *           without an explicit enqueue. Also registered as an editor style so
+ *           the editor previews match the front end.
+ *         - enqueues the chosen heading/body fonts from Google Fonts, so the
+ *           declared font stacks resolve to real webfonts instead of generic
+ *           serif/sans fallbacks.
  */
 final class FinalizeThemeStep implements Step
 {
@@ -61,37 +64,48 @@ final class FinalizeThemeStep implements Step
     /** @param string[] $names */
     private static function functionsPhp(string $slug, array $names): string
     {
-        $handle = ProjectStore::slugify($slug) . '-fonts';
+        $slug = ProjectStore::slugify($slug);
+        $fonts = '';
 
-        if ($names === []) {
-            // No webfonts to load; still emit a valid functions.php.
-            return "<?php\n// No external webfonts required for this theme.\n";
-        }
+        if ($names !== []) {
+            $families = implode('&', array_map(
+                static fn (string $n) => 'family=' . rawurlencode($n) . ':wght@400;600;700',
+                $names
+            ));
+            // rawurlencode turns spaces into %20; Google Fonts wants '+'.
+            $families = str_replace('%20', '+', $families);
+            $url = 'https://fonts.googleapis.com/css2?' . $families . '&display=swap';
+            $list = implode(', ', $names);
 
-        $families = implode('&', array_map(
-            static fn (string $n) => 'family=' . rawurlencode($n) . ':wght@400;600;700',
-            $names
-        ));
-        // rawurlencode turns spaces into %20; Google Fonts wants '+'.
-        $families = str_replace('%20', '+', $families);
-        $url = 'https://fonts.googleapis.com/css2?' . $families . '&display=swap';
+            $fonts = <<<PHP
 
-        $list = implode(', ', $names);
-
-        return <<<PHP
-            <?php
-            /**
-             * Enqueue the theme's webfonts ({$list}) from Google Fonts so the
-             * font families declared in theme.json render as designed.
-             */
-            add_action('wp_enqueue_scripts', function () {
+                // Webfonts ({$list}) from Google Fonts, so the font families
+                // declared in theme.json render as designed.
                 wp_enqueue_style('preconnect-gfonts', 'https://fonts.gstatic.com', array(), null);
                 wp_enqueue_style(
-                    '{$handle}',
+                    '{$slug}-fonts',
                     '{$url}',
                     array(),
                     null
                 );
+            PHP;
+        }
+
+        return <<<PHP
+            <?php
+            /**
+             * Front-end wiring the block theme needs beyond theme.json.
+             */
+            add_action('wp_enqueue_scripts', function () {
+                // Block themes do not load style.css automatically — without this
+                // enqueue its utility CSS (card layouts, layout utilities) never applies.
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), array(), wp_get_theme()->get('Version'));
+            {$fonts}
+            });
+
+            // Mirror style.css into the editor so previews match the front end.
+            add_action('after_setup_theme', function () {
+                add_editor_style('style.css');
             });
 
             PHP;
