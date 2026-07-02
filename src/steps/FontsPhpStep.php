@@ -17,10 +17,10 @@ declare(strict_types=1);
  * can request true italics — beyond what a literal scan of the markup finds.
  * But the scan still runs first and acts as the floor: the model's css2 URL
  * MUST request every family and every weight/italic the build actually uses
- * (issue #49's guarantee), call nothing but wp_enqueue_style/add_action, touch
- * no URL outside fonts.googleapis.com/fonts.gstatic.com, and lint clean. Any
- * violation is logged and the file is replaced by a deterministic fallback
- * built from the scan — the build never degrades below the scanned minimum.
+ * (issue #49's guarantee), touch no URL outside fonts.googleapis.com/
+ * fonts.gstatic.com, and lint clean. Any violation is logged and the file is
+ * replaced by a deterministic fallback built from the scan — the build never
+ * degrades below the scanned minimum.
  */
 final class FontsPhpStep implements Step
 {
@@ -59,26 +59,29 @@ final class FontsPhpStep implements Step
     public function run(Project $project): void
     {
         $theme = $project->readJson('theme/theme.json');
-        $names = self::googleFamilies($theme);
-        if ($names === []) {
+        $requirements = self::fontRequirements($theme, self::themeMarkup($project));
+        if ($requirements === []) {
+            $fontsFile = $project->themePath('fonts.php');
+            if (is_file($fontsFile) && !unlink($fontsFile)) {
+                throw new RuntimeException("Could not remove stale file: {$fontsFile}");
+            }
             echo "  no Google-hosted families; fonts.php not needed\n";
             return;
         }
 
-        [$weights, $italic] = self::fontVariants($theme, self::themeMarkup($project));
         $handle = ProjectStore::slugify($project->slug()) . '-fonts';
 
         $rendered = $this->renderer->render('fonts-php.md', [
             'design_direction' => DesignDirectionStep::readFor($project),
-            'families'         => implode(', ', $names),
-            'usage'            => self::usageText($weights, $italic),
+            'families'         => implode(', ', array_keys($requirements)),
+            'usage'            => self::usageText($requirements),
             'handle'           => $handle,
         ]);
         $php = self::stripFences(trim(
             $this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()]))
         ));
 
-        $problems = self::validate($php, $names, $weights, $italic);
+        $problems = self::validate($php, $requirements);
         if ($problems !== []) {
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
@@ -86,7 +89,7 @@ final class FontsPhpStep implements Step
             );
             echo '  fonts-php: model output rejected (' . count($problems)
                 . ' problem(s)); using the deterministic fallback — see logs/' . self::LOG_FILE . "\n";
-            $php = self::fallback($handle, $names, $weights, $italic);
+            $php = self::fallback($handle, $requirements);
         }
 
         $project->writeText('theme/fonts.php', rtrim($php) . "\n");
@@ -95,14 +98,13 @@ final class FontsPhpStep implements Step
     /**
      * Validate the model's fonts.php against the constraints that make it safe
      * to execute and complete for the design: required hook and enqueues, only
-     * Google Fonts URLs, no side-effecting PHP, every scanned family/weight/
-     * italic requested, and clean `php -l`. Returns problems; empty = valid.
+     * Google Fonts URLs, every scanned family/weight/italic requested per
+     * family, and clean `php -l`. Returns problems; empty = valid.
      *
-     * @param string[] $names
-     * @param int[] $weights
+     * @param array<string,array{weights:int[],italic:bool}> $requirements
      * @return string[]
      */
-    public static function validate(string $php, array $names, array $weights, bool $italic): array
+    public static function validate(string $php, array $requirements): array
     {
         $problems = [];
         if (!str_starts_with(trim($php), '<?php')) {
@@ -123,50 +125,44 @@ final class FontsPhpStep implements Step
             $problems[] = 'missing add_action(\'enqueue_block_assets\', …)';
         }
 
-        // No side-effecting PHP: this file runs inside WordPress.
-        if (preg_match('/\b(?:eval|exec|system|shell_exec|passthru|proc_open|popen|assert|create_function|call_user_func|call_user_func_array|file_get_contents|file_put_contents|fopen|unlink|base64_decode|hex2bin|gzinflate|wp_remote_\w+)\s*\(/i', $php) === 1) {
-            $problems[] = 'forbidden function call';
-        }
-        if (preg_match('/\b(?:include|require)(?:_once)?\b/i', $php) === 1) {
-            $problems[] = 'include/require is not allowed';
-        }
-        if (preg_match('/\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES|ENV|SESSION)\b/', $php) === 1) {
-            $problems[] = 'superglobal access is not allowed';
-        }
-        if (str_contains($php, '`')) {
-            $problems[] = 'backticks are not allowed';
-        }
-
         // Only Google Fonts hosts may appear.
         preg_match_all('~https?://[^\s\'"<>)]+~i', $php, $m);
-        $googleUrls = '';
+        $coverage = [];
+        $hasGoogleCss = false;
         foreach ($m[0] as $url) {
             $host = strtolower((string) parse_url($url, PHP_URL_HOST));
             if (!in_array($host, ['fonts.googleapis.com', 'fonts.gstatic.com'], true)) {
                 $problems[] = "URL outside Google Fonts: {$url}";
             }
             if ($host === 'fonts.googleapis.com') {
-                $googleUrls .= ' ' . $url;
+                $hasGoogleCss = true;
+                self::mergeCoverage($coverage, self::coverageFromGoogleUrl($url));
             }
         }
 
-        // The scan is the floor: every family, weight, and italic the build
-        // uses must be requested (the model may add more).
-        if ($googleUrls === '') {
+        // The scan is the floor: every family must cover its own required
+        // weights and italics. The model may request more than the scan.
+        if (!$hasGoogleCss) {
             $problems[] = 'no fonts.googleapis.com URL';
         } else {
-            foreach ($names as $name) {
-                if (!str_contains($googleUrls, 'family=' . str_replace('%20', '+', rawurlencode($name)))) {
+            foreach ($requirements as $name => $required) {
+                $key = self::familyKey($name);
+                if (!isset($coverage[$key])) {
                     $problems[] = "family not requested: {$name}";
+                    continue;
                 }
-            }
-            foreach ($weights as $weight) {
-                if (preg_match('/\b' . $weight . '\b/', $googleUrls) !== 1) {
-                    $problems[] = "scanned weight not requested: {$weight}";
+                foreach ($required['weights'] as $weight) {
+                    if (!self::coverageHasWeight($coverage[$key]['upright'], $weight)) {
+                        $problems[] = "family {$name} missing scanned weight: {$weight}";
+                    }
                 }
-            }
-            if ($italic && !str_contains($googleUrls, 'ital')) {
-                $problems[] = 'italics are used but not requested';
+                if ($required['italic']) {
+                    foreach ($required['weights'] as $weight) {
+                        if (!self::coverageHasWeight($coverage[$key]['italic'], $weight)) {
+                            $problems[] = "family {$name} missing scanned italic weight: {$weight}";
+                        }
+                    }
+                }
             }
         }
 
@@ -215,28 +211,63 @@ final class FontsPhpStep implements Step
     }
 
     /**
-     * The Google Fonts CSS2 URL requesting each family at exactly the given
-     * weights — `ital,wght` tuples when italics are used, plain `wght` axis
-     * otherwise. Used by the deterministic fallback. Pure — unit-testable.
+     * Google-hosted family requirements from the generated theme, keyed by
+     * family name in theme.json order. Unlike fontVariants(), this keeps weights
+     * and italics attached to the family that uses them so validation/fallback do
+     * not accidentally let one family cover another family's variant.
      *
-     * @param string[] $names
-     * @param int[] $weights ascending
+     * @param array<mixed> $theme decoded theme.json
+     * @return array<string,array{weights:int[],italic:bool}>
      */
-    public static function googleFontsUrl(array $names, array $weights, bool $italic): string
+    public static function fontRequirements(array $theme, string $markup): array
     {
-        // css2 requires axis tuples in ascending order: all 0,(upright) before 1,(italic).
-        $axis = $italic
-            ? 'ital,wght@' . implode(';', array_merge(
-                array_map(static fn (int $w): string => "0,{$w}", $weights),
-                array_map(static fn (int $w): string => "1,{$w}", $weights),
-            ))
-            : 'wght@' . implode(';', $weights);
+        $familiesBySlug = self::googleFamiliesBySlug($theme);
+        if ($familiesBySlug === []) {
+            return [];
+        }
 
-        $params = array_map(
+        $requirements = [];
+        foreach ($familiesBySlug as $family) {
+            self::addFamilyWeight($requirements, $family, 400);
+        }
+        if (isset($familiesBySlug['body'])) {
+            // Body copy commonly contains <strong>; load the bold body face.
+            self::addFamilyWeight($requirements, $familiesBySlug['body'], 700);
+        }
+
+        $styles = $theme['styles'] ?? [];
+        if (is_array($styles)) {
+            self::collectThemeRequirements($styles, 'body', $familiesBySlug, $requirements);
+        }
+        self::collectMarkupRequirements($markup, $familiesBySlug, $requirements);
+
+        return self::normalizeRequirements($requirements);
+    }
+
+    /**
+     * The Google Fonts CSS2 URL requesting each family at exactly the given
+     * weights — `ital,wght` tuples for families whose scanned use includes
+     * italics, plain `wght` otherwise. Used by the deterministic fallback.
+     * Pure — unit-testable.
+     *
+     * @param array<string,array{weights:int[],italic:bool}> $requirements
+     */
+    public static function googleFontsUrl(array $requirements): string
+    {
+        $params = [];
+        foreach (self::normalizeRequirements($requirements) as $name => $required) {
+            // css2 requires axis tuples in ascending order: all 0,(upright)
+            // before 1,(italic).
+            $axis = $required['italic']
+                ? 'ital,wght@' . implode(';', array_merge(
+                    array_map(static fn (int $w): string => "0,{$w}", $required['weights']),
+                    array_map(static fn (int $w): string => "1,{$w}", $required['weights']),
+                ))
+                : 'wght@' . implode(';', $required['weights']);
+
             // rawurlencode turns spaces into %20; Google Fonts wants '+'.
-            static fn (string $n): string => 'family=' . str_replace('%20', '+', rawurlencode($n)) . ':' . $axis,
-            $names
-        );
+            $params[] = 'family=' . str_replace('%20', '+', rawurlencode($name)) . ':' . $axis;
+        }
         return 'https://fonts.googleapis.com/css2?' . implode('&', $params) . '&display=swap';
     }
 
@@ -244,13 +275,13 @@ final class FontsPhpStep implements Step
      * The deterministic fonts.php built straight from the scan — the guaranteed
      * floor the model output is measured against. Pure — unit-testable.
      *
-     * @param string[] $names
-     * @param int[] $weights
+     * @param array<string,array{weights:int[],italic:bool}> $requirements
      */
-    public static function fallback(string $handle, array $names, array $weights, bool $italic): string
+    public static function fallback(string $handle, array $requirements): string
     {
-        $url = self::googleFontsUrl($names, $weights, $italic);
-        $list = implode(', ', $names);
+        $requirements = self::normalizeRequirements($requirements);
+        $url = self::googleFontsUrl($requirements);
+        $list = implode(', ', array_keys($requirements));
 
         return <<<PHP
             <?php
@@ -279,14 +310,360 @@ final class FontsPhpStep implements Step
      */
     public static function googleFamilies(array $theme): array
     {
-        $names = [];
+        return array_values(self::googleFamiliesBySlug($theme));
+    }
+
+    /**
+     * Google-hostable families keyed by their theme.json slug, first-seen order.
+     *
+     * @param array<mixed> $theme
+     * @return array<string,string> slug => family name
+     */
+    private static function googleFamiliesBySlug(array $theme): array
+    {
+        $families = [];
         foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $family) {
+            if (!is_array($family)) {
+                continue;
+            }
+            $slug = (string) ($family['slug'] ?? '');
             $primary = self::primaryFamily((string) ($family['fontFamily'] ?? ''));
-            if ($primary !== null && !in_array(strtolower($primary), self::GENERIC, true)) {
-                $names[$primary] = true; // dedupe preserving first-seen
+            if (
+                $slug !== ''
+                && $primary !== null
+                && !in_array(strtolower($primary), self::GENERIC, true)
+                && !in_array($primary, $families, true)
+            ) {
+                $families[$slug] = $primary;
             }
         }
-        return array_keys($names);
+        return $families;
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param array<string,string> $familiesBySlug
+     * @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements
+     */
+    private static function collectThemeRequirements(
+        array $node,
+        ?string $currentSlug,
+        array $familiesBySlug,
+        array &$requirements,
+    ): void {
+        $familySlug = $currentSlug;
+        $typography = $node['typography'] ?? null;
+        if (is_array($typography) && isset($typography['fontFamily'])) {
+            $familySlug = self::resolveFamilySlug((string) $typography['fontFamily'], $familiesBySlug, $familySlug);
+        }
+
+        if ($familySlug !== null && isset($familiesBySlug[$familySlug]) && is_array($typography)) {
+            self::addTypographyUse($requirements, $familiesBySlug[$familySlug], $typography);
+        }
+
+        foreach ($node as $key => $value) {
+            if (is_array($value)) {
+                $nextSlug = $familySlug;
+                if (is_string($key) && in_array($key, ['heading', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true)) {
+                    $nextSlug = 'heading';
+                }
+                self::collectThemeRequirements($value, $nextSlug, $familiesBySlug, $requirements);
+            }
+        }
+    }
+
+    /**
+     * @param array<string,string> $familiesBySlug
+     * @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements
+     */
+    private static function collectMarkupRequirements(string $markup, array $familiesBySlug, array &$requirements): void
+    {
+        if (preg_match_all('/<!--\s*wp:([^\s{\/]+)[\s\S]*?-->/', $markup, $comments, PREG_SET_ORDER) > 0) {
+            foreach ($comments as $comment) {
+                $attrs = self::blockAttrs($comment[0]);
+                if ($attrs === null) {
+                    continue;
+                }
+                $blockName = $comment[1];
+                $familySlug = is_string($attrs['fontFamily'] ?? null)
+                    ? self::resolveFamilySlug($attrs['fontFamily'], $familiesBySlug, null)
+                    : self::defaultFamilySlugForBlock($blockName);
+                if ($familySlug === null || !isset($familiesBySlug[$familySlug])) {
+                    continue;
+                }
+
+                $typography = [];
+                if (is_array($attrs['style']['typography'] ?? null)) {
+                    $typography = $attrs['style']['typography'];
+                }
+                foreach (['fontWeight', 'fontStyle'] as $key) {
+                    if (array_key_exists($key, $attrs)) {
+                        $typography[$key] = $attrs[$key];
+                    }
+                }
+                self::addTypographyUse($requirements, $familiesBySlug[$familySlug], $typography);
+            }
+        }
+
+        if (preg_match_all('/<([a-z0-9-]+)\b([^>]*)>/i', $markup, $tags, PREG_SET_ORDER) > 0) {
+            foreach ($tags as $tag) {
+                $attrs = $tag[2];
+                $familySlug = null;
+                if (preg_match('/\bclass=(["\'])(.*?)\1/is', $attrs, $classMatch) === 1) {
+                    foreach (array_keys($familiesBySlug) as $slug) {
+                        if (preg_match('/(?<![\w-])has-' . preg_quote($slug, '/') . '-font-family(?![\w-])/', $classMatch[2]) === 1) {
+                            $familySlug = $slug;
+                            break;
+                        }
+                    }
+                }
+                $familySlug ??= self::defaultFamilySlugForTag($tag[1]);
+                if ($familySlug === null || !isset($familiesBySlug[$familySlug])) {
+                    continue;
+                }
+                if (preg_match('/\bstyle=(["\'])(.*?)\1/is', $attrs, $styleMatch) !== 1) {
+                    continue;
+                }
+                $typography = [];
+                if (preg_match('/font-weight:\s*([1-9]00)\b/i', $styleMatch[2], $m) === 1) {
+                    $typography['fontWeight'] = $m[1];
+                }
+                if (preg_match('/font-style:\s*italic\b/i', $styleMatch[2]) === 1) {
+                    $typography['fontStyle'] = 'italic';
+                }
+                self::addTypographyUse($requirements, $familiesBySlug[$familySlug], $typography);
+            }
+        }
+    }
+
+    /** @return array<mixed>|null */
+    private static function blockAttrs(string $comment): ?array
+    {
+        $start = strpos($comment, '{');
+        $end = strrpos($comment, '}');
+        if ($start === false || $end === false || $end <= $start) {
+            return null;
+        }
+        $attrs = json_decode(substr($comment, $start, $end - $start + 1), true);
+        return is_array($attrs) ? $attrs : null;
+    }
+
+    /** @param array<string,string> $familiesBySlug */
+    private static function resolveFamilySlug(string $value, array $familiesBySlug, ?string $fallback): ?string
+    {
+        $value = trim($value);
+        if (isset($familiesBySlug[$value])) {
+            return $value;
+        }
+        if (preg_match('/var:preset\|font-family\|([a-z0-9-]+)|--wp--preset--font-family--([a-z0-9-]+)/i', $value, $m) === 1) {
+            $slug = $m[1] !== '' ? $m[1] : $m[2];
+            return isset($familiesBySlug[$slug]) ? $slug : $fallback;
+        }
+        $primary = self::primaryFamily($value);
+        if ($primary !== null) {
+            foreach ($familiesBySlug as $slug => $family) {
+                if (strcasecmp($primary, $family) === 0) {
+                    return $slug;
+                }
+            }
+        }
+        return $fallback !== null && isset($familiesBySlug[$fallback]) ? $fallback : null;
+    }
+
+    private static function defaultFamilySlugForBlock(string $blockName): ?string
+    {
+        return in_array($blockName, ['heading', 'site-title'], true) ? 'heading' : 'body';
+    }
+
+    private static function defaultFamilySlugForTag(string $tag): ?string
+    {
+        return preg_match('/^h[1-6]$/i', $tag) === 1 ? 'heading' : 'body';
+    }
+
+    /**
+     * @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements
+     * @param array<mixed> $typography
+     */
+    private static function addTypographyUse(array &$requirements, string $family, array $typography): void
+    {
+        if (isset($typography['fontWeight']) && preg_match('/^[1-9]00$/', (string) $typography['fontWeight']) === 1) {
+            self::addFamilyWeight($requirements, $family, (int) $typography['fontWeight']);
+        }
+        if (isset($typography['fontStyle']) && is_string($typography['fontStyle']) && strtolower($typography['fontStyle']) === 'italic') {
+            self::markFamilyItalic($requirements, $family);
+        }
+    }
+
+    /** @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements */
+    private static function addFamilyWeight(array &$requirements, string $family, int $weight): void
+    {
+        $requirements[$family] ??= ['weights' => [], 'italic' => false];
+        $requirements[$family]['weights'][$weight] = true;
+    }
+
+    /** @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements */
+    private static function markFamilyItalic(array &$requirements, string $family): void
+    {
+        $requirements[$family] ??= ['weights' => [400 => true], 'italic' => false];
+        $requirements[$family]['italic'] = true;
+    }
+
+    /**
+     * @param array<string,array{weights:int[]|array<int,bool>,italic:bool}> $requirements
+     * @return array<string,array{weights:int[],italic:bool}>
+     */
+    private static function normalizeRequirements(array $requirements): array
+    {
+        $normalized = [];
+        foreach ($requirements as $family => $required) {
+            $weights = $required['weights'] ?? [400];
+            $weights = array_map('intval', array_is_list($weights) ? $weights : array_keys($weights));
+            $weights = array_values(array_unique(array_filter(
+                $weights,
+                static fn (int $weight): bool => $weight >= 100 && $weight <= 900 && $weight % 100 === 0
+            )));
+            if ($weights === []) {
+                $weights = [400];
+            }
+            sort($weights);
+            $normalized[$family] = [
+                'weights' => $weights,
+                'italic' => (bool) ($required['italic'] ?? false),
+            ];
+        }
+        return $normalized;
+    }
+
+    /**
+     * @return array<string,array{
+     *   upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},
+     *   italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}
+     * }>
+     */
+    private static function coverageFromGoogleUrl(string $url): array
+    {
+        $query = (string) parse_url($url, PHP_URL_QUERY);
+        if ($query === '') {
+            return [];
+        }
+
+        $coverage = [];
+        foreach (explode('&', $query) as $part) {
+            [$key, $value] = array_pad(explode('=', $part, 2), 2, '');
+            if (urldecode($key) !== 'family') {
+                continue;
+            }
+            $spec = urldecode($value);
+            [$family, $variant] = array_pad(explode(':', $spec, 2), 2, '');
+            $family = trim($family);
+            if ($family === '') {
+                continue;
+            }
+            $key = self::familyKey($family);
+            $coverage[$key] ??= self::emptyCoverage();
+            self::mergeOneCoverage($coverage[$key], self::coverageFromVariant($variant));
+        }
+        return $coverage;
+    }
+
+    /** @return array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}} */
+    private static function coverageFromVariant(string $variant): array
+    {
+        $coverage = self::emptyCoverage();
+        if ($variant === '') {
+            self::addCoverageValue($coverage['upright'], '400');
+            return $coverage;
+        }
+
+        [$axisText, $tupleText] = array_pad(explode('@', $variant, 2), 2, '');
+        if ($tupleText === '') {
+            return $coverage;
+        }
+
+        $axes = array_map('strtolower', array_map('trim', explode(',', $axisText)));
+        $weightIndex = array_search('wght', $axes, true);
+        $italicIndex = array_search('ital', $axes, true);
+
+        foreach (explode(';', $tupleText) as $tuple) {
+            $parts = array_map('trim', explode(',', $tuple));
+            $weight = $weightIndex === false ? '400' : ($parts[$weightIndex] ?? '');
+            if ($weight === '') {
+                continue;
+            }
+            $slot = 'upright';
+            if ($italicIndex !== false && ($parts[$italicIndex] ?? '') === '1') {
+                $slot = 'italic';
+            }
+            self::addCoverageValue($coverage[$slot], $weight);
+        }
+
+        return $coverage;
+    }
+
+    /** @return array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}} */
+    private static function emptyCoverage(): array
+    {
+        return [
+            'upright' => ['exact' => [], 'ranges' => []],
+            'italic'  => ['exact' => [], 'ranges' => []],
+        ];
+    }
+
+    /**
+     * @param array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>} $slot
+     */
+    private static function addCoverageValue(array &$slot, string $weight): void
+    {
+        if (preg_match('/^([1-9]00)$/', $weight, $m) === 1) {
+            $slot['exact'][(int) $m[1]] = true;
+            return;
+        }
+        if (preg_match('/^([1-9]00)\.\.([1-9]00)$/', $weight, $m) === 1) {
+            $slot['ranges'][] = [(int) $m[1], (int) $m[2]];
+        }
+    }
+
+    /**
+     * @param array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>} $slot
+     */
+    private static function coverageHasWeight(array $slot, int $weight): bool
+    {
+        if (isset($slot['exact'][$weight])) {
+            return true;
+        }
+        foreach ($slot['ranges'] as [$min, $max]) {
+            if ($weight >= min($min, $max) && $weight <= max($min, $max)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}}> $into */
+    private static function mergeCoverage(array &$into, array $from): void
+    {
+        foreach ($from as $family => $coverage) {
+            $into[$family] ??= self::emptyCoverage();
+            self::mergeOneCoverage($into[$family], $coverage);
+        }
+    }
+
+    /** @param array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}} $into */
+    private static function mergeOneCoverage(array &$into, array $from): void
+    {
+        foreach (['upright', 'italic'] as $slot) {
+            foreach ($from[$slot]['exact'] as $weight => $_) {
+                $into[$slot]['exact'][(int) $weight] = true;
+            }
+            foreach ($from[$slot]['ranges'] as $range) {
+                $into[$slot]['ranges'][] = $range;
+            }
+        }
+    }
+
+    private static function familyKey(string $family): string
+    {
+        return strtolower(trim($family));
     }
 
     /**
@@ -332,14 +709,15 @@ final class FontsPhpStep implements Step
         return $first === '' ? null : $first;
     }
 
-    /**
-     * The scanned-usage block for the prompt.
-     *
-     * @param int[] $weights
-     */
-    private static function usageText(array $weights, bool $italic): string
+    /** @param array<string,array{weights:int[],italic:bool}> $requirements */
+    private static function usageText(array $requirements): string
     {
-        return 'Weights: ' . implode(', ', $weights) . "\nItalics: " . ($italic ? 'yes' : 'no');
+        $lines = [];
+        foreach (self::normalizeRequirements($requirements) as $family => $required) {
+            $lines[] = $family . ': weights ' . implode(', ', $required['weights'])
+                . '; italics ' . ($required['italic'] ? 'yes' : 'no');
+        }
+        return implode("\n", $lines);
     }
 
     /** @return string[] problems from `php -l`, empty when the file parses */

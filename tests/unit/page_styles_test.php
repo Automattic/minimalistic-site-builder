@@ -73,6 +73,8 @@ test('validate rejects raw color literals', function () {
     assert_true([] !== PageStylesStep::validate(".hover-lift {\n    color: #fff;\n}"), 'hex');
     assert_true([] !== PageStylesStep::validate(".hover-lift {\n    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);\n}"), 'rgba');
     assert_true([] !== PageStylesStep::validate(".hover-lift {\n    color: hsl(20 10% 20%);\n}"), 'hsl');
+    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    color: red;\n}"), 'named color');
+    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    box-shadow: 0 10px 30px black;\n}"), 'named shadow color');
 });
 
 test('validate rejects disallowed at-rules and url()', function () {
