@@ -30,6 +30,16 @@ Across the four directions, pull the palettes apart on at least these levers:
 
 Even when the topic pulls toward a restrained or monochrome look (e.g. documentary photography), you can still diverge the paper temperature, the ink tone, and especially the accent hue while keeping each palette faithful and tasteful. Distinct ≠ arbitrary: each palette must still be grounded in the direction's own concept — just make sure the four grounds lead to four different color worlds.
 
+## Image Grade — One Photographic Treatment Per Direction
+
+Every image on the site is generated independently, so the only thing that makes them read as one photographic series is a shared grade. Each direction MUST include an `image_grade`: one compact, concrete art-direction sentence that applies to ALL of the site's imagery. It must commit to:
+
+- **Color vs monochrome** — say it explicitly (e.g. "monochrome documentary" or "warm kodachrome color"); never leave it ambiguous
+- **Light** — the quality of light shared across every image (e.g. "available light", "soft golden light", "hard midday sun")
+- **Texture / era cues** — grain, film stock, tonal range where relevant (e.g. "visible 35mm grain, charcoal midtones")
+
+Examples of good grades: "monochrome documentary, visible 35mm grain, charcoal midtones, available light, no saturated color" — "warm kodachrome color, soft golden light, shallow depth of field, gentle film grain". The grade must fit the direction's concept and palette: a dark-luxe direction and a pastel-pop direction should have visibly different grades.
+
 ## Hero Section — The First Impression
 
 Each direction MUST describe a distinctive hero section layout as part of its vision. The hero is the emotional anchor — describe it cinematically:
@@ -62,7 +72,8 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
   "directions": [
     {
       "title": "Short Evocative Title (2-4 words, topic-grounded — e.g., 'Forge & Flame' for a blacksmith, not 'Bold Modern')",
-      "description": "A rich, vivid paragraph describing the complete design vision including the hero section composition. Paint the picture: what does a visitor feel the moment they land? Describe the hero layout cinematically — how is space used, where does imagery sit, how does typography interact with visuals? Then flow into the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes."
+      "description": "A rich, vivid paragraph describing the complete design vision including the hero section composition. Paint the picture: what does a visitor feel the moment they land? Describe the hero layout cinematically — how is space used, where does imagery sit, how does typography interact with visuals? Then flow into the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes.",
+      "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above — e.g. 'monochrome documentary, visible 35mm grain, charcoal midtones, available light, no saturated color'."
     }
   ]
 }

@@ -6,7 +6,9 @@ declare(strict_types=1);
  * theme, palette, or layout is chosen.
  *
  * Input:  meta.json (the user prompt) + siteSpec.json (factual info).
- * Output: designDirection.md — a short freeform design brief (markdown).
+ * Output: designDirection.md — a short freeform design brief (markdown) — and
+ *         imageGrade.txt — the direction's one-sentence photographic grade for
+ *         ALL site imagery (read by GenerateImagesStep via imageGradeFor()).
  *
  * The model is asked for FOUR distinct visual directions in one call; this step
  * then picks ONE of them at random. Generating a spread and sampling from it —
@@ -38,6 +40,14 @@ final class DesignDirectionStep implements Step
 
     /** Where the brief is written, and read back from by readFor(). */
     private const FILE = 'designDirection.md';
+
+    /**
+     * Where the chosen direction's image grade is written, and read back from by
+     * imageGradeFor(). A separate machine-readable artifact (not parsed out of
+     * the freeform brief) so GenerateImagesStep can inject it verbatim into
+     * every composed image prompt.
+     */
+    private const GRADE_FILE = 'imageGrade.txt';
 
     public function __construct(
         private Llm $llm,
@@ -83,6 +93,12 @@ final class DesignDirectionStep implements Step
         $chosen = $directions[random_int(0, count($directions) - 1)];
 
         $project->writeText(self::FILE, self::format($chosen) . "\n");
+
+        // Persist the direction's photographic grade for the image pipeline.
+        // Always written — even empty (a partial model response without one just
+        // means image prompts get no grade clause; imageGradeFor() returns '')
+        // — so a re-run never leaves a stale grade from a previous direction.
+        $project->writeText(self::GRADE_FILE, trim((string) ($chosen['image_grade'] ?? '')) . "\n");
     }
 
     /**
@@ -107,5 +123,18 @@ final class DesignDirectionStep implements Step
         return $project->exists(self::FILE)
             ? trim($project->readText(self::FILE))
             : self::FALLBACK;
+    }
+
+    /**
+     * The committed direction's image grade — the one-sentence photographic
+     * treatment shared by ALL of the site's imagery. Returns '' when no grade
+     * was persisted (no fallback: an absent grade just means the image prompts
+     * carry no grade clause).
+     */
+    public static function imageGradeFor(Project $project): string
+    {
+        return $project->exists(self::GRADE_FILE)
+            ? trim($project->readText(self::GRADE_FILE))
+            : '';
     }
 }
