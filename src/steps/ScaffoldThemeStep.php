@@ -58,6 +58,17 @@ final class ScaffoldThemeStep implements Step
             justify-content: center;
         }
 
+        /* Chrome-less overlay header (the header part opts in via className="header-overlay"):
+           floats transparently over the full-bleed hero instead of stacking above it. */
+        .wp-site-blocks .header-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            background: transparent;
+        }
+
         .wp-site-blocks > footer {
             margin-block-start: 0;
         }
