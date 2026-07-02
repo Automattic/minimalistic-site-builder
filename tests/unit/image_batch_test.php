@@ -98,6 +98,12 @@ test('fitToTokens trims from the end to fit the cap, keeping the lead intact', f
     assert_true($out !== '', 'still returns something');
 });
 
+test('sampleImageSize renders wide (full-bleed) images at 2K, the rest at 1K', function () {
+    assert_eq('2K', WpcomImageClient::sampleImageSize('16:9'));
+    assert_eq('1K', WpcomImageClient::sampleImageSize('1:1'));
+    assert_eq('1K', WpcomImageClient::sampleImageSize('9:16'));
+});
+
 test('estimateTokens is conservative and grows with length', function () {
     assert_eq(0, WpcomImageClient::estimateTokens('   '));
     assert_true(WpcomImageClient::estimateTokens('a b c d e') >= 5, 'at least one token per short word');

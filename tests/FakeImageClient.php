@@ -42,7 +42,10 @@ final class FakeImageClient implements ImageClient
         foreach ($specs as $i => $spec) {
             // Record each spec as a call too, so existing assertions on ->calls
             // (prompt + aspect ratio) keep working under batching.
-            $this->calls[] = ['prompt' => $spec['prompt'], 'opts' => ['aspect_ratio' => $spec['aspect_ratio'] ?? '16:9']];
+            $this->calls[] = ['prompt' => $spec['prompt'], 'opts' => [
+                'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
+                'sample_image_size' => $spec['sample_image_size'] ?? null,
+            ]];
             $results[$i] = ($this->fail || $this->shouldFail((string) $spec['prompt']))
                 ? ['ok' => false, 'error' => 'fake image failure']
                 : ['ok' => true, 'bytes' => $this->bytes];

@@ -47,7 +47,8 @@ When creating multiple images that will be displayed together in a row or grid (
 - `watercolor` — Watercolor painting style
 
 **Subject guidelines:**
-- 1-3 specific sentences describing ONLY the image itself: what it shows and from what point of view (composition, framing, vantage, colors, mood, lighting). This is the actual generation subject — do not put the page placement here, that goes in `page-context`.
+- 1-3 specific sentences describing ONLY the image itself: what it shows and from what point of view (composition, framing, vantage, mood). This is the actual generation subject — do not put the page placement here, that goes in `page-context`.
+- Describe content and composition, NOT photographic grade or style treatment. A single site-wide grade (color vs black-and-white, film grain, light quality, color grading) is applied to every image automatically at generation time — do not restate or contradict it in the subject (no "black and white", "golden hour color", "muted grey tones", "35mm grain" and the like). Per-image grading would make adjacent images clash.
 - Make sibling images in the same section describe their distinct subject so they don't read alike.
 - For cover/hero backgrounds, keep the focal subject off-center with calm, low-detail areas so the overlaid text (described in `page-context`) stays legible.
 

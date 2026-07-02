@@ -11,22 +11,27 @@ test('image-logger slug keeps dots and dashes, lowercases the rest', function ()
 /** A successful request renders prompt, model, aspect ratio, spec and output. */
 test('image-logger format renders the full prompt, model and params on success', function () {
     $out = ImageLogger::format('hero.jpg', [
-        'model'        => 'imagen-4.0-generate-001',
-        'prompt'       => 'A bakery at dawn. Style: photorealistic',
-        'aspect_ratio' => '16:9',
-        'subject'      => 'A bakery at dawn',
-        'page_context' => 'full-bleed hero with text overlay',
-        'style'        => 'photorealistic',
+        'model'             => 'imagen-4.0-generate-001',
+        'prompt'            => 'A bakery at dawn. Style: photorealistic',
+        'aspect_ratio'      => '16:9',
+        'sample_image_size' => '2K',
+        'subject'           => 'A bakery at dawn',
+        'page_context'      => 'full-bleed hero with text overlay',
+        'style'             => 'photorealistic',
+        'image_grade'       => 'warm kodachrome color, soft golden light',
     ], ['path' => 'theme/assets/hero.jpg', 'bytes' => 123456]);
 
     assert_contains('IMAGE REQUEST LOG', $out);
     assert_contains('File         : hero.jpg', $out);
     assert_contains('Model        : imagen-4.0-generate-001', $out);
     assert_contains('Aspect ratio : 16:9', $out);
+    assert_contains('Sample size  : 2K', $out);
     assert_contains('Status       : OK', $out);
     assert_contains('Output       : theme/assets/hero.jpg (123456 bytes)', $out);
     assert_contains('A bakery at dawn', $out);                    // subject
     assert_contains('full-bleed hero with text overlay', $out);   // page context
+    assert_contains('IMAGE GRADE', $out);
+    assert_contains('warm kodachrome color, soft golden light', $out);
     assert_contains('A bakery at dawn. Style: photorealistic', $out); // full prompt
 });
 

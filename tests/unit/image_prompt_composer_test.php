@@ -45,3 +45,42 @@ test('compose keeps the subject in full when the site context is huge', function
     assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
     assert_contains("{$subject}. Style: photorealistic", $out);
 });
+
+test('compose injects the image grade as its own art-direction clause', function () {
+    $grade = 'monochrome documentary, visible 35mm grain, charcoal midtones';
+    $out = ImagePromptComposer::compose(
+        'A sourdough loaf on a board',
+        'menu item card',
+        'photorealistic',
+        'Image for the website “Hearth & Crumb”.',
+        $grade
+    );
+
+    assert_contains("Art direction for all site imagery: {$grade}.", $out);
+    // The grade sits BEFORE the sheddable guidance so end-trimming keeps it.
+    assert_true(
+        strpos($out, 'Art direction for all site imagery') < strpos($out, 'Context to guide'),
+        'grade clause precedes the guidance'
+    );
+});
+
+test('compose omits the grade clause when no grade is given', function () {
+    $out = ImagePromptComposer::compose('A sourdough loaf', 'menu item card', 'photorealistic', '', '');
+    assert_true(!str_contains($out, 'Art direction'), 'no grade clause without a grade');
+});
+
+test('compose sheds the site context under token pressure but keeps the grade', function () {
+    $subject = 'A specific sourdough loaf on a floured board, warm side light';
+    $grade   = 'monochrome documentary, visible 35mm grain, charcoal midtones';
+    $out = ImagePromptComposer::compose(
+        $subject,
+        'menu item card',
+        'photorealistic',
+        str_repeat('blurb context word ', 2000), // far over budget — gets shed
+        $grade
+    );
+
+    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_contains("{$subject}. Style: photorealistic", $out);
+    assert_contains("Art direction for all site imagery: {$grade}.", $out);
+});

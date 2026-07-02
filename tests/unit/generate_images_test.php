@@ -76,6 +76,50 @@ test('generate-images leads with the subject + style and adds the page context',
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images injects the persisted image grade into every prompt', function () {
+    [$project, $tmp] = generate_fixture();
+    $grade = 'monochrome documentary, visible 35mm grain, available light';
+    $project->writeText('imageGrade.txt', $grade . "\n");
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_contains("Art direction for all site imagery: {$grade}.", $images->calls[0]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images requests 2K for landscape images and 1K otherwise', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', [
+        [
+            'filename' => 'hero.jpg', 'src' => 'theme:./assets/hero.jpg',
+            'subject' => 'a hero', 'pageContext' => 'full-bleed hero',
+            'style' => 'photorealistic', 'aspectRatio' => 'landscape', 'status' => 'pending',
+        ],
+        [
+            'filename' => 'thumb.jpg', 'src' => 'theme:./assets/thumb.jpg',
+            'subject' => 'a thumb', 'pageContext' => 'card thumbnail',
+            'style' => 'photorealistic', 'aspectRatio' => 'square', 'status' => 'pending',
+        ],
+        [
+            'filename' => 'tall.jpg', 'src' => 'theme:./assets/tall.jpg',
+            'subject' => 'a tall image', 'pageContext' => 'about portrait',
+            'style' => 'photorealistic', 'aspectRatio' => 'portrait', 'status' => 'pending',
+        ],
+    ]);
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq('2K', $images->calls[0]['opts']['sample_image_size']); // landscape full-bleed
+    assert_eq('1K', $images->calls[1]['opts']['sample_image_size']); // square thumb
+    assert_eq('1K', $images->calls[2]['opts']['sample_image_size']); // portrait
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images marks failed and leaves the placeholder on error', function () {
     [$project, $tmp] = generate_fixture();
     $images = new FakeImageClient('', true); // throws

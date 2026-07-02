@@ -14,11 +14,17 @@ declare(strict_types=1);
  * "portfolio gallery card") and the SITE CONTEXT (what the whole site is about)
  * are NOT things to draw: they only steer subject choice, mood and composition.
  *
+ * The IMAGE GRADE — the design direction's one-sentence photographic treatment
+ * shared by ALL of the site's imagery (color vs B&W, grain, light) — IS render
+ * instruction: it is appended to every prompt so independently generated images
+ * read as one photographic series.
+ *
  * The shape of the prompt lives in prompts/image-prompt.md (a composable template
  * with plain {{placeholders}}, like the other prompts). This class assembles the
- * optional clauses — the style suffix and the context guidance — and caps the
- * result at the model's input-token limit. Because the subject leads the template,
- * that cap sheds trailing context first and keeps the subject intact.
+ * optional clauses — the style suffix, the grade clause and the context guidance —
+ * and caps the result at the model's input-token limit. Because the subject leads
+ * the template and the grade sits BEFORE the trailing guidance, that cap sheds the
+ * sheddable context first and keeps the subject and grade intact.
  *
  * The aspect ratio is intentionally absent from this text — it is sent to the
  * endpoint as a structured parameter (WpcomImageClient::aspectRatio / buildBody).
@@ -30,6 +36,8 @@ final class ImagePromptComposer
      * @param string             $pageContext where/how the image is used on the page
      * @param string             $style       one of the AI_IMAGE style keywords
      * @param string             $siteContext a factual sentence about the site
+     * @param string             $imageGrade  the project-wide photographic grade
+     *        from the design direction, applied to every image
      * @param PromptRenderer|null $renderer    defaults to the repo's prompts/ dir;
      *        injectable so the template lookup can be redirected in tests
      */
@@ -38,6 +46,7 @@ final class ImagePromptComposer
         string $pageContext,
         string $style,
         string $siteContext = '',
+        string $imageGrade = '',
         ?PromptRenderer $renderer = null
     ): string {
         $renderer ??= new PromptRenderer(repo_path('prompts'));
@@ -46,9 +55,16 @@ final class ImagePromptComposer
         $style       = trim($style);
         $pageContext = trim($pageContext);
         $siteContext = trim($siteContext);
+        $imageGrade  = trim($imageGrade);
 
         // Style is appended to the subject as a suffix; absent when no style.
         $styleClause = $style !== '' ? ". Style: {$style}" : '';
+
+        // The shared grade is a render instruction for every image on the site;
+        // it precedes the guidance so end-trimming sheds the guidance first.
+        $gradeClause = $imageGrade !== ''
+            ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
+            : '';
 
         // Page and site context only steer mood/composition — they are NOT drawn,
         // so they are framed as guidance and omitted entirely when there is none.
@@ -66,12 +82,14 @@ final class ImagePromptComposer
         $prompt = $renderer->render('image-prompt.md', [
             'subject'      => $subject,
             'style_clause' => $styleClause,
+            'grade_clause' => $gradeClause,
             'guidance'     => $guidance,
         ]);
 
-        // The template leaves a blank line that collapses when guidance is empty;
-        // normalise the surrounding whitespace then cap to the model's hard input
+        // Empty clauses leave stacked blank lines in the template; collapse them,
+        // normalise the surrounding whitespace, then cap to the model's hard input
         // limit (sheds trailing context first — see class doc).
-        return WpcomImageClient::fitToTokens(trim($prompt), WpcomImageClient::MAX_PROMPT_TOKENS);
+        $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
+        return WpcomImageClient::fitToTokens($prompt, WpcomImageClient::MAX_PROMPT_TOKENS);
     }
 }

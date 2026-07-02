@@ -56,6 +56,10 @@ final class GenerateImagesStep implements Step
             $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : []
         );
 
+        // The design direction's photographic grade, injected into EVERY prompt
+        // so the independently generated images read as one photographic series.
+        $imageGrade = DesignDirectionStep::imageGradeFor($project);
+
         $assetDir = $project->themePath('assets');
         if (!is_dir($assetDir) && !mkdir($assetDir, 0775, true) && !is_dir($assetDir)) {
             throw new RuntimeException("Could not create assets directory: {$assetDir}");
@@ -88,15 +92,22 @@ final class GenerateImagesStep implements Step
 
             // Map this batch's original indices to generation specs (order kept).
             $indices = array_keys($batch);
-            $batchSpecs = array_map(fn (array $spec): array => [
-                'prompt'       => ImagePromptComposer::compose(
-                    (string) ($spec['subject'] ?? ''),
-                    (string) ($spec['pageContext'] ?? ''),
-                    (string) ($spec['style'] ?? ''),
-                    $siteContext,
-                ),
-                'aspect_ratio' => WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
-            ], array_values($batch));
+            $batchSpecs = array_map(function (array $spec) use ($siteContext, $imageGrade): array {
+                $ratio = WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
+                return [
+                    'prompt'            => ImagePromptComposer::compose(
+                        (string) ($spec['subject'] ?? ''),
+                        (string) ($spec['pageContext'] ?? ''),
+                        (string) ($spec['style'] ?? ''),
+                        $siteContext,
+                        $imageGrade,
+                    ),
+                    'aspect_ratio'      => $ratio,
+                    // Wide images are the full-bleed ones (heroes, banners) —
+                    // render those at 2K so they stay sharp past ~1366px.
+                    'sample_image_size' => WpcomImageClient::sampleImageSize($ratio),
+                ];
+            }, array_values($batch));
 
             $results = $this->images->generateBatch($batchSpecs);
 
@@ -107,12 +118,14 @@ final class GenerateImagesStep implements Step
                 // The full prompt + every parameter that shaped this request,
                 // logged below whether it succeeds or fails.
                 $logRequest = [
-                    'model'        => $this->images->model(),
-                    'prompt'       => (string) $batchSpecs[$pos]['prompt'],
-                    'aspect_ratio' => (string) $batchSpecs[$pos]['aspect_ratio'],
-                    'subject'      => (string) ($specs[$i]['subject'] ?? ''),
-                    'page_context' => (string) ($specs[$i]['pageContext'] ?? ''),
-                    'style'        => (string) ($specs[$i]['style'] ?? ''),
+                    'model'             => $this->images->model(),
+                    'prompt'            => (string) $batchSpecs[$pos]['prompt'],
+                    'aspect_ratio'      => (string) $batchSpecs[$pos]['aspect_ratio'],
+                    'sample_image_size' => (string) $batchSpecs[$pos]['sample_image_size'],
+                    'subject'           => (string) ($specs[$i]['subject'] ?? ''),
+                    'page_context'      => (string) ($specs[$i]['pageContext'] ?? ''),
+                    'style'             => (string) ($specs[$i]['style'] ?? ''),
+                    'image_grade'       => $imageGrade,
                 ];
 
                 // A single image must never abort the build — isolate both a

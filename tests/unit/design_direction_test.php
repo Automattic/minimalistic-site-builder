@@ -38,6 +38,45 @@ test('design-direction picks one of the four directions and writes it to designD
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('design-direction persists the chosen direction\'s image grade', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    // Same grade on all four so the random choice doesn't matter to the assertion.
+    $grade = 'warm kodachrome color, soft golden light, shallow depth of field';
+    $llm->queueJson(['directions' => array_map(fn (int $i) => [
+        'title'       => "Direction {$i}",
+        'description' => "Vision {$i}.",
+        'image_grade' => $grade,
+    ], range(1, 4))]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_true($project->exists('imageGrade.txt'), 'imageGrade.txt written');
+    assert_eq($grade, DesignDirectionStep::imageGradeFor($project));
+
+    // The prompt asks the model for the grade field.
+    assert_contains('image_grade', $llm->calls[0]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction tolerates a direction without an image grade', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    // A stale grade from a previous run must not survive a re-run whose chosen
+    // direction carries no grade.
+    $project->writeText('imageGrade.txt', "stale grade from an earlier run\n");
+    $llm->queueJson(['directions' => [
+        ['title' => 'No Grade', 'description' => 'A direction with no image_grade field.'],
+    ]]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_eq('', DesignDirectionStep::imageGradeFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('design-direction throws when the model returns no usable directions', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['directions' => [['title' => 'Empty', 'description' => '   ']]]);
