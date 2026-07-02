@@ -133,10 +133,6 @@ function build_pipeline(Llm $llm): Pipeline
             new ThemeJsonStep($llm, $renderer, $models['theme-json']),
             new SectionPlanStep($llm, $renderer, $models['section-plan']),
         ]),
-        // theme.json only names the heading/body families; nothing loads them.
-        // Write a functions.php that enqueues them from Google Fonts so the
-        // chosen typography actually renders (front end + editor).
-        new FontsStep(),
         // Generate the header, footer, and every section part in one concurrent
         // batch, then stitch them into the page deterministically.
         new SectionsStep($llm, $renderer, $models['sections']),
@@ -150,6 +146,9 @@ function build_pipeline(Llm $llm): Pipeline
         // layout utility classes survived, and appends their CSS to style.css —
         // a file the fixer never touches, so nothing here can be stripped.
         new PageStylesStep($llm, $renderer, $models['page-styles']),
+        // Sole owner of functions.php: enqueues style.css and the Google Fonts
+        // at the weights the design uses — LAST, so the scan sees the final
+        // theme.json and the fixed markup.
         new FinalizeThemeStep(),
     ]);
 }
