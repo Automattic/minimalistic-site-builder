@@ -45,7 +45,12 @@ You may refine details within the archetype (column ratios, spacing, type scale)
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
 - Wrap the whole section in a single top-level <!-- wp:group --> with a constrained or full layout, so it drops cleanly into the page in order.
-- Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, list, separator, spacer; query/post-template only if useful).
+- Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, gallery, media-text, quote, pullquote, list, separator, spacer; query/post-template only if useful).
+- Reach beyond group/columns when the content calls for it:
+    media-text — a split row with the image filling one half edge-to-edge and copy in the other; supports `"mediaPosition":"right"`, `"verticalAlignment"`, `"isStackedOnMobile":true`. The best tool for alternating feature rows and about/story sections.
+    pullquote — ONE oversized editorial line (a manifesto, a review, a customer's best sentence) as a typographic centerpiece between denser sections.
+    quote — attributed testimonials or reviews at reading size, with a citation.
+    gallery — photo grids with proper gutters; set `"columns"` (2–4) and it handles responsive wrapping. Better than hand-built image columns for photo-led sections.
 - Reference theme.json presets by slug:
     colors via "backgroundColor" / "textColor" using slugs: base, contrast, primary, secondary, accent
     fonts via "fontFamily" using slugs: heading, body
@@ -71,13 +76,31 @@ Text orientation (all sections):
 Visual richness beyond the one hero image — build atmosphere with tokens, NOT extra photos and NOT `<style>` tags:
 - Use theme.json gradient and shadow presets (`"gradient":"<slug>"` on cover/group backgrounds; the shadow presets for depth), color blocks, typographic scale, decorative borders (`"style":{"border":{...}}`), and spacing rhythm via inline `style` on group/heading wrappers.
 
-Equal-height card rows (features, services, team, pricing, gallery cards) — use this recipe so cards line up:
-- `wp:columns` with `"className":"equal-cards"`.
-- Each `wp:column` with `"verticalAlignment":"stretch"` and `"width":"X%"` where X = 100 / number_of_cards (2 cards → 50%, 3 → 33.33%, 4 → 25%). All widths MUST sum to exactly 100%.
-- Inside each column a single `wp:group` card wrapper holding the content (heading, paragraph, image, list).
-- Any card image: `style="height:200px;object-fit:cover;width:100%"`.
-- For a bottom-aligned CTA, wrap it in `wp:buttons` with `"className":"cta-bottom"`.
-  (The supporting `.equal-cards` / `.cta-bottom` CSS already ships in the theme's style.css — just use these class hooks; do NOT add `<style>` tags.)
+Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick the recipe; do NOT default every card section to the same equal grid:
+
+1. `equal-grid` — uniform card row, for flat hierarchies (pricing tiers, a trio of equally weighted features):
+   - `wp:columns` with `"className":"equal-cards"`.
+   - Each `wp:column` with `"verticalAlignment":"stretch"` and `"width":"X%"` where X = 100 / number_of_cards (2 cards → 50%, 3 → 33.33%, 4 → 25%). All widths MUST sum to exactly 100%.
+   - Inside each column a single `wp:group` card wrapper holding the content (heading, paragraph, image, list).
+   - Any card image: `style="height:200px;object-fit:cover;width:100%"`.
+   - For a bottom-aligned CTA, wrap it in `wp:buttons` with `"className":"cta-bottom"`.
+     (The supporting `.equal-cards` / `.cta-bottom` CSS already ships in the theme's style.css — just use these class hooks.)
+2. `staggered-grid` — offset rhythm, for directions that promise energy or a broken grid:
+   - `wp:columns` (no equal-cards class); each `wp:column` still gets a `"width"` and the widths MUST sum to 100%.
+   - Push every SECOND column's card down by giving its inner card `wp:group` `"style":{"spacing":{"margin":{"top":"3rem"}}}` (odd columns get no offset). Use "4rem" for a stronger stagger.
+3. `editorial-row` — one dominant card plus supporting cards, for curated/selected-work sections:
+   - `wp:columns` with mixed widths that sum to 100% (e.g. 50/25/25 or 60/40); the dominant column gets the bigger image (`style="height:320px;object-fit:cover;width:100%"`) and a larger heading; supporting cards stay at `height:200px`.
+4. `list-thumb` — stacked rows with a small thumbnail and text, for menus, article lists, or dense catalogs:
+   - One `wp:columns` per row: a narrow image column (`"width":"18%"`, image `style="height:110px;object-fit:cover;width:100%"`) and a wide text column (`"width":"82%"`) with heading + one-line paragraph.
+   - Optionally a `wp:separator` between rows for an index/menu feel.
+
+Layout utility classes (optional, powerful) — a later build step generates the CSS for EXACTLY these class names, tuned to this design direction. You MAY add them via `"className"` on the blocks noted; NEVER invent other utility classes and NEVER add `<style>` tags:
+- `overlap-up` — on a group/columns block: pulls it upward with a negative top margin so it overlaps the element above (e.g. a card row breaking into the hero). If you put it on the section's TOP-LEVEL group, omit that group's margin-top:0 reset — the class supplies the pull.
+- `masonry-3` — on a group whose direct children are cards/images of varying height: flows them into a 3-column masonry (fewer columns on small screens). Use instead of forcing unequal content into equal columns.
+- `hover-lift` — on a card `wp:group` or an image: lifts with a soft shadow on hover.
+- `hover-reveal` — on a card `wp:group` that layers text with an image: the image dims/zooms and the text reveals on hover. Good for gallery/portfolio cards with clean overlay captions.
+- `sticky-side` — on ONE `wp:column` of a two-column layout: that column stays pinned while the other scrolls (desktop only). Good for a sticky title/intro beside a long list.
+Combine them with the recipes (e.g. a staggered-grid of hover-lift cards, or a masonry-3 gallery of hover-reveal tiles) when the direction calls for that energy.
 
 - Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS below. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
 - Every block comment must be correctly closed and the HTML class names must match the block (standard WordPress block classes).
