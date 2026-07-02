@@ -1,5 +1,13 @@
 [
     {
+        "slug": "portfolio3",
+        "asset": "portfolio3-playground-20260702T192944Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/matiasbenedetto/minimalistic-site-builder/playground-artifacts/portfolio3-playground-20260702T192944Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2Fmatiasbenedetto%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fportfolio3-playground-20260702T192944Z.zip",
+        "size_bytes": 27582889,
+        "created_at": "2026-07-02T19:29:53+00:00"
+    },
+    {
         "slug": "portfolio23",
         "asset": "portfolio23-playground-20260702T192532Z.zip",
         "artifact_url": "https://raw.githubusercontent.com/matiasbenedetto/minimalistic-site-builder/playground-artifacts/portfolio23-playground-20260702T192532Z.zip",
