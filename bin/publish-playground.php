@@ -44,9 +44,6 @@ foreach (array_slice($argv, 1) as $a) {
         $repo = substr($a, 7);
     } elseif (str_starts_with($a, '--branch=')) {
         $branch = substr($a, 9);
-    } elseif (str_starts_with($a, '--tag=')) {
-        // Backwards-compatible alias from the first release-asset version.
-        $branch = substr($a, 6);
     } elseif (str_starts_with($a, '--name=')) {
         $assetName = substr($a, 7);
     } elseif (str_starts_with($a, '--out=')) {
@@ -77,7 +74,7 @@ try {
 
     echo "Packaging '{$project->slug()}' for WordPress Playground\n";
     $bundle = PlaygroundArtifact::build($project, $assetName, $out);
-    $size = format_bytes((int) filesize($bundle));
+    $size = PlaygroundArtifact::formatBytes((int) filesize($bundle));
     echo "  bundle: {$bundle} ({$size})\n";
     echo "  includes: blueprint.json, project.zip (project/{$project->slug()}/...)\n";
 
@@ -194,9 +191,6 @@ function publish_to_branch(string $repo, string $branch, string $bundle, string 
         } else {
             run_or_fail('git checkout -q --orphan ' . escapeshellarg($branch), $tmp);
         }
-        if (!is_file($tmp . '/README.md')) {
-            file_put_contents($tmp . '/README.md', "# Playground artifacts\n\nGenerated WordPress Playground bundles.\n");
-        }
 
         $dest = $tmp . '/' . $assetName;
         if ($branchExists) {
@@ -245,13 +239,7 @@ function publish_to_branch(string $repo, string $branch, string $bundle, string 
 /** @param array<string,mixed> $entry */
 function update_index(string $path, array $entry): void
 {
-    $index = read_index($path);
-
-    $index = array_values(array_filter(
-        $index,
-        static fn (array $item) => ($item['asset'] ?? null) !== $entry['asset']
-    ));
-    array_unshift($index, $entry);
+    $index = PlaygroundArtifact::updateIndex(read_index($path), $entry);
 
     $json = json_encode($index, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     if ($json === false || file_put_contents($path, $json . "\n") === false) {
@@ -262,16 +250,9 @@ function update_index(string $path, array $entry): void
 /** @return array<int,array<string,mixed>> */
 function read_index(string $path): array
 {
-    if (!is_file($path)) {
-        return [];
-    }
-
-    $decoded = json_decode((string) file_get_contents($path), true);
-    if (!is_array($decoded)) {
-        return [];
-    }
-
-    return array_values(array_filter($decoded, static fn ($item) => is_array($item)));
+    return is_file($path)
+        ? PlaygroundArtifact::parseIndex((string) file_get_contents($path))
+        : [];
 }
 
 /** @param array<int,array<string,mixed>> $index */
@@ -294,30 +275,24 @@ function list_assets(string $repo, string $branch): void
     }
 
     $json = base64_decode(preg_replace('/\s+/', '', $view['output']) ?? '', true);
-    $assets = $json === false ? [] : json_decode($json, true);
-    if (!is_array($assets) || $assets === []) {
+    $assets = $json === false ? [] : PlaygroundArtifact::parseIndex($json);
+    if ($assets === []) {
         echo "  (none)\n";
         return;
     }
 
     foreach ($assets as $asset) {
-        if (!is_array($asset)) {
-            continue;
-        }
         $name = (string) ($asset['asset'] ?? '');
         if ($name === '') {
             continue;
         }
-        $size = format_bytes((int) ($asset['size_bytes'] ?? 0));
+        $size = PlaygroundArtifact::formatBytes((int) ($asset['size_bytes'] ?? 0));
         $created = (string) ($asset['created_at'] ?? '');
         $artifactUrl = (string) ($asset['artifact_url'] ?? PlaygroundArtifact::artifactUrl($repo, $branch, $name));
         $playgroundUrl = (string) ($asset['playground_url'] ?? PlaygroundArtifact::playgroundUrl($artifactUrl));
 
-        echo "- {$name}";
-        if ($size !== '0 B' || $created !== '') {
-            echo " ({$size}" . ($created !== '' ? ", {$created}" : '') . ')';
-        }
-        echo "\n";
+        $meta = array_filter([$size, $created], static fn (string $v) => $v !== '');
+        echo "- {$name}" . ($meta === [] ? '' : ' (' . implode(', ', $meta) . ')') . "\n";
         echo "  artifact:   {$artifactUrl}\n";
         echo "  playground: {$playgroundUrl}\n";
     }
@@ -346,22 +321,6 @@ function mkdir_or_fail(string $dir): void
     if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
         throw new RuntimeException("Could not create directory: {$dir}");
     }
-}
-
-function format_bytes(int $bytes): string
-{
-    if ($bytes < 1024) {
-        return $bytes . ' B';
-    }
-    $units = ['KB', 'MB', 'GB'];
-    $value = $bytes / 1024;
-    foreach ($units as $unit) {
-        if ($value < 1024 || $unit === 'GB') {
-            return number_format($value, $value >= 10 ? 1 : 2) . " {$unit}";
-        }
-        $value /= 1024;
-    }
-    return $bytes . ' B';
 }
 
 function open_url(string $url): void

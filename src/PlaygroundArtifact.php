@@ -30,6 +30,38 @@ final class PlaygroundArtifact
         return 'https://playground.wordpress.net/?blueprint-url=' . rawurlencode($artifactUrl);
     }
 
+    /**
+     * Decode an index.json payload, dropping malformed content and non-object
+     * entries so a corrupted index degrades to "no entries" instead of failing.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function parseIndex(string $json): array
+    {
+        $decoded = json_decode($json, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        return array_values(array_filter($decoded, static fn ($item) => is_array($item)));
+    }
+
+    /**
+     * Prepend an entry, replacing any previous entry for the same asset.
+     *
+     * @param array<int,array<string,mixed>> $index
+     * @param array<string,mixed> $entry
+     * @return array<int,array<string,mixed>>
+     */
+    public static function updateIndex(array $index, array $entry): array
+    {
+        $index = array_values(array_filter(
+            $index,
+            static fn (array $item) => ($item['asset'] ?? null) !== $entry['asset']
+        ));
+        array_unshift($index, $entry);
+        return $index;
+    }
+
     /** @param array<int,array<string,mixed>> $index */
     public static function renderArtifactReadme(array $index): string
     {
@@ -160,16 +192,28 @@ final class PlaygroundArtifact
         return $out;
     }
 
-    /** @return array<string,string> */
-    private static function siteOptions(Project $project): array
+    /**
+     * WP site identity for a Blueprint's setSiteOptions step: the header's
+     * site-title/site-tagline blocks read these options, not the theme.
+     * A malformed siteSpec.json falls back to the theme header/slug.
+     *
+     * @return array<string,string>
+     */
+    public static function siteOptions(Project $project): array
     {
         $name = self::themeDisplayName($project);
         $blogname = $name !== '' ? $name : $project->slug();
         $blogdescription = '';
 
         if ($project->exists('siteSpec.json')) {
-            $spec = $project->readJson('siteSpec.json');
+            try {
+                $spec = $project->readJson('siteSpec.json');
+            } catch (RuntimeException) {
+                $spec = [];
+            }
             $blogname = (string) ($spec['name'] ?? $blogname);
+            // The spec carries a tagline only when the user stated one; fall back
+            // to the factual topic so the site-tagline block is never blank.
             $blogdescription = (string) ($spec['tagline'] ?? $spec['topic'] ?? '');
         }
 
@@ -179,7 +223,8 @@ final class PlaygroundArtifact
         ];
     }
 
-    private static function themeDisplayName(Project $project): string
+    /** Theme display name from the style.css header, or '' if absent. */
+    public static function themeDisplayName(Project $project): string
     {
         $style = $project->themePath('style.css');
         if (preg_match('/Theme Name:\s*(.+)/', (string) file_get_contents($style), $m)) {
@@ -190,8 +235,15 @@ final class PlaygroundArtifact
 
     private static function assertAssetName(string $assetName): void
     {
-        if ($assetName === '' || basename($assetName) !== $assetName || !str_ends_with($assetName, '.zip')) {
-            throw new RuntimeException('--name must be a ZIP filename, not a path.');
+        // Allowlist, not basename(): the name lands in git sparse-checkout
+        // patterns, git command lines, and markdown, so control characters and
+        // leading '-' must be rejected too.
+        if (
+            !str_ends_with($assetName, '.zip')
+            || str_starts_with($assetName, '-')
+            || preg_match('/[^A-Za-z0-9._-]/', $assetName)
+        ) {
+            throw new RuntimeException('--name must be a .zip filename using letters, numbers, dots, underscores, or hyphens.');
         }
     }
 
@@ -256,7 +308,8 @@ final class PlaygroundArtifact
         }
     }
 
-    private static function formatBytes(int $bytes): string
+    /** Human-readable size, or '' for zero/unknown so table cells stay blank. */
+    public static function formatBytes(int $bytes): string
     {
         if ($bytes <= 0) {
             return '';

@@ -88,6 +88,55 @@ test('playground artifact README renders one row per uploaded zip', function () 
     assert_contains('| old-entry | 2026-07-02 19:29:53 UTC | [old-entry.zip](https://raw.githubusercontent.com/owner/repo/playground-artifacts/old-entry.zip) | [Open](https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fexample.test%2Fold-entry.zip) | 512 B |', $readme);
 });
 
+test('playground artifact index update replaces same-name assets and prepends the newest entry', function () {
+    $index = PlaygroundArtifact::updateIndex(
+        [
+            ['asset' => 'a.zip', 'size_bytes' => 1],
+            ['asset' => 'b.zip', 'size_bytes' => 2],
+        ],
+        ['asset' => 'a.zip', 'size_bytes' => 3]
+    );
+
+    assert_eq([
+        ['asset' => 'a.zip', 'size_bytes' => 3],
+        ['asset' => 'b.zip', 'size_bytes' => 2],
+    ], $index);
+});
+
+test('playground artifact index parsing tolerates malformed content', function () {
+    assert_eq([], PlaygroundArtifact::parseIndex(''));
+    assert_eq([], PlaygroundArtifact::parseIndex('not json'));
+    assert_eq([], PlaygroundArtifact::parseIndex('"a string"'));
+    assert_eq(
+        [['asset' => 'a.zip']],
+        PlaygroundArtifact::parseIndex('[{"asset": "a.zip"}, "junk", 3, null]')
+    );
+});
+
+test('playground artifact build rejects unsafe asset names', function () {
+    $tmp = sys_get_temp_dir() . '/builder_playground_names_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Demo Site');
+    $project->writeText('theme/style.css', "/*\nTheme Name: Demo Theme\n*/\n");
+
+    $bad = [
+        '',
+        'no-extension',
+        'nested/path.zip',
+        '../escape.zip',
+        '-leading-dash.zip',
+        "line\nbreak.zip",
+        'spaced name.zip',
+    ];
+    foreach ($bad as $name) {
+        assert_throws(
+            fn () => PlaygroundArtifact::build($project, $name),
+            'asset name rejected: ' . str_replace("\n", '\n', $name)
+        );
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 /** @return string[] */
 function zip_entries(string $zip): array
 {
