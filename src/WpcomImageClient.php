@@ -60,6 +60,17 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
+     * The Imagen sample size to request for a given aspect ratio. Wide (16:9)
+     * images are the ones used full-bleed (heroes, banners, wide features) where
+     * a 1K render stretched past ~1366px goes soft — request 2K for those. The
+     * smaller square/portrait slots stay at 1K to keep cost down.
+     */
+    public static function sampleImageSize(string $aspectRatio): string
+    {
+        return trim($aspectRatio) === '16:9' ? '2K' : '1K';
+    }
+
+    /**
      * Conservative token estimate for an Imagen text prompt. No local tokenizer
      * is available, so over-estimate (the larger of a word- and a character-based
      * count) to stay safely under the hard model limit.
@@ -123,7 +134,8 @@ final class WpcomImageClient implements ImageClient
         $bodies = [];
         foreach ($specs as $i => $spec) {
             $bodies[$i] = self::buildBody((string) $spec['prompt'], [
-                'aspect_ratio' => $spec['aspect_ratio'] ?? '16:9',
+                'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
+                'sample_image_size' => $spec['sample_image_size'] ?? null,
             ]);
         }
 
@@ -231,7 +243,7 @@ final class WpcomImageClient implements ImageClient
     /**
      * The Imagen predict request body for one prompt.
      *
-     * @param array{aspect_ratio?:string} $opts
+     * @param array{aspect_ratio?:string,sample_image_size?:?string} $opts
      * @return array<string,mixed>
      */
     private static function buildBody(string $prompt, array $opts): array
@@ -241,7 +253,7 @@ final class WpcomImageClient implements ImageClient
             'parameters' => [
                 'sampleCount'     => 1,
                 'aspectRatio'     => $opts['aspect_ratio'] ?? '16:9',
-                'sampleImageSize' => '1K',
+                'sampleImageSize' => $opts['sample_image_size'] ?? '1K',
                 // Ask Imagen for JPEG directly so the bytes match the .jpg asset
                 // filenames (it returns PNG otherwise — larger and mislabeled).
                 'outputOptions'   => [
