@@ -43,7 +43,7 @@ function default_llm_model(): string
 /**
  * Per-step model selection — the single, explicit place to choose which Claude
  * model each LLM step runs on. Change a value here to A/B model quality, cost
- * and speed for one step in isolation. Only the three LLM steps appear; the
+ * and speed for one step in isolation. Only the LLM steps appear; the
  * deterministic steps (scaffold, apply-identity, collect-images, fix-blocks,
  * finalize) make no LLM calls.
  *
@@ -51,7 +51,7 @@ function default_llm_model(): string
  *   'site-spec' => 'claude-haiku-4-5',
  * Or override any one step from the environment without touching code:
  *   LLM_MODEL_REFINE_PROMPT, LLM_MODEL_SITE_SPEC, LLM_MODEL_THEME_JSON,
- *   LLM_MODEL_SECTION_PLAN, LLM_MODEL_SECTIONS
+ *   LLM_MODEL_SECTION_PLAN, LLM_MODEL_SECTIONS, LLM_MODEL_PAGE_STYLES
  * LLM_MODEL sets the fallback for every step left at the default.
  *
  * @return array<string,string> step id => model id
@@ -71,6 +71,9 @@ function step_models(): array
         'section-plan' => Env::get('LLM_MODEL_SECTION_PLAN', 'claude-haiku-4-5'),
         // Section markup is the quality-critical work — best model by default.
         'sections'     => Env::get('LLM_MODEL_SECTIONS',     $default),
+        // One small CSS appendix, but it must satisfy a strict validator and
+        // carry the direction's mood — best model by default; cheap to override.
+        'page-styles'  => Env::get('LLM_MODEL_PAGE_STYLES',  $default),
     ];
 }
 
@@ -143,6 +146,10 @@ function build_pipeline(Llm $llm): Pipeline
         // resets it to ""), which would lose every hero's AI_IMAGE spec.
         new CollectImagesStep(),
         new FixBlocksStep(),
+        // AFTER fix-blocks: reads the final (re-serialized) markup for which
+        // layout utility classes survived, and appends their CSS to style.css —
+        // a file the fixer never touches, so nothing here can be stripped.
+        new PageStylesStep($llm, $renderer, $models['page-styles']),
         new FinalizeThemeStep(),
     ]);
 }
