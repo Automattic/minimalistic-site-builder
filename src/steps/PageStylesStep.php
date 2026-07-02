@@ -48,6 +48,38 @@ final class PageStylesStep implements Step
     private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
     private const MARKER = '/* Layout utilities — generated per-design by the page-styles step. */';
+    private const RAW_COLOR_NAMES = [
+        'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige',
+        'bisque', 'black', 'blanchedalmond', 'blue', 'blueviolet', 'brown',
+        'burlywood', 'cadetblue', 'chartreuse', 'chocolate', 'coral',
+        'cornflowerblue', 'cornsilk', 'crimson', 'cyan', 'darkblue',
+        'darkcyan', 'darkgoldenrod', 'darkgray', 'darkgreen', 'darkgrey',
+        'darkkhaki', 'darkmagenta', 'darkolivegreen', 'darkorange',
+        'darkorchid', 'darkred', 'darksalmon', 'darkseagreen',
+        'darkslateblue', 'darkslategray', 'darkslategrey', 'darkturquoise',
+        'darkviolet', 'deeppink', 'deepskyblue', 'dimgray', 'dimgrey',
+        'dodgerblue', 'firebrick', 'floralwhite', 'forestgreen', 'fuchsia',
+        'gainsboro', 'ghostwhite', 'gold', 'goldenrod', 'gray', 'green',
+        'greenyellow', 'grey', 'honeydew', 'hotpink', 'indianred', 'indigo',
+        'ivory', 'khaki', 'lavender', 'lavenderblush', 'lawngreen',
+        'lemonchiffon', 'lightblue', 'lightcoral', 'lightcyan',
+        'lightgoldenrodyellow', 'lightgray', 'lightgreen', 'lightgrey',
+        'lightpink', 'lightsalmon', 'lightseagreen', 'lightskyblue',
+        'lightslategray', 'lightslategrey', 'lightsteelblue', 'lightyellow',
+        'lime', 'limegreen', 'linen', 'magenta', 'maroon', 'mediumaquamarine',
+        'mediumblue', 'mediumorchid', 'mediumpurple', 'mediumseagreen',
+        'mediumslateblue', 'mediumspringgreen', 'mediumturquoise',
+        'mediumvioletred', 'midnightblue', 'mintcream', 'mistyrose',
+        'moccasin', 'navajowhite', 'navy', 'oldlace', 'olive', 'olivedrab',
+        'orange', 'orangered', 'orchid', 'palegoldenrod', 'palegreen',
+        'paleturquoise', 'palevioletred', 'papayawhip', 'peachpuff', 'peru',
+        'pink', 'plum', 'powderblue', 'purple', 'rebeccapurple', 'red',
+        'rosybrown', 'royalblue', 'saddlebrown', 'salmon', 'sandybrown',
+        'seagreen', 'seashell', 'sienna', 'silver', 'skyblue', 'slateblue',
+        'slategray', 'slategrey', 'snow', 'springgreen', 'steelblue', 'tan',
+        'teal', 'thistle', 'tomato', 'turquoise', 'violet', 'wheat', 'white',
+        'whitesmoke', 'yellow', 'yellowgreen',
+    ];
 
     public function __construct(
         private Llm $llm,
@@ -166,6 +198,9 @@ final class PageStylesStep implements Step
         if (preg_match('/\b(?:rgba?|hsla?)\s*\(/i', $stripped) === 1) {
             $problems[] = 'raw rgb()/hsl() color literal (use var(--wp--preset--color--…))';
         }
+        foreach (self::rawNamedColorProblems($stripped) as $problem) {
+            $problems[] = $problem;
+        }
         if (preg_match('/\burl\s*\(/i', $stripped) === 1) {
             $problems[] = 'url() is not allowed';
         }
@@ -197,6 +232,54 @@ final class PageStylesStep implements Step
         }
 
         return $problems;
+    }
+
+    /** @return string[] */
+    private static function rawNamedColorProblems(string $css): array
+    {
+        $properties = implode('|', [
+            'color',
+            'background',
+            'background-color',
+            'border',
+            'border-top',
+            'border-right',
+            'border-bottom',
+            'border-left',
+            'border-color',
+            'border-top-color',
+            'border-right-color',
+            'border-bottom-color',
+            'border-left-color',
+            'outline',
+            'outline-color',
+            'box-shadow',
+            'text-shadow',
+            'fill',
+            'stroke',
+            'caret-color',
+            'accent-color',
+            'text-decoration-color',
+            'column-rule',
+            'column-rule-color',
+        ]);
+
+        $problems = [];
+        if (preg_match_all('/(?<![-\w])(' . $properties . ')\s*:\s*([^;{}]+)/i', $css, $decls, PREG_SET_ORDER) > 0) {
+            foreach ($decls as $decl) {
+                $property = strtolower($decl[1]);
+                $value = strtolower($decl[2]);
+                if (preg_match_all('/\b[a-z]+\b/', $value, $tokens) === 0) {
+                    continue;
+                }
+                foreach (array_unique($tokens[0]) as $token) {
+                    if (in_array($token, self::RAW_COLOR_NAMES, true)) {
+                        $problems[] = "raw named color literal in {$property}: {$token}";
+                    }
+                }
+            }
+        }
+        return array_values(array_unique($problems));
     }
 
     /**
