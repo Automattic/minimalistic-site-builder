@@ -32,8 +32,8 @@ test('sections passes the design direction and hero brief to header and footer p
     [$project, $tmp] = sections_fixture();
     $project->writeText('designDirection.md', "# Archivo Silencioso\n\nFull-bleed black-and-white photography, chrome-less.\n");
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.'],
-        ['slug' => 'about', 'title' => 'About', 'type' => 'about'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header and about section.'],
+        ['slug' => 'about', 'title' => 'About', 'type' => 'about', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'handoff' => 'Between the hero and footer.'],
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
@@ -50,14 +50,15 @@ test('sections passes each part its assigned composition and its neighbors\' ass
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     $hero = $reqs['section-hero']['prompt'];
-    assert_contains('Layout archetype: full-bleed-cover', $hero);
-    assert_contains('Background:       image', $hero);
+    assert_true((bool) preg_match('/Layout archetype:\s+full-bleed-cover/', $hero), 'hero archetype in prompt');
+    assert_true((bool) preg_match('/Background:\s+image/', $hero), 'hero background in prompt');
     assert_contains('Between the site header above and the base about split below.', $hero);
     assert_contains('Above: the site header (this is the first section)', $hero);
     assert_contains('Below: "About" — asymmetric-split on base background', $hero);
+    assert_contains('If SECTION Notes mention a different layout or background', $hero);
 
     $about = $reqs['section-about']['prompt'];
-    assert_contains('Layout archetype: asymmetric-split', $about);
+    assert_true((bool) preg_match('/Layout archetype:\s+asymmetric-split/', $about), 'about archetype in prompt');
     assert_contains('Above: "Hero" — full-bleed-cover on image background', $about);
     assert_contains('Below: the site footer (this is the last section)', $about);
 
@@ -73,6 +74,22 @@ test('outline and neighbors tolerate a plan without art-direction fields', funct
     ];
     assert_eq("1. Hero (hero)\n2. About (about)", SectionsStep::outline($sections));
     assert_eq("Above: \"Hero\"\nBelow: the site footer (this is the last section)", SectionsStep::neighbors($sections, 1));
+});
+
+test('sections throws when a planned section is missing composition fields', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sec_old_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('sections.json', ['sections' => [
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+    ]]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    assert_throws(function () use ($renderer, $project) {
+        (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+    }, 'missing layout_archetype');
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('heroBrief summarizes the hero section and falls back to the first section', function () {

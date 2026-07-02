@@ -98,7 +98,7 @@ test('sections passes the configured model into every part request', function ()
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
     ]]);
     $llm = new FakeLlm();
     // header, footer, one section — in requests() order.
@@ -121,7 +121,7 @@ test('sections sends no model key when none is configured', function () {
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
     ]]);
     $llm = new FakeLlm();
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');

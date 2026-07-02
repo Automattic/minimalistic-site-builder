@@ -58,6 +58,7 @@ Rules:
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.
 - Variety is mandatory: NO layout_archetype may be used by two ADJACENT sections, and "equal-card-grid" may appear at most TWICE on the whole page.
 - Plan the background rhythm deliberately: mostly "base" with 1-2 "contrast" or "image" bands placed for pacing (e.g. under the hero's fold and before the closing CTA) — never alternating stripes, and let the design direction's mood decide how heavy the dark/image bands feel.
+- An "image" background wraps whatever archetype the section uses inside a full-bleed cover band; pairing it with "full-bleed-cover" is the classic image-led band (a natural hero choice, not a redundancy). Reserve "image" for the 1-2 sections where imagery should carry the band.
 - "handoff" must name the actual neighbors' assignments (e.g. "Sits between the full-bleed image hero above and the base-background menu grid below; this contrast band gives the eye a rest between two image-heavy blocks."). For the first section the neighbor above is the site header; for the last it is the footer.
 - Before returning, re-check the finished list top-to-bottom: if any two ADJACENT sections share a layout_archetype, or "equal-card-grid" appears more than twice, change one of them — the plan is rejected otherwise.
 

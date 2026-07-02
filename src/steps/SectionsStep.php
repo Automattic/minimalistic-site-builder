@@ -86,10 +86,7 @@ final class SectionsStep implements Step
                 'section_type'  => (string) ($section['type'] ?? 'content'),
                 'section_purpose' => (string) ($section['purpose'] ?? ''),
                 'content_notes' => (string) ($section['content_notes'] ?? ''),
-                'layout_archetype' => (string) ($section['layout_archetype'] ?? ''),
-                'background'       => (string) ($section['background'] ?? ''),
-                'handoff'          => (string) ($section['handoff'] ?? ''),
-                'neighbors'        => self::neighbors($sections, $i),
+                'composition'   => $this->composition($sections, $i),
                 'image_instructions' => $imageInstructions,
             ])]);
         }
@@ -153,6 +150,32 @@ final class SectionsStep implements Step
             $lines[] = $line;
         }
         return implode("\n", $lines);
+    }
+
+    /**
+     * The section's COMPOSITION prompt block: the assigned archetype/background/
+     * handoff plus its neighbors' assignments (section-composition.md). Missing
+     * composition fields mean the plan step contract was broken, so fail before
+     * sending a half-empty prompt to the model.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     */
+    private function composition(array $sections, int $i): string
+    {
+        $section = $sections[$i];
+        $slug = (string) ($section['slug'] ?? "section-{$i}");
+        foreach (['layout_archetype', 'background', 'handoff'] as $field) {
+            if (trim((string) ($section[$field] ?? '')) === '') {
+                throw new RuntimeException("sections: section '{$slug}' is missing {$field} from section-plan");
+            }
+        }
+
+        return $this->renderer->render('section-composition.md', [
+            'layout_archetype' => (string) ($section['layout_archetype'] ?? ''),
+            'background'       => (string) ($section['background'] ?? ''),
+            'handoff'          => (string) ($section['handoff'] ?? ''),
+            'neighbors'        => self::neighbors($sections, $i),
+        ]);
     }
 
     /**

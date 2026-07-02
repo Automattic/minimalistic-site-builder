@@ -83,6 +83,34 @@ test('SectionPlanStep::normalize allows a repeated archetype when not adjacent',
     assert_eq(3, count($sections));
 });
 
+test('SectionPlanStep::normalize reports every violation in one rejection', function () {
+    try {
+        SectionPlanStep::normalize([
+            plan_section(['background' => 'plaid']),
+            plan_section(['slug' => 'work', 'layout_archetype' => 'centered-stack', 'handoff' => '']),
+            plan_section(['slug' => 'team', 'layout_archetype' => 'centered-stack']),
+        ]);
+        assert_true(false, 'expected the plan to be rejected');
+    } catch (RuntimeException $e) {
+        assert_contains("invalid background 'plaid'", $e->getMessage());
+        assert_contains("missing 'handoff'", $e->getMessage());
+        assert_contains('adjacent sections', $e->getMessage());
+    }
+});
+
+test('SectionPlanStep::normalize does not report adjacency between invalid archetypes', function () {
+    try {
+        SectionPlanStep::normalize([
+            plan_section(['layout_archetype' => 'fancy-mosaic']),
+            plan_section(['slug' => 'work', 'layout_archetype' => 'fancy-mosaic']),
+        ]);
+        assert_true(false, 'expected the plan to be rejected');
+    } catch (RuntimeException $e) {
+        assert_contains('invalid layout_archetype', $e->getMessage());
+        assert_true(!str_contains($e->getMessage(), 'adjacent'), 'enum error must not cascade into an adjacency error');
+    }
+});
+
 test('SectionPlanStep::normalize caps equal-card-grid at twice per page', function () {
     assert_throws(function () {
         SectionPlanStep::normalize([
@@ -142,10 +170,14 @@ test('section-plan repairs an invalid plan with one follow-up call', function ()
 
     $plan = $project->readJson('sections.json');
     assert_eq('full-bleed-cover', $plan['sections'][0]['layout_archetype']);
-    // The repair prompt carries the rejected plan and the specific error.
+    // The repair prompt carries the rejected plan and the specific error,
+    // and the repair call is identifiable in the LLM logs.
     $repairPrompt = $llm->calls[1]['prompt'];
     assert_contains('IT WAS REJECTED', $repairPrompt);
     assert_contains('adjacent sections', $repairPrompt);
+    assert_contains('also update its content_notes', $repairPrompt);
+    assert_contains('affected neighbor handoffs', $repairPrompt);
+    assert_eq('section-plan-repair', $llm->calls[1]['opts']['log_label'] ?? null);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -168,7 +200,7 @@ test('section-plan throws when the repair is still invalid', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('section-plan throws when the model returns no sections', function () {
+test('section-plan repairs an empty plan and throws when the repair is empty too', function () {
     $tmp = sys_get_temp_dir() . '/builder_sp0_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A bakery']);
@@ -176,10 +208,14 @@ test('section-plan throws when the model returns no sections', function () {
 
     $llm = new FakeLlm();
     $llm->queueJson(['sections' => []]);
+    $llm->queueJson(['sections' => []]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     assert_throws(function () use ($llm, $renderer, $project) {
         (new SectionPlanStep($llm, $renderer))->run($project);
-    });
+    }, 'no sections');
+    // The empty plan went through the repair path before aborting.
+    assert_eq(2, count($llm->calls));
+    assert_contains('has no sections', $llm->calls[1]['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
