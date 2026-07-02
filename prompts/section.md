@@ -18,6 +18,30 @@ SECTION TO BUILD:
   Purpose:  {{section_purpose}}
   Notes:    {{content_notes}}
 
+ASSIGNED COMPOSITION (the page plan assigned every section its composition so the whole page has a deliberate rhythm — execute YOURS; do not re-choose):
+  Layout archetype: {{layout_archetype}}
+  Background:       {{background}}
+  Seams:            {{handoff}}
+  Neighbors' assignments (design your top and bottom edges against these):
+{{neighbors}}
+
+Execute the assigned layout archetype:
+- full-bleed-cover — a full-width wp:cover (align:"full") with a background image or gradient preset and overlaid content.
+- asymmetric-split — two columns at deliberately unequal widths (e.g. 34/66 or 40/60) — never 50/50.
+- centered-stack — a single constrained column of centered content; let type scale and whitespace carry it.
+- offset-grid — a staggered grid: unequal column widths and different top spacing per item so rows don't line up neatly.
+- mixed-width-editorial — a magazine-like row mixing wide and narrow items (e.g. a 66% feature beside a 33% note).
+- equal-card-grid — the equal-height card recipe below.
+- list-with-thumbnails — stacked rows, each a small image beside its text.
+
+Execute the assigned background:
+- base — the default page background; no backgroundColor on the section's top-level group.
+- tinted — a subtle tint: "secondary" backgroundColor or a soft gradient preset on the top-level group.
+- contrast — an inverted band: backgroundColor "contrast" with light text ("base" textColor) throughout.
+- image — a full-bleed image band: express the section as/inside a wp:cover with an AI_IMAGE background.
+
+You may refine details within the archetype (column ratios, spacing, type scale), but do NOT swap the archetype or background — your neighbors were planned around them, and the seams described above only work if every section holds its assignment.
+
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
 - Wrap the whole section in a single top-level <!-- wp:group --> with a constrained or full layout, so it drops cleanly into the page in order.
@@ -34,10 +58,10 @@ Section discipline:
 - **Width discipline:** heroes, cover blocks and feature/card grids use `"align":"wide"` or `"align":"full"`. Reserve the default (content) width for text-heavy reading sections only.
 - **NO decorative HTML comments** — never write `<!-- Hero Section -->`, `<!-- Services -->` and the like. Only `<!-- wp:... -->` block comments are allowed.
 - **NO EMOJIS** anywhere — not in headings, paragraphs, button text, list items, or any content.
-- Be bold with layout: asymmetric grids, overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
+- Be bold with layout WITHIN your assigned archetype: overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
 
-Hero layout variety (if this is the hero section):
-- Do NOT default to "text left, image right." Pick the composition the DESIGN DIRECTION committed to, from this menu: full-bleed background image with overlaid text; left-aligned image; centered/stacked; asymmetric/grid-breaking; partial coverage (~60–70% width); split-diagonal; framed/inset.
+Hero notes (if this is the hero section):
+- Do NOT default to "text left, image right." Execute your ASSIGNED archetype in the spirit of the DESIGN DIRECTION's committed hero composition.
 - Express a full-bleed hero as a `wp:cover` (align:"full") with an inner `wp-block-cover__image-background` — see the IMAGE INSTRUCTIONS pattern below.
 - A full-bleed hero BACKGROUND image (the `wp-block-cover__image-background`) MUST be `landscape` — never `square` or `portrait` — so it fills the banner cleanly. A `framed`/inset or foreground image inside the hero (e.g. a portrait in a contained frame, or a second image layered over the background) is free to be `portrait` or `square` — pick the aspect ratio that fits its own slot, and let the frame follow that aspect rather than cropping the image toward a different shape.
 

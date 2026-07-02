@@ -75,7 +75,7 @@ final class SectionsStep implements Step
             ])]),
         ];
 
-        foreach ($sections as $section) {
+        foreach ($sections as $i => $section) {
             $key = self::SECTION_PREFIX . $section['slug'];
             $requests[$key] = $this->withModel(['prompt' => $this->renderer->render('section.md', [
                 'site_spec'        => $siteSpec,
@@ -86,6 +86,10 @@ final class SectionsStep implements Step
                 'section_type'  => (string) ($section['type'] ?? 'content'),
                 'section_purpose' => (string) ($section['purpose'] ?? ''),
                 'content_notes' => (string) ($section['content_notes'] ?? ''),
+                'layout_archetype' => (string) ($section['layout_archetype'] ?? ''),
+                'background'       => (string) ($section['background'] ?? ''),
+                'handoff'          => (string) ($section['handoff'] ?? ''),
+                'neighbors'        => self::neighbors($sections, $i),
                 'image_instructions' => $imageInstructions,
             ])]);
         }
@@ -131,7 +135,8 @@ final class SectionsStep implements Step
 
     /**
      * A one-line-per-section outline string used to give every part the same
-     * view of the page. Pure — unit-testable.
+     * view of the page, including each section's planned archetype and
+     * background so the page rhythm is visible everywhere. Pure — unit-testable.
      *
      * @param array<int,array<string,mixed>> $sections
      */
@@ -141,9 +146,52 @@ final class SectionsStep implements Step
         foreach ($sections as $n => $s) {
             $title = (string) ($s['title'] ?? '');
             $type = (string) ($s['type'] ?? '');
-            $lines[] = ($n + 1) . ". {$title} ({$type})";
+            $line = ($n + 1) . ". {$title} ({$type})";
+            if (($plan = self::assignment($s)) !== '') {
+                $line .= " — {$plan}";
+            }
+            $lines[] = $line;
         }
         return implode("\n", $lines);
+    }
+
+    /**
+     * The plan's art-direction context for the section at $i: its neighbors'
+     * archetype/background assignments, so each seam is designed on both sides.
+     * Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     */
+    public static function neighbors(array $sections, int $i): string
+    {
+        $describe = function (?array $s): ?string {
+            if (!is_array($s)) {
+                return null;
+            }
+            $title = (string) ($s['title'] ?? '');
+            $plan = self::assignment($s);
+            return "\"{$title}\"" . ($plan !== '' ? " — {$plan}" : '');
+        };
+
+        $above = $describe($sections[$i - 1] ?? null) ?? 'the site header (this is the first section)';
+        $below = $describe($sections[$i + 1] ?? null) ?? 'the site footer (this is the last section)';
+        return "Above: {$above}\nBelow: {$below}";
+    }
+
+    /**
+     * "archetype on background" summary of a planned section, or '' when the
+     * plan predates the art-direction fields.
+     *
+     * @param array<string,mixed> $section
+     */
+    private static function assignment(array $section): string
+    {
+        $archetype = trim((string) ($section['layout_archetype'] ?? ''));
+        $background = trim((string) ($section['background'] ?? ''));
+        if ($archetype === '' && $background === '') {
+            return '';
+        }
+        return trim($archetype . ($background !== '' ? " on {$background} background" : ''));
     }
 
     /**

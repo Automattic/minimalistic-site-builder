@@ -84,7 +84,7 @@ test('section-plan passes the configured model into every request', function () 
     [$project, $tmp] = sm_project('builder_sm_sp_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo', 'sections' => ['Hero']]);
     $llm = new FakeLlm();
-    $llm->queueJson(['sections' => [['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero']]]);
+    $llm->queueJson(['sections' => [['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.']]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionPlanStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
