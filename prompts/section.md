@@ -40,6 +40,7 @@ Rules:
 Section discipline:
 - **Margin reset:** add `"style":{"spacing":{"margin":{"top":"0"}}}` to the section's top-level group so it sits flush in the page flow.
 - **Width discipline:** heroes, cover blocks and feature/card grids use `"align":"wide"` or `"align":"full"`. Reserve the default (content) width for text-heavy reading sections only.
+- **Text measure:** the band may be full-width, but the TEXT inside it must keep a readable measure. Wrap headline/copy stacks in an inner group with `"layout":{"type":"constrained"}` whose `contentSize` is at or below the theme's contentSize — never the wide size (1200px+). Paragraphs running the full width of a wide band read as broken.
 - **NO decorative HTML comments** — never write `<!-- Hero Section -->`, `<!-- Services -->` and the like. Only `<!-- wp:... -->` block comments are allowed.
 - **NO EMOJIS** anywhere — not in headings, paragraphs, button text, list items, or any content.
 - Be bold with layout WITHIN your archetype (see COMPOSITION above): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
@@ -47,6 +48,7 @@ Section discipline:
 Hero notes (if this is the hero section):
 - Do NOT default to "text left, image right." Execute your archetype from the COMPOSITION block above in the spirit of the DESIGN DIRECTION's committed hero composition.
 - Express a full-bleed hero as a `wp:cover` (align:"full") with an inner `wp-block-cover__image-background` — see the IMAGE INSTRUCTIONS pattern below.
+- Text over a photo MUST stay readable at every viewport: give the cover `dimRatio` 40+ or a gradient overlay that visibly darkens (or lightens) the area BEHIND the text, and pick the text color against the DIMMED image, not the raw one. Never float light text over an un-dimmed light image area. Remember the site header may float transparently over the very top of your cover — keep some overlay coverage there too, not only behind the headline.
 - A full-bleed hero BACKGROUND image (the `wp-block-cover__image-background`) MUST be `landscape` — never `square` or `portrait` — so it fills the banner cleanly. A `framed`/inset or foreground image inside the hero (e.g. a portrait in a contained frame, or a second image layered over the background) is free to be `portrait` or `square` — pick the aspect ratio that fits its own slot, and let the frame follow that aspect rather than cropping the image toward a different shape.
 
 Text orientation (all sections):
