@@ -51,6 +51,27 @@ test('typography warnings flag hardcoded font sizes and an unused display preset
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('typography warnings flag long paragraphs at heading-scale presets', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
+        ['slug' => 'medium', 'name' => 'Body', 'size' => '1rem'],
+        ['slug' => 'large', 'name' => 'Large', 'size' => '1.25rem'],
+    ]]]]);
+    $long = 'Naturaleza Sabia was born from a simple conviction: that the soul of Argentine cooking lives in its rituals, not only its meat, reimagined at the market each morning.';
+    $project->writeText(
+        'theme/parts/section-hero.html',
+        // A long intro pushed up the scale (flagged) and a short lead line (fine).
+        '<!-- wp:paragraph {"fontSize":"large"} --><p class="has-large-font-size">' . $long . '</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"large"} --><p class="has-large-font-size">One short lead line.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"medium"} --><p class="has-medium-font-size">' . $long . '</p><!-- /wp:paragraph -->'
+    );
+    $warnings = ThemeValidator::typographyWarnings($project);
+    $joined = implode(' ', $warnings);
+    assert_contains('heading-scale', $joined);
+    assert_contains('section-hero.html (1)', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('typography warnings stay quiet when sizes come from the preset scale', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [

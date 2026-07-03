@@ -65,7 +65,8 @@ final class ThemeValidator
     /**
      * Soft typography checks (warnings, not build failures): font sizes
      * hardcoded in block markup instead of drawn from the theme.json
-     * fontSizes scale, and a "display" preset that no markup uses.
+     * fontSizes scale, a "display" preset that no markup uses, and
+     * multi-line paragraphs set at heading-scale presets.
      *
      * @return string[] list of warnings (empty means the scale governs the page)
      */
@@ -77,7 +78,18 @@ final class ThemeValidator
             glob($project->themePath('templates') . '/*.html') ?: []
         );
 
+        $theme = $project->exists('theme/theme.json')
+            ? json_decode($project->readText('theme/theme.json'), true)
+            : null;
+        $sizeBySlug = [];
+        foreach ($theme['settings']['typography']['fontSizes'] ?? [] as $entry) {
+            if (isset($entry['slug'], $entry['size'])) {
+                $sizeBySlug[$entry['slug']] = self::sizeToPx((string) $entry['size']);
+            }
+        }
+
         $hardcoded = [];
+        $bigParagraphs = [];
         $displayUsed = false;
         foreach ($files as $file) {
             $markup = (string) file_get_contents($file);
@@ -92,20 +104,59 @@ final class ThemeValidator
             if (preg_match('/has-display-font-size|"fontSize"\s*:\s*"display"|font-size--display/', $markup)) {
                 $displayUsed = true;
             }
+            $count = self::oversizedParagraphs($markup, $sizeBySlug);
+            if ($count > 0) {
+                $bigParagraphs[] = basename($file) . " ({$count})";
+            }
         }
         if ($hardcoded !== []) {
             $warnings[] = 'hardcoded font-size values bypass the fontSizes scale: ' . implode(', ', $hardcoded);
         }
-
-        $theme = $project->exists('theme/theme.json')
-            ? json_decode($project->readText('theme/theme.json'), true)
-            : null;
-        $slugs = array_column($theme['settings']['typography']['fontSizes'] ?? [], 'slug');
-        if (in_array('display', $slugs, true) && !$displayUsed) {
+        if ($bigParagraphs !== []) {
+            $warnings[] = 'multi-line paragraphs set at heading-scale presets (>= 1.25rem): ' . implode(', ', $bigParagraphs);
+        }
+        if (in_array('display', array_keys($sizeBySlug), true) && !$displayUsed) {
             $warnings[] = 'theme.json defines a "display" fontSize that no template or part uses';
         }
 
         return $warnings;
+    }
+
+    /**
+     * Count paragraphs whose fontSize preset resolves to heading scale
+     * (>= 1.25rem at desktop) while carrying more than a short lead line of
+     * text — running copy pushed up the scale for emphasis.
+     *
+     * @param array<string,float|null> $sizeBySlug preset slug => desktop px
+     */
+    private static function oversizedParagraphs(string $markup, array $sizeBySlug): int
+    {
+        if (!preg_match_all('/<!--\s*wp:paragraph\s+(\{.*?\})\s*-->\s*(<p\b.*?<\/p>)/s', $markup, $matches, PREG_SET_ORDER)) {
+            return 0;
+        }
+        $count = 0;
+        foreach ($matches as $m) {
+            $attrs = json_decode($m[1], true);
+            $px = $sizeBySlug[$attrs['fontSize'] ?? ''] ?? null;
+            $text = trim(strip_tags($m[2]));
+            if ($px !== null && $px >= 20.0 && mb_strlen($text) > 120) {
+                $count++;
+            }
+        }
+        return $count;
+    }
+
+    /** Desktop px for a preset size; clamp()/fluid values judged at their max end. */
+    private static function sizeToPx(string $size): ?float
+    {
+        if (!preg_match_all('/([0-9.]+)\s*(rem|em|px)/', $size, $m, PREG_SET_ORDER)) {
+            return null;
+        }
+        $px = array_map(
+            static fn (array $t): float => (float) $t[1] * ($t[2] === 'px' ? 1 : 16),
+            $m
+        );
+        return max($px);
     }
 
     /** @return string|null problem description, or null if balanced */

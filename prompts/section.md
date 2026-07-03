@@ -36,6 +36,7 @@ Rules:
     font sizes via "fontSize" using the slugs defined in THEME TOKENS settings.typography.fontSizes (e.g. "fontSize":"display" → class `has-display-font-size`)
   Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2 class="wp-block-heading has-heading-font-family has-primary-color has-text-color">…</h2><!-- /wp:heading -->
 - ALL text sizing comes from the fontSizes presets via the "fontSize" attribute. NEVER hardcode a font size — no raw values or `clamp()` in `"style":{"typography":{"fontSize":...}}` and no hand-written `font-size:` inline styles. The scale (including the masthead-scale `display` step) already lives in theme.json; if no preset genuinely fits a rare case, reference a preset variable through the block attribute (`"style":{"typography":{"fontSize":"var:preset|font-size|<slug>"}}`) — never a raw value.
+- Paragraph scale discipline: running copy — any paragraph, list, or card text that wraps past ~2 lines — stays at the theme's body step (~1rem) or smaller; often that means NO "fontSize" attribute at all, since body is the default. At most ONE short lead line per section may sit one step above body (~1.25rem): the hero's supporting line or a single-sentence intro under a section title. Never push multi-line reading copy up the scale for emphasis — the upper steps belong to headings, and the contrast between big headings and modest copy IS the hierarchy.
 - Reserve the accent color for buttons/CTAs only.
 - Write real, specific copy in the brand voice grounded in the site spec — never lorem ipsum.
 
@@ -49,6 +50,7 @@ Section discipline:
 
 Hero notes (if this is the hero section):
 - The primary headline is a level-1 `wp:heading` with `"fontSize":"display"` — the theme.json `display` step is a fluid masthead size defined for exactly this one moment. Do not shrink it with a smaller preset and do not override it with an inline size.
+- The supporting line under the masthead stays at body scale (one step above only if it is a single short sentence) — oversized subcopy competes with the masthead and deflates it.
 - Do NOT default to "text left, image right." Execute your archetype from the COMPOSITION block above in the spirit of the DESIGN DIRECTION's committed hero composition.
 - Express a full-bleed hero as a `wp:cover` (align:"full") with an inner `wp-block-cover__image-background` — see the IMAGE INSTRUCTIONS pattern below.
 - Text over a photo MUST stay readable at every viewport: give the cover `dimRatio` 40+ or a gradient overlay that visibly darkens (or lightens) the area BEHIND the text, and pick the text color against the DIMMED image, not the raw one. Never float light text over an un-dimmed light image area. Remember the site header may float transparently over the very top of your cover — keep some overlay coverage there too, not only behind the headline.
