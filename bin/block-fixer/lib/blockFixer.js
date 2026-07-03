@@ -39,6 +39,23 @@ function initializeBlockRegistry() {
  * Recursively fix a block and its inner blocks.
  * Invalid blocks are recreated using createBlock() to regenerate clean HTML.
  */
+function normalizedAttributes(block) {
+  const attrs = { ...block.attributes };
+
+  // core/media-text serializes an empty <figure> when mediaUrl is present but
+  // mediaType is missing. AI markup often includes a valid <img src> in the
+  // saved HTML without the matching JSON attribute, so preserve that media by
+  // inferring the type before createBlock() reserializes it.
+  if (block.name === 'core/media-text' && attrs.mediaUrl && !attrs.mediaType) {
+    const source = `${attrs.mediaUrl} ${block.originalContent || ''}`;
+    attrs.mediaType = /<\s*video\b|\.(?:mp4|webm|ogv)(?:[?#]|$)/i.test(source)
+      ? 'video'
+      : 'image';
+  }
+
+  return attrs;
+}
+
 function fixBlockRecursively(block) {
   // Recursively fix all inner blocks
   const fixedInnerBlocks = [];
@@ -60,7 +77,7 @@ function fixBlockRecursively(block) {
 
   const fixedBlock = createBlock(
     block.name,
-    block.attributes,
+    normalizedAttributes(block),
     fixedInnerBlocks.length > 0 ? fixedInnerBlocks : undefined
   );
 

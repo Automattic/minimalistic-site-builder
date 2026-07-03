@@ -74,7 +74,7 @@ Layout utility classes (optional, powerful) — a later build step generates the
 - `overlap-up` — on a group/columns block: pulls it upward with a negative top margin so it overlaps the element above (e.g. a card row breaking into the hero). If you put it on the section's TOP-LEVEL group, omit that group's margin-top:0 reset — the class supplies the pull.
 - `masonry-3` — on a group whose direct children are cards/images of varying height: flows them into a 3-column masonry (fewer columns on small screens). Use instead of forcing unequal content into equal columns.
 - `hover-lift` — on a card `wp:group` or an image: lifts with a soft shadow on hover.
-- `hover-reveal` — on a card `wp:group` that layers text with an image: the image dims/zooms and the text reveals on hover. Good for gallery/portfolio cards with clean overlay captions.
+- `hover-reveal` — on a card `wp:group` with an image: the image dims/zooms on hover while captions and details remain visible at rest. Do not depend on hidden overlay text.
 - `sticky-side` — on ONE `wp:column` of a two-column layout: that column stays pinned while the other scrolls (desktop only). Good for a sticky title/intro beside a long list.
 Combine them with the recipes (e.g. a staggered-grid of hover-lift cards, or a masonry-3 gallery of hover-reveal tiles) when the direction calls for that energy.
 
