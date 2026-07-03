@@ -83,6 +83,17 @@ test('validate rejects disallowed at-rules and url()', function () {
     assert_true([] !== PageStylesStep::validate(".hover-lift {\n    background: url(x.png);\n}"), 'url()');
 });
 
+test('validate rejects CSS that hides generated content', function () {
+    foreach ([
+        ".hover-reveal > :not(img) {\n    opacity: 0;\n}",
+        ".hover-reveal .caption {\n    visibility: hidden;\n}",
+        ".hover-reveal .wp-block-image {\n    display: none;\n}",
+    ] as $css) {
+        $problems = PageStylesStep::validate($css);
+        assert_true($problems !== [], "should reject hidden content: {$css}");
+    }
+});
+
 test('validate rejects empty, oversized, and unbalanced CSS', function () {
     assert_eq(['empty CSS'], PageStylesStep::validate("  \n "));
     $long = str_repeat(".hover-lift {\n    opacity: 1;\n}\n", 40); // 120 lines

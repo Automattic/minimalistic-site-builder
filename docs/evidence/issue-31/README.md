@@ -22,12 +22,12 @@ images (only `Section 1` is in the initial viewport). Generate the images with
 
 ```bash
 cd docs/evidence/issue-31/fixture
-./make-images.sh
+bash ./make-images.sh
 php -S 127.0.0.1:8199 &
 
 # Reproduce the bug — sections 2-7 come out as empty boxes:
-node ../../../bin/screenshot/screenshot.js http://127.0.0.1:8199/index.html before.png --no-scroll
+node ../../../../bin/screenshot/screenshot.js http://127.0.0.1:8199/index.html before.png --no-scroll
 
 # With the fix — all seven images render:
-node ../../../bin/screenshot/screenshot.js http://127.0.0.1:8199/index.html after.png
+node ../../../../bin/screenshot/screenshot.js http://127.0.0.1:8199/index.html after.png
 ```

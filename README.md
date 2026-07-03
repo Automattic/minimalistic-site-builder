@@ -109,5 +109,6 @@ npm install   # once, at the repo root; uses your system Chrome, no download
 node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
 ```
 
-Pass `--width=<px>`, `--chrome=<path>` (or set `CHROME`), and `--no-scroll` to
-reproduce the old un-scrolled behaviour.
+Pass `--width=<px>` (or set `SHOT_WIDTH`), `--chrome=<path>` (or set
+`CHROME`/`CHROME_BIN`), and `--no-scroll` to reproduce the old un-scrolled
+behaviour.
