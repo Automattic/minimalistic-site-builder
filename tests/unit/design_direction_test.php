@@ -32,7 +32,7 @@ function designdir_candidates(): array
 test('design-direction persists the judge-picked candidate as structured designDirection.json', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['directions' => designdir_candidates()]);
-    $llm->queueJson(['choice' => 3, 'reason' => 'fits and diverges']); // judge verdict
+    $llm->queueJson(['choice' => 3, 'reason' => 'best fit']); // judge verdict
 
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new DesignDirectionStep($llm, $renderer))->run($project);
@@ -140,30 +140,48 @@ test('DESIGN_DIRECTION_CHOICE out of range fails loud', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('design-direction records the choice in the cross-build history and injects it into the next build', function () {
+test('design-direction does not read or write cross-build history', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
-    $llm->queueJson(['directions' => designdir_candidates()]);
+    file_put_contents($tmp . '/.direction-history.json', json_encode([
+        ['title' => 'Forbidden Previous Direction'],
+    ]));
+    $previousCandidates = designdir_candidates();
+    $previousCandidates[0]['title'] = 'Previous Build Marker';
+    $llm->queueJson(['directions' => $previousCandidates]);
     $llm->queueJson(['choice' => 1, 'reason' => 'fit']);
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new DesignDirectionStep($llm, $renderer))->run($project);
 
-    $historyFile = $tmp . '/.direction-history.json';
-    assert_true(is_file($historyFile), 'history file written beside the projects');
-    $entries = json_decode((string) file_get_contents($historyFile), true);
-    assert_eq('Direction 1', $entries[0]['title']);
-    assert_eq('Font 1 700', $entries[0]['type']['heading']);
+    assert_eq(
+        '[{"title":"Forbidden Previous Direction"}]',
+        (string) file_get_contents($tmp . '/.direction-history.json'),
+        'legacy history files are ignored and left untouched'
+    );
+    assert_true(
+        !str_contains($llm->calls[0]['prompt'], 'Forbidden Previous Direction'),
+        'generation prompt ignores previous directions'
+    );
+    assert_true(
+        !str_contains($llm->calls[1]['prompt'], 'Forbidden Previous Direction'),
+        'judge prompt ignores previous directions'
+    );
 
-    // A second build in the same store sees the first choice in BOTH prompts.
     $second = (new ProjectStore($tmp))->create('demo-two');
     $second->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $second->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb']);
     $llm2 = new FakeLlm();
     $llm2->queueJson(['directions' => designdir_candidates()]);
-    $llm2->queueJson(['choice' => 2, 'reason' => 'distinct from history']);
+    $llm2->queueJson(['choice' => 2, 'reason' => 'stronger concept']);
     (new DesignDirectionStep($llm2, $renderer))->run($second);
 
-    assert_contains('Direction 1', $llm2->calls[0]['prompt'], 'generation prompt lists the previous direction');
-    assert_contains('Direction 1', $llm2->calls[1]['prompt'], 'judge prompt lists the previous direction');
+    assert_true(
+        !str_contains($llm2->calls[0]['prompt'], 'Previous Build Marker'),
+        'generation prompt does not list the previous build choice'
+    );
+    assert_true(
+        !str_contains($llm2->calls[1]['prompt'], 'Previous Build Marker'),
+        'judge prompt does not list the previous build choice'
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

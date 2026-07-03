@@ -18,7 +18,6 @@ require_once $src . '/WpcomImageClient.php';
 require_once $src . '/ImagePromptComposer.php';
 require_once $src . '/Project.php';
 require_once $src . '/ProjectStore.php';
-require_once $src . '/DirectionHistory.php';
 require_once $src . '/PromptRenderer.php';
 require_once $src . '/LlmOptions.php';
 require_once $src . '/Step.php';
@@ -92,7 +91,7 @@ function step_models(): array
  * Opus <= 4.6). AnthropicClient omits temperature for the sampling-less
  * models — see AnthropicClient::supportsSampling() — so a step left on the
  * Opus 4.8 default gets its diversity from the prompt-level mechanisms
- * (candidate spread + history + judge) instead.
+ * (candidate spread + judge) instead.
  *
  * Override any one step from the environment without touching code:
  *   LLM_TEMPERATURE_DESIGN_DIRECTION=0.7, LLM_TEMPERATURE_SECTIONS=1.0, …

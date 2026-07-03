@@ -5,23 +5,20 @@ declare(strict_types=1);
  * Step (LLM): commit to ONE distinctive creative concept for the site BEFORE any
  * theme, palette, or layout is chosen.
  *
- * Input:  meta.json (the user prompt) + siteSpec.json (factual info) + the
- *         cross-build direction history (projects/.direction-history.json).
+ * Input:  meta.json (the user prompt) + siteSpec.json (factual info).
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
  *         image grade, signature device, hero composition).
  *
  * The model is asked for FOUR distinct visual directions in one call (at a hot
- * sampling temperature, with the recently used directions injected as "do NOT
- * repeat these"); a cheap judge call then picks the candidate that best fits
- * the brief AND is most distinct from that history. Generating a spread and
- * selecting from it — rather than asking for a single "best" concept — is the
- * deliberate injection of variety: it widens the creative range and stops
- * repeated builds of the same brief from converging on the model's one safe
- * favourite. If the judge fails, selection falls back to a uniform random
- * pick, and the DESIGN_DIRECTION_CHOICE env var forces candidate N (1-based)
- * for reproducible evals.
+ * sampling temperature); a cheap judge call then picks the candidate that best
+ * fits the brief. Generating a spread and selecting from it — rather than
+ * asking for a single "best" concept — is the deliberate injection of variety:
+ * it widens the creative range within the current build without exposing the
+ * builder to previous site builds. If the judge fails, selection falls back to a
+ * uniform random pick, and the DESIGN_DIRECTION_CHOICE env var forces candidate
+ * N (1-based) for reproducible evals.
  *
  * This is the single source of design intent. The theme-json, section-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
@@ -47,9 +44,6 @@ final class DesignDirectionStep implements Step
 
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
     public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
-
-    /** Recent history entries injected into the generation + judge prompts. */
-    private const HISTORY_PROMPT_LIMIT = 8;
 
     /** Env var forcing candidate N (1-based) — the reproducible-evals escape hatch. */
     public const CHOICE_ENV = 'DESIGN_DIRECTION_CHOICE';
@@ -80,13 +74,9 @@ final class DesignDirectionStep implements Step
             throw new RuntimeException('meta.json has no "prompt"');
         }
 
-        $history = DirectionHistory::forProject($project);
-        $recent = DirectionHistory::renderForPrompt($history->recent(self::HISTORY_PROMPT_LIMIT));
-
         $rendered = $this->renderer->render('design-direction.md', [
-            'user_prompt'       => $prompt,
-            'site_spec'         => $project->readText('siteSpec.json'),
-            'recent_directions' => $recent,
+            'user_prompt' => $prompt,
+            'site_spec'   => $project->readText('siteSpec.json'),
         ]);
         $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
 
@@ -103,10 +93,9 @@ final class DesignDirectionStep implements Step
             throw new RuntimeException('design-direction: model returned no usable directions');
         }
 
-        $chosen = $this->choose($prompt, $directions, $recent);
+        $chosen = $this->choose($prompt, $directions);
 
         $project->writeJson(self::FILE, $chosen);
-        $history->append($chosen);
     }
 
     /**
@@ -115,14 +104,14 @@ final class DesignDirectionStep implements Step
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces candidate N
      * (1-based; out of range fails loud — a forced eval must not silently
      * drift); a single candidate is taken as-is; otherwise a cheap judge call
-     * scores fit-to-brief and distinctiveness-from-history and picks. Any
-     * judge failure (transport error, malformed verdict) falls back to a
-     * uniform random pick — selection must never abort a build.
+     * scores fit-to-brief and specificity and picks. Any judge failure
+     * (transport error, malformed verdict) falls back to a uniform random pick
+     * — selection must never abort a build.
      *
      * @param array<int,array<string,mixed>> $directions
      * @return array<string,mixed>
      */
-    private function choose(string $brief, array $directions, string $recentDirections): array
+    private function choose(string $brief, array $directions): array
     {
         $forced = Env::get(self::CHOICE_ENV);
         if ($forced !== null && $forced !== '') {
@@ -144,9 +133,8 @@ final class DesignDirectionStep implements Step
 
         try {
             $judgePrompt = $this->renderer->render('direction-judge.md', [
-                'user_prompt'       => $brief,
-                'recent_directions' => $recentDirections,
-                'candidates'        => self::renderCandidates($directions),
+                'user_prompt' => $brief,
+                'candidates'  => self::renderCandidates($directions),
             ]);
             $opts = ['log_label' => 'direction-judge'];
             if ($this->judgeModel !== null) {
