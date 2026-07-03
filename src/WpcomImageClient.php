@@ -71,6 +71,16 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
+     * The output MIME type an asset filename calls for. `.png` assets are the
+     * transparent-background ones (decorative flourishes, ornaments, logo
+     * marks); everything else is photographic and stays JPEG for size.
+     */
+    public static function mimeForFilename(string $filename): string
+    {
+        return preg_match('/\.png$/i', trim($filename)) === 1 ? 'image/png' : 'image/jpeg';
+    }
+
+    /**
      * Conservative token estimate for an Imagen text prompt. No local tokenizer
      * is available, so over-estimate (the larger of a word- and a character-based
      * count) to stay safely under the hard model limit.
@@ -136,6 +146,7 @@ final class WpcomImageClient implements ImageClient
             $bodies[$i] = self::buildBody((string) $spec['prompt'], [
                 'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
                 'sample_image_size' => $spec['sample_image_size'] ?? null,
+                'mime'              => $spec['mime'] ?? null,
             ]);
         }
 
@@ -243,23 +254,28 @@ final class WpcomImageClient implements ImageClient
     /**
      * The Imagen predict request body for one prompt.
      *
-     * @param array{aspect_ratio?:string,sample_image_size?:?string} $opts
+     * @param array{aspect_ratio?:string,sample_image_size?:?string,mime?:?string} $opts
      * @return array<string,mixed>
      */
     private static function buildBody(string $prompt, array $opts): array
     {
+        // Ask Imagen for the format matching the asset filename: JPEG for the
+        // photographic default (it returns PNG otherwise — larger and
+        // mislabeled), PNG for transparent-background assets (JPEG has no
+        // alpha channel). compressionQuality is a JPEG-only knob.
+        $mime = ($opts['mime'] ?? null) ?: 'image/jpeg';
+        $outputOptions = ['mimeType' => $mime];
+        if ($mime === 'image/jpeg') {
+            $outputOptions['compressionQuality'] = 85;
+        }
+
         return [
             'instances'  => [['prompt' => $prompt]],
             'parameters' => [
                 'sampleCount'     => 1,
                 'aspectRatio'     => $opts['aspect_ratio'] ?? '16:9',
                 'sampleImageSize' => $opts['sample_image_size'] ?? '1K',
-                // Ask Imagen for JPEG directly so the bytes match the .jpg asset
-                // filenames (it returns PNG otherwise — larger and mislabeled).
-                'outputOptions'   => [
-                    'mimeType'           => 'image/jpeg',
-                    'compressionQuality' => 85,
-                ],
+                'outputOptions'   => $outputOptions,
             ],
         ];
     }

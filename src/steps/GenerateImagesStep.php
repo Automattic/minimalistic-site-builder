@@ -94,6 +94,10 @@ final class GenerateImagesStep implements Step
             $indices = array_keys($batch);
             $batchSpecs = array_map(function (array $spec) use ($siteContext, $imageGrade): array {
                 $ratio = WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
+                // A .png placeholder is a transparent-background asset: request
+                // PNG bytes, prompt for a flat white background (Imagen cannot
+                // render alpha), and key that background out after generation.
+                $mime = WpcomImageClient::mimeForFilename((string) ($spec['filename'] ?? ''));
                 return [
                     'prompt'            => ImagePromptComposer::compose(
                         (string) ($spec['subject'] ?? ''),
@@ -101,11 +105,13 @@ final class GenerateImagesStep implements Step
                         (string) ($spec['style'] ?? ''),
                         $siteContext,
                         $imageGrade,
+                        $mime === 'image/png',
                     ),
                     'aspect_ratio'      => $ratio,
                     // Wide images are the full-bleed ones (heroes, banners) —
                     // render those at 2K so they stay sharp past ~1366px.
                     'sample_image_size' => WpcomImageClient::sampleImageSize($ratio),
+                    'mime'              => $mime,
                 ];
             }, array_values($batch));
 
@@ -122,6 +128,7 @@ final class GenerateImagesStep implements Step
                     'prompt'            => (string) $batchSpecs[$pos]['prompt'],
                     'aspect_ratio'      => (string) $batchSpecs[$pos]['aspect_ratio'],
                     'sample_image_size' => (string) $batchSpecs[$pos]['sample_image_size'],
+                    'mime'              => (string) $batchSpecs[$pos]['mime'],
                     'subject'           => (string) ($specs[$i]['subject'] ?? ''),
                     'page_context'      => (string) ($specs[$i]['pageContext'] ?? ''),
                     'style'             => (string) ($specs[$i]['style'] ?? ''),
@@ -134,7 +141,14 @@ final class GenerateImagesStep implements Step
                     if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
                         throw new RuntimeException((string) ($result['error'] ?? 'unknown error'));
                     }
-                    $project->writeText('theme/assets/' . $filename, (string) $result['bytes']);
+                    $bytes = (string) $result['bytes'];
+                    if ($batchSpecs[$pos]['mime'] === 'image/png') {
+                        // Imagen cannot render real alpha: the prompt asked for
+                        // a flat solid white background instead, keyed out here
+                        // so the asset gets the transparency its .png promises.
+                        $bytes = ImageTransparency::keyOutBackground($bytes);
+                    }
+                    $project->writeText('theme/assets/' . $filename, $bytes);
                     $specs[$i]['status'] = 'completed';
                     $specs[$i]['url']    = $this->servedUrl($project, $filename);
                     unset($specs[$i]['error']);

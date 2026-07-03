@@ -45,6 +45,23 @@ test('collect-images dedupes the same asset across files and records sources', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images collects .png placeholders (transparent-background assets)', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/footer.html',
+        '<img src="theme:./assets/grapevine-flourish.png" '
+        . 'alt="AI_IMAGE: A small grapevine flourish, thin gold linework | decorative accent under a subheading | illustration | landscape"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('grapevine-flourish.png', $images[0]['filename']);
+    assert_eq('theme:./assets/grapevine-flourish.png', $images[0]['src']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images ignores plain images with no AI_IMAGE marker', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/templates/index.html',

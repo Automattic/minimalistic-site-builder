@@ -9,11 +9,14 @@ declare(strict_types=1);
 interface ImageClient
 {
     /**
-     * Generate one image from a prompt; return the raw image bytes (JPEG).
+     * Generate one image from a prompt; return the raw image bytes (JPEG by
+     * default, PNG when `mime` asks for it).
      *
-     * @param array{aspect_ratio?:string,sample_image_size?:?string} $opts
+     * @param array{aspect_ratio?:string,sample_image_size?:?string,mime?:?string} $opts
      *        aspect_ratio is one of the Imagen-supported ratios: "1:1", "16:9",
-     *        "9:16", "4:3", "3:4"; sample_image_size is "1K" (default) or "2K".
+     *        "9:16", "4:3", "3:4"; sample_image_size is "1K" (default) or "2K";
+     *        mime is "image/jpeg" (default) or "image/png" (for assets that
+     *        need a transparent background — JPEG has no alpha channel).
      */
     public function generate(string $prompt, array $opts = []): string;
 
@@ -28,7 +31,7 @@ interface ImageClient
      * requests together (not one-at-a-time) and tolerate partial failure: one
      * image failing must not abort the others.
      *
-     * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string}> $specs
+     * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string,mime?:?string}> $specs
      * @return array<int,array{ok:bool,bytes?:string,error?:string}> keyed by the
      *         same index as $specs (one result per spec, order preserved)
      */
