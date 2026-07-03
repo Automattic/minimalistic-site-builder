@@ -71,7 +71,7 @@ Besides the vivid narrative, each direction commits to explicit structured field
 - `type`: the heading and body families WITH weights. Both MUST be real Google Fonts families spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts by name, and a family that isn't there gets silently downgraded to a fallback. Design within that constraint: never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
 - `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
 - `signature_device`: the ONE repeated visual motif that makes the direction recognizable on every section (e.g. "hairline rules with page folios", "oversized year numerals in the margins", "duotone image blocks with offset borders").
-- `hero_composition`: the composition archetype the hero commits to, in one concrete sentence (e.g. "full-bleed landscape photo, headline pinned lower-left, nav reduced to a wordmark and one link").
+- `hero_composition`: the composition archetype the hero commits to, in one concrete sentence (e.g. "full-bleed landscape photo, headline pinned lower-left, generous negative space above"). Describe only the hero section's OWN content — never the site header, wordmark, or navigation; those live in a separate header part rendered above the hero.
 
 Respond with ONLY a JSON object. No explanation, no commentary, no text before or after.
 

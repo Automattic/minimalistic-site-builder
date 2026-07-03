@@ -22,6 +22,7 @@ SECTION TO BUILD:
 
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
+- NEVER include site chrome in the section: no wordmark, no site-title lockup, no navigation or menu links — even if the DESIGN DIRECTION, hero composition, or Notes mention them. The real site header is a separate part rendered above (often overlaid on) your section; duplicating it here puts two headers on the page. If the Notes say "wordmark top-left" or "nav reduced to one link", skip that furniture and build only the section's own content.
 - Wrap the whole section in a single top-level <!-- wp:group --> with a constrained or full layout, so it drops cleanly into the page in order.
 - Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, gallery, media-text, quote, pullquote, list, separator, spacer; query/post-template only if useful).
 - Reach beyond group/columns when the content calls for it:
