@@ -17,7 +17,9 @@ declare(strict_types=1);
  * The IMAGE GRADE — the design direction's one-sentence photographic treatment
  * shared by ALL of the site's imagery (color vs B&W, grain, light) — IS render
  * instruction: it is appended to every prompt so independently generated images
- * read as one photographic series.
+ * read as one photographic series. TRANSPARENCY is also render instruction: a
+ * `.png` placeholder is an asset meant to sit directly on the page background,
+ * so its prompt asks for the subject isolated on a transparent background.
  *
  * The shape of the prompt lives in prompts/image-prompt.md (a composable template
  * with plain {{placeholders}}, like the other prompts). This class assembles the
@@ -38,6 +40,10 @@ final class ImagePromptComposer
      * @param string             $siteContext a factual sentence about the site
      * @param string             $imageGrade  the project-wide photographic grade
      *        from the design direction, applied to every image
+     * @param bool               $transparent whether the asset needs a transparent
+     *        background (a `.png` placeholder — decorative flourishes, ornaments,
+     *        logo marks). Imagen has no structured transparency parameter, so the
+     *        instruction must travel in the prompt text itself.
      * @param PromptRenderer|null $renderer    defaults to the repo's prompts/ dir;
      *        injectable so the template lookup can be redirected in tests
      */
@@ -47,6 +53,7 @@ final class ImagePromptComposer
         string $style,
         string $siteContext = '',
         string $imageGrade = '',
+        bool $transparent = false,
         ?PromptRenderer $renderer = null
     ): string {
         $renderer ??= new PromptRenderer(repo_path('prompts'));
@@ -66,6 +73,13 @@ final class ImagePromptComposer
             ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
             : '';
 
+        // Like the grade, transparency is a render instruction: it sits before
+        // the guidance so end-trimming under token pressure never sheds it.
+        $transparencyClause = $transparent
+            ? 'Render the subject isolated on a fully transparent background (PNG alpha'
+                . ' channel): no backdrop, no scenery, no solid color fill behind the subject.'
+            : '';
+
         // Page and site context only steer mood/composition — they are NOT drawn,
         // so they are framed as guidance and omitted entirely when there is none.
         $sentences = [];
@@ -80,10 +94,11 @@ final class ImagePromptComposer
             . implode(' ', $sentences);
 
         $prompt = $renderer->render('image-prompt.md', [
-            'subject'      => $subject,
-            'style_clause' => $styleClause,
-            'grade_clause' => $gradeClause,
-            'guidance'     => $guidance,
+            'subject'             => $subject,
+            'style_clause'        => $styleClause,
+            'grade_clause'        => $gradeClause,
+            'transparency_clause' => $transparencyClause,
+            'guidance'            => $guidance,
         ]);
 
         // Empty clauses leave stacked blank lines in the template; collapse them,

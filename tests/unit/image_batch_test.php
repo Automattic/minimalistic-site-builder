@@ -104,6 +104,13 @@ test('sampleImageSize renders wide (full-bleed) images at 2K, the rest at 1K', f
     assert_eq('1K', WpcomImageClient::sampleImageSize('9:16'));
 });
 
+test('mimeForFilename maps .png assets to PNG and everything else to JPEG', function () {
+    assert_eq('image/png', WpcomImageClient::mimeForFilename('grapevine-flourish.png'));
+    assert_eq('image/png', WpcomImageClient::mimeForFilename('ORNAMENT.PNG'));
+    assert_eq('image/jpeg', WpcomImageClient::mimeForFilename('hero-dawn.jpg'));
+    assert_eq('image/jpeg', WpcomImageClient::mimeForFilename('hero-dawn.jpeg'));
+});
+
 test('estimateTokens is conservative and grows with length', function () {
     assert_eq(0, WpcomImageClient::estimateTokens('   '));
     assert_true(WpcomImageClient::estimateTokens('a b c d e') >= 5, 'at least one token per short word');

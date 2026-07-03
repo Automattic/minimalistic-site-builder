@@ -214,7 +214,8 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
             $dataUri = null;
             if (($spec['status'] ?? '') === 'completed' && $project->exists('theme/assets/' . $filename)) {
                 $bytes = $project->readText('theme/assets/' . $filename);
-                $dataUri = 'data:image/jpeg;base64,' . base64_encode($bytes);
+                $dataUri = 'data:' . WpcomImageClient::mimeForFilename($filename) . ';base64,'
+                    . base64_encode($bytes);
             }
             $results[] = [
                 'filename'    => $filename,
@@ -226,6 +227,8 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
                     (string) ($spec['pageContext'] ?? ''),
                     (string) ($spec['style'] ?? ''),
                     $siteContext,
+                    '',
+                    WpcomImageClient::mimeForFilename($filename) === 'image/png',
                 ),
                 'aspectRatio' => WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
                 'dataUri'     => $dataUri,
@@ -249,13 +252,15 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
 function sanitize_filename(string $name, int $index): string
 {
     $name = strtolower(trim($name));
+    // A .png extension is meaningful (transparent-background asset) — keep it.
+    $ext = str_ends_with($name, '.png') ? '.png' : '.jpg';
     $name = preg_replace('/\.(jpe?g|png)$/', '', $name) ?? $name;
     $name = preg_replace('/[^a-z0-9-]+/', '-', $name) ?? '';
     $name = trim($name, '-');
     if ($name === '') {
         $name = 'image-' . ($index + 1);
     }
-    return $name . '.jpg';
+    return $name . $ext;
 }
 
 function rrmdir(string $dir): void

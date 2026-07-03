@@ -69,6 +69,44 @@ test('compose omits the grade clause when no grade is given', function () {
     assert_true(!str_contains($out, 'Art direction'), 'no grade clause without a grade');
 });
 
+test('compose asks for a transparent background for transparent assets', function () {
+    $out = ImagePromptComposer::compose(
+        'A small symmetrical grapevine flourish, thin gold linework',
+        'decorative accent beneath a section subheading',
+        'illustration',
+        '',
+        '',
+        true
+    );
+
+    assert_contains('fully transparent background', $out);
+    // Like the grade, transparency is a render instruction — it precedes the
+    // sheddable guidance so end-trimming keeps it.
+    assert_true(
+        strpos($out, 'fully transparent background') < strpos($out, 'Context to guide'),
+        'transparency clause precedes the guidance'
+    );
+});
+
+test('compose omits the transparency clause by default', function () {
+    $out = ImagePromptComposer::compose('A sourdough loaf', 'menu item card', 'photorealistic', '');
+    assert_true(!str_contains($out, 'transparent'), 'no transparency clause for opaque assets');
+});
+
+test('compose sheds the site context under token pressure but keeps transparency', function () {
+    $out = ImagePromptComposer::compose(
+        'A small grapevine flourish',
+        'decorative accent',
+        'illustration',
+        str_repeat('blurb context word ', 2000), // far over budget — gets shed
+        '',
+        true
+    );
+
+    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_contains('fully transparent background', $out);
+});
+
 test('compose sheds the site context under token pressure but keeps the grade', function () {
     $subject = 'A specific sourdough loaf on a floured board, warm side light';
     $grade   = 'monochrome documentary, visible 35mm grain, charcoal midtones';

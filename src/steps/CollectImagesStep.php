@@ -10,7 +10,8 @@ declare(strict_types=1);
  *           { filename, src, subject, pageContext, style, aspectRatio, status, sources[] }
  *
  * Placeholders follow the telex convention: an <img> whose src is a theme-relative
- * "theme:./assets/<name>.jpg" path and whose alt is "AI_IMAGE: subject | page-context
+ * "theme:./assets/<name>.jpg" path (".png" for transparent-background assets)
+ * and whose alt is "AI_IMAGE: subject | page-context
  * | style | aspect-ratio". The subject describes what to render and from what POV; the
  * page-context describes where/how the image is used (it is context for the generator,
  * not part of the rendered subject — see ImagePromptComposer). This step is pure
