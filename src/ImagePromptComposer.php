@@ -17,9 +17,16 @@ declare(strict_types=1);
  * The IMAGE GRADE — the design direction's one-sentence photographic treatment
  * shared by ALL of the site's imagery (color vs B&W, grain, light) — IS render
  * instruction: it is appended to every prompt so independently generated images
- * read as one photographic series. TRANSPARENCY is also render instruction: a
- * `.png` placeholder is an asset meant to sit directly on the page background,
- * so its prompt asks for the subject isolated on a transparent background.
+ * read as one photographic series — EXCEPT for transparent assets: the grade
+ * describes lighting and backdrop treatment ("candlelit low-key", "deep shadow
+ * falloff"), which Imagen paints in as a background scene, so it is omitted
+ * for them.
+ *
+ * TRANSPARENCY is also render instruction, but Imagen cannot output an alpha
+ * channel and ignores prompt-level "transparent background" requests. So a
+ * `.png` placeholder's prompt asks for the one isolation the model DOES honor —
+ * the subject alone on a flat solid white background — and ImageTransparency
+ * keys that background out to real alpha after generation.
  *
  * The shape of the prompt lives in prompts/image-prompt.md (a composable template
  * with plain {{placeholders}}, like the other prompts). This class assembles the
@@ -42,8 +49,11 @@ final class ImagePromptComposer
      *        from the design direction, applied to every image
      * @param bool               $transparent whether the asset needs a transparent
      *        background (a `.png` placeholder — decorative flourishes, ornaments,
-     *        logo marks). Imagen has no structured transparency parameter, so the
-     *        instruction must travel in the prompt text itself.
+     *        logo marks). Imagen cannot render real transparency, so the prompt
+     *        asks for a flat solid white background instead, which
+     *        ImageTransparency keys out after generation; the photographic
+     *        grade is omitted so no lighting/backdrop gets painted behind the
+     *        subject.
      * @param PromptRenderer|null $renderer    defaults to the repo's prompts/ dir;
      *        injectable so the template lookup can be redirected in tests
      */
@@ -69,15 +79,21 @@ final class ImagePromptComposer
 
         // The shared grade is a render instruction for every image on the site;
         // it precedes the guidance so end-trimming sheds the guidance first.
-        $gradeClause = $imageGrade !== ''
+        // Transparent assets skip it: the grade describes lighting and backdrop
+        // treatment, which Imagen would paint in as a background scene behind
+        // the subject — exactly what the white-background keying must avoid.
+        $gradeClause = ($imageGrade !== '' && !$transparent)
             ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
             : '';
 
-        // Like the grade, transparency is a render instruction: it sits before
-        // the guidance so end-trimming under token pressure never sheds it.
+        // Like the grade, this is a render instruction: it sits before the
+        // guidance so end-trimming under token pressure never sheds it. Imagen
+        // cannot render real alpha, so ask for the isolation it does honor — a
+        // flat solid white backdrop — which is keyed out after generation.
         $transparencyClause = $transparent
-            ? 'Render the subject isolated on a fully transparent background (PNG alpha'
-                . ' channel): no backdrop, no scenery, no solid color fill behind the subject.'
+            ? 'Render the subject fully isolated and centered on a plain solid pure white'
+                . ' background: perfectly flat and even, with no gradients, no vignette,'
+                . ' no glow, no shadows, no scenery and no backdrop of any kind.'
             : '';
 
         // Page and site context only steer mood/composition — they are NOT drawn,

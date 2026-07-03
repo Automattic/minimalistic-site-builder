@@ -138,12 +138,12 @@ test('generate-images requests PNG and a transparent background for .png assets'
 
     (new GenerateImagesStep($images))->run($project);
 
-    // The .png asset asks the endpoint for PNG bytes and carries the
-    // transparency instruction in its prompt; the .jpg asset stays JPEG.
+    // The .png asset asks the endpoint for PNG bytes and prompts for the flat
+    // white background that gets keyed out; the .jpg asset stays JPEG.
     assert_eq('image/png', $images->calls[0]['opts']['mime']);
-    assert_contains('fully transparent background', $images->calls[0]['prompt']);
+    assert_contains('solid pure white background', $images->calls[0]['prompt']);
     assert_eq('image/jpeg', $images->calls[1]['opts']['mime']);
-    assert_true(!str_contains($images->calls[1]['prompt'], 'transparent background'), 'jpg prompt has no transparency clause');
+    assert_true(!str_contains($images->calls[1]['prompt'], 'white background'), 'jpg prompt has no isolation clause');
 
     // Both assets are written and wired in under their own extension.
     assert_true($project->exists('theme/assets/grapevine-flourish.png'), 'png asset written');

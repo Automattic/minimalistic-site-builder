@@ -95,7 +95,8 @@ final class GenerateImagesStep implements Step
             $batchSpecs = array_map(function (array $spec) use ($siteContext, $imageGrade): array {
                 $ratio = WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
                 // A .png placeholder is a transparent-background asset: request
-                // PNG bytes AND ask for the transparency in the prompt itself.
+                // PNG bytes, prompt for a flat white background (Imagen cannot
+                // render alpha), and key that background out after generation.
                 $mime = WpcomImageClient::mimeForFilename((string) ($spec['filename'] ?? ''));
                 return [
                     'prompt'            => ImagePromptComposer::compose(
@@ -140,7 +141,14 @@ final class GenerateImagesStep implements Step
                     if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
                         throw new RuntimeException((string) ($result['error'] ?? 'unknown error'));
                     }
-                    $project->writeText('theme/assets/' . $filename, (string) $result['bytes']);
+                    $bytes = (string) $result['bytes'];
+                    if ($batchSpecs[$pos]['mime'] === 'image/png') {
+                        // Imagen cannot render real alpha: the prompt asked for
+                        // a flat solid white background instead, keyed out here
+                        // so the asset gets the transparency its .png promises.
+                        $bytes = ImageTransparency::keyOutBackground($bytes);
+                    }
+                    $project->writeText('theme/assets/' . $filename, $bytes);
                     $specs[$i]['status'] = 'completed';
                     $specs[$i]['url']    = $this->servedUrl($project, $filename);
                     unset($specs[$i]['error']);
