@@ -32,6 +32,39 @@ test('validator flags unbalanced block comments', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('typography warnings flag hardcoded font sizes and an unused display preset', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
+        ['slug' => 'small', 'name' => 'Small', 'size' => '0.875rem'],
+        ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
+    ]]]]);
+    $project->writeText(
+        'theme/parts/section-hero.html',
+        '<!-- wp:heading {"level":1,"style":{"typography":{"fontSize":"clamp(2.75rem, 5vw, 4.25rem)"}}} -->'
+        . '<h1 class="wp-block-heading" style="font-size:clamp(2.75rem, 5vw, 4.25rem)">Big</h1><!-- /wp:heading -->'
+    );
+    $warnings = ThemeValidator::typographyWarnings($project);
+    $joined = implode(' ', $warnings);
+    assert_contains('hardcoded font-size', $joined);
+    assert_contains('section-hero.html', $joined);
+    assert_contains('"display" fontSize', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('typography warnings stay quiet when sizes come from the preset scale', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
+        ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
+    ]]]]);
+    $project->writeText(
+        'theme/parts/section-hero.html',
+        '<!-- wp:heading {"level":1,"fontSize":"display"} -->'
+        . '<h1 class="wp-block-heading has-display-font-size">Big</h1><!-- /wp:heading -->'
+    );
+    assert_eq([], ThemeValidator::typographyWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator flags bad theme.json and leftover placeholders', function () {
     [$project, $tmp] = validator_project();
     $project->writeText('theme/theme.json', '{not json');

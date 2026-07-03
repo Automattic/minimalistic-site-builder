@@ -62,6 +62,52 @@ final class ThemeValidator
         return $problems;
     }
 
+    /**
+     * Soft typography checks (warnings, not build failures): font sizes
+     * hardcoded in block markup instead of drawn from the theme.json
+     * fontSizes scale, and a "display" preset that no markup uses.
+     *
+     * @return string[] list of warnings (empty means the scale governs the page)
+     */
+    public static function typographyWarnings(Project $project): array
+    {
+        $warnings = [];
+        $files = array_merge(
+            glob($project->themePath('parts') . '/*.html') ?: [],
+            glob($project->themePath('templates') . '/*.html') ?: []
+        );
+
+        $hardcoded = [];
+        $displayUsed = false;
+        foreach ($files as $file) {
+            $markup = (string) file_get_contents($file);
+            // Raw values in the fontSize block attribute (a preset slug or
+            // var:preset reference is fine; "1.25rem" / "clamp(...)" is not).
+            // Inline font-size styles mirror this attribute, so counting the
+            // attribute counts each hardcoded size once.
+            $count = preg_match_all('/"fontSize"\s*:\s*"(?:clamp\(|[0-9.]+(?:r?em|px|vw|vh|%))/', $markup);
+            if ($count > 0) {
+                $hardcoded[] = basename($file) . " ({$count})";
+            }
+            if (preg_match('/has-display-font-size|"fontSize"\s*:\s*"display"|font-size--display/', $markup)) {
+                $displayUsed = true;
+            }
+        }
+        if ($hardcoded !== []) {
+            $warnings[] = 'hardcoded font-size values bypass the fontSizes scale: ' . implode(', ', $hardcoded);
+        }
+
+        $theme = $project->exists('theme/theme.json')
+            ? json_decode($project->readText('theme/theme.json'), true)
+            : null;
+        $slugs = array_column($theme['settings']['typography']['fontSizes'] ?? [], 'slug');
+        if (in_array('display', $slugs, true) && !$displayUsed) {
+            $warnings[] = 'theme.json defines a "display" fontSize that no template or part uses';
+        }
+
+        return $warnings;
+    }
+
     /** @return string|null problem description, or null if balanced */
     private static function blockBalance(string $markup): ?string
     {

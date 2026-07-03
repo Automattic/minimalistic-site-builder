@@ -62,6 +62,7 @@ foreach (SITES as $slug => $prompt) {
     }
 
     $problems = $error === null ? ThemeValidator::validate($project) : ['build failed before validation'];
+    $warnings = $error === null ? ThemeValidator::typographyWarnings($project) : [];
     $metrics = collect_metrics($project);
 
     $results[$slug] = [
@@ -70,9 +71,16 @@ foreach (SITES as $slug => $prompt) {
         'total'    => round($total, 1),
         'error'    => $error,
         'problems' => $problems,
+        'warnings' => $warnings,
         'metrics'  => $metrics,
     ];
-    printf("  %-22s %6.1fs   %s\n", 'TOTAL', $total, $problems === [] ? 'VALID' : count($problems) . ' problem(s)');
+    printf(
+        "  %-22s %6.1fs   %s%s\n",
+        'TOTAL',
+        $total,
+        $problems === [] ? 'VALID' : count($problems) . ' problem(s)',
+        $warnings === [] ? '' : ', ' . count($warnings) . ' warning(s)'
+    );
 }
 
 write_report($results);
@@ -104,6 +112,7 @@ function rebuild_report(): void
             'total'    => array_sum($timings),
             'error'    => null,
             'problems' => ThemeValidator::validate($project),
+            'warnings' => ThemeValidator::typographyWarnings($project),
             'metrics'  => collect_metrics($project),
         ];
     }
@@ -189,6 +198,10 @@ function write_report(array $results): void
                 $md .= "- **{$slug}**: {$p}\n";
                 $any = true;
             }
+        }
+        foreach ($r['warnings'] ?? [] as $w) {
+            $md .= "- **{$slug}** (warning): {$w}\n";
+            $any = true;
         }
     }
     if (!$any) {
