@@ -71,7 +71,28 @@ test('full pipeline produces a structurally valid theme', function () {
     $llm->queueText($hdr);
     $llm->queueText($ftr);
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
-    $llm->queueText('<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->');
+    // The specials section opts into a layout utility class (hover-lift) so the
+    // page-styles step downstream has something to style — and we can assert the
+    // class survives the block-fixer's re-serialization.
+    $llm->queueText(
+        '<!-- wp:group {"className":"hover-lift"} --><div class="wp-block-group hover-lift">'
+        . '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+    );
+    // page-styles (text) — runs after fix-blocks, sees hover-lift in the final
+    // markup, and returns the CSS appendix for it.
+    $llm->queueText(
+        ".hover-lift {\n    transition: transform 0.25s ease;\n}\n"
+        . ".hover-lift:hover {\n    transform: translateY(-6px);\n    box-shadow: var(--wp--preset--shadow--natural);\n}"
+    );
+    // fonts-php (text) — the generated fonts module; must cover the scanned
+    // 400/700 floor for both theme.json families or the step falls back.
+    $llm->queueText(
+        "<?php\nadd_action('enqueue_block_assets', function () {\n"
+        . "    wp_enqueue_style('preconnect-gfonts', 'https://fonts.gstatic.com', array(), null);\n"
+        . "    wp_enqueue_style('demo-fonts', 'https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700&family=Source+Sans+3:wght@400;700&display=swap', array(), null);\n"
+        . "});\n"
+    );
 
     build_pipeline($llm)->runThrough($project);
 
@@ -92,9 +113,24 @@ test('full pipeline produces a structurally valid theme', function () {
         'sections composed in plan order'
     );
 
-    // finalize-theme produced font loading.
-    assert_true($project->exists('theme/functions.php'), 'functions.php written');
-    assert_contains('fonts.googleapis.com', $project->readText('theme/functions.php'));
+    // The utility class survived the fix-blocks re-serialization, and the
+    // page-styles step appended its CSS to style.css (after the theme header).
+    assert_contains('hover-lift', $project->readText('theme/parts/section-specials.html'));
+    $style = $project->readText('theme/style.css');
+    assert_contains('.hover-lift:hover', $style);
+    assert_true(
+        strpos($style, 'Theme Name:') < strpos($style, '.hover-lift'),
+        'appendix appended after the theme header'
+    );
+
+    // fonts-php accepted the model's module; finalize-theme wrote the
+    // deterministic loader that enqueues style.css (block themes don't load
+    // it automatically) and require_once's fonts.php.
+    assert_contains('fonts.googleapis.com', $project->readText('theme/fonts.php'));
+    $functions = $project->readText('theme/functions.php');
+    assert_contains('get_stylesheet_uri()', $functions);
+    assert_contains("require_once __DIR__ . '/fonts.php'", $functions);
+    assert_true(!str_contains($functions, 'googleapis'), 'fonts stay in fonts.php');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -103,7 +139,7 @@ test('pipeline step order is correct', function () {
     $ids = build_pipeline(new FakeLlm())->stepIds();
     assert_eq([
         'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+section-plan', 'enqueue-fonts', 'sections', 'assemble-landing-page',
-        'collect-images', 'fix-blocks', 'finalize-theme',
+        'theme-json+section-plan', 'sections', 'assemble-landing-page',
+        'collect-images', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
     ], $ids);
 });

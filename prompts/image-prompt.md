@@ -2,4 +2,6 @@
 
 {{grade_clause}}
 
+{{transparency_clause}}
+
 {{guidance}}

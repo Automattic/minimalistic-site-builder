@@ -64,6 +64,33 @@ finishes building, so you can inspect it in a browser (Ctrl-C to stop and move
 on to the next). Unlike `--serve`, which previews only after the whole batch, it
 keeps the server up the moment each site is done.
 
+## Publish a shareable Playground link
+
+Upload a built project to the Playground artifact branch and print a URL that
+opens it directly in WordPress Playground:
+
+```bash
+php bin/publish-playground.php <slug>
+php bin/publish-playground.php <slug> --dry-run   # build the ZIP, don't upload
+php bin/publish-playground.php --list             # list uploaded artifacts
+```
+
+The uploaded ZIP is a Playground Blueprint bundle. It contains the runnable
+Blueprint plus a complete archive of the project folder for debugging:
+
+```text
+blueprint.json
+project.zip
+```
+
+`project.zip` contains `project/<slug>/...`, including logs, screenshots, JSON
+artifacts, and the generated theme. By default assets are pushed to a
+`playground-artifacts` branch in the current GitHub repo and served from
+`raw.githubusercontent.com`, which WordPress Playground can fetch in the
+browser. Override with `--repo=OWNER/REPO` or `--branch=<branch-name>`.
+Uploaded ZIPs are browsable online at
+<https://github.com/matiasbenedetto/minimalistic-site-builder/tree/playground-artifacts>.
+
 ## Image prompt debugger
 
 A standalone page for iterating on `AI_IMAGE` prompts **without building a whole
@@ -109,5 +136,6 @@ npm install   # once, at the repo root; uses your system Chrome, no download
 node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
 ```
 
-Pass `--width=<px>`, `--chrome=<path>` (or set `CHROME`), and `--no-scroll` to
-reproduce the old un-scrolled behaviour.
+Pass `--width=<px>` (or set `SHOT_WIDTH`), `--chrome=<path>` (or set
+`CHROME`/`CHROME_BIN`), and `--no-scroll` to reproduce the old un-scrolled
+behaviour.

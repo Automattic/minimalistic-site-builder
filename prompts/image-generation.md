@@ -4,7 +4,7 @@ When a section needs imagery (hero covers, feature/gallery/card images), emit a 
 
 Use ONLY the native `src` and `alt` attributes on `img` elements. Do NOT use any custom data attributes.
 
-- **src**: The image path using the `theme:./assets/` prefix followed by the filename. The filename must only contain lowercase letters (a-z), numbers (0-9), and hyphens (-) — no spaces or special characters — and must be descriptive of the image. Always use the `.jpg` extension. Give every image a UNIQUE filename. Example: `theme:./assets/hero-mountain-dawn.jpg`
+- **src**: The image path using the `theme:./assets/` prefix followed by the filename. The filename must only contain lowercase letters (a-z), numbers (0-9), and hyphens (-) — no spaces or special characters — and must be descriptive of the image. Use the `.jpg` extension for regular images; use `.png` ONLY for images that need a transparent background (see "Transparent backgrounds" below). Give every image a UNIQUE filename. Example: `theme:./assets/hero-mountain-dawn.jpg`
 
 - **alt**: A structured string containing all image generation parameters, e.g. `AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape`
 
@@ -45,6 +45,11 @@ When creating multiple images that will be displayed together in a row or grid (
 - `3d-render` — 3D rendered appearance
 - `abstract` — Abstract artistic style
 - `watercolor` — Watercolor painting style
+
+**Transparent backgrounds (`.png`):**
+An image whose extension is `.png` is generated with a TRANSPARENT background, so it sits directly on whatever the page background is. Use `.png` only for assets that need this: small decorative ornaments, flourishes, dividers, accent motifs and logo marks — typically `illustration`, `minimalist` or `flat-design` style. Everything photographic or full-bleed stays `.jpg` (photos have no transparency to preserve, and JPEG is much smaller).
+
+For a `.png` image, describe ONLY the subject itself — never a backdrop. Do not write "centered on empty dark space", "on a white field" or any background color into the subject: the background is transparent, and describing one would get it painted into the image. Example: `theme:./assets/grapevine-flourish.png` with alt `AI_IMAGE: A small symmetrical grapevine flourish with a single grape cluster and two curling tendrils, thin gold linework | decorative accent beneath a section subheading | illustration | landscape`
 
 **Subject guidelines:**
 - 1-3 specific sentences describing ONLY the image itself: what it shows and from what point of view (composition, framing, vantage, mood). This is the actual generation subject — do not put the page placement here, that goes in `page-context`.

@@ -124,6 +124,39 @@ test('generate-images requests 2K for landscape images and 1K otherwise', functi
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images requests PNG and a transparent background for .png assets', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText('theme/parts/footer.html',
+        '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/grapevine-flourish.png" '
+        . 'alt="AI_IMAGE: A small grapevine flourish, thin gold linework | decorative accent under a subheading | illustration | landscape"/></figure>'
+        . '<!-- /wp:image -->'
+        . '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/vineyard-hills.jpg" '
+        . 'alt="AI_IMAGE: Rolling vineyard hills at dusk | wide feature image | photorealistic | landscape"/></figure>'
+        . '<!-- /wp:image -->'
+    );
+    (new CollectImagesStep())->run($project);
+    $images = new FakeImageClient('PNGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    // The .png asset asks the endpoint for PNG bytes and prompts for the flat
+    // white background that gets keyed out; the .jpg asset stays JPEG.
+    assert_eq('image/png', $images->calls[0]['opts']['mime']);
+    assert_contains('solid pure white background', $images->calls[0]['prompt']);
+    assert_eq('image/jpeg', $images->calls[1]['opts']['mime']);
+    assert_true(!str_contains($images->calls[1]['prompt'], 'white background'), 'jpg prompt has no isolation clause');
+
+    // Both assets are written and wired in under their own extension.
+    assert_true($project->exists('theme/assets/grapevine-flourish.png'), 'png asset written');
+    $markup = $project->readText('theme/parts/footer.html');
+    assert_contains('/wp-content/themes/demo/assets/grapevine-flourish.png', $markup);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images marks failed and leaves the placeholder on error', function () {
     [$project, $tmp] = generate_fixture();
     $images = new FakeImageClient('', true); // throws

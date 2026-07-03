@@ -22,16 +22,22 @@
  * bin/playground.php.
  *
  * Options:
- *   --width=<px>     Viewport width (default 1366).
+ *   --width=<px>     Viewport width (default 1366, or SHOT_WIDTH).
  *   --no-scroll      Skip the lazy-load scroll/wait (reproduces the old bug).
- *   --chrome=<path>  Chrome/Chromium executable (or set CHROME env var).
+ *   --chrome=<path>  Chrome/Chromium executable (or set CHROME/CHROME_BIN).
  *   --timeout=<ms>   Per-image load wait budget (default 15000).
  */
 
 const { chromium } = require('playwright-core');
 
 function parseArgs(argv) {
-  const opts = { width: 1366, scroll: true, timeout: 15000, chrome: process.env.CHROME };
+  const envWidth = parseInt(process.env.SHOT_WIDTH || '', 10);
+  const opts = {
+    width: Number.isFinite(envWidth) && envWidth > 0 ? envWidth : 1366,
+    scroll: true,
+    timeout: 15000,
+    chrome: process.env.CHROME || process.env.CHROME_BIN,
+  };
   const positional = [];
   for (const a of argv) {
     if (a === '--no-scroll') opts.scroll = false;
@@ -47,8 +53,30 @@ function parseArgs(argv) {
 }
 
 function findChrome(explicit) {
-  if (explicit) return explicit;
   const fs = require('fs');
+  const path = require('path');
+  const findOnPath = (bin) => {
+    for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+      if (!dir) continue;
+      const candidate = path.join(dir, bin);
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      } catch { /* ignore */ }
+    }
+    return null;
+  };
+
+  if (explicit) {
+    if (explicit.includes('/') || explicit.includes('\\')) {
+      if (fs.existsSync(explicit)) return explicit;
+      throw new Error(`Chrome/Chromium executable does not exist: ${explicit}`);
+    }
+    const resolved = findOnPath(explicit);
+    if (resolved) return resolved;
+    throw new Error(`Could not find Chrome/Chromium executable named ${explicit}. Pass --chrome=<path>.`);
+  }
+
   const candidates = [
     '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome',
@@ -60,7 +88,7 @@ function findChrome(explicit) {
   for (const c of candidates) {
     try { if (fs.existsSync(c)) return c; } catch { /* ignore */ }
   }
-  throw new Error('Could not find Chrome/Chromium. Pass --chrome=<path> or set CHROME.');
+  throw new Error('Could not find Chrome/Chromium. Pass --chrome=<path> or set CHROME/CHROME_BIN.');
 }
 
 /**
@@ -70,19 +98,32 @@ function findChrome(explicit) {
 async function autoScroll(page, step = 600, pause = 150) {
   await page.evaluate(async ({ step, pause }) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    let lastHeight = -1;
-    for (let y = 0; ; y += step) {
-      window.scrollTo(0, y);
-      await sleep(pause);
-      const height = document.documentElement.scrollHeight;
-      if (y + window.innerHeight >= height) {
-        // Reached the bottom — but lazy content may have grown the page, so do
-        // one more loop if the height changed, otherwise stop.
-        if (height === lastHeight) break;
-        lastHeight = height;
+    const root = document.documentElement;
+    const body = document.body;
+    const previousRootScrollBehavior = root.style.scrollBehavior;
+    const previousBodyScrollBehavior = body?.style.scrollBehavior;
+
+    root.style.scrollBehavior = 'auto';
+    if (body) body.style.scrollBehavior = 'auto';
+
+    try {
+      let lastHeight = -1;
+      for (let y = 0; ; y += step) {
+        window.scrollTo(0, y);
+        await sleep(pause);
+        const height = document.documentElement.scrollHeight;
+        if (y + window.innerHeight >= height) {
+          // Reached the bottom, but lazy content may have grown the page. Do
+          // one more loop if the height changed, otherwise stop.
+          if (height === lastHeight) break;
+          lastHeight = height;
+        }
       }
+    } finally {
+      window.scrollTo(0, 0);
+      root.style.scrollBehavior = previousRootScrollBehavior;
+      if (body) body.style.scrollBehavior = previousBodyScrollBehavior;
     }
-    window.scrollTo(0, 0);
   }, { step, pause });
 }
 
@@ -96,7 +137,11 @@ async function waitForImages(page, timeout) {
     const isDone = (img) => img.complete && img.naturalWidth > 0;
     const waitOne = (img) => {
       img.loading = 'eager';
-      if (img.dataset && img.dataset.src && !img.src) img.src = img.dataset.src;
+      if (img.dataset) {
+        if (img.dataset.srcset) img.srcset = img.dataset.srcset;
+        if (img.dataset.sizes) img.sizes = img.dataset.sizes;
+        if (img.dataset.src) img.src = img.dataset.src;
+      }
       if (isDone(img)) return Promise.resolve();
       return new Promise((resolve) => {
         const timer = setTimeout(resolve, timeout);

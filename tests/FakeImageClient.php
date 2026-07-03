@@ -45,6 +45,7 @@ final class FakeImageClient implements ImageClient
             $this->calls[] = ['prompt' => $spec['prompt'], 'opts' => [
                 'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
                 'sample_image_size' => $spec['sample_image_size'] ?? null,
+                'mime'              => $spec['mime'] ?? null,
             ]];
             $results[$i] = ($this->fail || $this->shouldFail((string) $spec['prompt']))
                 ? ['ok' => false, 'error' => 'fake image failure']

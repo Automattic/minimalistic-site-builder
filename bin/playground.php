@@ -47,11 +47,8 @@ if (!command_exists('npx')) {
     exit(1);
 }
 
-// Theme display name from the style.css header.
-$name = '';
-if (preg_match('/Theme Name:\s*(.+)/', (string) file_get_contents($themeDir . '/style.css'), $m)) {
-    $name = trim($m[1]);
-}
+$project = (new ProjectStore(repo_path('projects')))->open($slug);
+$name = PlaygroundArtifact::themeDisplayName($project);
 
 // Pick a free port starting from the requested one (avoids EADDRINUSE when a
 // previous Playground is still running).
@@ -61,29 +58,15 @@ if ($port !== $requestedPort) {
     fwrite(STDERR, "Port {$requestedPort} is in use — using {$port} instead.\n");
 }
 
-// Use the site name/tagline from siteSpec for the WP site title (the header's
-// site-title block reads this option, not the theme).
-$blogname = $name !== '' ? $name : $slug;
-$blogdescription = '';
-$specFile = repo_path("projects/{$slug}/siteSpec.json");
-if (is_file($specFile)) {
-    $spec = json_decode((string) file_get_contents($specFile), true) ?: [];
-    $blogname = (string) ($spec['name'] ?? $blogname);
-    // The spec carries a tagline only when the user stated one; fall back to the
-    // factual topic so the site-tagline block is never blank.
-    $blogdescription = (string) ($spec['tagline'] ?? $spec['topic'] ?? '');
-}
-
-// Blueprint: set the site identity, activate the mounted theme, log in.
+// Blueprint: set the site identity, activate the mounted theme, log in. The
+// identity comes from PlaygroundArtifact::siteOptions so this local preview
+// matches the published Playground bundles.
 $blueprint = [
     '$schema'      => 'https://playground.wordpress.net/blueprint-schema.json',
     'landingPage'  => '/',
     'login'        => true,
     'steps'        => [
-        ['step' => 'setSiteOptions', 'options' => [
-            'blogname'        => $blogname,
-            'blogdescription' => $blogdescription,
-        ]],
+        ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
         ['step' => 'activateTheme', 'themeFolderName' => $slug],
     ],
 ];
