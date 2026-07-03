@@ -85,6 +85,71 @@ const out = (line) => process.stdout.write(line + '\n');
 
 const { fixBlocksInTemplate } = require('./lib/blockFixer.js');
 
+// ── Dropped-content detection.
+//
+// Re-serialization regenerates each block's HTML from its comment JSON
+// attributes, so any inline style declaration or class token that exists only
+// in the authored HTML is silently deleted (issue #48: card cropping, padding
+// and shadows lost). Diff the pre/post markup per file and report every loss
+// prominently so regressions are visible in each build's fix-blocks.log.
+
+/** Count each `prop:value` declaration across all style="..." attributes. */
+function styleDeclarationCounts(html) {
+  const counts = new Map();
+  for (const m of html.matchAll(/style="([^"]*)"/g)) {
+    for (const raw of m[1].split(';')) {
+      const decl = raw.trim();
+      if (decl) counts.set(decl, (counts.get(decl) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** Count each class token across all class="..." attributes. */
+function classTokenCounts(html) {
+  const counts = new Map();
+  for (const m of html.matchAll(/class="([^"]*)"/g)) {
+    for (const token of m[1].split(/\s+/)) {
+      if (token) counts.set(token, (counts.get(token) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** Values whose occurrence count decreased from before to after. */
+function droppedValues(before, after) {
+  const dropped = [];
+  for (const [value, count] of before) {
+    const remaining = after.get(value) || 0;
+    if (remaining < count) dropped.push({ value, lost: count - remaining });
+  }
+  return dropped;
+}
+
+/**
+ * Human-readable loss report for one file: every style declaration and class
+ * token present in the original markup but absent (or less frequent) after
+ * re-serialization. Empty array when nothing was lost.
+ */
+function detectDroppedContent(original, fixed) {
+  const lines = [];
+  for (const d of droppedValues(styleDeclarationCounts(original), styleDeclarationCounts(fixed))) {
+    lines.push(
+      `DROPPED style \`${d.value}\`` +
+        (d.lost > 1 ? ` (x${d.lost})` : '') +
+        ' — not mirrored in the block comment JSON attributes'
+    );
+  }
+  for (const d of droppedValues(classTokenCounts(original), classTokenCounts(fixed))) {
+    lines.push(
+      `DROPPED class \`${d.value}\`` +
+        (d.lost > 1 ? ` (x${d.lost})` : '') +
+        ' — not mirrored in the block comment JSON attributes'
+    );
+  }
+  return lines;
+}
+
 /** Collect templates/*.html and parts/*.html under a theme directory. */
 function collectFiles(themeDir) {
   const out = [];
@@ -108,6 +173,7 @@ function main() {
   let totalFiles = 0;
   let totalChanged = 0;
   let totalIssues = 0;
+  let totalDropped = 0;
   const report = [];
 
   for (const themeDir of themeDirs) {
@@ -130,16 +196,19 @@ function main() {
       const result = fixBlocksInTemplate(original);
 
       const issues = result.fixedIssues || [];
+      const dropped = result.changed ? detectDroppedContent(original, result.html) : [];
       if (result.changed) {
         fs.writeFileSync(file, result.html, 'utf-8');
         totalChanged++;
         totalIssues += issues.length;
+        totalDropped += dropped.length;
       }
 
       report.push({
         file: rel,
         status: result.changed ? 'fixed' : 'ok',
         issues,
+        dropped,
       });
     }
   }
@@ -148,13 +217,17 @@ function main() {
   for (const r of report) {
     const tag = r.status === 'fixed' ? 'FIXED ' : r.status === 'ok' ? 'ok    ' : 'skip  ';
     out(`  ${tag} ${r.file}`);
+    for (const loss of r.dropped || []) {
+      out(`         ! ${loss}`);
+    }
     for (const issue of r.issues || []) {
       out(`         - ${issue}`);
     }
   }
   out(
     `\n[fix-templates] ${totalChanged}/${totalFiles} file(s) re-serialized,` +
-      ` ${totalIssues} issue(s) fixed across ${themeDirs.length} theme(s).`
+      ` ${totalIssues} issue(s) fixed,` +
+      ` ${totalDropped} style/class value(s) dropped across ${themeDirs.length} theme(s).`
   );
 }
 
