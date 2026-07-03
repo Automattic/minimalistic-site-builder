@@ -24,15 +24,15 @@ test('full pipeline produces a structurally valid theme', function () {
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
-    // design-direction (json) — the model returns 4 candidate directions and the
-    // step samples ONE at random. Runs after site-spec, before the concurrent
-    // group, and is read by theme-json/section-plan/sections.
-    $llm->queueJson(['directions' => [
-        ['title' => 'Hearth & Grain',  'description' => 'Editorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.'],
-        ['title' => 'Flour & Steel',   'description' => 'Industrial-utilitarian bakery, raw concrete tones and stencilled type.'],
-        ['title' => 'Sugar Bloom',     'description' => 'Playful-pop pastels with oversized display type and rounded frames.'],
-        ['title' => 'Midnight Levain', 'description' => 'Dark-luxe patisserie, gold on near-black with fine serif detailing.'],
-    ]]);
+    // design-direction (sentinel text) — the model returns 4 candidate directions
+    // and the step samples ONE at random. Runs after site-spec, before the
+    // concurrent group, and is read by theme-json/section-plan/sections.
+    $llm->queueText(
+        "=== DIRECTION ===\nTITLE: Hearth & Grain\nDESCRIPTION:\nEditorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.\n"
+        . "=== DIRECTION ===\nTITLE: Flour & Steel\nDESCRIPTION:\nIndustrial-utilitarian bakery, raw concrete tones and stencilled type.\n"
+        . "=== DIRECTION ===\nTITLE: Sugar Bloom\nDESCRIPTION:\nPlayful-pop pastels with oversized display type and rounded frames.\n"
+        . "=== DIRECTION ===\nTITLE: Midnight Levain\nDESCRIPTION:\nDark-luxe patisserie, gold on near-black with fine serif detailing.\n"
+    );
     // Concurrent group, request order is [theme-json, section-plan]:
     // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([

@@ -45,7 +45,7 @@ test('design-direction passes the configured model into the LLM opts', function 
     [$project, $tmp] = sm_project('builder_sm_dd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]]);
+    $llm->queueText("=== DIRECTION ===\nTITLE: Brut\nDESCRIPTION:\nBrutalist direction: raw concrete palette, mono type.\n");
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
@@ -58,7 +58,7 @@ test('design-direction sends no model key when none is configured', function () 
     [$project, $tmp] = sm_project('builder_sm_ddd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]]);
+    $llm->queueText("=== DIRECTION ===\nTITLE: Brut\nDESCRIPTION:\nBrutalist direction: raw concrete palette, mono type.\n");
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer))->run($project);

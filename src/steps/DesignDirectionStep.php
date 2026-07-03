@@ -16,6 +16,12 @@ declare(strict_types=1);
  * variety: it widens the creative range and stops repeated builds of the same
  * brief from converging on the model's one safe favourite.
  *
+ * The model responds in a sentinel-delimited plain-text format (=== DIRECTION ===
+ * blocks with TITLE:/IMAGE_GRADE:/DESCRIPTION: fields), NOT JSON: the
+ * descriptions are long free prose, exactly where models drop an unescaped
+ * quote and break json_decode. With sentinels there is nothing to escape, so a
+ * quote in the prose can't fail the step.
+ *
  * This is the single source of design intent. The theme-json, section-plan and
  * section steps all read it (via DesignDirectionStep::readFor) and let it drive
  * their choices, so two sites diverge in concept — not just in hex values.
@@ -77,14 +83,9 @@ final class DesignDirectionStep implements Step
             'user_prompt' => $prompt,
             'site_spec'   => $project->readText('siteSpec.json'),
         ]);
-        $payload = $this->llm->completeJson($rendered, $this->withModel(['log_label' => $this->id()]));
+        $text = $this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()]));
 
-        // Keep only well-formed directions (a description is what downstream needs;
-        // the title is a nice-to-have label).
-        $directions = array_values(array_filter(
-            is_array($payload['directions'] ?? null) ? $payload['directions'] : [],
-            static fn ($d): bool => is_array($d) && trim((string) ($d['description'] ?? '')) !== '',
-        ));
+        $directions = self::parseDirections($text);
         if ($directions === []) {
             throw new RuntimeException('design-direction: model returned no usable directions');
         }
@@ -99,6 +100,45 @@ final class DesignDirectionStep implements Step
         // means image prompts get no grade clause; imageGradeFor() returns '')
         // — so a re-run never leaves a stale grade from a previous direction.
         $project->writeText(self::GRADE_FILE, trim((string) ($chosen['image_grade'] ?? '')) . "\n");
+    }
+
+    /**
+     * Parse the sentinel-delimited response into direction arrays. Each
+     * "=== DIRECTION ===" block yields {title, description, image_grade};
+     * TITLE:/IMAGE_GRADE: are single lines, DESCRIPTION: is everything after its
+     * marker to the end of the block. Anything before the first marker (stray
+     * preamble) is ignored, and a block without a description is dropped — a
+     * description is what downstream needs; the title is a nice-to-have label.
+     * Pure — unit-testable.
+     *
+     * @return array<int,array{title:string,description:string,image_grade:string}>
+     */
+    public static function parseDirections(string $text): array
+    {
+        $blocks = preg_split('/^[ \t]*={2,}[ \t]*DIRECTION[ \t]*={2,}[ \t]*$/mi', $text) ?: [];
+
+        $out = [];
+        foreach (array_slice($blocks, 1) as $block) {
+            $description = '';
+            if (preg_match('/^[ \t]*DESCRIPTION:[ \t]*/mi', $block, $m, PREG_OFFSET_CAPTURE)) {
+                $description = trim(substr($block, $m[0][1] + strlen($m[0][0])));
+            }
+            if ($description === '') {
+                continue;
+            }
+            $out[] = [
+                'title'       => self::line($block, 'TITLE'),
+                'description' => $description,
+                'image_grade' => self::line($block, 'IMAGE_GRADE'),
+            ];
+        }
+        return $out;
+    }
+
+    /** The first "NAME: value" single-line field in a direction block, or ''. */
+    private static function line(string $block, string $name): string
+    {
+        return preg_match('/^[ \t]*' . $name . ':[ \t]*(.*)$/mi', $block, $m) ? trim($m[1]) : '';
     }
 
     /**

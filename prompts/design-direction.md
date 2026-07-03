@@ -65,16 +65,14 @@ Do NOT generate directions that feel like generic AI output:
 
 **Each direction must be completely self-contained.** It will be sent to a separate model call in isolation — never alongside the other directions. Do not reference other directions ("same as direction 1", "takes the same DNA"). Describe all visual choices explicitly rather than assuming shared context.
 
-Respond with ONLY a JSON object. No explanation, no commentary, no text before or after.
+Respond with ONLY the four directions in the plain-text format below — NOT JSON, no markdown fences, no commentary before the first marker or after the last direction. Repeat this block once per direction:
 
-```json
-{
-  "directions": [
-    {
-      "title": "Short Evocative Title (2-4 words, topic-grounded — e.g., 'Forge & Flame' for a blacksmith, not 'Bold Modern')",
-      "description": "A rich, vivid paragraph describing the complete design vision including the hero section composition. Paint the picture: what does a visitor feel the moment they land? Describe the hero layout cinematically — how is space used, where does imagery sit, how does typography interact with visuals? Then flow into the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes.",
-      "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above — e.g. 'monochrome documentary, visible 35mm grain, charcoal midtones, available light, no saturated color'."
-    }
-  ]
-}
-```
+=== DIRECTION ===
+TITLE: Short Evocative Title (2-4 words, topic-grounded — e.g., 'Forge & Flame' for a blacksmith, not 'Bold Modern')
+IMAGE_GRADE: One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above — e.g. monochrome documentary, visible 35mm grain, charcoal midtones, available light, no saturated color.
+DESCRIPTION:
+A rich, vivid paragraph describing the complete design vision including the hero section composition. Paint the picture: what does a visitor feel the moment they land? Describe the hero layout cinematically — how is space used, where does imagery sit, how does typography interact with visuals? Then flow into the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes.
+
+Format rules:
+- `TITLE:` and `IMAGE_GRADE:` are each ONE line. `DESCRIPTION:` runs from the line after it until the next `=== DIRECTION ===` marker (or the end of your response) — multiple paragraphs, quotes, apostrophes and any punctuation are all fine; write freely.
+- Never start a line inside a description with `===`, `TITLE:`, `IMAGE_GRADE:` or `DESCRIPTION:`.
