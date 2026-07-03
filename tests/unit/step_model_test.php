@@ -45,7 +45,9 @@ test('design-direction passes the configured model into the LLM opts', function 
     [$project, $tmp] = sm_project('builder_sm_dd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]]);
+    $llm->queueJson(['directions' => [
+        ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.'],
+    ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
@@ -58,7 +60,9 @@ test('design-direction sends no model key when none is configured', function () 
     [$project, $tmp] = sm_project('builder_sm_ddd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]]);
+    $llm->queueJson(['directions' => [
+        ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.'],
+    ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer))->run($project);
@@ -84,7 +88,7 @@ test('section-plan passes the configured model into every request', function () 
     [$project, $tmp] = sm_project('builder_sm_sp_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo', 'sections' => ['Hero']]);
     $llm = new FakeLlm();
-    $llm->queueJson(['sections' => [['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero']]]);
+    $llm->queueJson(['sections' => [['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.']]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionPlanStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
@@ -98,7 +102,7 @@ test('sections passes the configured model into every part request', function ()
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
     ]]);
     $llm = new FakeLlm();
     // header, footer, one section — in requests() order.
@@ -121,7 +125,7 @@ test('sections sends no model key when none is configured', function () {
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
     ]]);
     $llm = new FakeLlm();
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
@@ -167,7 +171,7 @@ test('sections passes the configured temperature into every part request', funct
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the footer below.'],
     ]]);
     $llm = new FakeLlm();
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');

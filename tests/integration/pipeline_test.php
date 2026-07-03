@@ -62,8 +62,8 @@ test('full pipeline produces a structurally valid theme', function () {
     ]);
     // section-plan (json) — ordered list of sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
-        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the base specials grid below.'],
+        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'handoff' => 'Between the image hero above and the footer below.'],
     ]]);
     // sections (raw markup) — header, footer, then one part per section, in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';

@@ -101,7 +101,22 @@ final class AnthropicClient implements Llm
 
         $data = self::decodeJson($text);
         if ($data === null) {
-            throw new RuntimeException("Expected JSON, got: {$text}");
+            // The transport call succeeded and was logged OK above; log the
+            // decode failure as its own FAILED entry so the transcript reflects
+            // that the build died on THIS call, not somewhere downstream.
+            $error = "Expected JSON, got: {$text}";
+            LlmLogger::log(
+                (string) ($opts['log_label'] ?? 'request'),
+                [
+                    'model'    => $opts['model'] ?? $this->model,
+                    'system'   => $opts['system'],
+                    'messages' => [['role' => 'user', 'content' => $prompt]],
+                ],
+                ['text' => $text, 'input' => 0, 'output' => 0],
+                0.0,
+                $error,
+            );
+            throw new RuntimeException($error);
         }
         return $data;
     }
@@ -112,7 +127,22 @@ final class AnthropicClient implements Llm
         foreach ($this->textBatch($requests, true) as $key => $text) {
             $data = self::decodeJson($text);
             if ($data === null) {
-                throw new RuntimeException("batch request '{$key}': expected JSON, got: {$text}");
+                // Same as completeJson: the transport entry was logged OK, so
+                // log the decode failure as its own FAILED entry too.
+                $error = "batch request '{$key}': expected JSON, got: {$text}";
+                $req = $requests[$key];
+                LlmLogger::log(
+                    (string) ($req['log_label'] ?? $key),
+                    [
+                        'model'    => $req['model'] ?? $this->model,
+                        'system'   => $req['system'] ?? null,
+                        'messages' => [['role' => 'user', 'content' => (string) $req['prompt']]],
+                    ],
+                    ['text' => $text, 'input' => 0, 'output' => 0],
+                    0.0,
+                    $error,
+                );
+                throw new RuntimeException($error);
             }
             $out[$key] = $data;
         }

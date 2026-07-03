@@ -89,17 +89,28 @@ $report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c
 
 // Attribute token spend to each step by diffing the client's cumulative usage
 // totals before and after it ran (the reporter fires once a step completes).
+// The onStart callback tracks the step being run, so a failure names the step
+// that threw — the per-step rows only print on completion, so without it the
+// error would appear under the LAST COMPLETED step and point at the wrong one.
 $prevIn = 0;
 $prevOut = 0;
-$pipeline->runThrough($project, $until, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
-    $u = $llm->usageTotals();
-    $inDelta = $u['input_tokens'] - $prevIn;
-    $outDelta = $u['output_tokens'] - $prevOut;
-    $prevIn = $u['input_tokens'];
-    $prevOut = $u['output_tokens'];
-    $report->addStep($step->id(), $secs, $inDelta, $outDelta);
-    echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
-});
+$currentStep = null;
+try {
+    $pipeline->runThrough($project, $until, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
+        $u = $llm->usageTotals();
+        $inDelta = $u['input_tokens'] - $prevIn;
+        $outDelta = $u['output_tokens'] - $prevOut;
+        $prevIn = $u['input_tokens'];
+        $prevOut = $u['output_tokens'];
+        $report->addStep($step->id(), $secs, $inDelta, $outDelta);
+        echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
+    }, function (Step $step) use (&$currentStep): void {
+        $currentStep = $step->id();
+    });
+} catch (Throwable $e) {
+    fwrite(STDERR, '✗ FAILED' . ($currentStep !== null ? " in step {$currentStep}" : '') . ": {$e->getMessage()}\n");
+    exit(1);
+}
 
 // Image generation is opt-in: slow and networked, so it runs only on request
 // and only for a full build (skipped when --until stops the pipeline early).

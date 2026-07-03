@@ -18,6 +18,8 @@ SECTION TO BUILD:
   Purpose:  {{section_purpose}}
   Notes:    {{content_notes}}
 
+{{composition}}
+
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
 - Wrap the whole section in a single top-level <!-- wp:group --> with a constrained or full layout, so it drops cleanly into the page in order.
@@ -39,10 +41,10 @@ Section discipline:
 - **Width discipline:** heroes, cover blocks and feature/card grids use `"align":"wide"` or `"align":"full"`. Reserve the default (content) width for text-heavy reading sections only.
 - **NO decorative HTML comments** — never write `<!-- Hero Section -->`, `<!-- Services -->` and the like. Only `<!-- wp:... -->` block comments are allowed.
 - **NO EMOJIS** anywhere — not in headings, paragraphs, button text, list items, or any content.
-- Be bold with layout: asymmetric grids, overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
+- Be bold with layout WITHIN your archetype (see COMPOSITION above): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
 
-Hero layout variety (if this is the hero section):
-- Do NOT default to "text left, image right." Pick the composition the DESIGN DIRECTION committed to, from this menu: full-bleed background image with overlaid text; left-aligned image; centered/stacked; asymmetric/grid-breaking; partial coverage (~60–70% width); split-diagonal; framed/inset.
+Hero notes (if this is the hero section):
+- Do NOT default to "text left, image right." Execute your archetype from the COMPOSITION block above in the spirit of the DESIGN DIRECTION's committed hero composition.
 - Express a full-bleed hero as a `wp:cover` (align:"full") with an inner `wp-block-cover__image-background` — see the IMAGE INSTRUCTIONS pattern below.
 - A full-bleed hero BACKGROUND image (the `wp-block-cover__image-background`) MUST be `landscape` — never `square` or `portrait` — so it fills the banner cleanly. A `framed`/inset or foreground image inside the hero (e.g. a portrait in a contained frame, or a second image layered over the background) is free to be `portrait` or `square` — pick the aspect ratio that fits its own slot, and let the frame follow that aspect rather than cropping the image toward a different shape.
 
