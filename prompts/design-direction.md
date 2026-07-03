@@ -67,7 +67,7 @@ Do NOT generate directions that feel like generic AI output:
 
 Besides the vivid narrative, each direction commits to explicit structured fields. Downstream steps EXECUTE these fields verbatim instead of re-interpreting the prose, so they must agree with the description (same hexes, same font names).
 
-- `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = reserved for CTAs/interaction.
+- `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = for CTAs/interaction — and the direction MAY also commit accent to its `signature_device` micro-motif (say so explicitly in that field); never to body text or broad fills.
 - `type`: the heading and body families WITH weights. Both MUST be real Google Fonts families spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts by name, and a family that isn't there gets silently downgraded to a fallback. Design within that constraint: never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
 - `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
 - `signature_device`: the ONE repeated visual motif that makes the direction recognizable on every section (e.g. "hairline rules with page folios", "oversized year numerals in the margins", "duotone image blocks with offset borders").
