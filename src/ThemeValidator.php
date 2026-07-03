@@ -90,6 +90,7 @@ final class ThemeValidator
 
         $hardcoded = [];
         $bigParagraphs = [];
+        $tinyParagraphs = [];
         $displayUsed = false;
         foreach ($files as $file) {
             $markup = (string) file_get_contents($file);
@@ -104,9 +105,13 @@ final class ThemeValidator
             if (preg_match('/has-display-font-size|"fontSize"\s*:\s*"display"|font-size--display/', $markup)) {
                 $displayUsed = true;
             }
-            $count = self::oversizedParagraphs($markup, $sizeBySlug);
+            $count = self::paragraphsOutsideBodyScale($markup, $sizeBySlug, 20.0, null);
             if ($count > 0) {
                 $bigParagraphs[] = basename($file) . " ({$count})";
+            }
+            $count = self::paragraphsOutsideBodyScale($markup, $sizeBySlug, null, 16.0);
+            if ($count > 0) {
+                $tinyParagraphs[] = basename($file) . " ({$count})";
             }
         }
         if ($hardcoded !== []) {
@@ -114,6 +119,9 @@ final class ThemeValidator
         }
         if ($bigParagraphs !== []) {
             $warnings[] = 'multi-line paragraphs set at heading-scale presets (>= 1.25rem): ' . implode(', ', $bigParagraphs);
+        }
+        if ($tinyParagraphs !== []) {
+            $warnings[] = 'multi-line paragraphs set at caption-scale presets (< 1rem): ' . implode(', ', $tinyParagraphs);
         }
         if (in_array('display', array_keys($sizeBySlug), true) && !$displayUsed) {
             $warnings[] = 'theme.json defines a "display" fontSize that no template or part uses';
@@ -123,13 +131,14 @@ final class ThemeValidator
     }
 
     /**
-     * Count paragraphs whose fontSize preset resolves to heading scale
-     * (>= 1.25rem at desktop) while carrying more than a short lead line of
-     * text — running copy pushed up the scale for emphasis.
+     * Count paragraphs whose fontSize preset falls outside body scale —
+     * heading-size ($minPx set) or caption-size ($maxPx set) — while carrying
+     * more than a short lead line of text. Running copy belongs at body size;
+     * both drifts read wrong (inflated or unreadably small).
      *
      * @param array<string,float|null> $sizeBySlug preset slug => desktop px
      */
-    private static function oversizedParagraphs(string $markup, array $sizeBySlug): int
+    private static function paragraphsOutsideBodyScale(string $markup, array $sizeBySlug, ?float $minPx, ?float $maxPx): int
     {
         if (!preg_match_all('/<!--\s*wp:paragraph\s+(\{.*?\})\s*-->\s*(<p\b.*?<\/p>)/s', $markup, $matches, PREG_SET_ORDER)) {
             return 0;
@@ -139,7 +148,10 @@ final class ThemeValidator
             $attrs = json_decode($m[1], true);
             $px = $sizeBySlug[$attrs['fontSize'] ?? ''] ?? null;
             $text = trim(strip_tags($m[2]));
-            if ($px !== null && $px >= 20.0 && mb_strlen($text) > 120) {
+            if ($px === null || mb_strlen($text) <= 120) {
+                continue;
+            }
+            if (($minPx !== null && $px >= $minPx) || ($maxPx !== null && $px < $maxPx)) {
                 $count++;
             }
         }

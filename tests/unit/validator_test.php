@@ -72,6 +72,27 @@ test('typography warnings flag long paragraphs at heading-scale presets', functi
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('typography warnings flag long paragraphs at caption-scale presets', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
+        ['slug' => 'caption', 'name' => 'Caption', 'size' => '0.875rem'],
+        ['slug' => 'body', 'name' => 'Body', 'size' => '1.125rem'],
+    ]]]]);
+    $long = 'Down a cobbled lane in Tbilisi Old Town, our tavern keeps its supra rituals alive: wine from clay qvevri, khachapuri still steaming, and a toast to close each night.';
+    $project->writeText(
+        'theme/parts/section-story.html',
+        // Running copy shrunk to caption (flagged); a caption-size label (fine).
+        '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">' . $long . '</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Est. 1998 · Old Town</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"body"} --><p class="has-body-font-size">' . $long . '</p><!-- /wp:paragraph -->'
+    );
+    $warnings = ThemeValidator::typographyWarnings($project);
+    $joined = implode(' ', $warnings);
+    assert_contains('caption-scale', $joined);
+    assert_contains('section-story.html (1)', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('typography warnings stay quiet when sizes come from the preset scale', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['typography' => ['fontSizes' => [
