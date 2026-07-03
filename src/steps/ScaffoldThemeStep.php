@@ -59,7 +59,9 @@ final class ScaffoldThemeStep implements Step
         }
 
         /* Chrome-less overlay header (the header part opts in via className="header-overlay"):
-           floats transparently over the full-bleed hero instead of stacking above it. */
+           floats transparently over the full-bleed hero instead of stacking above it. The
+           padding keeps the title/nav off the viewport edges even when the generated part
+           brings no spacing of its own. */
         .wp-site-blocks .header-overlay {
             position: absolute;
             top: 0;
@@ -67,8 +69,15 @@ final class ScaffoldThemeStep implements Step
             right: 0;
             z-index: 10;
             background: transparent;
+            padding: var(--wp--preset--spacing--sm) var(--wp--preset--spacing--md);
         }
 
+        /* The root block-gap margin would open a page-background band between the header
+           and the first section (above the hero) — and when the header is an absolutely
+           positioned overlay, <main> still counts as "not the first child", so the band
+           shows at the very top of the page. Sections space themselves; kill it on both
+           flow neighbors. */
+        .wp-site-blocks > main,
         .wp-site-blocks > footer {
             margin-block-start: 0;
         }

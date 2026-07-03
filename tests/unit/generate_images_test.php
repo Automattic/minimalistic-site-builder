@@ -79,7 +79,11 @@ test('generate-images leads with the subject + style and adds the page context',
 test('generate-images injects the persisted image grade into every prompt', function () {
     [$project, $tmp] = generate_fixture();
     $grade = 'monochrome documentary, visible 35mm grain, available light';
-    $project->writeText('imageGrade.txt', $grade . "\n");
+    $project->writeJson('designDirection.json', [
+        'title'       => 'Archivo Silencioso',
+        'description' => 'Full-bleed black-and-white photography.',
+        'image_grade' => $grade,
+    ]);
     $images = new FakeImageClient('JPEGDATA');
 
     (new GenerateImagesStep($images))->run($project);

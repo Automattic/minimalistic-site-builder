@@ -24,15 +24,25 @@ test('full pipeline produces a structurally valid theme', function () {
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
-    // design-direction (json) — the model returns 4 candidate directions and the
-    // step samples ONE at random. Runs after site-spec, before the concurrent
-    // group, and is read by theme-json/section-plan/sections.
+    // design-direction (json) — the model returns 4 candidate directions and a
+    // judge call picks ONE. Runs after site-spec, before the concurrent group,
+    // and is read by theme-json/section-plan/sections.
     $llm->queueJson(['directions' => [
-        ['title' => 'Hearth & Grain',  'description' => 'Editorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.'],
+        [
+            'title' => 'Hearth & Grain',
+            'description' => 'Editorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.',
+            'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],
+            'type' => ['heading' => 'Fraunces 700/900', 'body' => 'Source Sans 3 400/600'],
+            'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
+            'signature_device' => 'hairline rules with small caps folios',
+            'hero_composition' => 'full-bleed bakery photo, headline pinned lower-left',
+        ],
         ['title' => 'Flour & Steel',   'description' => 'Industrial-utilitarian bakery, raw concrete tones and stencilled type.'],
         ['title' => 'Sugar Bloom',     'description' => 'Playful-pop pastels with oversized display type and rounded frames.'],
         ['title' => 'Midnight Levain', 'description' => 'Dark-luxe patisserie, gold on near-black with fine serif detailing.'],
     ]]);
+    // direction-judge (json) — picks candidate 1.
+    $llm->queueJson(['choice' => 1, 'reason' => 'Best fit for the warm rustic brief.']);
     // Concurrent group, request order is [theme-json, section-plan]:
     // theme-json (json) — design decisions made inline, no design.md
     $llm->queueJson([
@@ -52,8 +62,8 @@ test('full pipeline produces a structurally valid theme', function () {
     ]);
     // section-plan (json) — ordered list of sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
-        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the base specials grid below.'],
+        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'handoff' => 'Between the image hero above and the footer below.'],
     ]]);
     // sections (raw markup) — header, footer, then one part per section, in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';

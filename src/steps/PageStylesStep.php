@@ -26,7 +26,7 @@ declare(strict_types=1);
  */
 final class PageStylesStep implements Step
 {
-    use ModelOption;
+    use LlmOptions;
 
     /**
      * The documented utility-class vocabulary, each with its implementation
@@ -85,6 +85,7 @@ final class PageStylesStep implements Step
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string
@@ -111,7 +112,7 @@ final class PageStylesStep implements Step
             'used_classes'     => self::classList($used),
         ]);
         $css = self::stripFences(trim(
-            $this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()]))
+            $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
         ));
 
         $problems = self::validate($css);

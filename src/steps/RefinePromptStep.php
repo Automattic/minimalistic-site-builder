@@ -22,12 +22,13 @@ declare(strict_types=1);
  */
 final class RefinePromptStep implements Step
 {
-    use ModelOption;
+    use LlmOptions;
 
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string
@@ -55,7 +56,7 @@ final class RefinePromptStep implements Step
         // Never let a refinement failure block the build: on any error, or an
         // empty/garbage response, fall back to the original prompt untouched.
         try {
-            $improved = trim($this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()])));
+            $improved = trim($this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()])));
         } catch (Throwable $e) {
             $improved = '';
         }

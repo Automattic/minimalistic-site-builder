@@ -14,7 +14,7 @@ declare(strict_types=1);
  */
 final class ThemeJsonStep implements ConcurrentStep
 {
-    use ModelOption;
+    use LlmOptions;
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
@@ -24,6 +24,7 @@ final class ThemeJsonStep implements ConcurrentStep
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string
@@ -45,7 +46,7 @@ final class ThemeJsonStep implements ConcurrentStep
             'design_direction' => DesignDirectionStep::readFor($project),
         ]);
 
-        return [self::REQ => $this->withModel(['prompt' => $rendered])];
+        return [self::REQ => $this->withOptions(['prompt' => $rendered])];
     }
 
     public function consume(Project $project, array $results): void

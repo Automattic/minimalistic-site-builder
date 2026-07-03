@@ -131,6 +131,10 @@ foreach ($entries as $i => $entry) {
     $reqStart = $base['requests'];
 
     $error = null;
+    // Track the step being run, so a failure names the step that threw — the
+    // per-step rows only print on completion, so without this the error line
+    // appears under the LAST COMPLETED step and points at the wrong one.
+    $currentStep = null;
     try {
         $pipeline->runThrough($project, null, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
             $u = $llm->usageTotals();
@@ -140,9 +144,11 @@ foreach ($entries as $i => $entry) {
             $prevOut = $u['output_tokens'];
             $report->addStep($step->id(), $secs, $inDelta, $outDelta);
             echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
+        }, function (Step $step) use (&$currentStep): void {
+            $currentStep = $step->id();
         });
     } catch (Throwable $e) {
-        $error = $e->getMessage();
+        $error = ($currentStep !== null ? "step {$currentStep}: " : '') . $e->getMessage();
     }
 
     if ($withImages && $error === null) {

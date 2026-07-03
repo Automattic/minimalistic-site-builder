@@ -23,6 +23,8 @@ Pick ONE header archetype — the one that serves the DESIGN DIRECTION and the p
 4. **oversized-wordmark** — the site name is the dominant visual element: wp:site-title at display scale (very large font size via `"style":{"typography":{"fontSize":"..."}}`, "fontFamily":"heading"), with a small, quiet wp:navigation tucked beside or beneath it. Suits type-driven, brutalist, and studio directions.
 
 Rules:
+- The top-level wp:group MUST declare `"layout":{"type":"constrained"}` (add `"wideSize"` when the direction wants a wider bar) and the title/nav row goes in an inner group with `"align":"wide"`. A top-level group with no "layout" attribute renders its content edge-to-edge at the viewport — broken on wide screens.
+- Give the top-level group vertical breathing room: `"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}}` or more — for minimal-overlay a small base padding already ships in `.header-overlay`, but the other archetypes bring none of their own.
 - Navigation default: the `wp:navigation` should contain `<!-- wp:page-list /-->` so it auto-reflects the site's pages — do NOT hand-author `wp:navigation-link` entries unless a curated menu is clearly wanted.
 - Sticky is archetype-dependent, NOT a default: NEVER sticky for minimal-overlay; for the other archetypes use `"style":{"position":{"type":"sticky","top":"0px"}}` on the top-level group only when it suits the direction, and give a sticky header an explicit "backgroundColor" so content doesn't show through it.
 - A CTA button (accent color) is allowed only when the archetype and direction call for one — never in minimal-overlay.

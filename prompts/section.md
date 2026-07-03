@@ -18,8 +18,11 @@ SECTION TO BUILD:
   Purpose:  {{section_purpose}}
   Notes:    {{content_notes}}
 
+{{composition}}
+
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
+- NEVER include site chrome in the section: no wordmark, no site-title lockup, no navigation or menu links — even if the DESIGN DIRECTION, hero composition, or Notes mention them. The real site header is a separate part rendered above (often overlaid on) your section; duplicating it here puts two headers on the page. If the Notes say "wordmark top-left" or "nav reduced to one link", skip that furniture and build only the section's own content.
 - Wrap the whole section in a single top-level <!-- wp:group --> with a constrained or full layout, so it drops cleanly into the page in order.
 - Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, gallery, media-text, quote, pullquote, list, separator, spacer; query/post-template only if useful).
 - Reach beyond group/columns when the content calls for it:
@@ -37,13 +40,15 @@ Rules:
 Section discipline:
 - **Margin reset:** add `"style":{"spacing":{"margin":{"top":"0"}}}` to the section's top-level group so it sits flush in the page flow.
 - **Width discipline:** heroes, cover blocks and feature/card grids use `"align":"wide"` or `"align":"full"`. Reserve the default (content) width for text-heavy reading sections only.
+- **Text measure:** the band may be full-width, but the TEXT inside it must keep a readable measure. Wrap headline/copy stacks in an inner group with `"layout":{"type":"constrained"}` whose `contentSize` is at or below the theme's contentSize — never the wide size (1200px+). Paragraphs running the full width of a wide band read as broken.
 - **NO decorative HTML comments** — never write `<!-- Hero Section -->`, `<!-- Services -->` and the like. Only `<!-- wp:... -->` block comments are allowed.
 - **NO EMOJIS** anywhere — not in headings, paragraphs, button text, list items, or any content.
-- Be bold with layout: asymmetric grids, overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
+- Be bold with layout WITHIN your archetype (see COMPOSITION above): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
 
-Hero layout variety (if this is the hero section):
-- Do NOT default to "text left, image right." Pick the composition the DESIGN DIRECTION committed to, from this menu: full-bleed background image with overlaid text; left-aligned image; centered/stacked; asymmetric/grid-breaking; partial coverage (~60–70% width); split-diagonal; framed/inset.
+Hero notes (if this is the hero section):
+- Do NOT default to "text left, image right." Execute your archetype from the COMPOSITION block above in the spirit of the DESIGN DIRECTION's committed hero composition.
 - Express a full-bleed hero as a `wp:cover` (align:"full") with an inner `wp-block-cover__image-background` — see the IMAGE INSTRUCTIONS pattern below.
+- Text over a photo MUST stay readable at every viewport: give the cover `dimRatio` 40+ or a gradient overlay that visibly darkens (or lightens) the area BEHIND the text, and pick the text color against the DIMMED image, not the raw one. Never float light text over an un-dimmed light image area. Remember the site header may float transparently over the very top of your cover — keep some overlay coverage there too, not only behind the headline.
 - A full-bleed hero BACKGROUND image (the `wp-block-cover__image-background`) MUST be `landscape` — never `square` or `portrait` — so it fills the banner cleanly. A `framed`/inset or foreground image inside the hero (e.g. a portrait in a contained frame, or a second image layered over the background) is free to be `portrait` or `square` — pick the aspect ratio that fits its own slot, and let the frame follow that aspect rather than cropping the image toward a different shape.
 
 Text orientation (all sections):

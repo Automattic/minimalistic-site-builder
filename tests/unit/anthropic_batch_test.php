@@ -142,3 +142,93 @@ test('concurrencyWindows leaves a small batch as a single window', function () {
     assert_eq(1, count($windows), 'a sub-cap batch is one window');
     assert_eq(['a', 'b', 'c'], array_keys($windows[0]));
 });
+
+test('bodyFor sends temperature only when set and supported, and applies model/token defaults', function () {
+    $body = AnthropicClient::bodyFor(
+        ['prompt' => 'Hi', 'temperature' => 0.9, 'system' => 'Be terse.'],
+        'claude-sonnet-4-6',
+        16000,
+    );
+    assert_eq('claude-sonnet-4-6', $body['model']);
+    assert_eq(16000, $body['max_tokens']);
+    assert_eq(0.9, $body['temperature']);
+    assert_eq('Be terse.', $body['system']);
+    assert_eq(true, $body['stream']);
+    assert_eq('Hi', $body['messages'][0]['content']);
+
+    $body = AnthropicClient::bodyFor(
+        ['prompt' => 'Hi', 'model' => 'claude-haiku-4-5', 'max_tokens' => 512],
+        'claude-opus-4-8',
+        16000,
+    );
+    assert_eq('claude-haiku-4-5', $body['model']);
+    assert_eq(512, $body['max_tokens']);
+    assert_true(!array_key_exists('temperature', $body), 'no temperature key when unset');
+    assert_true(!array_key_exists('system', $body), 'no system key when empty');
+
+    // Sampling-less models (Opus 4.7/4.8, Fable) never get a temperature key -
+    // the API removed the parameter and 400s on it.
+    $body = AnthropicClient::bodyFor(
+        ['prompt' => 'Hi', 'temperature' => 0.9],
+        'claude-opus-4-8',
+        16000,
+    );
+    assert_true(!array_key_exists('temperature', $body), 'temperature omitted on a sampling-less model');
+});
+
+test('supportsSampling is false for Opus 4.7/4.8 and Fable, true otherwise', function () {
+    assert_eq(false, AnthropicClient::supportsSampling('claude-opus-4-8'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-opus-4-7'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5[1m]'));
+    assert_eq(true, AnthropicClient::supportsSampling('claude-haiku-4-5'));
+    assert_eq(true, AnthropicClient::supportsSampling('claude-sonnet-4-6'));
+    assert_eq(true, AnthropicClient::supportsSampling('claude-opus-4-6'));
+});
+
+test('rejectedParam detects the removed-sampling-parameter 400, null otherwise', function () {
+    $apiError = 'HTTP 400: {"type":"error","error":{"type":"invalid_request_error",'
+        . '"message":"`temperature` is deprecated for this model."},"request_id":"req_x"}';
+    assert_eq('temperature', AnthropicClient::rejectedParam($apiError));
+    assert_eq('top_p', AnthropicClient::rejectedParam('`top_p` is not supported on this model'));
+    assert_eq(null, AnthropicClient::rejectedParam('HTTP 400: {"error":{"message":"messages: roles must alternate"}}'));
+    assert_eq(null, AnthropicClient::rejectedParam('temperature must be between 0 and 1'));
+});
+
+test('retryTextBatch strips a rejected sampling parameter and retries without backoff', function () {
+    $bodies = [
+        'header' => ['model' => 'claude-next-1', 'temperature' => 0.9, 'messages' => []],
+        'footer' => ['model' => 'claude-next-1', 'temperature' => 0.9, 'messages' => []],
+    ];
+    $sent = [];
+    $transport = function (array $subset) use (&$sent) {
+        $sent[] = $subset;
+        $out = [];
+        foreach ($subset as $k => $body) {
+            $out[$k] = array_key_exists('temperature', $body)
+                ? ['ok' => false, 'transient' => false, 'error' => 'HTTP 400: `temperature` is deprecated for this model.', 'retry_without' => 'temperature']
+                : ['ok' => true, 'text' => "T:{$k}", 'input' => 1, 'output' => 1];
+        }
+        return $out;
+    };
+
+    // Delays [] = zero transient retries allowed - the strip retry must not need one.
+    $out = AnthropicClient::retryTextBatch($bodies, $transport, []);
+
+    assert_eq('T:header', $out['header']['text']);
+    assert_eq('T:footer', $out['footer']['text']);
+    assert_eq(2, count($sent), 'one failed round, one stripped retry round');
+    assert_true(!array_key_exists('temperature', $bodies['header']), 'caller sees the stripped body');
+});
+
+test('retryTextBatch fails loud when the rejected parameter is not in the body', function () {
+    $bodies = ['x' => ['model' => 'claude-next-1', 'messages' => []]];
+    $transport = fn (array $subset): array => ['x' => [
+        'ok' => false, 'transient' => false,
+        'error' => 'HTTP 400: `temperature` is deprecated for this model.',
+        'retry_without' => 'temperature',
+    ]];
+    assert_throws(function () use (&$bodies, $transport) {
+        AnthropicClient::retryTextBatch($bodies, $transport, []);
+    });
+});

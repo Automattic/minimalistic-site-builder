@@ -68,17 +68,7 @@ final class AnthropicClient implements Llm
         // connection is detected quickly (and retried) instead of blocking the
         // full timeout, and long generations never hit an idle-connection
         // timeout.
-        $body = [
-            'model'      => $opts['model'] ?? $this->model,
-            'max_tokens' => $opts['max_tokens'] ?? $this->defaultMaxTokens,
-            'stream'     => true,
-            'messages'   => [
-                ['role' => 'user', 'content' => $prompt],
-            ],
-        ];
-        if (isset($opts['system'])) {
-            $body['system'] = $opts['system'];
-        }
+        $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens);
 
         $label = (string) ($opts['log_label'] ?? 'request');
         try {
@@ -111,7 +101,22 @@ final class AnthropicClient implements Llm
 
         $data = self::decodeJson($text);
         if ($data === null) {
-            throw new RuntimeException("Expected JSON, got: {$text}");
+            // The transport call succeeded and was logged OK above; log the
+            // decode failure as its own FAILED entry so the transcript reflects
+            // that the build died on THIS call, not somewhere downstream.
+            $error = "Expected JSON, got: {$text}";
+            LlmLogger::log(
+                (string) ($opts['log_label'] ?? 'request'),
+                [
+                    'model'    => $opts['model'] ?? $this->model,
+                    'system'   => $opts['system'],
+                    'messages' => [['role' => 'user', 'content' => $prompt]],
+                ],
+                ['text' => $text, 'input' => 0, 'output' => 0],
+                0.0,
+                $error,
+            );
+            throw new RuntimeException($error);
         }
         return $data;
     }
@@ -122,7 +127,22 @@ final class AnthropicClient implements Llm
         foreach ($this->textBatch($requests, true) as $key => $text) {
             $data = self::decodeJson($text);
             if ($data === null) {
-                throw new RuntimeException("batch request '{$key}': expected JSON, got: {$text}");
+                // Same as completeJson: the transport entry was logged OK, so
+                // log the decode failure as its own FAILED entry too.
+                $error = "batch request '{$key}': expected JSON, got: {$text}";
+                $req = $requests[$key];
+                LlmLogger::log(
+                    (string) ($req['log_label'] ?? $key),
+                    [
+                        'model'    => $req['model'] ?? $this->model,
+                        'system'   => $req['system'] ?? null,
+                        'messages' => [['role' => 'user', 'content' => (string) $req['prompt']]],
+                    ],
+                    ['text' => $text, 'input' => 0, 'output' => 0],
+                    0.0,
+                    $error,
+                );
+                throw new RuntimeException($error);
             }
             $out[$key] = $data;
         }
@@ -149,8 +169,9 @@ final class AnthropicClient implements Llm
             return [];
         }
 
-        // Build one Messages body per request. Each may pin its own model and
-        // token budget, so a single batch can mix (e.g. Haiku plan + Opus theme).
+        // Build one Messages body per request. Each may pin its own model,
+        // temperature and token budget, so a single batch can mix (e.g. Haiku
+        // plan + Opus theme).
         $bodies = [];
         foreach ($requests as $key => $req) {
             $system = (string) ($req['system'] ?? '');
@@ -158,18 +179,7 @@ final class AnthropicClient implements Llm
                 $system .= "\nRespond with a single valid JSON value and nothing else. "
                     . 'No prose, no markdown fences.';
             }
-            $body = [
-                'model'      => $req['model'] ?? $this->model,
-                'max_tokens' => $req['max_tokens'] ?? $this->defaultMaxTokens,
-                'stream'     => true,
-                'messages'   => [
-                    ['role' => 'user', 'content' => (string) $req['prompt']],
-                ],
-            ];
-            if (trim($system) !== '') {
-                $body['system'] = $system;
-            }
-            $bodies[$key] = $body;
+            $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens);
         }
 
         // Label a call after its step's explicit log_label, else the request key
@@ -183,7 +193,7 @@ final class AnthropicClient implements Llm
             $bodies,
             fn (array $subset): array => $this->streamMulti($subset),
             [2, 5, 12],
-            function (string $key, string $error, float $time) use ($labelFor, $bodies): void {
+            function (string $key, string $error, float $time) use ($labelFor, &$bodies): void {
                 LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
             },
         );
@@ -202,6 +212,65 @@ final class AnthropicClient implements Llm
     }
 
     /**
+     * Build one streaming Messages API request body from a request spec — the
+     * single place the optional per-request knobs (model, max_tokens,
+     * temperature, system) are mapped onto the wire format, shared by the
+     * single-call and batch paths. Temperature is only sent when the caller
+     * set one AND the target model still supports sampling parameters, so an
+     * unset step keeps the API's default sampling and a step pointed at a
+     * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure — unit-testable.
+     *
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
+     * @return array<string,mixed>
+     */
+    public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array
+    {
+        $model = (string) ($req['model'] ?? $defaultModel);
+        $body = [
+            'model'      => $model,
+            'max_tokens' => $req['max_tokens'] ?? $defaultMaxTokens,
+            'stream'     => true,
+            'messages'   => [
+                ['role' => 'user', 'content' => (string) $req['prompt']],
+            ],
+        ];
+        if (isset($req['temperature']) && self::supportsSampling($model)) {
+            $body['temperature'] = (float) $req['temperature'];
+        }
+        if (trim((string) ($req['system'] ?? '')) !== '') {
+            $body['system'] = $req['system'];
+        }
+        return $body;
+    }
+
+    /**
+     * Whether a model still accepts the sampling parameters (temperature,
+     * top_p, top_k). The API REMOVED them on Claude Opus 4.7/4.8 and Fable —
+     * sending one returns HTTP 400 "`temperature` is deprecated for this
+     * model". A model this misclassifies as supporting (e.g. a future family
+     * that also drops sampling) is still handled: the 400 is detected via
+     * rejectedParam() and the request retried without the parameter. Pure.
+     */
+    public static function supportsSampling(string $model): bool
+    {
+        return preg_match('/claude-(fable|opus-4-[78])/', $model) !== 1;
+    }
+
+    /**
+     * Detect the "sampling parameter no longer supported" API rejection in an
+     * error payload (raw response body or an exception message containing it)
+     * and name the offending parameter, so the caller can strip it and retry
+     * instead of aborting the build. Returns null for any other error. Pure.
+     */
+    public static function rejectedParam(string $error): ?string
+    {
+        if (preg_match('/`(temperature|top_p|top_k)` is (?:deprecated|not supported)/', $error, $m) === 1) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    /**
      * Drive a batched transport to completion, retrying ONLY the transient
      * failures with backoff. Pure orchestration (the transport does the I/O,
      * sleep() paces the rounds) so it is unit-testable with a fake transport and
@@ -209,13 +278,19 @@ final class AnthropicClient implements Llm
      * the whole batch — a missing section or theme would break the build, so we
      * fail loud rather than return a partial set.
      *
+     * A request rejected for carrying a sampling parameter the model no longer
+     * supports (outcome carries `retry_without`) is retried immediately with
+     * that parameter stripped from its body — it can't recur (the key is gone),
+     * so it doesn't consume a transient-retry attempt. $bodies is by-reference
+     * so the caller's post-batch logging reflects what was actually sent.
+     *
      * @param array<string,array<string,mixed>> $bodies request bodies keyed by id
-     * @param callable(array<string,array<string,mixed>>):array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool}> $transport
+     * @param callable(array<string,array<string,mixed>>):array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param null|callable(string,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
      * @return array<string,array{text:string,input:int,output:int,time:float}>
      */
-    public static function retryTextBatch(array $bodies, callable $transport, array $delays, ?callable $onFailure = null): array
+    public static function retryTextBatch(array &$bodies, callable $transport, array $delays, ?callable $onFailure = null): array
     {
         $results = [];
         $pending = array_keys($bodies);
@@ -225,7 +300,9 @@ final class AnthropicClient implements Llm
             $outcomes = $transport(array_intersect_key($bodies, array_flip($pending)));
 
             $retry = [];
+            $transient = false;
             foreach ($outcomes as $key => $outcome) {
+                $dropParam = $outcome['retry_without'] ?? null;
                 if ($outcome['ok']) {
                     $results[$key] = [
                         'text'   => (string) ($outcome['text'] ?? ''),
@@ -233,8 +310,13 @@ final class AnthropicClient implements Llm
                         'output' => (int) ($outcome['output'] ?? 0),
                         'time'   => (float) ($outcome['time'] ?? 0),
                     ];
+                } elseif ($dropParam !== null && array_key_exists($dropParam, $bodies[$key])) {
+                    unset($bodies[$key][$dropParam]);
+                    $retry[] = $key;
+                    fwrite(STDERR, "    (model rejected '{$dropParam}' on request '{$key}'; retrying without it)\n");
                 } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
                     $retry[] = $key;
+                    $transient = true;
                 } else {
                     $error = (string) ($outcome['error'] ?? 'unknown');
                     if ($onFailure !== null) {
@@ -245,7 +327,9 @@ final class AnthropicClient implements Llm
             }
 
             $pending = $retry;
-            if ($pending !== []) {
+            // Back off only for genuinely transient failures; a stripped-param
+            // retry is deterministic (the offending key is gone) and immediate.
+            if ($pending !== [] && $transient) {
                 $wait = $delays[$attempt];
                 $attempt++;
                 fwrite(STDERR, '    (transient API error on ' . count($pending)
@@ -364,7 +448,13 @@ final class AnthropicClient implements Llm
             return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}"];
         }
         if ($status < 200 || $status >= 300) {
-            return ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw)];
+            $out = ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw)];
+            // A rejected sampling parameter is recoverable: the orchestrator
+            // strips it from the body and retries (see retryTextBatch).
+            if (($param = self::rejectedParam($raw)) !== null) {
+                $out['retry_without'] = $param;
+            }
+            return $out;
         }
 
         $parsed = self::parseSse($raw);
@@ -401,12 +491,15 @@ final class AnthropicClient implements Llm
     }
 
     /**
-     * Run a streaming request, retrying transient failures with backoff.
+     * Run a streaming request, retrying transient failures with backoff. A
+     * 400 for a sampling parameter the model no longer supports is retried
+     * immediately with that parameter stripped (can't recur — the key is
+     * gone). $body is by-reference so the caller logs what was actually sent.
      *
      * @param array<string,mixed> $body
      * @return array{text:string,input:int,output:int,time:float}
      */
-    private function requestWithRetry(array $body): array
+    private function requestWithRetry(array &$body): array
     {
         $delays = [2, 5, 12]; // seconds before retries 1, 2, 3
         $attempt = 0;
@@ -421,6 +514,13 @@ final class AnthropicClient implements Llm
                 $attempt++;
                 fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
+            } catch (RuntimeException $e) {
+                $param = self::rejectedParam($e->getMessage());
+                if ($param === null || !array_key_exists($param, $body)) {
+                    throw $e;
+                }
+                unset($body[$param]);
+                fwrite(STDERR, "    (model rejected '{$param}'; retrying without it)\n");
             }
         }
     }
