@@ -24,7 +24,7 @@ declare(strict_types=1);
  */
 final class FontsPhpStep implements Step
 {
-    use ModelOption;
+    use LlmOptions;
 
     /** Weights every build loads: body default + strong. Scanned weights add to these. */
     private const BASE_WEIGHTS = [400, 700];
@@ -44,6 +44,7 @@ final class FontsPhpStep implements Step
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
+        private ?float $temperature = null,
     ) {}
 
     public function id(): string
@@ -78,7 +79,7 @@ final class FontsPhpStep implements Step
             'handle'           => $handle,
         ]);
         $php = self::stripFences(trim(
-            $this->llm->complete($rendered, $this->withModel(['log_label' => $this->id()]))
+            $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
         ));
 
         $problems = self::validate($php, $requirements);

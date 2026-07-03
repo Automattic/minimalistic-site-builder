@@ -117,6 +117,8 @@ function step_temperatures(): array
         'theme-json'       => llm_temperature('THEME_JSON', null),
         'section-plan'     => llm_temperature('SECTION_PLAN', null),
         'sections'         => llm_temperature('SECTIONS', 0.9),
+        'page-styles'      => llm_temperature('PAGE_STYLES', null),
+        'fonts-php'        => llm_temperature('FONTS_PHP', null),
     ];
 }
 
@@ -200,12 +202,12 @@ function build_pipeline(Llm $llm): Pipeline
         // AFTER fix-blocks: reads the final (re-serialized) markup for which
         // layout utility classes survived, and appends their CSS to style.css —
         // a file the fixer never touches, so nothing here can be stripped.
-        new PageStylesStep($llm, $renderer, $models['page-styles']),
+        new PageStylesStep($llm, $renderer, $models['page-styles'], $temps['page-styles']),
         // Also after fix-blocks: writes fonts.php from the design direction,
         // validated against a deterministic scan of the final theme.json +
         // markup (every family/weight/italic the build uses MUST be requested;
         // scan-built fallback otherwise).
-        new FontsPhpStep($llm, $renderer, $models['fonts-php']),
+        new FontsPhpStep($llm, $renderer, $models['fonts-php'], $temps['fonts-php']),
         // Sole owner of functions.php: the deterministic loader that enqueues
         // style.css and require_once's the generated fonts.php.
         new FinalizeThemeStep(),
