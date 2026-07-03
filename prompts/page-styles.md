@@ -12,6 +12,7 @@ UTILITY CLASSES USED BY THE SECTIONS — write CSS for exactly these, nothing el
 HARD RULES — the output is machine-validated and the whole appendix is rejected if any rule breaks them:
 - Every rule's selector MUST start with one of the class names listed above (descendant selectors like `.hover-reveal img` or `.masonry-3 > *` are fine). No element-only, universal, `body`, `:root`, or any other selector not scoped under those classes.
 - Colors and shadows come from theme presets: `var(--wp--preset--color--<slug>)` (slugs: base, contrast, primary, secondary, accent), the core shadow presets (`var(--wp--preset--shadow--natural)`, `--deep`, `--crisp`, …), or `color-mix()` over those variables. NEVER write raw hex, rgb()/rgba()/hsl() color literals.
+- Do not visually hide generated content. NEVER use `opacity: 0`, `visibility: hidden`, or `display: none`; full-page screenshots and non-hover browsing must show all images and text.
 - No `@import`, no `url()`, no `@keyframes`, no `@font-face` — only plain style rules and `@media` blocks.
 - Under 80 lines total.
 

@@ -40,7 +40,7 @@ final class PageStylesStep implements Step
         'overlap-up'   => 'pulls the block upward over the preceding content: a negative margin-top (typically -3rem to -6rem) plus position:relative and a z-index so it layers above',
         'masonry-3'    => 'CSS-columns masonry on the container: columns:3 with a comfortable gap; direct children get break-inside:avoid, display:block and a bottom margin; drop to 2 columns below 1024px and 1 column below 600px via @media',
         'hover-lift'   => 'a transition, then on :hover a small translateY lift and a shadow',
-        'hover-reveal' => 'the container crops (overflow:hidden; position:relative); its img scales slightly and dims on hover; its non-image children fade/slide in on hover',
+        'hover-reveal' => 'the container crops (overflow:hidden; position:relative); its img scales slightly and dims on hover; captions/text remain visible at rest — do not set opacity:0, visibility:hidden, or display:none on children because Gutenberg wraps images in figure elements',
         'sticky-side'  => 'position:sticky with a top offset, applied only at desktop widths (@media (min-width: 782px)); align-self:flex-start so the column can stick',
     ];
 
@@ -203,6 +203,15 @@ final class PageStylesStep implements Step
         }
         if (preg_match('/\burl\s*\(/i', $stripped) === 1) {
             $problems[] = 'url() is not allowed';
+        }
+        if (preg_match('/(?<![-\w])opacity\s*:\s*0(?:\.0+)?\s*(?:!important\s*)?(?:;|$)/i', $stripped) === 1) {
+            $problems[] = 'opacity:0 hides generated content';
+        }
+        if (preg_match('/(?<![-\w])visibility\s*:\s*hidden\s*(?:!important\s*)?(?:;|$)/i', $stripped) === 1) {
+            $problems[] = 'visibility:hidden hides generated content';
+        }
+        if (preg_match('/(?<![-\w])display\s*:\s*none\s*(?:!important\s*)?(?:;|$)/i', $stripped) === 1) {
+            $problems[] = 'display:none hides generated content';
         }
         if (preg_match_all('/@([a-zA-Z-]+)/', $stripped, $atRules) > 0) {
             foreach (array_unique($atRules[1]) as $at) {

@@ -9,9 +9,9 @@ declare(strict_types=1);
  *
  * Reuses bin/playground.php to start the server (so the same blueprint, theme
  * mount and site options apply), waits until it reports ready, screenshots `/`
- * via bin/screenshot.mjs (system Chrome over DevTools — no extra deps), then
- * shuts the server down. The image is written to projects/<slug>/logs/home.png
- * by default, serving as visual testing evidence alongside the per-step logs.
+ * via the lazy-load-aware Playwright helper, then shuts the server down. The
+ * image is written to projects/<slug>/logs/home.png by default, serving as
+ * visual testing evidence alongside the per-step logs.
  *
  * Options:
  *   --port=<n>     port to boot Playground on (default 9400; auto-bumped if busy).
@@ -23,7 +23,7 @@ declare(strict_types=1);
  *                  in a browser. Ctrl-C to stop the server.
  *
  * Requires Node.js (npx, for Playground) and a Chrome/Chromium binary. Override
- * the browser with CHROME_BIN; width with SHOT_WIDTH (see bin/screenshot.mjs).
+ * the browser with CHROME_BIN; width with SHOT_WIDTH.
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
@@ -62,6 +62,10 @@ if (!is_file($project->themePath('style.css'))) {
 
 if (!command_exists('npx')) {
     fwrite(STDERR, "npx (Node.js) is required to run WordPress Playground.\n");
+    exit(1);
+}
+if (!command_exists('node')) {
+    fwrite(STDERR, "node is required to capture screenshots.\n");
     exit(1);
 }
 $chrome = chrome_binary();
@@ -135,9 +139,9 @@ if ($baseUrl === null) {
 }
 
 echo "Capturing {$baseUrl} → {$out}\n";
-$shot = 'node ' . escapeshellarg(repo_path('bin/screenshot.mjs'))
+$shot = 'node ' . escapeshellarg(repo_path('bin/screenshot/screenshot.js'))
     . ' ' . escapeshellarg($baseUrl) . ' ' . escapeshellarg($out)
-    . ' ' . escapeshellarg($chrome);
+    . ' ' . escapeshellarg('--chrome=' . $chrome);
 passthru($shot, $exit);
 
 if ($exit === 0 && is_file($out)) {
@@ -199,8 +203,14 @@ function chrome_binary(): ?string
         'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
     ]);
     foreach ($candidates as $bin) {
-        if (str_contains($bin, '/') ? is_executable($bin) : command_exists($bin)) {
+        if (str_contains($bin, '/') && is_executable($bin)) {
             return $bin;
+        }
+        if (!str_contains($bin, '/')) {
+            $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
+            if ($path !== '') {
+                return $path;
+            }
         }
     }
     return null;
