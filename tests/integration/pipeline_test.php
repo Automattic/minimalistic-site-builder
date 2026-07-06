@@ -22,6 +22,8 @@ test('full pipeline produces a structurally valid theme', function () {
         'title' => 'Hearth & Crumb', 'site_type' => 'bakery storefront',
         'topic' => 'artisan bread and pastries', 'area' => 'bakery',
         'audience' => 'neighborhood locals', 'visual_vibe' => 'warm and rustic',
+        'language' => 'en', 'persona_name' => '',
+        'email_domain' => 'hearthandcrumb.com', 'invented' => ['name', 'email_domain'],
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
     // design-direction (json) — the model returns 4 candidate directions and a

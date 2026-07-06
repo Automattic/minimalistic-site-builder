@@ -32,5 +32,7 @@ Rules:
 - Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body). Keep accent rare: a CTA button, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it — nothing else.
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Every block comment must be correctly closed and HTML class names must match the block.
+- LANGUAGE: write any user-facing text you author (nav labels, a CTA button, a tagline) in {{language}} — do not mix languages. Proper nouns and the spec's identity values stay verbatim.
+- IDENTITY: the masthead is the spec's `name`, exactly — prefer wp:site-title (the site title is set from the spec); if you hand-author a wordmark, use `name` verbatim, never a longer descriptor or an invented alternate.
 
 Output ONLY the block markup, starting with "<!-- wp:" — no JSON, no prose, no markdown code fences.

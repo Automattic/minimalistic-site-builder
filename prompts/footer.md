@@ -22,5 +22,7 @@ Rules:
 - Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body).
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Every block comment must be correctly closed and HTML class names must match the block.
+- LANGUAGE: write ALL user-facing footer copy — link labels, contact lines, the copyright and credit lines — in {{language}}. Do not mix languages; proper nouns and the spec's identity values stay verbatim.
+- IDENTITY: the footer speaks for the spec's ONE committed identity. The copyright line credits `persona_name` when set, otherwise `name` — exactly as written in the spec, never a rephrased or generic descriptor. Any email shown must be at the spec's `email_domain`. NEVER invent alternate names or domains.
 
 Output ONLY the block markup, starting with "<!-- wp:" — no JSON, no prose, no markdown code fences.

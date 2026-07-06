@@ -20,7 +20,7 @@ function sm_project(string $prefix): array
 test('site-spec passes the configured model into the LLM opts', function () {
     [$project, $tmp] = sm_project('builder_sm_ss_');
     $llm = new FakeLlm();
-    $llm->queueJson(['name' => 'Demo']);
+    $llm->queueJson(['name' => 'Demo', 'language' => 'en']);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SiteSpecStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
@@ -32,7 +32,7 @@ test('site-spec passes the configured model into the LLM opts', function () {
 test('site-spec sends no model key when none is configured', function () {
     [$project, $tmp] = sm_project('builder_sm_ssd_');
     $llm = new FakeLlm();
-    $llm->queueJson(['name' => 'Demo']);
+    $llm->queueJson(['name' => 'Demo', 'language' => 'en']);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SiteSpecStep($llm, $renderer))->run($project);
