@@ -23,7 +23,7 @@ Design intelligence to encode as tokens:
     `display` — the hero masthead: a fluid `clamp()` reaching roughly 5–7rem at desktop widths, sized to the DESIGN DIRECTION's ambition (a broadsheet/poster direction earns ~7rem; a quiet editorial one ~5rem). Do NOT cap it near 3.5–4rem — an undersized hero headline reads as timid.
   Example: `0.875rem / 1.125rem / 1.375rem / 1.75rem / clamp(2.25rem, 3vw, 3rem) / clamp(3rem, 7vw, 6rem)`. Only caption and body are paragraph sizes (lead is for ONE short line per section); everything above is heading territory, and display exists for ONE hero/masthead moment per page.
 - **Line height.** Body 1.5–1.65; headings 1.1–1.3; never below 1.0. Set `styles.typography.lineHeight` and `styles.elements.heading.typography.lineHeight`.
-- **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` reserved for CTAs / interaction only. Avoid purple-on-white and generic blue-gray.
+- **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` RARE: CTAs/interaction, plus at most the ONE micro-motif the DESIGN DIRECTION's `signature_device` explicitly commits accent to (e.g. eyebrow labels, hairline rules, hover underlines) — never body text, large-area backgrounds, or any motif the direction didn't name. Avoid purple-on-white and generic blue-gray.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
 - **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies, dramatic shadows and decorative borders over flat solids. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
 
@@ -36,7 +36,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
     "contrast"  = body text color
     "primary"   = main brand color (headings, structure)
     "secondary" = supporting color (metadata, captions)
-    "accent"    = reserved for CTAs / interaction only
+    "accent"    = CTAs / interaction, plus the direction's signature_device motif when it names accent
   Give each a human "name".
 - settings.color.gradients: a small array of named gradient presets (slug + name + gradient) built from the palette, for section backgrounds/atmosphere.
 - settings.shadow.presets: a small array of named shadow presets (slug + name + shadow) sections can apply for depth.

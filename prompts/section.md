@@ -41,7 +41,7 @@ Rules:
     `caption` = genuine metadata only — labels, eyebrows, image captions, folio lines. Not sentences the visitor is meant to read.
     `lead` = the ONE standout line a section gets (if it has one): the hero's supporting line or a single-sentence intro under the section title. One per section, kept short.
   The upper steps belong to headings — the contrast between big headings and modest copy IS the hierarchy.
-- Reserve the accent color for buttons/CTAs only.
+- Keep the accent color RARE: buttons/CTAs, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it (e.g. eyebrow labels, hairline rules, hover underlines) — then apply that motif consistently, not in some sections only. Never use accent for body text, large-area backgrounds, or any motif the direction didn't name.
 - Write real, specific copy in the brand voice grounded in the site spec — never lorem ipsum.
 
 Section discipline:
