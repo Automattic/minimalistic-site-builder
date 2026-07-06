@@ -31,6 +31,7 @@ Rules:
 - Use valid CORE block markup only (group, site-title, site-logo, navigation, page-list, buttons/button, image).
 - Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body); font sizes via "fontSize" (the theme.json fontSizes slugs) — never hardcode a raw `font-size` value or `clamp()`. Keep accent rare: a CTA button, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it — nothing else.
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
+- Any inline `style` or extra class you write in the HTML MUST be mirrored in the block comment's JSON attributes (supported paths like `"style":{"spacing":{...},"border":{...}}`, `"className"`) — a later build step re-serializes blocks from their attributes and silently deletes styles that exist only in the HTML.
 - Every block comment must be correctly closed and HTML class names must match the block.
 - LANGUAGE: write any user-facing text you author (nav labels, a CTA button, a tagline) in {{language}} — do not mix languages. Proper nouns and the spec's identity values stay verbatim.
 - IDENTITY: the masthead is the spec's `name`, exactly — prefer wp:site-title (the site title is set from the spec); if you hand-author a wordmark, use `name` verbatim, never a longer descriptor or an invented alternate.

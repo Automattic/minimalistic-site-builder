@@ -42,6 +42,21 @@ final class ScaffoldThemeStep implements Step
         Text Domain: {{THEME_SLUG}}
         */
 
+        /* Card image cropping (sections opt in via className on the wp:image).
+           Uniform media heights live here, in the theme stylesheet, instead of
+           per-image inline CSS — fix-blocks deletes inline styles that aren't
+           mirrored in block attributes, and a class hook survives untouched. */
+        .card-media img,
+        .card-media-tall img,
+        .card-media-thumb img {
+            width: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .card-media img { height: 200px; }
+        .card-media-tall img { height: 320px; }
+        .card-media-thumb img { height: 110px; }
+
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
             display: flex;
