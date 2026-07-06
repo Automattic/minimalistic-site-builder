@@ -4,10 +4,10 @@ declare(strict_types=1);
 /**
  * ImageTransparency keys the flat solid background Imagen was prompted to
  * render (it cannot produce real alpha) out to PNG transparency: a flood fill
- * inward from the image border, then a global key pass for background-colored
- * pockets enclosed by the subject, reverted when it would erase too much of
- * the subject. It fails soft — undecodable bytes or a keying that would erase
- * the whole image return the input unchanged.
+ * inward from the image border, then an unconditional global key pass so
+ * background-colored pockets enclosed by the subject go too. It fails soft —
+ * undecodable bytes or a border fill that would erase the whole image return
+ * the input unchanged.
  *
  * These tests build tiny fixtures with Imagick and are skipped (registered as
  * trivial passes) when the extension is missing, matching keyOutBackground's
@@ -76,10 +76,11 @@ test('keyOutBackground keys background pockets enclosed by the subject', functio
     assert_true(alpha_at($out, 25, 25) > 0.99, 'subject stays opaque');
 });
 
-test('keyOutBackground keeps a large background-colored subject fill', function () {
-    // A thin red frame whose interior is white: the "pocket" is most of what
-    // the flood fill kept, so the global pass would be eating a deliberate
-    // fill — the guard must revert it and keep the interior opaque.
+test('keyOutBackground keys pockets that outweigh the ink itself', function () {
+    // A thin red frame whose interior is white — the shape of real line-art
+    // flourishes, where enclosed background is most of the subject's bounding
+    // area. The global pass must still key the interior (issue #77: ALL
+    // background goes, no matter how large the enclosed region is).
     $im = new Imagick();
     $im->newImage(60, 60, new ImagickPixel('white'));
     $draw = new ImagickDraw();
@@ -93,8 +94,8 @@ test('keyOutBackground keeps a large background-colored subject fill', function 
     $out = ImageTransparency::keyOutBackground($im->getImageBlob());
 
     assert_true(alpha_at($out, 0, 0) < 0.01, 'border background is transparent');
-    assert_true(alpha_at($out, 12, 12) > 0.99, 'frame stays opaque');
-    assert_true(alpha_at($out, 30, 30) > 0.99, 'large white interior stays opaque');
+    assert_true(alpha_at($out, 12, 12) > 0.99, 'frame ink stays opaque');
+    assert_true(alpha_at($out, 30, 30) < 0.01, 'large enclosed interior is keyed');
 });
 
 test('keyOutBackground returns undecodable bytes unchanged', function () {

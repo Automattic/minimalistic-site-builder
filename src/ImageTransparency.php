@@ -19,9 +19,11 @@ declare(strict_types=1);
  * pixel that matches a border background color — the flood fill cannot reach
  * a background pocket fully enclosed by the subject (inside a closed curl),
  * which is exactly what decorative flourishes produce dozens of. The global
- * pass is reverted when it would erase too much of what the flood fill kept:
- * a large surviving background-colored region is likelier a deliberate
- * subject fill (a white grape, a pale highlight) than an enclosed pocket.
+ * pass is unconditional: these assets are line art on flat white by prompt
+ * design (see ImagePromptComposer), where enclosed background routinely
+ * outweighs the ink itself, so any "is it a deliberate white fill?" area
+ * heuristic misfires on precisely the images this class exists to fix. A
+ * background-colored subject fill is keyed too — the acceptable cost.
  */
 final class ImageTransparency
 {
@@ -32,13 +34,6 @@ final class ImageTransparency
      * subject edges.
      */
     private const FUZZ_PERCENT = 10.0;
-
-    /**
-     * The largest share of the flood-fill-surviving opaque area the global
-     * key pass may remove before it is judged to be eating the subject
-     * (a deliberate background-colored fill) and reverted.
-     */
-    private const MAX_GLOBAL_KEY_SHARE = 0.5;
 
     /** Whether the runtime can key backgrounds at all. */
     public static function available(): bool
@@ -90,22 +85,21 @@ final class ImageTransparency
             }
 
             // If almost nothing opaque survived, the fill ate the subject too
-            // (subject color ≈ background color) — keep the original.
-            $floodOpacity = self::meanOpacity($im);
-            if ($floodOpacity < 0.01) {
+            // (subject color ≈ background color) — keep the original. Checked
+            // BEFORE the global pass: thin line art can legitimately end up
+            // with ~1% ink once its enclosed pockets are keyed, and must not
+            // trip this guard.
+            $alpha = $im->getImageChannelMean(Imagick::CHANNEL_ALPHA);
+            if (($alpha['mean'] ?? 0) / Imagick::getQuantum() < 0.01) {
                 return $pngBytes;
             }
 
             // Global pass: key background-colored pockets the border fill
-            // could not reach (enclosed by the subject). Kept only when it
-            // removes a modest share of the flood-fill-surviving area —
-            // beyond that the "pockets" are likelier a deliberate fill.
-            $global = clone $im;
+            // could not reach (enclosed by the subject). Unconditional — in
+            // thin line art the enclosed background often outweighs the ink,
+            // so no share-of-subject heuristic can tell pockets from fills.
             foreach ($seedColors as $seed) {
-                $global->transparentPaintImage($seed, 0.0, $fuzz, false);
-            }
-            if (self::meanOpacity($global) >= $floodOpacity * (1 - self::MAX_GLOBAL_KEY_SHARE)) {
-                $im = $global;
+                $im->transparentPaintImage($seed, 0.0, $fuzz, false);
             }
 
             $im->setImageFormat('png');
@@ -113,12 +107,5 @@ final class ImageTransparency
         } catch (Throwable) {
             return $pngBytes;
         }
-    }
-
-    /** Mean alpha of the image as a 0..1 fraction (1 = fully opaque). */
-    private static function meanOpacity(Imagick $im): float
-    {
-        $alpha = $im->getImageChannelMean(Imagick::CHANNEL_ALPHA);
-        return (float) ($alpha['mean'] ?? 0) / Imagick::getQuantum();
     }
 }
