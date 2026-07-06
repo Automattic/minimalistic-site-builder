@@ -114,7 +114,7 @@ test('retryTextBatch also reports a transient failure that exhausts its retries'
     assert_eq([['a', 'always down']], $reported, 'a call that gives up after retries is reported once');
 });
 
-test('concurrencyWindows caps each window at 5 and preserves keys in order', function () {
+test('concurrencyWindows caps each window at 10 and preserves keys in order', function () {
     $bodies = [];
     for ($i = 0; $i < 12; $i++) {
         $bodies["r{$i}"] = ['prompt' => "P{$i}"];
@@ -122,9 +122,9 @@ test('concurrencyWindows caps each window at 5 and preserves keys in order', fun
 
     $windows = AnthropicClient::concurrencyWindows($bodies);
 
-    assert_eq([5, 5, 2], array_map('count', $windows), 'no more than 5 in flight per window');
+    assert_eq([10, 2], array_map('count', $windows), 'no more than 10 in flight per window');
     foreach ($windows as $window) {
-        assert_true(count($window) <= 5, 'window within the cap');
+        assert_true(count($window) <= 10, 'window within the cap');
     }
 
     // Every request appears exactly once, with its key and order intact.

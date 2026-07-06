@@ -15,11 +15,12 @@ final class AnthropicClient implements Llm
 
     /**
      * Most concurrent in-flight requests per batch. A landing page can fan out
-     * to ~10 parts (header, footer, and every section); firing them all at once
-     * risks tripping the API's concurrent-request / rate limits, so we run them
-     * in windows of this size. Within a window they still overlap fully.
+     * to ~10 parts (header, footer, and every section); this cap lets a typical
+     * fan-out run as one fully overlapped window while still bounding in-flight
+     * transfers so a very wide batch cannot trip the API's concurrent-request /
+     * rate limits.
      */
-    private const MAX_CONCURRENCY = 5;
+    private const MAX_CONCURRENCY = 10;
 
     private int $requests = 0;
     private int $inputTokens = 0;
