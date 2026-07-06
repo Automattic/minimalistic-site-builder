@@ -46,6 +46,7 @@ final class SectionsStep implements Step
     {
         $siteSpec = $project->readText('siteSpec.json');
         $themeJson = $project->readText('theme/theme.json');
+        $language = SiteSpecStep::languageOf($project);
         $sections = self::sections($project);
 
         // A compact outline of the whole page, so each section knows its place.
@@ -63,6 +64,7 @@ final class SectionsStep implements Step
         $requests = [
             'header' => $this->withOptions(['prompt' => $this->renderer->render('header.md', [
                 'site_spec'        => $siteSpec,
+                'language'         => $language,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
                 'hero_brief'       => self::heroBrief($sections),
@@ -70,6 +72,7 @@ final class SectionsStep implements Step
             ])]),
             'footer' => $this->withOptions(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'        => $siteSpec,
+                'language'         => $language,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
                 'outline'          => $outline,
@@ -80,6 +83,7 @@ final class SectionsStep implements Step
             $key = self::SECTION_PREFIX . $section['slug'];
             $requests[$key] = $this->withOptions(['prompt' => $this->renderer->render('section.md', [
                 'site_spec'        => $siteSpec,
+                'language'         => $language,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
                 'outline'          => $outline,

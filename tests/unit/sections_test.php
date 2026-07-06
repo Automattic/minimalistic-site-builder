@@ -47,6 +47,27 @@ test('sections passes the design direction and hero brief to header and footer p
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections wires the spec language into every part prompt', function () {
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('siteSpec.json', ['name' => 'Demo', 'language' => 'es-AR']);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    foreach (['header', 'footer', 'section-hero', 'section-about'] as $key) {
+        assert_contains('in es-AR', $reqs[$key]['prompt']);
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections falls back to a descriptive language phrase for specs without one', function () {
+    [$project, $tmp] = sections_fixture(); // fixture spec has no "language"
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    assert_contains('in the language the user prompt is written in', $reqs['section-hero']['prompt']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('sections passes each part its assigned composition and its neighbors\' assignments', function () {
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));

@@ -33,9 +33,18 @@ Rules:
 - Reference theme.json presets by slug:
     colors via "backgroundColor" / "textColor" using slugs: base, contrast, primary, secondary, accent
     fonts via "fontFamily" using slugs: heading, body
+    font sizes via "fontSize" using slugs: caption, body, lead, heading, section-title, display (e.g. "fontSize":"display" → class `has-display-font-size`)
   Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2 class="wp-block-heading has-heading-font-family has-primary-color has-text-color">…</h2><!-- /wp:heading -->
+- ALL text sizing comes from the fontSizes presets via the "fontSize" attribute. NEVER hardcode a font size — no raw values or `clamp()` in `"style":{"typography":{"fontSize":...}}` and no hand-written `font-size:` inline styles. The scale (including the masthead-scale `display` step) already lives in theme.json; if no preset genuinely fits a rare case, reference a preset variable through the block attribute (`"style":{"typography":{"fontSize":"var:preset|font-size|<slug>"}}`) — never a raw value.
+- Paragraph scale discipline — each step of the scale has a role; use the right one:
+    running copy (any paragraph, list, or card text that wraps past ~2 lines) = the `body` step. That's the theme default, so usually NO "fontSize" attribute at all. Never push multi-line reading copy up the scale for emphasis, and never shrink it to `caption`.
+    `caption` = genuine metadata only — labels, eyebrows, image captions, folio lines. Not sentences the visitor is meant to read.
+    `lead` = the ONE standout line a section gets (if it has one): the hero's supporting line or a single-sentence intro under the section title. One per section, kept short.
+  The upper steps belong to headings — the contrast between big headings and modest copy IS the hierarchy.
 - Keep the accent color RARE: buttons/CTAs, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it (e.g. eyebrow labels, hairline rules, hover underlines) — then apply that motif consistently, not in some sections only. Never use accent for body text, large-area backgrounds, or any motif the direction didn't name.
 - Write real, specific copy in the brand voice grounded in the site spec — never lorem ipsum.
+- LANGUAGE: write ALL user-facing copy — headings, body text, captions, list items, labels, image alt text, button text — in {{language}}. Do NOT mix languages within the page; the only exceptions are proper nouns and the spec's verbatim identity values.
+- IDENTITY: the spec's `name`, `persona_name`, and `email_domain` are the site's ONE committed identity — masthead, hero, contact, and footer are all generated from them. Wherever this section names the brand or the person, use those exact values; any email address must be minted at `email_domain` (e.g. hello@that-domain). NEVER invent alternate names, personas, email addresses, or domains.
 
 Section discipline:
 - **Margin reset:** add `"style":{"spacing":{"margin":{"top":"0"}}}` to the section's top-level group so it sits flush in the page flow.
@@ -47,6 +56,8 @@ Section discipline:
 - Be bold with layout WITHIN your archetype (see COMPOSITION above): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
 
 Hero notes (if this is the hero section):
+- The primary headline is a level-1 `wp:heading` with `"fontSize":"display"` — the theme.json `display` step is a fluid masthead size defined for exactly this one moment. Do not shrink it with a smaller preset and do not override it with an inline size.
+- The supporting line under the masthead is ONE short sentence with `"fontSize":"lead"` — body-size subcopy gets lost under a masthead-scale headline, and anything longer or larger competes with it.
 - Do NOT default to "text left, image right." Execute your archetype from the COMPOSITION block above in the spirit of the DESIGN DIRECTION's committed hero composition.
 - Express a full-bleed hero as a `wp:cover` (align:"full") with an inner `wp-block-cover__image-background` — see the IMAGE INSTRUCTIONS pattern below.
 - Text over a photo MUST stay readable at every viewport: give the cover `dimRatio` 40+ or a gradient overlay that visibly darkens (or lightens) the area BEHIND the text, and pick the text color against the DIMMED image, not the raw one. Never float light text over an un-dimmed light image area. Remember the site header may float transparently over the very top of your cover — keep some overlay coverage there too, not only behind the headline.

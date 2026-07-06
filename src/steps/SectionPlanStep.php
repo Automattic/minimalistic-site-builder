@@ -63,6 +63,7 @@ final class SectionPlanStep implements ConcurrentStep
         $rendered = $this->renderer->render('section-plan.md', [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
             'site_spec'        => $project->readText('siteSpec.json'),
+            'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => DesignDirectionStep::readFor($project),
         ]);
 
