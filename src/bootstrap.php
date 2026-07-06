@@ -69,8 +69,9 @@ function step_models(): array
         // Design direction is the creative seed every later step builds on, so
         // it runs on the best model by default; override to trade cost/quality.
         'design-direction' => Env::get('LLM_MODEL_DESIGN_DIRECTION', $default),
-        // Picking one candidate direction is a cheap scoring task — small model.
-        'direction-judge' => Env::get('LLM_MODEL_DIRECTION_JUDGE', 'claude-haiku-4-5'),
+        // Brainstorming four compact concept seeds (one is picked at random and
+        // expanded by design-direction) is cheap divergence work — small model.
+        'design-direction-seeds' => Env::get('LLM_MODEL_DESIGN_DIRECTION_SEEDS', 'claude-haiku-4-5'),
         'theme-json'   => Env::get('LLM_MODEL_THEME_JSON',   $default),
         // Planning is light and structural — cheap/fast model by default.
         'section-plan' => Env::get('LLM_MODEL_SECTION_PLAN', 'claude-haiku-4-5'),
@@ -89,10 +90,11 @@ function step_models(): array
  * Per-step sampling temperature — the counterpart of step_models() for the
  * other quality/diversity knob. A null means "don't send temperature" so the
  * API default applies. The two creative steps get an explicit default: the
- * design direction runs hot (its four candidates are the pipeline's variety
- * source, and repeated builds of one brief must not converge), and sections
- * run slightly hot for compositional range while staying reliable at emitting
- * valid block markup.
+ * design direction runs hot (its seed spread is the pipeline's variety source,
+ * and repeated builds of one brief must not converge — the same temperature is
+ * applied to the seed call, where the small model still supports sampling),
+ * and sections run slightly hot for compositional range while staying reliable
+ * at emitting valid block markup.
  *
  * Caveat: the API REMOVED sampling parameters on Claude Opus 4.7/4.8 and
  * Fable (a request carrying temperature 400s), so these values only take
@@ -100,7 +102,7 @@ function step_models(): array
  * Opus <= 4.6). AnthropicClient omits temperature for the sampling-less
  * models — see AnthropicClient::supportsSampling() — so a step left on the
  * Opus 4.8 default gets its diversity from the prompt-level mechanisms
- * (candidate spread + judge) instead.
+ * (seed spread + random pick) instead.
  *
  * Override any one step from the environment without touching code:
  *   LLM_TEMPERATURE_DESIGN_DIRECTION=0.7, LLM_TEMPERATURE_SECTIONS=1.0, …
@@ -182,7 +184,7 @@ function build_pipeline(Llm $llm): Pipeline
         // Tradeoff: this is an extra serial LLM round-trip on the critical path
         // (the concurrent group now depends on its output) — a deliberate cost
         // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
-        new DesignDirectionStep($llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['direction-judge']),
+        new DesignDirectionStep($llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['design-direction-seeds']),
         // theme.json and the section plan both derive from the prompt + siteSpec +
         // the design direction, so run them concurrently. Design decisions are
         // made inline, steered by designDirection.json.
