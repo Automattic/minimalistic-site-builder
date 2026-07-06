@@ -11,6 +11,12 @@ declare(strict_types=1);
  *         (colors/typography/layout) live here — those are made later, inline,
  *         by the theme-json and landing-page steps.
  *
+ * The spec is also the single source of truth for voice and identity: it
+ * records the `language` all site copy must be written in, and one committed
+ * identity (name / persona_name / email_domain) that masthead, hero, contact
+ * and footer copy must agree on. Identity values the model invented (because
+ * the user stated none) are listed under `invented`.
+ *
  * The user prompt and this spec are the inputs the theme-json and landing-page
  * steps build the design from.
  */
@@ -19,7 +25,10 @@ final class SiteSpecStep implements Step
     use LlmOptions;
 
     /** Factual properties the spec must always carry. */
-    private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe'];
+    private const REQUIRED = ['name', 'title', 'description', 'site_type', 'topic', 'area', 'audience', 'visual_vibe', 'persona_name'];
+
+    /** Identity keys the model may invent (and must then flag in `invented`). */
+    private const IDENTITY_KEYS = ['name', 'persona_name', 'email_domain'];
 
     public function __construct(
         private Llm $llm,
@@ -92,6 +101,42 @@ final class SiteSpecStep implements Step
             $spec['sections'] = [];
         }
 
+        // `invented` lists which identity values the model made up; keep only
+        // the identity keys so downstream features can trust its contents.
+        $invented = array_values(array_intersect(
+            array_map('strval', is_array($spec['invented'] ?? null) ? $spec['invented'] : []),
+            self::IDENTITY_KEYS,
+        ));
+
+        // Every piece of site copy is written in this language; a spec without
+        // one would let each downstream prompt pick its own.
+        $language = trim((string) ($spec['language'] ?? ''));
+        if ($language === '') {
+            throw new RuntimeException('site spec has no "language"');
+        }
+        if (!self::plausibleLanguage($language)) {
+            throw new RuntimeException("site spec \"language\" is not a plausible language code or name: {$language}");
+        }
+        $spec['language'] = $language;
+
+        // Contact emails are minted from this domain; when the model returned
+        // none (or something that is not a domain), derive it from the slug so
+        // the identity stays coherent — and flag it as invented.
+        $domain = strtolower(trim((string) ($spec['email_domain'] ?? '')));
+        if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
+            $domain = str_replace('-', '', $slug) . '.com';
+            $invented[] = 'email_domain';
+        }
+        $spec['email_domain'] = $domain;
+        $spec['invented'] = array_values(array_unique($invented));
+
         return $spec;
+    }
+
+    /** A BCP-47-ish code ("en", "es-AR", "pt_BR") or a plain language name ("Spanish"). */
+    private static function plausibleLanguage(string $language): bool
+    {
+        return preg_match('/^[a-z]{2,3}([_-][a-z0-9]{2,8})*$/i', $language) === 1
+            || preg_match("/^\p{L}[\p{L}' -]{1,39}$/u", $language) === 1;
     }
 }
