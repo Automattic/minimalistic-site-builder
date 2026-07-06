@@ -113,8 +113,8 @@ final class SectionsStep implements Step
                 default           => 'parts/' . $key . '.html', // section-<slug>
             };
             $markup = self::markup($text, $key);
-            if ($key === 'header') {
-                $markup = self::constrainedHeader($markup);
+            if ($key === 'header' || $key === 'footer') {
+                $markup = self::constrainedPart($markup);
             }
             $files[$rel] = $markup;
         }
@@ -258,15 +258,16 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Ensure the header's top-level wp:group declares a layout. The header
-     * prompt demands `"layout":{"type":"constrained"}` on the top-level group,
-     * but the model sometimes drops it — and a group with no layout renders
-     * its inner align:wide row edge-to-edge at the viewport, so the title/nav
-     * hug the screen corners instead of aligning with the content column.
+     * Ensure a part's top-level wp:group declares a layout. The header and
+     * footer prompts demand `"layout":{"type":"constrained"}` on the top-level
+     * group, but the model sometimes drops it — and a group with no layout is
+     * flow, not constrained: no centering, no root-padding-aware gutter, so
+     * its content renders edge-to-edge at the viewport (a header's align:wide
+     * row hugs the screen corners; a footer's text touches the screen edge).
      * Only adds a missing layout; an explicit one (e.g. a deliberate flex row)
      * is left alone. Pure — unit-testable.
      */
-    public static function constrainedHeader(string $markup): string
+    public static function constrainedPart(string $markup): string
     {
         if (preg_match('/^<!--\s*wp:group\s*(\{.*?\})?\s*-->/s', $markup, $m) !== 1) {
             return $markup;
@@ -291,7 +292,27 @@ final class SectionsStep implements Step
         if ($markup === '' || !str_contains($markup, 'wp:')) {
             throw new RuntimeException("sections: part '{$key}' is not block markup");
         }
-        return rtrim($markup);
+        return self::normalizePresetRefs(rtrim($markup));
+    }
+
+    /**
+     * Repair the model's recurring preset-reference typo: `var:preset--type--slug`
+     * instead of `var:preset|type|slug` in block-comment attributes. WordPress
+     * resolves only the pipe form, so the malformed ref produces NO style — and
+     * the block-fixer then deletes the (correct) inline CSS as "not mirrored in
+     * attributes", leaving e.g. a section with zero padding beside 8rem siblings.
+     * The type names are a fixed vocabulary, so the rewrite is unambiguous.
+     * Pure — unit-testable.
+     */
+    public static function normalizePresetRefs(string $markup): string
+    {
+        // `--` may also appear as the serializer's `--` escape.
+        $dashes = '(?:--|(?:\\\\u002d){2})';
+        return (string) preg_replace(
+            "/var:preset{$dashes}(color|gradient|shadow|spacing|font-size|font-family|aspect-ratio|duotone){$dashes}/",
+            'var:preset|$1|',
+            $markup
+        );
     }
 
     /** Strip a leading/trailing markdown code fence if the model added one. */

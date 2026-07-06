@@ -59,7 +59,7 @@ final class ThemeJsonStep implements ConcurrentStep
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
-        $theme = self::withRootPaddingAwareAlignments($theme);
+        $theme = self::normalizeRootPadding($theme);
 
         self::assertColors($theme);
         self::assertFonts($theme);
@@ -73,23 +73,31 @@ final class ThemeJsonStep implements ConcurrentStep
     }
 
     /**
-     * A theme that sets root left/right padding MUST also opt into
-     * root-padding-aware alignments: without the flag WordPress puts the
-     * padding on <body>, where no block can escape it, so every align:full
-     * hero/footer renders inset by a page-background gutter. The model
-     * reliably reproduces the padding stanza from published themes but tends
-     * to drop the flag that those themes pair it with, so enforce it here.
+     * Normalize the root padding stanza the model reliably copies from
+     * published themes but never gets quite right:
+     *
+     * - A theme that sets root left/right padding MUST also opt into
+     *   root-padding-aware alignments: without the flag WordPress puts the
+     *   padding on <body>, where no block can escape it, so every align:full
+     *   hero/footer renders inset by a page-background gutter.
+     * - Root top/bottom padding is forced to 0: with the flag it lands on
+     *   .wp-site-blocks as dead space above the hero and below the footer,
+     *   and the vertical rhythm belongs to the header/sections/footer, which
+     *   all bring their own padding.
+     *
      * Pure — unit-testable.
      *
      * @param array<mixed> $theme
      * @return array<mixed>
      */
-    public static function withRootPaddingAwareAlignments(array $theme): array
+    public static function normalizeRootPadding(array $theme): array
     {
         $padding = $theme['styles']['spacing']['padding'] ?? null;
         if (!is_array($padding)) {
             return $theme;
         }
+        $theme['styles']['spacing']['padding']['top'] = '0';
+        $theme['styles']['spacing']['padding']['bottom'] = '0';
         foreach (['left', 'right'] as $side) {
             $value = trim((string) ($padding[$side] ?? ''));
             if ($value !== '' && preg_match('/^0(?:[a-z%]+)?$/i', $value) !== 1) {

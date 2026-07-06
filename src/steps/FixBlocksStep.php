@@ -11,9 +11,9 @@ declare(strict_types=1);
  * AI-generated block markup frequently carries style/attribute/element-order
  * mismatches that trigger "this block contains unexpected or invalid content"
  * in the editor and WordPress Playground. We shell out to the Node block-fixer
- * (a verbatim copy of telex's server/scripts/block-fixer), which parses each
- * file with @wordpress/blocks and re-serializes it — the same fix telex applies
- * to model output before saving.
+ * (telex's server/scripts/block-fixer plus a comment-attribute overlay — see
+ * lib/blockFixer.js), which parses each file with @wordpress/blocks and
+ * re-serializes it — the same fix telex applies to model output before saving.
  */
 final class FixBlocksStep implements Step
 {
@@ -83,6 +83,22 @@ final class FixBlocksStep implements Step
             throw new RuntimeException(
                 "block-fixer exited with code {$exit}; see logs/" . self::LOG_FILE . "\n" . trim($stderr)
             );
+        }
+
+        // The fixer can silently migrate a mismatched group through a
+        // deprecated block version whose schema predates "layout" (see the
+        // comment-attribute overlay in lib/blockFixer.js for the root fix).
+        // Re-assert the header/footer layout contract afterwards regardless,
+        // so no fixer path can undo the sections-step repair.
+        foreach (['parts/header.html', 'parts/footer.html'] as $rel) {
+            if (!$project->exists('theme/' . $rel)) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $repaired = SectionsStep::constrainedPart($markup);
+            if ($repaired !== $markup) {
+                $project->writeText('theme/' . $rel, $repaired);
+            }
         }
 
         echo '  ' . self::summaryLine($stdout) . ' (details: logs/' . self::LOG_FILE . ")\n";

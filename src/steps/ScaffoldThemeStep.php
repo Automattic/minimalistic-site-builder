@@ -78,10 +78,12 @@ final class ScaffoldThemeStep implements Step
            absolute positioning resolves against the viewport, not the padded body, so the
            horizontal padding mirrors the theme's root padding (--wp--style--root--padding-*,
            emitted when useRootPaddingAwareAlignments is on) — the title/nav then share the
-           same gutter as the constrained content below. */
+           same gutter as the constrained content below. The top offset clears the WP admin
+           bar when logged in (core defines the var only while the bar renders); logged-out
+           visitors get the 0px fallback. */
         .wp-site-blocks .header-overlay {
             position: absolute;
-            top: 0;
+            top: var(--wp-admin--admin-bar--height, 0px);
             left: 0;
             right: 0;
             z-index: 10;
@@ -92,13 +94,13 @@ final class ScaffoldThemeStep implements Step
             padding-right: var(--wp--style--root--padding-right, var(--wp--preset--spacing--md));
         }
 
-        /* The root block-gap margin would open a page-background band between the header
-           and the first section (above the hero) — and when the header is an absolutely
-           positioned overlay, <main> still counts as "not the first child", so the band
-           shows at the very top of the page. Sections space themselves; kill it on both
-           flow neighbors. */
-        .wp-site-blocks > main,
-        .wp-site-blocks > footer {
+        /* The root block-gap margin would open a page-background band between every pair
+           of top-level template parts — above the hero (behind the transparent overlay
+           header, where light text lands on the page background) and as a visible stripe
+           between adjacent dark/tinted section bands. Sections bring their own vertical
+           padding by design, so the root flow gap is never wanted: kill it on every
+           top-level child. */
+        .wp-site-blocks > * {
             margin-block-start: 0;
         }
 

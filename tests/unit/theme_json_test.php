@@ -89,28 +89,47 @@ test('theme-json forces useRootPaddingAwareAlignments when root side padding is 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('withRootPaddingAwareAlignments only fires on a non-zero side padding', function () {
+test('normalizeRootPadding only sets the flag on a non-zero side padding', function () {
     // No styles at all — untouched.
-    $theme = ThemeJsonStep::withRootPaddingAwareAlignments([]);
+    $theme = ThemeJsonStep::normalizeRootPadding([]);
     assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'no styles');
 
-    // Zero-valued side padding (any unit) — untouched.
-    $theme = ThemeJsonStep::withRootPaddingAwareAlignments(
+    // Zero-valued side padding (any unit) — no flag.
+    $theme = ThemeJsonStep::normalizeRootPadding(
         ['styles' => ['spacing' => ['padding' => ['left' => '0px', 'right' => '0']]]]
     );
     assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'zero padding');
 
-    // Vertical-only padding — untouched (nothing to bleed through).
-    $theme = ThemeJsonStep::withRootPaddingAwareAlignments(
+    // Vertical-only padding — no flag (nothing to bleed through).
+    $theme = ThemeJsonStep::normalizeRootPadding(
         ['styles' => ['spacing' => ['padding' => ['top' => '2rem', 'bottom' => '2rem']]]]
     );
     assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'vertical only');
 
     // One non-zero side is enough.
-    $theme = ThemeJsonStep::withRootPaddingAwareAlignments(
+    $theme = ThemeJsonStep::normalizeRootPadding(
         ['styles' => ['spacing' => ['padding' => ['right' => '1.5rem']]]]
     );
     assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments']);
+});
+
+test('normalizeRootPadding zeroes vertical root padding — sections own the rhythm', function () {
+    // The portfolio6 failure: bottom xxl became 128px of dead space under the
+    // footer once the flag moved root padding onto .wp-site-blocks.
+    $theme = ThemeJsonStep::normalizeRootPadding(['styles' => ['spacing' => ['padding' => [
+        'top'    => 'var(--wp--preset--spacing--md)',
+        'bottom' => 'var(--wp--preset--spacing--xxl)',
+        'left'   => 'var(--wp--preset--spacing--md)',
+        'right'  => 'var(--wp--preset--spacing--md)',
+    ]]]]);
+    assert_eq('0', $theme['styles']['spacing']['padding']['top']);
+    assert_eq('0', $theme['styles']['spacing']['padding']['bottom']);
+    assert_eq('var(--wp--preset--spacing--md)', $theme['styles']['spacing']['padding']['left'], 'side padding kept');
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments']);
+
+    // No padding stanza at all — nothing invented.
+    $theme = ThemeJsonStep::normalizeRootPadding(['styles' => ['spacing' => ['blockGap' => '1rem']]]);
+    assert_true(!isset($theme['styles']['spacing']['padding']), 'no padding invented');
 });
 
 test('theme-json throws when a required font slug is missing', function () {
