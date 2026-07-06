@@ -34,7 +34,7 @@ Rules:
     colors via "backgroundColor" / "textColor" using slugs: base, contrast, primary, secondary, accent
     fonts via "fontFamily" using slugs: heading, body
   Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2 class="wp-block-heading has-heading-font-family has-primary-color has-text-color">…</h2><!-- /wp:heading -->
-- Reserve the accent color for buttons/CTAs only.
+- Keep the accent color RARE: buttons/CTAs, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it (e.g. eyebrow labels, hairline rules, hover underlines) — then apply that motif consistently, not in some sections only. Never use accent for body text, large-area backgrounds, or any motif the direction didn't name.
 - Write real, specific copy in the brand voice grounded in the site spec — never lorem ipsum.
 
 Section discipline:

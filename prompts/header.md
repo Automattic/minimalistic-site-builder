@@ -29,7 +29,7 @@ Rules:
 - Sticky is archetype-dependent, NOT a default: NEVER sticky for minimal-overlay; for the other archetypes use `"style":{"position":{"type":"sticky","top":"0px"}}` on the top-level group only when it suits the direction, and give a sticky header an explicit "backgroundColor" so content doesn't show through it.
 - A CTA button (accent color) is allowed only when the archetype and direction call for one — never in minimal-overlay.
 - Use valid CORE block markup only (group, site-title, site-logo, navigation, page-list, buttons/button, image).
-- Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body). Reserve accent for a CTA button only.
+- Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body). Keep accent rare: a CTA button, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it — nothing else.
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Any inline `style` or extra class you write in the HTML MUST be mirrored in the block comment's JSON attributes (supported paths like `"style":{"spacing":{...},"border":{...}}`, `"className"`) — a later build step re-serializes blocks from their attributes and silently deletes styles that exist only in the HTML.
 - Every block comment must be correctly closed and HTML class names must match the block.
