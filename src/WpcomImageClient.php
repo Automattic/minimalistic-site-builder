@@ -64,9 +64,18 @@ final class WpcomImageClient implements ImageClient
      * images are the ones used full-bleed (heroes, banners, wide features) where
      * a 1K render stretched past ~1366px goes soft — request 2K for those. The
      * smaller square/portrait slots stay at 1K to keep cost down.
+     *
+     * Transparent assets are always 1K, whatever their ratio: they are
+     * decorative line art (flourishes, ornaments, logo marks) rendered small
+     * on the page, never full-bleed, and line art downscales gracefully. A 1K
+     * render quarters the pixels to generate and key and roughly cuts the
+     * shipped PNG bytes to a third.
      */
-    public static function sampleImageSize(string $aspectRatio): string
+    public static function sampleImageSize(string $aspectRatio, bool $transparent = false): string
     {
+        if ($transparent) {
+            return '1K';
+        }
         return trim($aspectRatio) === '16:9' ? '2K' : '1K';
     }
 

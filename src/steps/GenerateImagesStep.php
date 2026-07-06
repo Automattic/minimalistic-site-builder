@@ -110,7 +110,9 @@ final class GenerateImagesStep implements Step
                     'aspect_ratio'      => $ratio,
                     // Wide images are the full-bleed ones (heroes, banners) —
                     // render those at 2K so they stay sharp past ~1366px.
-                    'sample_image_size' => WpcomImageClient::sampleImageSize($ratio),
+                    // Transparent decoratives render small on the page and
+                    // stay at 1K whatever their ratio.
+                    'sample_image_size' => WpcomImageClient::sampleImageSize($ratio, $mime === 'image/png'),
                     'mime'              => $mime,
                 ];
             }, array_values($batch));
