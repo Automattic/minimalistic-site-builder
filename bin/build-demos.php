@@ -4,40 +4,42 @@ declare(strict_types=1);
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--keep-alive] [--serve [--port=<n>]] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
  * an incrementing number: photo-journalism-portfolio → photo-journalism-portfolio2
  * → -3 … so re-running the command never overwrites prior testing evidence.
  *
- * Builds run sequentially (not concurrently) so per-step timing is clean and a
- * single failure doesn't abort the others mid-flight.
+ * Builds run CONCURRENTLY, one `bin/build.php` child process per entry. Child
+ * processes keep the per-step timing/token accounting clean: every child owns
+ * its LLM client, so each demo's logs/project.log carries exactly its own
+ * numbers, and one demo failing never aborts the others. Slugs are reserved in
+ * this parent before spawning (concurrent children calling freeSlug() would
+ * race to the same folder name). Each child's output is streamed here with a
+ * [slug] prefix.
  *
- * Each build writes its run overview (per-step timing + token spend) to
- * projects/<slug>/logs/project.log, exactly like a single bin/build.php run.
+ * Note: each build fires up to ~10 concurrent Claude requests, so N parallel
+ * builds ≈ N×10 concurrent API requests. If rate limits bite, cap the batch
+ * with --parallel=<n>.
  *
- * After each successful build the home page is captured to a full-page
- * screenshot at projects/<slug>/logs/home.png (headless Playground + Chrome),
- * as visual testing evidence. Disable with --no-screenshot.
+ * After the builds, each home page is captured to a full-page screenshot at
+ * projects/<slug>/logs/home.png (headless Playground + Chrome) as visual
+ * testing evidence — also in parallel, each site on its own port. Disable with
+ * --no-screenshot.
  *
  * Options:
  *   --with-images   also generate the AI_IMAGE placeholders into real assets.
  *   --only=<slug>   build only the entry whose slug matches.
- *   --screenshot    capture the post-build home-page screenshot (the default).
- *   --no-screenshot skip the post-build home-page screenshot.
- *   --keep-alive    after each build, leave its WordPress Playground server
- *                   running in the foreground so the site can be inspected in a
- *                   browser (Ctrl-C to stop and move on). Reuses the screenshot
- *                   server when screenshots are on; otherwise boots one. Unlike
- *                   --serve this holds the server open as each site finishes,
- *                   rather than only after the whole batch.
- *   --serve         after building, preview each site in WordPress Playground,
- *                   one at a time (foreground; Ctrl-C a preview to move on to
- *                   the next). Off by default for a batch run.
+ *   --parallel=<n>  cap on concurrent builds (default: all entries at once).
+ *   --screenshot    capture the post-build home-page screenshots (the default).
+ *   --no-screenshot skip the post-build home-page screenshots.
+ *   --serve         after the batch, serve ALL built sites simultaneously in
+ *                   WordPress Playground, each on its own port, and print every
+ *                   URL. A single Ctrl-C stops all servers. Off by default.
  *   --no-serve      build only, don't boot any previews (the default).
- *   --port=<n>      Playground port for previews (default 9400; playground.php
- *                   auto-bumps to the next free port if it's busy).
+ *   --port=<n>      base Playground port (default 9400); site i gets the port
+ *                   window base+50i, and playground.php auto-bumps busy ports.
  *   --file=<path>   override the prompts file (default eval/theme-prompts.json).
  */
 
@@ -47,22 +49,22 @@ $withImages = false;
 $only = null;
 $serve = false;
 $screenshot = true;
-$keepAlive = false;
+$parallel = 0; // 0 = no cap (all entries at once)
 $port = 9400;
 $file = repo_path('eval/theme-prompts.json');
 foreach (array_slice($argv, 1) as $a) {
     if ($a === '--with-images') { $withImages = true; }
     elseif (str_starts_with($a, '--only=')) { $only = substr($a, 7); }
+    elseif (str_starts_with($a, '--parallel=')) { $parallel = max(1, (int) substr($a, 11)); }
     elseif (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
     elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
     elseif ($a === '--no-serve') { $serve = false; }
     elseif ($a === '--serve') { $serve = true; }
-    elseif ($a === '--keep-alive') { $keepAlive = true; }
     elseif ($a === '--no-screenshot') { $screenshot = false; }
     elseif ($a === '--screenshot') { $screenshot = true; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--no-screenshot] [--keep-alive] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
         exit(1);
     }
 }
@@ -85,12 +87,14 @@ if ($only !== null && $entries === []) {
     exit(1);
 }
 
-$llm = make_llm();
-$pipeline = build_pipeline($llm);
 $store = new ProjectStore(repo_path('projects'));
 
-$built = [];
+// Reserve a project folder per entry BEFORE spawning any children: freeSlug()
+// picks names by looking at existing folders, so concurrent children would race
+// to the same one. create() makes the directory immediately, which is what
+// makes the next freeSlug() call see it as taken.
 $failures = 0;
+$jobs = [];
 foreach ($entries as $i => $entry) {
     $prompt = trim((string) ($entry['prompt'] ?? ''));
     if ($prompt === '') {
@@ -103,132 +107,94 @@ foreach ($entries as $i => $entry) {
     $slug = $store->freeSlug($baseSlug);
 
     $project = $store->create($slug);
-    $createdAt = gmdate('c');
     $project->writeJson('meta.json', [
         'prompt'           => $prompt,
         'provisional_slug' => $project->slug(),
-        'created_at'       => $createdAt,
+        'created_at'       => gmdate('c'),
         // Absolute path so a built project stays traceable to its source prompt
-        // file regardless of where the command was invoked from.
+        // file regardless of where the command was invoked from. bin/build.php
+        // merges its own meta over this seed, preserving these two fields.
         'demo_source'      => realpath($file) ?: $file,
         'demo_id'          => $entry['id'] ?? $baseSlug,
     ]);
 
-    echo "\n[" . ($i + 1) . '/' . count($entries) . "] Building '{$project->slug()}'\n";
+    echo '[' . ($i + 1) . '/' . count($entries) . "] queued '{$project->slug()}'\n";
     if ($slug !== $baseSlug) {
         echo "  (folder '{$baseSlug}' existed → used '{$slug}')\n";
     }
     echo "  prompt: {$prompt}\n";
 
-    // One BuildReport per demo, written to its own logs/project.log — same
-    // accounting bin/build.php produces for a single build. The LLM client's
-    // usage totals are cumulative across the whole batch, so baseline them at
-    // the start of each demo and diff per step.
-    $report = new BuildReport($prompt, $project->slug(), $project->path(), $createdAt);
-    $base = $llm->usageTotals();
-    $prevIn = $base['input_tokens'];
-    $prevOut = $base['output_tokens'];
-    $reqStart = $base['requests'];
+    $jobs[] = [
+        'slug' => $project->slug(),
+        'path' => $project->path(),
+        'cmd'  => 'exec php ' . escapeshellarg(repo_path('bin/build.php'))
+            . ' ' . escapeshellarg($prompt)
+            . ' --slug=' . escapeshellarg($project->slug())
+            . ' --no-serve'
+            . ($withImages ? ' --with-images' : ''),
+    ];
+}
 
-    $error = null;
-    // Track the step being run, so a failure names the step that threw — the
-    // per-step rows only print on completion, so without this the error line
-    // appears under the LAST COMPLETED step and points at the wrong one.
-    $currentStep = null;
-    try {
-        $pipeline->runThrough($project, null, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
-            $u = $llm->usageTotals();
-            $inDelta = $u['input_tokens'] - $prevIn;
-            $outDelta = $u['output_tokens'] - $prevOut;
-            $prevIn = $u['input_tokens'];
-            $prevOut = $u['output_tokens'];
-            $report->addStep($step->id(), $secs, $inDelta, $outDelta);
-            echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
-        }, function (Step $step) use (&$currentStep): void {
-            $currentStep = $step->id();
-        });
-    } catch (Throwable $e) {
-        $error = ($currentStep !== null ? "step {$currentStep}: " : '') . $e->getMessage();
-    }
+if ($jobs === []) {
+    fwrite(STDERR, "Nothing to build.\n");
+    exit(1);
+}
 
-    if ($withImages && $error === null) {
-        $step = new GenerateImagesStep(make_image_client());
-        $start = microtime(true);
-        try {
-            $step->run($project);
-            $secs = microtime(true) - $start;
-            // Image generation uses the Vertex proxy, not Claude — no LLM tokens.
-            $report->addStep($step->id(), $secs, 0, 0);
-            echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+$cap = $parallel > 0 ? $parallel : count($jobs);
+echo "\nBuilding " . count($jobs) . ' demo(s), up to ' . $cap . " in parallel…\n\n";
 
-            $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
-            $generated = 0;
-            $failed = 0;
-            foreach ($specs as $spec) {
-                match ($spec['status'] ?? '') {
-                    'completed' => $generated++,
-                    'failed'    => $failed++,
-                    default     => null,
-                };
-            }
-            $report->setImages($generated, $failed, count($specs));
-        } catch (Throwable $e) {
-            $error = 'image step: ' . $e->getMessage();
-        }
-    }
+$results = run_jobs($jobs, $cap);
 
-    if ($error !== null) {
-        fwrite(STDERR, "  ✗ FAILED: {$error}\n");
+$built = [];
+foreach ($jobs as $i => $job) {
+    $r = $results[$i];
+    if ($r['exit'] !== 0) {
+        fwrite(STDERR, "  ✗ FAILED: {$job['slug']} (exit {$r['exit']}) — see {$job['path']}/logs/\n");
         $failures++;
         continue;
     }
-
-    $report->setRequestCount($llm->usageTotals()['requests'] - $reqStart);
-    echo $report->totalLine(), "\n";
-    if (($imagesLine = $report->imagesLine()) !== null) {
-        echo $imagesLine, "\n";
-    }
-    $project->writeText('logs/project.log', $report->render());
-    $total = $report->totalSecs();
-    echo "  Output: {$project->path()}\n";
-
-    // Capture a full-page screenshot of the home page as visual testing
-    // evidence (projects/<slug>/logs/home.png). Boots the site headless in
-    // Playground, shoots, tears down. A failure here doesn't fail the build —
-    // the theme is the artefact; the screenshot is a bonus record.
-    $shotPath = null;
-    if ($screenshot) {
-        $shotPath = $project->logPath('home.png');
-        $cmd = 'php ' . escapeshellarg(repo_path('bin/screenshot.php'))
-            . ' ' . escapeshellarg($project->slug())
-            . ' --port=' . $port
-            . ' --out=' . escapeshellarg($shotPath)
-            // Reuse the screenshot's server for inspection — it holds the site
-            // open in the foreground until Ctrl-C, so the exit code reflects the
-            // interrupt rather than the (already-saved) shot. Don't treat that
-            // as a screenshot failure when --keep-alive is on.
-            . ($keepAlive ? ' --keep-alive' : '');
-        passthru($cmd, $shotExit);
-        if (!$keepAlive && $shotExit !== 0) {
-            fwrite(STDERR, "  (screenshot failed — continuing)\n");
-            $shotPath = null;
-        }
-    } elseif ($keepAlive) {
-        // No screenshot to reuse — boot a Playground server directly and hold it
-        // open in the foreground for inspection (Ctrl-C to stop and continue).
-        echo "  Serving '{$project->slug()}' for inspection (Ctrl-C to continue)…\n";
-        $cmd = 'php ' . escapeshellarg(repo_path('bin/playground.php'))
-            . ' ' . escapeshellarg($project->slug())
-            . ' --port=' . $port;
-        passthru($cmd);
-    }
-
     $built[] = [
-        'slug'       => $project->slug(),
-        'path'       => $project->path(),
-        'seconds'    => round($total, 1),
-        'screenshot' => $shotPath,
+        'slug'       => $job['slug'],
+        'path'       => $job['path'],
+        'seconds'    => round($r['secs'], 1),
+        'screenshot' => null,
     ];
+}
+
+// Playground's find_free_port() probes ports without reserving them and scans
+// up to 50 past the requested one, so concurrent children whose scan windows
+// overlap can converge on the SAME free port and race to bind it (the losers
+// die with EADDRINUSE). Spacing the per-site base ports by that same scan
+// range keeps the windows disjoint, so no two children can collide.
+const PORT_STRIDE = 50;
+
+// Capture a full-page screenshot of each home page as visual testing evidence
+// (projects/<slug>/logs/home.png). Each child boots its site headless in
+// Playground on its own port, shoots, tears down — so they run in parallel too.
+// A failure here doesn't fail the batch — the theme is the artefact; the
+// screenshot is a bonus record.
+if ($screenshot && $built !== []) {
+    echo "\nCapturing " . count($built) . " screenshot(s)…\n\n";
+    $shotJobs = [];
+    foreach ($built as $i => $b) {
+        $shotJobs[] = [
+            'slug' => $b['slug'],
+            'cmd'  => 'exec php ' . escapeshellarg(repo_path('bin/screenshot.php'))
+                . ' ' . escapeshellarg($b['slug'])
+                . ' --port=' . ($port + $i * PORT_STRIDE)
+                . ' --out=' . escapeshellarg($b['path'] . '/logs/home.png'),
+        ];
+    }
+    $shotResults = run_jobs($shotJobs, $cap);
+    foreach ($built as $i => &$b) {
+        $shot = $b['path'] . '/logs/home.png';
+        if ($shotResults[$i]['exit'] === 0 && is_file($shot)) {
+            $b['screenshot'] = $shot;
+        } else {
+            fwrite(STDERR, "  ({$b['slug']}: screenshot failed — continuing)\n");
+        }
+    }
+    unset($b);
 }
 
 // Summary — the at-a-glance record of what this command produced, suitable as
@@ -243,22 +209,253 @@ foreach ($built as $b) {
     }
 }
 
-// Optionally preview each built site in WordPress Playground. Each instance runs
-// in the foreground (it's a long-lived server), so they're shown one at a time:
-// Ctrl-C the current preview to advance to the next. They all reuse the same
-// --port — by the time one starts the previous has been stopped — and
-// playground.php auto-bumps if that port is somehow still busy.
+$exitCode = $failures > 0 ? 1 : 0;
+
+// Serve all built sites simultaneously, one Playground server per site on its
+// own port, and block until Ctrl-C stops them all.
 if ($serve && $built !== []) {
-    echo "\nStarting previews (Ctrl-C each to move to the next)…\n";
-    foreach ($built as $b) {
-        $cmd = 'php ' . escapeshellarg(repo_path('bin/playground.php'))
-            . ' ' . escapeshellarg($b['slug'])
-            . ' --port=' . $port;
-        passthru($cmd, $exit);
-        if ($exit !== 0) {
-            fwrite(STDERR, "  preview failed for {$b['slug']} (exit {$exit})\n");
+    serve_all(array_column($built, 'slug'), $port, $exitCode);
+}
+
+exit($exitCode);
+
+/**
+ * Run each job's shell command as a child process, at most $cap at a time,
+ * streaming stdout/stderr line-by-line with a [slug] prefix so interleaved
+ * output from concurrent children stays attributable. Returns, per job index:
+ * ['exit' => int, 'secs' => float wall-clock].
+ *
+ * @param list<array{slug: string, cmd: string}> $jobs
+ * @return array<int, array{exit: int, secs: float}>
+ */
+function run_jobs(array $jobs, int $cap): array
+{
+    $pending = array_keys($jobs);
+    $running = [];
+    $results = [];
+
+    while ($pending !== [] || $running !== []) {
+        while (count($running) < $cap && $pending !== []) {
+            $idx = array_shift($pending);
+            $proc = proc_open(
+                $jobs[$idx]['cmd'],
+                [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+                $pipes,
+                repo_path()
+            );
+            if (!is_resource($proc)) {
+                fwrite(STDERR, "[{$jobs[$idx]['slug']}] failed to start child process\n");
+                $results[$idx] = ['exit' => 1, 'secs' => 0.0];
+                continue;
+            }
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+            $running[$idx] = [
+                'proc'  => $proc,
+                'pipes' => [1 => $pipes[1], 2 => $pipes[2]],
+                'buf'   => [1 => '', 2 => ''],
+                'start' => microtime(true),
+            ];
+        }
+
+        pump_children($running, static function (int $idx, int $fd, string $line) use ($jobs): void {
+            $out = "[{$jobs[$idx]['slug']}] " . $line;
+            $fd === 2 ? fwrite(STDERR, $out) : print($out);
+        });
+
+        foreach ($running as $idx => $r) {
+            $status = proc_get_status($r['proc']);
+            if ($status['running'] || $r['pipes'][1] !== null || $r['pipes'][2] !== null) {
+                continue;
+            }
+            $results[$idx] = ['exit' => $status['exitcode'], 'secs' => microtime(true) - $r['start']];
+            proc_close($r['proc']);
+            unset($running[$idx]);
+        }
+    }
+
+    ksort($results);
+    return $results;
+}
+
+/**
+ * One multiplexing pass over all running children: wait briefly for output on
+ * any pipe, then drain complete lines through $emit(idx, fd, line). Closed
+ * pipes are set to null in place; a trailing unterminated line is flushed when
+ * its pipe closes.
+ *
+ * @param array<int, array{proc: resource, pipes: array<int, resource|null>, buf: array<int, string>, start: float}> $running
+ */
+function pump_children(array &$running, callable $emit): void
+{
+    $read = [];
+    foreach ($running as $r) {
+        foreach ([1, 2] as $fd) {
+            if ($r['pipes'][$fd] !== null) {
+                $read[] = $r['pipes'][$fd];
+            }
+        }
+    }
+    if ($read === []) {
+        usleep(50_000);
+        return;
+    }
+    $write = $except = null;
+    @stream_select($read, $write, $except, 0, 200_000);
+
+    foreach ($running as $idx => &$r) {
+        foreach ([1, 2] as $fd) {
+            $pipe = $r['pipes'][$fd];
+            if ($pipe === null) {
+                continue;
+            }
+            $chunk = stream_get_contents($pipe);
+            if ($chunk !== false && $chunk !== '') {
+                $r['buf'][$fd] .= $chunk;
+                while (($nl = strpos($r['buf'][$fd], "\n")) !== false) {
+                    $emit($idx, $fd, substr($r['buf'][$fd], 0, $nl + 1));
+                    $r['buf'][$fd] = substr($r['buf'][$fd], $nl + 1);
+                }
+            }
+            if (feof($pipe)) {
+                if ($r['buf'][$fd] !== '') {
+                    $emit($idx, $fd, $r['buf'][$fd] . "\n");
+                    $r['buf'][$fd] = '';
+                }
+                fclose($pipe);
+                $r['pipes'][$fd] = null;
+            }
+        }
+    }
+    unset($r);
+}
+
+/**
+ * Boot one Playground server per slug (site i on $basePort + i*PORT_STRIDE),
+ * print every URL
+ * once all are ready, then block until they exit. A single Ctrl-C stops the
+ * parent AND all servers: the SIGINT handler turns the signal into a normal
+ * exit so the registered teardown runs (SIGINT also reaches the children
+ * directly — they share the foreground process group — but the pkill catches
+ * the npx-spawned node servers that reparent to init and escape both).
+ *
+ * @param list<string> $slugs
+ */
+function serve_all(array $slugs, int $basePort, int $exitCode): void
+{
+    echo "\nStarting " . count($slugs) . " Playground server(s)…\n\n";
+
+    $servers = [];
+    foreach ($slugs as $i => $slug) {
+        // `exec` makes the child pid the php process itself, so teardown can
+        // walk and kill its npx/node subtree (same trick as bin/screenshot.php).
+        $cmd = 'exec php ' . escapeshellarg(repo_path('bin/playground.php'))
+            . ' ' . escapeshellarg($slug)
+            . ' --port=' . ($basePort + $i * PORT_STRIDE);
+        $proc = proc_open(
+            $cmd,
+            // Merge stderr into stdout: server chatter is informational here,
+            // and one stream keeps the readiness scan simple.
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]],
+            $pipes,
+            repo_path()
+        );
+        if (!is_resource($proc)) {
+            fwrite(STDERR, "  could not start Playground for '{$slug}'\n");
+            continue;
+        }
+        stream_set_blocking($pipes[1], false);
+        $servers[$i] = [
+            'proc'  => $proc,
+            'pipes' => [1 => $pipes[1], 2 => null],
+            'buf'   => [1 => '', 2 => ''],
+            'start' => microtime(true),
+            'slug'  => $slug,
+            'pid'   => proc_get_status($proc)['pid'] ?? 0,
+            'url'   => null,
+        ];
+    }
+    if ($servers === []) {
+        return;
+    }
+
+    register_shutdown_function(static function () use ($servers): void {
+        foreach ($servers as $s) {
+            if ($s['pid'] > 0) {
+                kill_tree($s['pid']);
+            }
+            // Catch the reparented node server, which the tree walk misses. The
+            // blueprint path is unique per project, so this stops exactly this
+            // project's server and nothing else's.
+            $blueprint = repo_path("projects/{$s['slug']}/.playground-blueprint.json");
+            @exec('pkill -f ' . escapeshellarg(preg_quote($blueprint, '~')) . ' 2>/dev/null');
+            if (is_resource($s['proc'])) {
+                proc_terminate($s['proc']);
+                proc_close($s['proc']);
+            }
+        }
+    });
+    if (function_exists('pcntl_async_signals')) {
+        pcntl_async_signals(true);
+        $stop = static function () use ($exitCode): void {
+            echo "\nStopping all Playground servers…\n";
+            exit($exitCode); // normal exit → the shutdown teardown above runs
+        };
+        pcntl_signal(SIGINT, $stop);
+        pcntl_signal(SIGTERM, $stop);
+    }
+
+    $announced = false;
+    while ($servers !== []) {
+        pump_children($servers, static function (int $idx, int $fd, string $line) use (&$servers): void {
+            echo "[{$servers[$idx]['slug']}] " . $line;
+            // Playground prints this exact line once it is actually serving; it
+            // carries the real port (playground.php auto-bumps busy ones). The
+            // CLI may wrap it in ANSI colour codes — strip them before matching.
+            if ($servers[$idx]['url'] === null) {
+                $plain = preg_replace('~\x1b\[[0-9;]*m~', '', $line) ?? $line;
+                if (preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $plain, $m)) {
+                    $servers[$idx]['url'] = $m[1] . '/';
+                }
+            }
+        });
+
+        $allReady = $servers !== [];
+        foreach ($servers as $s) {
+            if ($s['url'] === null) {
+                $allReady = false;
+                break;
+            }
+        }
+        if (!$announced && $allReady) {
+            $announced = true;
+            echo "\n── all sites up — Ctrl-C stops everything ─────────────────\n";
+            foreach ($servers as $s) {
+                printf("  %-32s %s\n", $s['slug'], $s['url']);
+                echo "      ↳ admin: {$s['url']}wp-admin/ (auto-logged in)\n";
+            }
+            echo "\n";
+        }
+
+        foreach ($servers as $idx => $s) {
+            $status = proc_get_status($s['proc']);
+            if ($status['running'] || $s['pipes'][1] !== null) {
+                continue;
+            }
+            fwrite(STDERR, "  Playground for '{$s['slug']}' exited (code {$status['exitcode']})\n");
+            proc_close($s['proc']);
+            unset($servers[$idx]);
         }
     }
 }
 
-exit($failures > 0 ? 1 : 0);
+/** Recursively SIGTERM a process and all its descendants (leaves first). */
+function kill_tree(int $pid): void
+{
+    $children = [];
+    @exec('pgrep -P ' . $pid . ' 2>/dev/null', $children);
+    foreach ($children as $child) {
+        kill_tree((int) $child);
+    }
+    @exec('kill -TERM ' . $pid . ' 2>/dev/null');
+}
