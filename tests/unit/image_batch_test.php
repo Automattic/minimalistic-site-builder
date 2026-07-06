@@ -104,6 +104,12 @@ test('sampleImageSize renders wide (full-bleed) images at 2K, the rest at 1K', f
     assert_eq('1K', WpcomImageClient::sampleImageSize('9:16'));
 });
 
+test('sampleImageSize keeps transparent decoratives at 1K even when wide', function () {
+    assert_eq('1K', WpcomImageClient::sampleImageSize('16:9', true));
+    assert_eq('1K', WpcomImageClient::sampleImageSize('1:1', true));
+    assert_eq('2K', WpcomImageClient::sampleImageSize('16:9', false));
+});
+
 test('mimeForFilename maps .png assets to PNG and everything else to JPEG', function () {
     assert_eq('image/png', WpcomImageClient::mimeForFilename('grapevine-flourish.png'));
     assert_eq('image/png', WpcomImageClient::mimeForFilename('ORNAMENT.PNG'));

@@ -3,10 +3,11 @@ declare(strict_types=1);
 
 /**
  * ImageTransparency keys the flat solid background Imagen was prompted to
- * render (it cannot produce real alpha) out to PNG transparency, flood-filling
- * inward from the image border so background-colored pixels inside the subject
- * survive. It fails soft — undecodable bytes or a keying that would erase the
- * whole image return the input unchanged.
+ * render (it cannot produce real alpha) out to PNG transparency: a flood fill
+ * inward from the image border, then an unconditional global key pass so
+ * background-colored pockets enclosed by the subject go too. It fails soft —
+ * undecodable bytes or a border fill that would erase the whole image return
+ * the input unchanged.
  *
  * These tests build tiny fixtures with Imagick and are skipped (registered as
  * trivial passes) when the extension is missing, matching keyOutBackground's
@@ -56,9 +57,10 @@ test('keyOutBackground keys an off-white background via the fuzz', function () {
     assert_true(alpha_at($out, 30, 30) > 0.99, 'dark subject stays opaque');
 });
 
-test('keyOutBackground keeps background-colored pixels inside the subject', function () {
-    // A white dot INSIDE the red rectangle is not border-connected — a global
-    // color replace would strip it; the flood fill must not.
+test('keyOutBackground keys background pockets enclosed by the subject', function () {
+    // A small white pocket INSIDE the red rectangle is not border-connected —
+    // the flood fill alone cannot reach it (the closed-curl case of a
+    // flourish); the global key pass must strip it.
     $im = new Imagick();
     $im->readImageBlob(transparency_fixture('white', 'red'));
     $draw = new ImagickDraw();
@@ -70,7 +72,30 @@ test('keyOutBackground keeps background-colored pixels inside the subject', func
     $out = ImageTransparency::keyOutBackground($im->getImageBlob());
 
     assert_true(alpha_at($out, 0, 0) < 0.01, 'background is transparent');
-    assert_true(alpha_at($out, 30, 30) > 0.99, 'enclosed white pixel stays opaque');
+    assert_true(alpha_at($out, 30, 30) < 0.01, 'enclosed white pocket is keyed');
+    assert_true(alpha_at($out, 25, 25) > 0.99, 'subject stays opaque');
+});
+
+test('keyOutBackground keys pockets that outweigh the ink itself', function () {
+    // A thin red frame whose interior is white — the shape of real line-art
+    // flourishes, where enclosed background is most of the subject's bounding
+    // area. The global pass must still key the interior (issue #77: ALL
+    // background goes, no matter how large the enclosed region is).
+    $im = new Imagick();
+    $im->newImage(60, 60, new ImagickPixel('white'));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel('red'));
+    $draw->rectangle(10, 10, 50, 50);
+    $draw->setFillColor(new ImagickPixel('white'));
+    $draw->rectangle(14, 14, 46, 46);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+
+    $out = ImageTransparency::keyOutBackground($im->getImageBlob());
+
+    assert_true(alpha_at($out, 0, 0) < 0.01, 'border background is transparent');
+    assert_true(alpha_at($out, 12, 12) > 0.99, 'frame ink stays opaque');
+    assert_true(alpha_at($out, 30, 30) < 0.01, 'large enclosed interior is keyed');
 });
 
 test('keyOutBackground returns undecodable bytes unchanged', function () {
