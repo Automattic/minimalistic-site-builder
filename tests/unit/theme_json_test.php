@@ -64,6 +64,55 @@ test('theme-json throws when a required color slug is missing', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json forces useRootPaddingAwareAlignments when root side padding is set', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $payload = valid_theme_payload();
+    // The stanza the model reliably copies from published themes — without the
+    // flag it traps every align:full block inside the body padding.
+    $payload['styles'] = ['spacing' => ['padding' => [
+        'top'    => '0',
+        'bottom' => '0',
+        'left'   => 'var(--wp--preset--spacing--md)',
+        'right'  => 'var(--wp--preset--spacing--md)',
+    ]]];
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('withRootPaddingAwareAlignments only fires on a non-zero side padding', function () {
+    // No styles at all — untouched.
+    $theme = ThemeJsonStep::withRootPaddingAwareAlignments([]);
+    assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'no styles');
+
+    // Zero-valued side padding (any unit) — untouched.
+    $theme = ThemeJsonStep::withRootPaddingAwareAlignments(
+        ['styles' => ['spacing' => ['padding' => ['left' => '0px', 'right' => '0']]]]
+    );
+    assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'zero padding');
+
+    // Vertical-only padding — untouched (nothing to bleed through).
+    $theme = ThemeJsonStep::withRootPaddingAwareAlignments(
+        ['styles' => ['spacing' => ['padding' => ['top' => '2rem', 'bottom' => '2rem']]]]
+    );
+    assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'vertical only');
+
+    // One non-zero side is enough.
+    $theme = ThemeJsonStep::withRootPaddingAwareAlignments(
+        ['styles' => ['spacing' => ['padding' => ['right' => '1.5rem']]]]
+    );
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments']);
+});
+
 test('theme-json throws when a required font slug is missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

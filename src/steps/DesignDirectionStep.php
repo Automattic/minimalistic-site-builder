@@ -160,7 +160,7 @@ final class DesignDirectionStep implements Step
      * what is present. Pure — unit-testable.
      *
      * @param mixed $raw
-     * @return ?array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,signature_device:string,hero_composition:string}
+     * @return ?array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,signature_device:string,hero_composition:string}
      */
     public static function normalize($raw): ?array
     {
@@ -192,6 +192,9 @@ final class DesignDirectionStep implements Step
                 'body'    => trim((string) ($type['body'] ?? '')),
             ],
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
+            // Anything that isn't an explicit "framed" commitment is full-bleed:
+            // an accidental frame reads as a rendering bug, not a design choice.
+            'canvas'           => strtolower(trim((string) ($raw['canvas'] ?? ''))) === 'framed' ? 'framed' : 'full-bleed',
             'signature_device' => trim((string) ($raw['signature_device'] ?? '')),
             'hero_composition' => trim((string) ($raw['hero_composition'] ?? '')),
         ];
@@ -232,6 +235,16 @@ final class DesignDirectionStep implements Step
         }
         if ($pair !== []) {
             $facts[] = '- **Type**: ' . implode('; ', $pair);
+        }
+
+        // Render the canvas commitment with its executable meaning, so the
+        // section/header prompts act on it instead of re-interpreting a bare
+        // keyword. Directions persisted before the field existed carry none.
+        $canvas = trim((string) ($direction['canvas'] ?? ''));
+        if ($canvas === 'framed') {
+            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band; cap bands at `"align":"wide"`, never `"align":"full"`.';
+        } elseif ($canvas !== '') {
+            $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }
 
         foreach ([

@@ -150,6 +150,47 @@ test('sections writes header, footer and a part per section', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('constrainedHeader adds a missing layout to the header top-level group', function () {
+    // The tbilisi4 failure shape: className + spacing, no "layout" — the inner
+    // align:wide row then renders edge-to-edge at the viewport.
+    $in = '<!-- wp:group {"className":"header-overlay","style":{"spacing":{"padding":{"top":"var:preset|spacing|md"}}}} -->' . "\n"
+        . '<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $out = SectionsStep::constrainedHeader($in);
+    assert_contains('"layout":{"type":"constrained"}', $out);
+    assert_contains('"className":"header-overlay"', $out, 'existing attributes preserved');
+    assert_contains('<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>', $out, 'body untouched');
+
+    // An attribute-less top-level group gets one too.
+    $out = SectionsStep::constrainedHeader('<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->');
+    assert_contains('"layout":{"type":"constrained"}', $out);
+});
+
+test('constrainedHeader leaves an explicit layout and non-group markup alone', function () {
+    $flex = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"space-between"}} --><div class="wp-block-group"></div><!-- /wp:group -->';
+    assert_eq($flex, SectionsStep::constrainedHeader($flex));
+
+    $cover = '<!-- wp:cover {"align":"full"} --><div class="wp-block-cover"></div><!-- /wp:cover -->';
+    assert_eq($cover, SectionsStep::constrainedHeader($cover));
+});
+
+test('sections writes the header with a constrained layout when the model omits one', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('<!-- wp:group {"className":"header-overlay"} --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    assert_contains('"layout":{"type":"constrained"}', $project->readText('theme/parts/header.html'));
+    // The repair targets the header only — the footer keeps its markup as-is.
+    assert_true(!str_contains($project->readText('theme/parts/footer.html'), '"layout"'), 'footer untouched');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('sections strips a stray markdown code fence from a part response', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();

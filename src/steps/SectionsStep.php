@@ -112,7 +112,11 @@ final class SectionsStep implements Step
                 $key === 'footer' => 'parts/footer.html',
                 default           => 'parts/' . $key . '.html', // section-<slug>
             };
-            $files[$rel] = self::markup($text, $key);
+            $markup = self::markup($text, $key);
+            if ($key === 'header') {
+                $markup = self::constrainedHeader($markup);
+            }
+            $files[$rel] = $markup;
         }
 
         foreach ($files as $rel => $markup) {
@@ -251,6 +255,29 @@ final class SectionsStep implements Step
             }
         }
         return $lines === [] ? '(No hero section planned.)' : implode("\n", $lines);
+    }
+
+    /**
+     * Ensure the header's top-level wp:group declares a layout. The header
+     * prompt demands `"layout":{"type":"constrained"}` on the top-level group,
+     * but the model sometimes drops it — and a group with no layout renders
+     * its inner align:wide row edge-to-edge at the viewport, so the title/nav
+     * hug the screen corners instead of aligning with the content column.
+     * Only adds a missing layout; an explicit one (e.g. a deliberate flex row)
+     * is left alone. Pure — unit-testable.
+     */
+    public static function constrainedHeader(string $markup): string
+    {
+        if (preg_match('/^<!--\s*wp:group\s*(\{.*?\})?\s*-->/s', $markup, $m) !== 1) {
+            return $markup;
+        }
+        $attrs = isset($m[1]) && $m[1] !== '' ? json_decode($m[1], true) : [];
+        if (!is_array($attrs) || isset($attrs['layout'])) {
+            return $markup;
+        }
+        $attrs['layout'] = ['type' => 'constrained'];
+        $json = json_encode($attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return '<!-- wp:group ' . $json . ' -->' . substr($markup, strlen($m[0]));
     }
 
     /**

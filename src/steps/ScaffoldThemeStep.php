@@ -75,8 +75,10 @@ final class ScaffoldThemeStep implements Step
 
         /* Chrome-less overlay header (the header part opts in via className="header-overlay"):
            floats transparently over the full-bleed hero instead of stacking above it. The
-           padding keeps the title/nav off the viewport edges even when the generated part
-           brings no spacing of its own. */
+           absolute positioning resolves against the viewport, not the padded body, so the
+           horizontal padding mirrors the theme's root padding (--wp--style--root--padding-*,
+           emitted when useRootPaddingAwareAlignments is on) — the title/nav then share the
+           same gutter as the constrained content below. */
         .wp-site-blocks .header-overlay {
             position: absolute;
             top: 0;
@@ -84,7 +86,10 @@ final class ScaffoldThemeStep implements Step
             right: 0;
             z-index: 10;
             background: transparent;
-            padding: var(--wp--preset--spacing--sm) var(--wp--preset--spacing--md);
+            padding-top: var(--wp--preset--spacing--sm);
+            padding-bottom: var(--wp--preset--spacing--sm);
+            padding-left: var(--wp--style--root--padding-left, var(--wp--preset--spacing--md));
+            padding-right: var(--wp--style--root--padding-right, var(--wp--preset--spacing--md));
         }
 
         /* The root block-gap margin would open a page-background band between the header

@@ -229,6 +229,25 @@ test('format renders the narrative plus the structured fact list', function () {
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize commits a canvas: framed passes through, everything else is full-bleed', function () {
+    assert_eq('framed', DesignDirectionStep::normalize(['description' => 'x', 'canvas' => ' Framed '])['canvas']);
+    assert_eq('full-bleed', DesignDirectionStep::normalize(['description' => 'x'])['canvas']);
+    assert_eq('full-bleed', DesignDirectionStep::normalize(['description' => 'x', 'canvas' => 'poster'])['canvas']);
+});
+
+test('format renders the canvas commitment with its executable meaning', function () {
+    $framed = DesignDirectionStep::format(['description' => 'x', 'canvas' => 'framed']);
+    assert_contains('**Canvas**: framed', $framed);
+    assert_contains('"align":"wide"', $framed);
+
+    $full = DesignDirectionStep::format(['description' => 'x', 'canvas' => 'full-bleed']);
+    assert_contains('**Canvas**: full-bleed', $full);
+    assert_contains('"align":"full"', $full);
+
+    // Directions persisted before the field existed carry no canvas fact.
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
 test('design-direction throws when the model returns no usable directions', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['directions' => [['title' => 'Empty', 'description' => '   ']]]);

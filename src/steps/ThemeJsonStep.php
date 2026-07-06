@@ -59,6 +59,7 @@ final class ThemeJsonStep implements ConcurrentStep
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
+        $theme = self::withRootPaddingAwareAlignments($theme);
 
         self::assertColors($theme);
         self::assertFonts($theme);
@@ -69,6 +70,34 @@ final class ThemeJsonStep implements ConcurrentStep
     public function run(Project $project): void
     {
         $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+    }
+
+    /**
+     * A theme that sets root left/right padding MUST also opt into
+     * root-padding-aware alignments: without the flag WordPress puts the
+     * padding on <body>, where no block can escape it, so every align:full
+     * hero/footer renders inset by a page-background gutter. The model
+     * reliably reproduces the padding stanza from published themes but tends
+     * to drop the flag that those themes pair it with, so enforce it here.
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function withRootPaddingAwareAlignments(array $theme): array
+    {
+        $padding = $theme['styles']['spacing']['padding'] ?? null;
+        if (!is_array($padding)) {
+            return $theme;
+        }
+        foreach (['left', 'right'] as $side) {
+            $value = trim((string) ($padding[$side] ?? ''));
+            if ($value !== '' && preg_match('/^0(?:[a-z%]+)?$/i', $value) !== 1) {
+                $theme['settings']['useRootPaddingAwareAlignments'] = true;
+                return $theme;
+            }
+        }
+        return $theme;
     }
 
     /** @param array<mixed> $theme */
