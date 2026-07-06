@@ -19,7 +19,7 @@ Rules:
 - Contrast on dark footers: when the footer group has a dark "backgroundColor", set an explicit light "textColor" on the group AND explicit link colors so links don't fall back to an unreadable dark default — e.g. `"style":{"elements":{"link":{"color":{"text":"var:preset|color|base"}}}}` on the footer group (pick the palette slug that actually reads on that background).
 - The credit line is understated and adapts to the theme — small font size, muted color (e.g. secondary), heading/body font as fits — e.g. a "Built with WordPress" line. Keep it neutral; NO EMOJIS anywhere in the footer.
 - Use valid CORE block markup only (group, columns/column, site-title, paragraph, navigation, list, separator, social-links if useful).
-- Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body).
+- Reference theme.json presets by slug: colors via "backgroundColor"/"textColor" (base, contrast, primary, secondary, accent); fonts via "fontFamily" (heading, body); font sizes via "fontSize" (the theme.json fontSizes slugs) — never hardcode a raw `font-size` value or `clamp()`.
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Every block comment must be correctly closed and HTML class names must match the block.
 - LANGUAGE: write ALL user-facing footer copy — link labels, contact lines, the copyright and credit lines — in {{language}}. Do not mix languages; proper nouns and the spec's identity values stay verbatim.
