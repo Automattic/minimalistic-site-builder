@@ -15,6 +15,12 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('Text Domain: {{THEME_SLUG}}', $css);
     assert_contains('Description: {{DESCRIPTION}}', $css);
 
+    // The card-cropping class hooks the section recipes reference (they keep
+    // card sizing out of inline CSS, which fix-blocks would strip).
+    assert_contains('.card-media img', $css);
+    assert_contains('.card-media-tall img { height: 320px; }', $css);
+    assert_contains('.card-media-thumb img { height: 110px; }', $css);
+
     $readme = $project->readText('theme/readme.txt');
     assert_contains('=== {{THEME_NAME}} ===', $readme);
 

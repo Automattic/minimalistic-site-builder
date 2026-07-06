@@ -41,7 +41,7 @@ Section discipline:
 - **Margin reset:** add `"style":{"spacing":{"margin":{"top":"0"}}}` to the section's top-level group so it sits flush in the page flow.
 - **Width discipline:** heroes, cover blocks and feature/card grids use `"align":"wide"` or `"align":"full"`. Reserve the default (content) width for text-heavy reading sections only.
 - **Text measure:** the band may be full-width, but the TEXT inside it must keep a readable measure. Wrap headline/copy stacks in an inner group with `"layout":{"type":"constrained"}` whose `contentSize` is at or below the theme's contentSize — never the wide size (1200px+). Paragraphs running the full width of a wide band read as broken.
-- **Attribute mirroring — inline CSS survives ONLY via JSON:** a deterministic build step re-serializes every block from its comment JSON attributes and silently deletes any inline `style` declaration or class that the attributes don't produce. Never write raw `style="..."` CSS or extra classes on a block's HTML unless the block comment's JSON expresses the same thing. Use supported attribute paths — `"style":{"spacing":{...},"border":{...},"typography":{...},"color":{...},"shadow":"var:preset|shadow|<slug>"}`, image `"width"`/`"height"`/`"aspectRatio"`/`"scale"`, and `"className"` for extra classes — rather than freeform CSS the serializer will discard.
+- **Avoid inline CSS — style through attributes and theme classes:** a deterministic build step re-serializes every block from its comment JSON attributes and silently deletes any inline `style` declaration or class that the attributes don't produce. Express all styling through supported attribute paths — `"style":{"spacing":{...},"border":{...},"typography":{...},"color":{...},"shadow":"var:preset|shadow|<slug>"}` — and the documented theme CSS classes (via `"className"`); never invent freeform CSS of your own. The only inline `style` in your HTML should be the exact serialization of those JSON attributes.
 - **NO decorative HTML comments** — never write `<!-- Hero Section -->`, `<!-- Services -->` and the like. Only `<!-- wp:... -->` block comments are allowed.
 - **NO EMOJIS** anywhere — not in headings, paragraphs, button text, list items, or any content.
 - Be bold with layout WITHIN your archetype (see COMPOSITION above): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
@@ -56,7 +56,7 @@ Text orientation (all sections):
 - Keep all headline and body copy horizontal. NEVER rotate reading text — no `writing-mode: vertical-rl`/`vertical-lr`, no `transform: rotate` on headings, paragraphs, or the hero H1. Vertical orientation is allowed ONLY for a tiny decorative label or eyebrow (e.g. a frame number or single short word), never for a heading or a sentence.
 
 Visual richness beyond the one hero image — build atmosphere with tokens, NOT extra photos and NOT `<style>` tags:
-- Use theme.json gradient and shadow presets (`"gradient":"<slug>"` on cover/group backgrounds; the shadow presets for depth), color blocks, typographic scale, decorative borders (`"style":{"border":{...}}`), and spacing rhythm via inline `style` on group/heading wrappers.
+- Use theme.json gradient and shadow presets (`"gradient":"<slug>"` on cover/group backgrounds; the shadow presets for depth), color blocks, typographic scale, decorative borders (`"style":{"border":{...}}`), and spacing rhythm via the `"style":{"spacing":{...}}` attribute on group/heading wrappers.
 
 Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick the recipe; do NOT default every card section to the same equal grid:
 
@@ -64,16 +64,16 @@ Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick 
    - `wp:columns` with `"className":"equal-cards"`.
    - Each `wp:column` with `"verticalAlignment":"stretch"` and `"width":"X%"` where X = 100 / number_of_cards (2 cards → 50%, 3 → 33.33%, 4 → 25%). All widths MUST sum to exactly 100%.
    - Inside each column a single `wp:group` card wrapper holding the content (heading, paragraph, image, list).
-   - Any card image is cropped via the image block's OWN attributes: `<!-- wp:image {"sizeSlug":"large","width":"100%","height":"200px","scale":"cover"} -->` with matching HTML `<figure class="wp-block-image size-large is-resized"><img src="..." alt="..." style="object-fit:cover;width:100%;height:200px"/></figure>`. The JSON attributes are what survives the build — a bare `style` with no attributes is deleted.
+   - Any card image: add `"className":"card-media"` to the wp:image (`<figure class="wp-block-image size-large card-media">`) — the theme's style.css crops it to a uniform 200px height. NEVER write the cropping as inline CSS.
    - For a bottom-aligned CTA, wrap it in `wp:buttons` with `"className":"cta-bottom"`.
-     (The supporting `.equal-cards` / `.cta-bottom` CSS already ships in the theme's style.css — just use these class hooks.)
+     (The supporting `.equal-cards` / `.cta-bottom` / `.card-media*` CSS already ships in the theme's style.css — just use these class hooks.)
 2. `staggered-grid` — offset rhythm, for directions that promise energy or a broken grid:
    - `wp:columns` (no equal-cards class); each `wp:column` still gets a `"width"` and the widths MUST sum to 100%.
    - Push every SECOND column's card down by giving its inner card `wp:group` `"style":{"spacing":{"margin":{"top":"3rem"}}}` (odd columns get no offset). Use "4rem" for a stronger stagger.
 3. `editorial-row` — one dominant card plus supporting cards, for curated/selected-work sections:
-   - `wp:columns` with mixed widths that sum to 100% (e.g. 50/25/25 or 60/40); the dominant column gets the bigger image (`{"width":"100%","height":"320px","scale":"cover"}` on its wp:image → `style="object-fit:cover;width:100%;height:320px"`) and a larger heading; supporting cards stay at `"height":"200px"`.
+   - `wp:columns` with mixed widths that sum to 100% (e.g. 50/25/25 or 60/40); the dominant column gets the bigger image (`"className":"card-media-tall"` → 320px crop) and a larger heading; supporting cards stay on `"className":"card-media"` (200px).
 4. `list-thumb` — stacked rows with a small thumbnail and text, for menus, article lists, or dense catalogs:
-   - One `wp:columns` per row: a narrow image column (`"width":"18%"`, image `{"width":"100%","height":"110px","scale":"cover"}` → `style="object-fit:cover;width:100%;height:110px"`) and a wide text column (`"width":"82%"`) with heading + one-line paragraph.
+   - One `wp:columns` per row: a narrow image column (`"width":"18%"`, image `"className":"card-media-thumb"` → 110px crop) and a wide text column (`"width":"82%"`) with heading + one-line paragraph.
    - Optionally a `wp:separator` between rows for an index/menu feel.
 
 Layout utility classes (optional, powerful) — a later build step generates the CSS for EXACTLY these class names, tuned to this design direction. You MAY add them via `"className"` on the blocks noted; NEVER invent other utility classes and NEVER add `<style>` tags:

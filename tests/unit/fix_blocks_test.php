@@ -22,30 +22,30 @@ test('summaryLine falls back when no summary line is present', function () {
     assert_eq('block-fixer: no files changed', FixBlocksStep::summaryLine("   \n  noise\n"));
 });
 
-test('block fixer keeps card image sizing that is mirrored in JSON attributes', function () {
+test('block fixer keeps the card-media class hook the card recipe relies on', function () {
     $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
     $theme = $tmp . '/theme';
     mkdir($theme . '/parts', 0777, true);
 
-    // The card recipe from prompts/section.md: sizing expressed through the
-    // image block's own width/height/scale attributes, not freeform CSS.
+    // The card recipe from prompts/section.md: cropping comes from the theme's
+    // .card-media CSS via a className hook, with no inline CSS to strip.
     $part = <<<'HTML'
-<!-- wp:image {"sizeSlug":"large","width":"100%","height":"200px","scale":"cover"} -->
-<figure class="wp-block-image size-large is-resized"><img src="theme:./assets/card.jpg" alt="AI_IMAGE: A card photo | card in a grid | photorealistic | landscape" style="object-fit:cover;width:100%;height:200px"/></figure>
+<!-- wp:image {"sizeSlug":"large","className":"card-media"} -->
+<figure class="wp-block-image size-large card-media"><img src="theme:./assets/card.jpg" alt="AI_IMAGE: A card photo | card in a grid | photorealistic | landscape"/></figure>
 <!-- /wp:image -->
 HTML;
     file_put_contents($theme . '/parts/cards.html', $part);
 
     $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
     exec($cmd, $out, $exit);
+    $stdout = implode("\n", $out);
 
     $fixed = (string) file_get_contents($theme . '/parts/cards.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, implode("\n", $out));
-    assert_contains('object-fit:cover', $fixed);
-    assert_contains('height:200px', $fixed);
-    assert_contains('width:100%', $fixed);
+    assert_eq(0, $exit, $stdout);
+    assert_contains('card-media', $fixed);
+    assert_contains('0 style/class value(s) dropped', $stdout);
 });
 
 test('block fixer reports inline styles it drops during re-serialization', function () {
