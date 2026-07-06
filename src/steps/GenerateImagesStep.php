@@ -19,7 +19,7 @@ declare(strict_types=1);
 final class GenerateImagesStep implements Step
 {
     /** How many images to generate concurrently per batch. */
-    private const BATCH_SIZE = 5;
+    private const BATCH_SIZE = 10;
 
     public function __construct(private ImageClient $images) {}
 

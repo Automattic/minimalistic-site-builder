@@ -194,18 +194,18 @@ function batch_fixture(int $n): array
     return [$project, $tmp];
 }
 
-test('generate-images processes pending images in concurrent batches of 5', function () {
-    [$project, $tmp] = batch_fixture(7); // 7 -> batches of 5 + 2
+test('generate-images processes pending images in concurrent batches of 10', function () {
+    [$project, $tmp] = batch_fixture(12); // 12 -> batches of 10 + 2
     $images = new FakeImageClient('JPEGDATA');
 
     (new GenerateImagesStep($images))->run($project);
 
-    // Two batches were issued, sized 5 then 2 (not 7 single calls).
+    // Two batches were issued, sized 10 then 2 (not 12 single calls).
     assert_eq(2, count($images->batches), 'two batches');
-    assert_eq(5, count($images->batches[0]), 'first batch has 5');
+    assert_eq(10, count($images->batches[0]), 'first batch has 10');
     assert_eq(2, count($images->batches[1]), 'second batch has 2');
 
-    // All 7 assets written and marked completed.
+    // All 12 assets written and marked completed.
     $specs = $project->readJson('images.json');
     foreach ($specs as $s) {
         assert_eq('completed', $s['status']);
