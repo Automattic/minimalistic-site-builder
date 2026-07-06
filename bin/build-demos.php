@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--keep-alive|--serve] [--port=<n>] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -34,12 +34,9 @@ declare(strict_types=1);
  *   --parallel=<n>  cap on concurrent builds (default: all entries at once).
  *   --screenshot    capture the post-build home-page screenshots (the default).
  *   --no-screenshot skip the post-build home-page screenshots.
- *   --keep-alive    after the batch, serve ALL built sites simultaneously in
- *   --serve         WordPress Playground, each on its own port, and print every
- *                   URL. A single Ctrl-C stops all servers. (The two flags are
- *                   synonyms now that builds run in parallel — there is no
- *                   "as each site finishes" moment distinct from "after the
- *                   batch".) Off by default.
+ *   --serve         after the batch, serve ALL built sites simultaneously in
+ *                   WordPress Playground, each on its own port, and print every
+ *                   URL. A single Ctrl-C stops all servers. Off by default.
  *   --no-serve      build only, don't boot any previews (the default).
  *   --port=<n>      base Playground port (default 9400); site i gets the port
  *                   window base+50i, and playground.php auto-bumps busy ports.
@@ -62,12 +59,12 @@ foreach (array_slice($argv, 1) as $a) {
     elseif (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
     elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
     elseif ($a === '--no-serve') { $serve = false; }
-    elseif ($a === '--serve' || $a === '--keep-alive') { $serve = true; }
+    elseif ($a === '--serve') { $serve = true; }
     elseif ($a === '--no-screenshot') { $screenshot = false; }
     elseif ($a === '--screenshot') { $screenshot = true; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--parallel=<n>] [--no-screenshot] [--keep-alive|--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
         exit(1);
     }
 }

@@ -57,13 +57,12 @@ Useful variants:
 php bin/build-demos.php --with-images --only=tbilisi     # just one demo
 php bin/build-demos.php --with-images --parallel=2       # cap concurrent builds
 php bin/build-demos.php --with-images --no-screenshot    # skip the screenshots
-php bin/build-demos.php --with-images --keep-alive       # serve all sites afterward
+php bin/build-demos.php --with-images --serve            # serve all sites afterward
 ```
 
-`--keep-alive` (or its synonym `--serve`) boots every built site in Playground
-simultaneously after the batch — each on its own port — and prints all the
-URLs, so the whole demo set can be inspected side by side. A single Ctrl-C
-stops all the servers.
+`--serve` boots every built site in Playground simultaneously after the batch —
+each on its own port — and prints all the URLs, so the whole demo set can be
+inspected side by side. A single Ctrl-C stops all the servers.
 
 Each build fires up to ~10 concurrent Claude requests, so a full parallel batch
 is ~30 concurrent API requests; use `--parallel=<n>` if rate limits bite.
