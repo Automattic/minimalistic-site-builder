@@ -76,12 +76,15 @@ $slug ??= $store->freeSlug(ProjectStore::randomSlug());
 $project = $store->create($slug);
 
 // Seed meta.json (provisional slug = directory name; the canonical site slug
-// comes from siteSpec.json once generated).
-$project->writeJson('meta.json', [
+// comes from siteSpec.json once generated). Merge over any existing meta so an
+// orchestrator (bin/build-demos.php) can pre-seed extra fields — demo_source,
+// demo_id — before delegating the build to this script.
+$meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+$project->writeJson('meta.json', array_merge($meta, [
     'prompt'           => $prompt,
     'provisional_slug' => $project->slug(),
     'created_at'       => gmdate('c'),
-]);
+]));
 
 echo "Building '{$project->slug()}'\n";
 

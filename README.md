@@ -42,10 +42,11 @@ in one command — useful as testing evidence for pipeline/theme changes:
 php bin/build-demos.php --with-images   # build every demo, with generated images
 ```
 
-After each build, the home page is booted headless in WordPress Playground and a
-full-page screenshot is saved to `projects/<slug>/logs/home.png`. Re-runs never
-overwrite prior output — each build goes to the next free slug (`tbilisi`
-→ `tbilisi2` → …).
+The demos build **in parallel** — one `bin/build.php` child process per entry,
+output streamed with a `[slug]` prefix. After the builds, each home page is
+booted headless in WordPress Playground and a full-page screenshot is saved to
+`projects/<slug>/logs/home.png`. Re-runs never overwrite prior output — each
+build goes to the next free slug (`tbilisi` → `tbilisi2` → …).
 
 Needs `ANTHROPIC_API_KEY` and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js
 (for Playground) and a Chrome/Chromium binary (for the screenshot).
@@ -53,16 +54,18 @@ Needs `ANTHROPIC_API_KEY` and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js
 Useful variants:
 
 ```bash
-php bin/build-demos.php --with-images --only=tbilisi   # just one demo
-php bin/build-demos.php --with-images --no-screenshot         # skip the screenshots
-php bin/build-demos.php --with-images --serve                 # open each in Playground afterward
-php bin/build-demos.php --with-images --keep-alive            # leave Playground running as each site finishes
+php bin/build-demos.php --with-images --only=tbilisi     # just one demo
+php bin/build-demos.php --with-images --parallel=2       # cap concurrent builds
+php bin/build-demos.php --with-images --no-screenshot    # skip the screenshots
+php bin/build-demos.php --with-images --serve            # serve all sites afterward
 ```
 
-`--keep-alive` holds each site's Playground server open in the foreground as it
-finishes building, so you can inspect it in a browser (Ctrl-C to stop and move
-on to the next). Unlike `--serve`, which previews only after the whole batch, it
-keeps the server up the moment each site is done.
+`--serve` boots every built site in Playground simultaneously after the batch —
+each on its own port — and prints all the URLs, so the whole demo set can be
+inspected side by side. A single Ctrl-C stops all the servers.
+
+Each build fires up to ~10 concurrent Claude requests, so a full parallel batch
+is ~30 concurrent API requests; use `--parallel=<n>` if rate limits bite.
 
 ## Publish a shareable Playground link
 
