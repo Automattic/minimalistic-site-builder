@@ -12,13 +12,16 @@ declare(strict_types=1);
  * DOES honor reliably (see ImagePromptComposer) — and this class keys that
  * background out.
  *
- * The keying is a flood fill of transparency inward from the image border, one
- * fill per border seed point, each matched against the actual pixel color at
- * that seed (so a slightly off-white or unevenly rendered background still
- * keys). Flood fill — not a global color replace — so background-colored pixels
- * INSIDE the subject (a white grape, a pale highlight) are preserved. The one
- * blind spot is a background-colored pocket fully enclosed by the subject
- * (inside a closed curl): it stays opaque, which reads as a deliberate fill.
+ * The keying is two passes. First, a flood fill of transparency inward from
+ * the image border, one fill per border seed point, each matched against the
+ * actual pixel color at that seed (so a slightly off-white or unevenly
+ * rendered background still keys). Second, a global key of every remaining
+ * pixel that matches a border background color — the flood fill cannot reach
+ * a background pocket fully enclosed by the subject (inside a closed curl),
+ * which is exactly what decorative flourishes produce dozens of. The global
+ * pass is reverted when it would erase too much of what the flood fill kept:
+ * a large surviving background-colored region is likelier a deliberate
+ * subject fill (a white grape, a pale highlight) than an enclosed pocket.
  */
 final class ImageTransparency
 {
@@ -30,6 +33,13 @@ final class ImageTransparency
      */
     private const FUZZ_PERCENT = 10.0;
 
+    /**
+     * The largest share of the flood-fill-surviving opaque area the global
+     * key pass may remove before it is judged to be eating the subject
+     * (a deliberate background-colored fill) and reverted.
+     */
+    private const MAX_GLOBAL_KEY_SHARE = 0.5;
+
     /** Whether the runtime can key backgrounds at all. */
     public static function available(): bool
     {
@@ -37,12 +47,13 @@ final class ImageTransparency
     }
 
     /**
-     * Key the border-connected background of a PNG to transparency and return
-     * the re-encoded PNG bytes. Fails soft: when imagick is missing, the bytes
-     * don't decode, or keying would erase essentially the whole image (the
-     * "background" fill reached everywhere, i.e. the subject itself matched),
-     * the input bytes are returned unchanged — a decorative asset with a baked
-     * background is still better than a broken one.
+     * Key the background of a PNG — border-connected regions plus enclosed
+     * background-colored pockets, per the class docblock — to transparency
+     * and return the re-encoded PNG bytes. Fails soft: when imagick is
+     * missing, the bytes don't decode, or keying would erase essentially the
+     * whole image (the "background" fill reached everywhere, i.e. the subject
+     * itself matched), the input bytes are returned unchanged — a decorative
+     * asset with a baked background is still better than a broken one.
      */
     public static function keyOutBackground(string $pngBytes): string
     {
@@ -68,19 +79,33 @@ final class ImageTransparency
                 [intdiv($w, 2), 0], [intdiv($w, 2), $h - 1],
                 [0, intdiv($h, 2)], [$w - 1, intdiv($h, 2)],
             ];
+            $seedColors = [];
             foreach ($seeds as [$x, $y]) {
                 $seed = $im->getImagePixelColor($x, $y);
                 if ($seed->getColorValue(Imagick::COLOR_ALPHA) < 0.5) {
                     continue; // already keyed by an earlier seed's fill
                 }
+                $seedColors[] = $seed;
                 $im->floodFillPaintImage($transparent, $fuzz, $seed, $x, $y, false, Imagick::CHANNEL_ALPHA);
             }
 
             // If almost nothing opaque survived, the fill ate the subject too
             // (subject color ≈ background color) — keep the original.
-            $alpha = $im->getImageChannelMean(Imagick::CHANNEL_ALPHA);
-            if (($alpha['mean'] ?? 0) / Imagick::getQuantum() < 0.01) {
+            $floodOpacity = self::meanOpacity($im);
+            if ($floodOpacity < 0.01) {
                 return $pngBytes;
+            }
+
+            // Global pass: key background-colored pockets the border fill
+            // could not reach (enclosed by the subject). Kept only when it
+            // removes a modest share of the flood-fill-surviving area —
+            // beyond that the "pockets" are likelier a deliberate fill.
+            $global = clone $im;
+            foreach ($seedColors as $seed) {
+                $global->transparentPaintImage($seed, 0.0, $fuzz, false);
+            }
+            if (self::meanOpacity($global) >= $floodOpacity * (1 - self::MAX_GLOBAL_KEY_SHARE)) {
+                $im = $global;
             }
 
             $im->setImageFormat('png');
@@ -88,5 +113,12 @@ final class ImageTransparency
         } catch (Throwable) {
             return $pngBytes;
         }
+    }
+
+    /** Mean alpha of the image as a 0..1 fraction (1 = fully opaque). */
+    private static function meanOpacity(Imagick $im): float
+    {
+        $alpha = $im->getImageChannelMean(Imagick::CHANNEL_ALPHA);
+        return (float) ($alpha['mean'] ?? 0) / Imagick::getQuantum();
     }
 }
