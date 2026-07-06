@@ -123,6 +123,19 @@ test('SectionPlanStep::normalize caps equal-card-grid at twice per page', functi
     }, 'equal-card-grid');
 });
 
+test('section-plan wires the spec language into its prompt', function () {
+    $tmp = sys_get_temp_dir() . '/builder_spl_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo', 'language' => 'es-AR']);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    $reqs = (new SectionPlanStep(new FakeLlm(), $renderer))->requests($project);
+    assert_contains('in es-AR', $reqs['section-plan']['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('section-plan writes sections.json', function () {
     $tmp = sys_get_temp_dir() . '/builder_sp_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

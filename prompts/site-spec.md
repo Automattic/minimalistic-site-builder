@@ -15,7 +15,7 @@ Always include exactly these fixed properties:
   "topic": string,           // what the site is about, in one short phrase
   "area": string,            // business type / domain / category, e.g. "bakery", "climate advocacy", "bicycle retail"
   "audience": string,        // who the site is for
-  "language": string,        // BCP-47 code (e.g. "en", "es-AR") — the language ALL site copy will be written in: the language the prompt above is written in, UNLESS the user explicitly asks for the site in another language
+  "language": string,        // BCP-47 code (e.g. "en", "es-AR") — the language ALL site copy will be written in: the language the prompt above is WRITTEN in, UNLESS the user explicitly asks for the site in another language. NOT the language of the site's subject, location, or audience: an English prompt about an Argentinean photographer in Buenos Aires → "en", never "es"
   "persona_name": string,    // personal sites only (portfolio, CV, personal blog): the full name of the one person the site is about; "" for non-personal sites
   "email_domain": string,    // domain for contact email addresses, derived from the name — lowercase, no "@" or scheme, e.g. "hearthandcrumb.com"
   "invented": [string],      // which of "name" / "persona_name" / "email_domain" you invented rather than took from the prompt; [] if all were stated by the user

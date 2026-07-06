@@ -53,6 +53,8 @@ Background treatments:
 - image — a full-bleed image band
 
 Rules:
+- LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" stays lowercase a-z ASCII regardless (transliterate).
+- IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly, and any planned email uses the spec's `email_domain` — never invent alternates.
 - The FIRST section must be a "hero" and the LAST should be a strong call-to-action ("cta" or "contact").
 - "slug" is lowercase a-z, 0-9 and hyphens only, unique across the list, and descriptive (e.g. "hero", "menu-highlights", "meet-the-team").
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.

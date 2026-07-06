@@ -36,6 +36,8 @@ Rules:
   Example: <!-- wp:heading {"level":2,"fontFamily":"heading","textColor":"primary"} --><h2 class="wp-block-heading has-heading-font-family has-primary-color has-text-color">…</h2><!-- /wp:heading -->
 - Keep the accent color RARE: buttons/CTAs, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it (e.g. eyebrow labels, hairline rules, hover underlines) — then apply that motif consistently, not in some sections only. Never use accent for body text, large-area backgrounds, or any motif the direction didn't name.
 - Write real, specific copy in the brand voice grounded in the site spec — never lorem ipsum.
+- LANGUAGE: write ALL user-facing copy — headings, body text, captions, list items, labels, image alt text, button text — in {{language}}. Do NOT mix languages within the page; the only exceptions are proper nouns and the spec's verbatim identity values.
+- IDENTITY: the spec's `name`, `persona_name`, and `email_domain` are the site's ONE committed identity — masthead, hero, contact, and footer are all generated from them. Wherever this section names the brand or the person, use those exact values; any email address must be minted at `email_domain` (e.g. hello@that-domain). NEVER invent alternate names, personas, email addresses, or domains.
 
 Section discipline:
 - **Margin reset:** add `"style":{"spacing":{"margin":{"top":"0"}}}` to the section's top-level group so it sits flush in the page flow.

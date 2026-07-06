@@ -63,6 +63,18 @@ final class SiteSpecStep implements Step
     }
 
     /**
+     * The committed copy language from siteSpec.json, for wiring into the
+     * {{language}} placeholder of downstream prompts. Falls back to a
+     * descriptive phrase for specs that predate the language field, so the
+     * rendered rule still reads as an instruction.
+     */
+    public static function languageOf(Project $project): string
+    {
+        $language = trim((string) ($project->readJson('siteSpec.json')['language'] ?? ''));
+        return $language !== '' ? $language : 'the language the user prompt is written in';
+    }
+
+    /**
      * Require the fixed factual properties and normalize name/slug/sections.
      * Any extra factual keys the model returned pass through untouched — the
      * spec has no fixed/exhaustive schema beyond the required properties. No
