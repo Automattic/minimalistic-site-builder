@@ -137,7 +137,7 @@ function llm_temperature(string $envSuffix, ?float $default): ?float
 function make_llm(): AnthropicClient
 {
     return new AnthropicClient(
-        apiKey: Env::require('ANTHROPIC_API_KEY'),
+        apiKey: Env::getRequired('ANTHROPIC_API_KEY'),
         model:  default_llm_model(),
     );
 }
@@ -146,7 +146,7 @@ function make_llm(): AnthropicClient
 function make_image_client(): ImageClient
 {
     return new WpcomImageClient(
-        apiToken: Env::require('GOOGLE_VERTEX_API_TOKEN'),
+        apiToken: Env::getRequired('GOOGLE_VERTEX_API_TOKEN'),
         model:    Env::get('IMAGE_MODEL', 'imagen-4.0-generate-001'),
     );
 }
