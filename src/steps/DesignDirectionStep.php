@@ -12,16 +12,17 @@ declare(strict_types=1);
  *         image grade, signature device, hero composition).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
- * FOUR compact concept seeds — an evocative title plus a one-line visual angle
- * committing the light/dark key, paper temperature, accent hue family, and
- * hero archetype — with divergence across the set enforced in the prompt. One
- * seed is picked uniformly at random, then the main call expands ONLY that
- * seed into the full direction. Generating a cheap spread and expanding one
- * pick — rather than writing four full directions and judging — keeps the
- * deliberate variety injection while spending the expensive model's tokens on
- * a single direction. The DESIGN_DIRECTION_CHOICE env var forces seed N
- * (1-based) for reproducible evals, and a failed seed call degrades to a
- * built-in "invent one bold concept" seed instead of aborting the build.
+ * FOUR concept seeds — each one string: an evocative title plus one vivid
+ * sentence committing the seed's visual world (palette family, typography
+ * character, imagery treatment, mood) — with divergence across the set
+ * enforced in the prompt. One seed is picked uniformly at random, then the
+ * main call expands ONLY that seed into the full direction. The random pick
+ * over a divergent seed spread is the pipeline's variety injection — repeated
+ * builds of one brief land on different concepts — while the expensive
+ * model's tokens are spent on a single direction. The DESIGN_DIRECTION_CHOICE
+ * env var forces seed N (1-based) for reproducible evals, and a failed seed
+ * call degrades to a built-in "invent one bold concept" seed instead of
+ * aborting the build.
  *
  * This is the single source of design intent. The theme-json, section-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
@@ -103,7 +104,7 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * Brainstorm four concept seeds on the cheap model and pick ONE, rendered
+     * Brainstorm four concept titles on the cheap model and pick ONE, rendered
      * as the text block the expansion prompt consumes.
      *
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
@@ -157,46 +158,33 @@ final class DesignDirectionStep implements Step
                     count($seeds),
                 ));
             }
-            return self::formatSeed($seeds[$n - 1]);
+            return $seeds[$n - 1];
         }
 
         if ($seeds === []) {
             return self::SEED_FALLBACK;
         }
-        return self::formatSeed($seeds[random_int(0, count($seeds) - 1)]);
+        return $seeds[random_int(0, count($seeds) - 1)];
     }
 
     /**
-     * Validate and coerce one raw seed. Returns null when unusable (no title —
-     * the title is the concept). A missing angle degrades to '': the expansion
-     * prompt then only gets the title. Pure — unit-testable.
+     * Validate and coerce one raw seed ("Title — one vivid sentence"). The
+     * prompt asks for bare strings; an object carrying a `title` key is
+     * tolerated. Returns null when nothing non-empty is present. Pure —
+     * unit-testable.
      *
      * @param mixed $raw
-     * @return ?array{title:string,angle:string}
      */
-    public static function normalizeSeed($raw): ?array
+    public static function normalizeSeed($raw): ?string
     {
-        if (!is_array($raw)) {
+        if (is_array($raw)) {
+            $raw = $raw['title'] ?? null;
+        }
+        if (!is_string($raw)) {
             return null;
         }
-        $title = trim((string) ($raw['title'] ?? ''));
-        if ($title === '') {
-            return null;
-        }
-        return ['title' => $title, 'angle' => trim((string) ($raw['angle'] ?? ''))];
-    }
-
-    /**
-     * Render one seed as the text block injected into the expansion prompt.
-     * Pure — unit-testable.
-     *
-     * @param array{title:string,angle:string} $seed
-     */
-    public static function formatSeed(array $seed): string
-    {
-        return $seed['angle'] === ''
-            ? "**{$seed['title']}**"
-            : "**{$seed['title']}** — {$seed['angle']}";
+        $seed = trim($raw);
+        return $seed === '' ? null : $seed;
     }
 
     /**

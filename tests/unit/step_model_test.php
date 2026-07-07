@@ -45,7 +45,7 @@ test('design-direction passes the configured model into the LLM opts', function 
     [$project, $tmp] = sm_project('builder_sm_dd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['seeds' => [['title' => 'Brut', 'angle' => 'Dark-grounded raw concrete, cold accents, oversized-type hero.']]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
     $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -60,7 +60,7 @@ test('design-direction sends no model key when none is configured', function () 
     [$project, $tmp] = sm_project('builder_sm_ddd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['seeds' => [['title' => 'Brut', 'angle' => 'Dark-grounded raw concrete, cold accents, oversized-type hero.']]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
     $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -142,7 +142,7 @@ test('design-direction passes the configured temperature into the LLM opts', fun
     [$project, $tmp] = sm_project('builder_sm_ddt_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['seeds' => [['title' => 'Brut', 'angle' => 'Dark-grounded raw concrete.']]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
     $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -157,7 +157,7 @@ test('design-direction sends no temperature key when none is configured', functi
     [$project, $tmp] = sm_project('builder_sm_ddtd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['seeds' => [['title' => 'Brut', 'angle' => 'Dark-grounded raw concrete.']]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
     $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 

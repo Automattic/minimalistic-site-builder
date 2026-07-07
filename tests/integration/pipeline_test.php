@@ -26,15 +26,10 @@ test('full pipeline produces a structurally valid theme', function () {
         'email_domain' => 'hearthandcrumb.com', 'invented' => ['name', 'email_domain'],
         'sections' => ['Hero', 'Specials', 'About'],
     ]);
-    // design-direction-seeds (json) — 4 cheap concept seeds; ONE is picked at
+    // design-direction-seeds (json) — 4 cheap concept titles; ONE is picked at
     // random and expanded by the design-direction call below. Runs after
     // site-spec, before the concurrent group.
-    $llm->queueJson(['seeds' => [
-        ['title' => 'Hearth & Grain',  'angle' => 'Light-grounded warm cream paper, ember-orange accents, full-bleed photo hero.'],
-        ['title' => 'Flour & Steel',   'angle' => 'Light-grounded stark white paper, cold steel-blue accents, asymmetric editorial hero.'],
-        ['title' => 'Sugar Bloom',     'angle' => 'Light-grounded blush pastel paper, mint accents, oversized-type hero.'],
-        ['title' => 'Midnight Levain', 'angle' => 'Dark-grounded near-black paper, gold accents, contained-frame hero.'],
-    ]]);
+    $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
     // design-direction (json) — the expanded direction, read by
     // theme-json/section-plan/sections.
     $llm->queueJson(['direction' => [

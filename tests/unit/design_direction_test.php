@@ -11,13 +11,10 @@ function make_designdir_fixture(): array
     return [$project, new FakeLlm(), $tmp];
 }
 
-/** Four concept seeds whose titles identify them. @return array<int,array<string,string>> */
+/** Four concept titles that identify themselves. @return array<int,string> */
 function designdir_seeds(): array
 {
-    return array_map(fn (int $i) => [
-        'title' => "Seed {$i}",
-        'angle' => "Angle {$i}: light-grounded warm cream paper, ember-orange accents, full-bleed hero.",
-    ], range(1, 4));
+    return array_map(fn (int $i) => "Seed {$i}", range(1, 4));
 }
 
 /** One full direction as the expansion call returns it. @return array<string,mixed> */
@@ -54,14 +51,11 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('hairline rules with small caps folios', $written['signature_device']);
     assert_eq('full-bleed bakery photo, headline pinned lower-left', $written['hero_composition']);
 
-    // The seed prompt carries the user's words, the factual spec, and asks
-    // for both seed fields.
+    // The seed prompt carries the user's words and the factual spec.
     assert_eq(2, count($llm->calls), 'exactly two calls: seeds + expansion');
     assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[0]['prompt']);
-    foreach (['title', 'angle'] as $field) {
-        assert_contains($field, $llm->calls[0]['prompt']);
-    }
+    assert_contains('title', $llm->calls[0]['prompt']);
 
     // The expansion prompt carries the brief, the spec, ONE of the seeds
     // (random pick), and asks for every structured field.
@@ -140,7 +134,7 @@ test('design-direction falls back to a built-in seed when the seed call fails', 
 
 test('design-direction falls back to a built-in seed when no seed is usable', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
-    $llm->queueJson(['seeds' => [['title' => '   '], 'not a seed']]);
+    $llm->queueJson(['seeds' => ['   ', 123, ['angle' => 'no title']]]);
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -164,7 +158,7 @@ test('DESIGN_DIRECTION_CHOICE forces seed N', function () {
         putenv('DESIGN_DIRECTION_CHOICE');
     }
 
-    assert_contains('**Seed 2** — Angle 2', $llm->calls[1]['prompt'], 'forced seed reaches the expansion prompt');
+    assert_contains('Seed 2', $llm->calls[1]['prompt'], 'forced seed reaches the expansion prompt');
     assert_true(!str_contains($llm->calls[1]['prompt'], 'Seed 3'), 'other seeds do not leak into the prompt');
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -249,20 +243,14 @@ test('design-direction does not read or write cross-build history', function () 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('normalizeSeed requires a title and formatSeed renders title plus angle', function () {
-    assert_eq(
-        ['title' => 'Forge & Flame', 'angle' => 'Dark-grounded, ember accents.'],
-        DesignDirectionStep::normalizeSeed(['title' => ' Forge & Flame ', 'angle' => ' Dark-grounded, ember accents. '])
-    );
-    assert_eq(['title' => 'Bare', 'angle' => ''], DesignDirectionStep::normalizeSeed(['title' => 'Bare']));
-    assert_eq(null, DesignDirectionStep::normalizeSeed(['title' => '   ', 'angle' => 'x']));
-    assert_eq(null, DesignDirectionStep::normalizeSeed('not an array'));
-
-    assert_eq(
-        '**Forge & Flame** — Dark-grounded, ember accents.',
-        DesignDirectionStep::formatSeed(['title' => 'Forge & Flame', 'angle' => 'Dark-grounded, ember accents.'])
-    );
-    assert_eq('**Bare**', DesignDirectionStep::formatSeed(['title' => 'Bare', 'angle' => '']));
+test('normalizeSeed accepts titles as strings or title-keyed objects, rejects the rest', function () {
+    assert_eq('Forge & Flame', DesignDirectionStep::normalizeSeed(' Forge & Flame '));
+    assert_eq('Forge & Flame', DesignDirectionStep::normalizeSeed(['title' => ' Forge & Flame ']));
+    assert_eq(null, DesignDirectionStep::normalizeSeed('   '));
+    assert_eq(null, DesignDirectionStep::normalizeSeed(['title' => '   ']));
+    assert_eq(null, DesignDirectionStep::normalizeSeed(['angle' => 'no title']));
+    assert_eq(null, DesignDirectionStep::normalizeSeed(123));
+    assert_eq(null, DesignDirectionStep::normalizeSeed(null));
 });
 
 test('normalize keeps valid palette hexes, drops invalid ones, and requires a description', function () {

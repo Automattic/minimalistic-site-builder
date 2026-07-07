@@ -7,9 +7,9 @@ You are a senior design director at a top creative agency. Your task: expand a c
 Factual info about the site (JSON — no design guidance). Use it to ground the direction in the site's real topic, audience, and offering:
 {{site_spec}}
 
-## Committed Concept Seed
+## Chosen Concept Seed
 
-The creative concept below was already chosen for this site. Expand it faithfully into the full direction — do not replace it with a different concept. The seed's commitments (light/dark key, paper temperature, accent hue family, hero composition archetype) are binding; everything they leave open — exact hexes, the type pairing, the image grade, the signature device, spacing, texture, mood — is yours to design:
+The concept seed below was already chosen for this site. It is the creative core of the whole direction — do not replace it with a different concept. Everything the seed commits (its palette family, typography character, imagery treatment, mood) is binding; everything it leaves open — the exact hexes, the exact font names and weights, the image grade, the signature device, spacing, texture — is yours to design, and every choice must serve this one concept:
 
 {{seed}}
 
@@ -28,7 +28,7 @@ Examples of good grades: "monochrome documentary, visible 35mm grain, charcoal m
 
 ## Hero Section — The First Impression
 
-The direction MUST describe a distinctive hero section layout as part of its vision, committing to the hero composition archetype the seed names. The hero is the emotional anchor — describe it cinematically:
+The direction MUST describe a distinctive hero section layout as part of its vision. The hero is the emotional anchor — describe it cinematically:
 
 - **Spatial composition**: Where does the eye land first? Is content centered like a film title card, asymmetrically balanced like an editorial spread, split diagonally with tension, or does imagery bleed edge-to-edge behind floating text?
 - **Image treatment**: Full-bleed photography that immerses? A contained frame that creates breathing room? Overlapping elements that add depth? Abstract shapes that suggest rather than show? A full-bleed background image should read wide/landscape; a framed or foreground image within the hero can be any shape that fits its slot.
@@ -61,7 +61,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
 ```json
 {
   "direction": {
-    "title": "Short Evocative Title (2-4 words, topic-grounded — usually the seed's title, refined only if the expansion demands it)",
+    "title": "The chosen seed's title (refine it only if the expansion truly demands it)",
     "description": "A rich, vivid paragraph describing the complete design vision including the hero section composition. Paint the picture: what does a visitor feel the moment they land? Describe the hero layout cinematically — how is space used, where does imagery sit, how does typography interact with visuals? Then flow into the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes.",
     "palette": {
       "base": "#RRGGBB",
