@@ -48,7 +48,7 @@ final class Env
         return self::$vars[$key] ?? $default;
     }
 
-    public static function require(string $key): string
+    public static function getRequired(string $key): string
     {
         $val = self::get($key);
         if ($val === null || $val === '') {

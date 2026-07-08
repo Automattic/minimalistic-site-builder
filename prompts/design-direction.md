@@ -53,6 +53,7 @@ Besides the vivid narrative, the direction commits to explicit structured fields
 - `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = for CTAs/interaction — and the direction MAY also commit accent to its `signature_device` micro-motif (say so explicitly in that field); never to body text or broad fills.
 - `type`: the heading and body families WITH weights. Both MUST be real Google Fonts families spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts by name, and a family that isn't there gets silently downgraded to a fallback. Design within that constraint: never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
 - `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
+- `canvas`: `"full-bleed"` or `"framed"` — how the page meets the viewport edge. `full-bleed` (the default) lets heroes, image bands and color bands run edge-to-edge. Commit to `framed` ONLY when the concept genuinely calls for a contained, gallery-mat presentation (an art-book portfolio, a print-inspired editorial) — the page then keeps a visible mat of page background around every band, and the header can never float over the hero. Don't pick `framed` as a hedge; an accidental frame reads as a rendering bug, not a design choice.
 - `signature_device`: the ONE repeated visual motif that makes the direction recognizable on every section (e.g. "hairline rules with page folios", "oversized year numerals in the margins", "duotone image blocks with offset borders").
 - `hero_composition`: the composition archetype the hero commits to, in one concrete sentence (e.g. "full-bleed landscape photo, headline pinned lower-left, generous negative space above"). Describe only the hero section's OWN content — never the site header, wordmark, or navigation; those live in a separate header part rendered above the hero.
 
@@ -75,6 +76,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
       "body": "Exact Google Fonts family + weights, e.g. 'Source Sans 3 400/600'"
     },
     "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above.",
+    "canvas": "full-bleed",
     "signature_device": "The one repeated visual motif, one concrete sentence.",
     "hero_composition": "The hero's composition archetype, one concrete sentence."
   }

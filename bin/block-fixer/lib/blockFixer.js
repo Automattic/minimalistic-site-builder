@@ -7,10 +7,16 @@
  *
  * Key insight: The parse() function automatically applies validation fixes,
  * so we just need to parse and re-serialize to get clean, validated HTML.
+ *
+ * Diverges from the telex original in one way: authored comment attributes
+ * are overlaid back over parse()'s output (overlayCommentAttributes below),
+ * because parse()'s deprecated-version migrations silently delete modern
+ * attributes from mismatched blocks.
  */
 
 const { parse, serialize, createBlock } = require('@wordpress/blocks');
 const { registerCoreBlocks } = require('@wordpress/block-library');
+const { parse: grammarParse } = require('@wordpress/block-serialization-default-parser');
 const { fixNestedParagraphs } = require('./paragraphFixer');
 
 let initialized = false;
@@ -56,6 +62,41 @@ function normalizedAttributes(block) {
   return attrs;
 }
 
+/**
+ * Re-assert each block's original comment-delimiter attributes over what
+ * parse() returned.
+ *
+ * When a block's authored HTML doesn't match its current save() output (e.g.
+ * the model declared spacing in the comment JSON but forgot the inline style),
+ * parse() tries the block type's DEPRECATED versions, and a match silently
+ * migrates the block through an old schema — deleting every modern attribute
+ * it doesn't know (a header group loses "layout" and "textColor", flips to
+ * isValid=true, and nothing is reported). In this pipeline the comment JSON is
+ * always authored in the CURRENT format and is the single source of truth —
+ * the whole point of the fixer is to regenerate the HTML from it — so the raw
+ * comment attributes always win over migration output. HTML-sourced attributes
+ * (paragraph content, image url/alt) live outside the comment JSON and are
+ * untouched by the overlay.
+ *
+ * The grammar parser and parse() walk the same delimiters, so the trees are
+ * parallel; both represent inter-block whitespace as nameless entries, which
+ * are skipped on each side. Any structural surprise stops the overlay for that
+ * subtree rather than guessing.
+ */
+function overlayCommentAttributes(blocks, rawBlocks) {
+  let j = 0;
+  for (const block of blocks) {
+    if (!block.name) continue; // freeform/whitespace filler
+    while (j < rawBlocks.length && !rawBlocks[j].blockName) j++;
+    if (j >= rawBlocks.length) return;
+    const raw = rawBlocks[j++];
+    const rawName = raw.blockName.includes('/') ? raw.blockName : `core/${raw.blockName}`;
+    if (rawName !== block.name) return; // trees diverged — don't guess
+    block.attributes = { ...block.attributes, ...(raw.attrs || {}) };
+    overlayCommentAttributes(block.innerBlocks || [], raw.innerBlocks || []);
+  }
+}
+
 function fixBlockRecursively(block) {
   // Recursively fix all inner blocks
   const fixedInnerBlocks = [];
@@ -95,8 +136,10 @@ function fixBlocksInTemplate(htmlContent) {
     // Apply manual fixes before WordPress block parsing
     const preFixedContent = fixNestedParagraphs(htmlContent);
 
-    // Parse the HTML into blocks
+    // Parse the HTML into blocks, then restore the authored comment
+    // attributes that a deprecated-version migration may have destroyed.
     const blocks = parse(preFixedContent);
+    overlayCommentAttributes(blocks, grammarParse(preFixedContent));
 
     // Check for invalid blocks
     const fixedIssues = [];
