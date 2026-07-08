@@ -150,6 +150,68 @@ test('sections writes header, footer and a part per section', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('constrainedPart adds a missing layout to a part top-level group', function () {
+    // The tbilisi4 failure shape: className + spacing, no "layout" — the inner
+    // align:wide row then renders edge-to-edge at the viewport.
+    $in = '<!-- wp:group {"className":"header-overlay","style":{"spacing":{"padding":{"top":"var:preset|spacing|md"}}}} -->' . "\n"
+        . '<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $out = SectionsStep::constrainedPart($in);
+    assert_contains('"layout":{"type":"constrained"}', $out);
+    assert_contains('"className":"header-overlay"', $out, 'existing attributes preserved');
+    assert_contains('<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>', $out, 'body untouched');
+
+    // An attribute-less top-level group gets one too.
+    $out = SectionsStep::constrainedPart('<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->');
+    assert_contains('"layout":{"type":"constrained"}', $out);
+});
+
+test('constrainedPart leaves an explicit layout and non-group markup alone', function () {
+    $flex = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"space-between"}} --><div class="wp-block-group"></div><!-- /wp:group -->';
+    assert_eq($flex, SectionsStep::constrainedPart($flex));
+
+    $cover = '<!-- wp:cover {"align":"full"} --><div class="wp-block-cover"></div><!-- /wp:cover -->';
+    assert_eq($cover, SectionsStep::constrainedPart($cover));
+});
+
+test('sections writes header AND footer with a constrained layout when the model omits one', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('<!-- wp:group {"className":"header-overlay"} --><!-- wp:site-title /--><!-- /wp:group -->');
+    // The naturaleza6 failure: footer group with align:full but no layout —
+    // flow, not constrained, so its text ran edge-to-edge at the viewport.
+    $llm->queueText('<!-- wp:group {"tagName":"footer","align":"full"} --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    assert_contains('"layout":{"type":"constrained"}', $project->readText('theme/parts/header.html'));
+    assert_contains('"layout":{"type":"constrained"}', $project->readText('theme/parts/footer.html'));
+    // Sections are not touched — their width discipline is their own.
+    assert_true(!str_contains($project->readText('theme/parts/section-hero.html'), '"layout"'), 'section untouched');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('markup repairs the var:preset--type--slug typo into the pipe form', function () {
+    $in = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset--spacing--xxl","bottom":"var:preset--spacing--md"},"blockGap":"var:preset|spacing|sm"},"typography":{"fontSize":"var:preset--font-size--lead"}}} -->'
+        . '<div class="wp-block-group">x</div><!-- /wp:group -->';
+    $out = SectionsStep::markup($in, 'section-test');
+    assert_contains('"top":"var:preset|spacing|xxl"', $out);
+    assert_contains('"bottom":"var:preset|spacing|md"', $out);
+    assert_contains('"fontSize":"var:preset|font-size|lead"', $out);
+    assert_contains('"blockGap":"var:preset|spacing|sm"', $out, 'valid refs untouched');
+
+    // The serializer-escaped spelling (-- for --) is repaired too,
+    // and CSS custom properties (var(--wp--preset--…)) are never touched.
+    $escaped = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset\u002d\u002dspacing\u002d\u002dxxl"}}}} -->'
+        . '<div style="padding-top:var(--wp--preset--spacing--xxl)">x</div><!-- /wp:group -->';
+    $out = SectionsStep::markup($escaped, 'section-test');
+    assert_contains('"top":"var:preset|spacing|xxl"', $out);
+    assert_contains('var(--wp--preset--spacing--xxl)', $out);
+});
+
 test('sections strips a stray markdown code fence from a part response', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
