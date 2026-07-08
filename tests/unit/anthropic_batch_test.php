@@ -152,7 +152,7 @@ test('bodyFor sends temperature only when set and supported, and applies model/t
     assert_eq('claude-sonnet-4-6', $body['model']);
     assert_eq(16000, $body['max_tokens']);
     assert_eq(0.9, $body['temperature']);
-    assert_eq('Be terse.', $body['system']);
+    assert_eq(AnthropicClient::SYSTEM_PREAMBLE . "\n\nBe terse.", $body['system']);
     assert_eq(true, $body['stream']);
     assert_eq('Hi', $body['messages'][0]['content']);
 
@@ -164,7 +164,7 @@ test('bodyFor sends temperature only when set and supported, and applies model/t
     assert_eq('claude-haiku-4-5', $body['model']);
     assert_eq(512, $body['max_tokens']);
     assert_true(!array_key_exists('temperature', $body), 'no temperature key when unset');
-    assert_true(!array_key_exists('system', $body), 'no system key when empty');
+    assert_eq(AnthropicClient::SYSTEM_PREAMBLE, $body['system'], 'preamble alone when the caller sets no system');
 
     // Sampling-less models (Opus 4.7/4.8, Fable) never get a temperature key -
     // the API removed the parameter and 400s on it.
@@ -174,6 +174,19 @@ test('bodyFor sends temperature only when set and supported, and applies model/t
         16000,
     );
     assert_true(!array_key_exists('temperature', $body), 'temperature omitted on a sampling-less model');
+});
+
+test('bodyFor puts the language preamble on every request, before any per-request system', function () {
+    // The respect-the-prompt-language rule must ride on EVERY call — even a
+    // step that sets no system prompt of its own.
+    $body = AnthropicClient::bodyFor(['prompt' => 'Hi'], 'claude-opus-4-8', 16000);
+    assert_true(str_contains((string) $body['system'], 'language of the original user prompt'), 'language rule present');
+
+    // A caller's system text (e.g. the JSON steering instruction) is appended
+    // after the preamble, never replacing it.
+    $body = AnthropicClient::bodyFor(['prompt' => 'Hi', 'system' => 'Respond with JSON.'], 'claude-opus-4-8', 16000);
+    assert_true(str_starts_with((string) $body['system'], AnthropicClient::SYSTEM_PREAMBLE), 'preamble comes first');
+    assert_true(str_ends_with((string) $body['system'], 'Respond with JSON.'), 'per-request system follows');
 });
 
 test('supportsSampling is false for Opus 4.7/4.8 and Fable, true otherwise', function () {

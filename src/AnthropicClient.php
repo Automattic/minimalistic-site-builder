@@ -14,6 +14,35 @@ final class AnthropicClient implements Llm
     private const API_VERSION = '2023-06-01';
 
     /**
+     * System preamble sent on EVERY request, single-call and batch alike.
+     * Each prompt embeds the user's site brief; whatever the step, user-facing
+     * text must come back in that brief's language rather than drifting into
+     * English because the surrounding instructions are English. Structural
+     * output and machine-readable directives (e.g. the AI_IMAGE alt specs the
+     * image pipeline parses) are exempt, so the JSON/markup/CSS/PHP steps and
+     * image generation are unaffected. Public so tests can assert it rides on
+     * every body.
+     */
+    public const SYSTEM_PREAMBLE = 'Respect the language of the original user prompt. A request '
+        . 'may wrap or quote that prompt inside English instructions — the instruction language is '
+        . 'irrelevant; what counts is the language the user\'s own brief is written in. Write ALL '
+        . 'user-facing text you produce — titles, headings, body copy, labels, button text, '
+        . 'captions — in that language, unless the user explicitly asked for another language or '
+        . 'the request names the exact language to use. Output addressed to the build pipeline '
+        . 'rather than to site visitors (planning notes, design rationale, scores) is not '
+        . 'user-facing. Structural output is exempt: JSON keys, code, block markup, CSS, slugs, '
+        . 'file names, other identifiers, and machine-readable directives (such as AI_IMAGE '
+        . 'placeholder specs) keep the exact form their instructions prescribe.';
+
+    /**
+     * Appended to the system prompt of every JSON call (single and batch) to
+     * steer the model toward raw, fence-free JSON. One constant so the wire
+     * request and the decode-failure log reconstruction can never drift apart.
+     */
+    private const JSON_SYSTEM = "\nRespond with a single valid JSON value and nothing else. "
+        . 'No prose, no markdown fences.';
+
+    /**
      * Most concurrent in-flight requests per batch. A landing page can fan out
      * to ~10 parts (header, footer, and every section); this cap lets a typical
      * fan-out run as one fully overlapped window while still bounding in-flight
@@ -95,24 +124,21 @@ final class AnthropicClient implements Llm
     public function completeJson(string $prompt, array $opts = []): array
     {
         // Steer toward raw JSON; still strip fences defensively.
-        $opts['system'] = ($opts['system'] ?? '')
-            . "\nRespond with a single valid JSON value and nothing else. "
-            . 'No prose, no markdown fences.';
+        $opts['system'] = ($opts['system'] ?? '') . self::JSON_SYSTEM;
         $text = $this->complete($prompt, $opts);
 
         $data = self::decodeJson($text);
         if ($data === null) {
             // The transport call succeeded and was logged OK above; log the
             // decode failure as its own FAILED entry so the transcript reflects
-            // that the build died on THIS call, not somewhere downstream.
+            // that the build died on THIS call, not somewhere downstream. The
+            // body is rebuilt through bodyFor so the log carries the request as
+            // built (system preamble included) — a sampling parameter stripped
+            // mid-retry is the one divergence it can't see.
             $error = "Expected JSON, got: {$text}";
             LlmLogger::log(
                 (string) ($opts['log_label'] ?? 'request'),
-                [
-                    'model'    => $opts['model'] ?? $this->model,
-                    'system'   => $opts['system'],
-                    'messages' => [['role' => 'user', 'content' => $prompt]],
-                ],
+                self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens),
                 ['text' => $text, 'input' => 0, 'output' => 0],
                 0.0,
                 $error,
@@ -129,16 +155,19 @@ final class AnthropicClient implements Llm
             $data = self::decodeJson($text);
             if ($data === null) {
                 // Same as completeJson: the transport entry was logged OK, so
-                // log the decode failure as its own FAILED entry too.
+                // log the decode failure as its own FAILED entry too, with the
+                // body rebuilt as textBatch built it (preamble + JSON steer
+                // included; a sampling parameter stripped mid-retry is the one
+                // divergence it can't see).
                 $error = "batch request '{$key}': expected JSON, got: {$text}";
                 $req = $requests[$key];
                 LlmLogger::log(
                     (string) ($req['log_label'] ?? $key),
-                    [
-                        'model'    => $req['model'] ?? $this->model,
-                        'system'   => $req['system'] ?? null,
-                        'messages' => [['role' => 'user', 'content' => (string) $req['prompt']]],
-                    ],
+                    self::bodyFor(
+                        ['system' => (string) ($req['system'] ?? '') . self::JSON_SYSTEM] + $req,
+                        $this->model,
+                        $this->defaultMaxTokens,
+                    ),
                     ['text' => $text, 'input' => 0, 'output' => 0],
                     0.0,
                     $error,
@@ -177,8 +206,7 @@ final class AnthropicClient implements Llm
         foreach ($requests as $key => $req) {
             $system = (string) ($req['system'] ?? '');
             if ($json) {
-                $system .= "\nRespond with a single valid JSON value and nothing else. "
-                    . 'No prose, no markdown fences.';
+                $system .= self::JSON_SYSTEM;
             }
             $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens);
         }
@@ -216,7 +244,9 @@ final class AnthropicClient implements Llm
      * Build one streaming Messages API request body from a request spec — the
      * single place the optional per-request knobs (model, max_tokens,
      * temperature, system) are mapped onto the wire format, shared by the
-     * single-call and batch paths. Temperature is only sent when the caller
+     * single-call and batch paths. Every body carries SYSTEM_PREAMBLE (the
+     * respect-the-prompt-language rule) as its system prompt, with any
+     * per-request system text appended after it. Temperature is only sent when the caller
      * set one AND the target model still supports sampling parameters, so an
      * unset step keeps the API's default sampling and a step pointed at a
      * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure — unit-testable.
@@ -238,9 +268,11 @@ final class AnthropicClient implements Llm
         if (isset($req['temperature']) && self::supportsSampling($model)) {
             $body['temperature'] = (float) $req['temperature'];
         }
+        $system = self::SYSTEM_PREAMBLE;
         if (trim((string) ($req['system'] ?? '')) !== '') {
-            $body['system'] = $req['system'];
+            $system .= "\n\n" . $req['system'];
         }
+        $body['system'] = $system;
         return $body;
     }
 
