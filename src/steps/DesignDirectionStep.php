@@ -11,14 +11,18 @@ declare(strict_types=1);
  *         execute instead of re-interpreting (palette hexes, type pairing,
  *         image grade, signature device, hero composition).
  *
- * The model is asked for FOUR distinct visual directions in one call (at a hot
- * sampling temperature); a cheap judge call then picks the candidate that best
- * fits the brief. Generating a spread and selecting from it — rather than
- * asking for a single "best" concept — is the deliberate injection of variety:
- * it widens the creative range within the current build without exposing the
- * builder to previous site builds. If the judge fails, selection falls back to a
- * uniform random pick, and the DESIGN_DIRECTION_CHOICE env var forces candidate
- * N (1-based) for reproducible evals.
+ * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
+ * FOUR concept seeds — each one string: an evocative title plus one vivid
+ * sentence committing the seed's visual world (palette family, typography
+ * character, imagery treatment, mood) — with divergence across the set
+ * enforced in the prompt. One seed is picked uniformly at random, then the
+ * main call expands ONLY that seed into the full direction. The random pick
+ * over a divergent seed spread is the pipeline's variety injection — repeated
+ * builds of one brief land on different concepts — while the expensive
+ * model's tokens are spent on a single direction. The DESIGN_DIRECTION_CHOICE
+ * env var forces seed N (1-based) for reproducible evals, and a failed seed
+ * call degrades to a built-in "invent one bold concept" seed instead of
+ * aborting the build.
  *
  * This is the single source of design intent. The theme-json, section-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
@@ -39,13 +43,20 @@ final class DesignDirectionStep implements Step
         . 'default treatments like a centered hero, all-sans-serif typography, and a '
         . 'blue/teal palette.)';
 
+    /**
+     * Injected as the {{seed}} when the seed call fails or returns nothing
+     * usable — the expansion call must still commit to something bold.
+     */
+    private const SEED_FALLBACK = '(No concept seed was chosen. Invent ONE distinctive, '
+        . 'topic-grounded concept yourself and commit to it.)';
+
     /** Where the chosen direction is persisted, and read back from by readFor(). */
     private const FILE = 'designDirection.json';
 
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
     public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
 
-    /** Env var forcing candidate N (1-based) — the reproducible-evals escape hatch. */
+    /** Env var forcing seed N (1-based) — the reproducible-evals escape hatch. */
     public const CHOICE_ENV = 'DESIGN_DIRECTION_CHOICE';
 
     public function __construct(
@@ -53,7 +64,7 @@ final class DesignDirectionStep implements Step
         private PromptRenderer $renderer,
         private ?string $model = null,
         private ?float $temperature = null,
-        private ?string $judgeModel = null,
+        private ?string $seedModel = null,
     ) {}
 
     public function id(): string
@@ -73,89 +84,113 @@ final class DesignDirectionStep implements Step
         if (trim($prompt) === '') {
             throw new RuntimeException('meta.json has no "prompt"');
         }
+        $spec = $project->readText('siteSpec.json');
+
+        $seed = $this->chooseSeed($prompt, $spec);
 
         $rendered = $this->renderer->render('design-direction.md', [
             'user_prompt' => $prompt,
-            'site_spec'   => $project->readText('siteSpec.json'),
+            'site_spec'   => $spec,
+            'seed'        => $seed,
         ]);
         $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
 
-        // Keep only well-formed directions (a description is what downstream
-        // needs; everything else degrades gracefully — see normalize()).
-        $directions = [];
-        foreach (is_array($payload['directions'] ?? null) ? $payload['directions'] : [] as $raw) {
-            $direction = self::normalize($raw);
-            if ($direction !== null) {
-                $directions[] = $direction;
-            }
-        }
-        if ($directions === []) {
-            throw new RuntimeException('design-direction: model returned no usable directions');
+        $direction = self::normalize($payload['direction'] ?? null);
+        if ($direction === null) {
+            throw new RuntimeException('design-direction: model returned no usable direction');
         }
 
-        $chosen = $this->choose($prompt, $directions);
-
-        $project->writeJson(self::FILE, $chosen);
+        $project->writeJson(self::FILE, $direction);
     }
 
     /**
-     * Pick ONE direction from the candidates.
+     * Brainstorm four concept titles on the cheap model and pick ONE, rendered
+     * as the text block the expansion prompt consumes.
      *
-     * Precedence: the DESIGN_DIRECTION_CHOICE env var forces candidate N
-     * (1-based; out of range fails loud — a forced eval must not silently
-     * drift); a single candidate is taken as-is; otherwise a cheap judge call
-     * scores fit-to-brief and specificity and picks. Any judge failure
-     * (transport error, malformed verdict) falls back to a uniform random pick
-     * — selection must never abort a build.
-     *
-     * @param array<int,array<string,mixed>> $directions
-     * @return array<string,mixed>
+     * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
+     * out of range — including a failed seed call — fails loud, because a
+     * forced eval must not silently drift); otherwise a uniform random pick.
+     * Without a forced choice, any seed failure (transport error, no usable
+     * seeds) degrades to SEED_FALLBACK — seeding must never abort a build.
+     * The step's hot temperature is applied here too: the seed spread is now
+     * the pipeline's variety source, and the small models still support
+     * sampling.
      */
-    private function choose(string $brief, array $directions): array
+    private function chooseSeed(string $brief, string $spec): string
     {
         $forced = Env::get(self::CHOICE_ENV);
-        if ($forced !== null && $forced !== '') {
+        $isForced = $forced !== null && $forced !== '';
+
+        $seeds = [];
+        try {
+            $rendered = $this->renderer->render('design-direction-seeds.md', [
+                'user_prompt' => $brief,
+                'site_spec'   => $spec,
+            ]);
+            $opts = ['log_label' => 'design-direction-seeds'];
+            if ($this->seedModel !== null) {
+                $opts['model'] = $this->seedModel;
+            }
+            if ($this->temperature !== null) {
+                $opts['temperature'] = $this->temperature;
+            }
+            $payload = $this->llm->completeJson($rendered, $opts);
+            foreach (is_array($payload['seeds'] ?? null) ? $payload['seeds'] : [] as $raw) {
+                $seed = self::normalizeSeed($raw);
+                if ($seed !== null) {
+                    $seeds[] = $seed;
+                }
+            }
+        } catch (Throwable $e) {
+            if ($isForced) {
+                throw $e;
+            }
+            // Fall through to the fallback seed below.
+        }
+
+        if ($isForced) {
             $n = (int) $forced;
-            if ($n < 1 || $n > count($directions)) {
+            if ($n < 1 || $n > count($seeds)) {
                 throw new RuntimeException(sprintf(
                     'design-direction: %s=%s is out of range (1..%d)',
                     self::CHOICE_ENV,
                     $forced,
-                    count($directions),
+                    count($seeds),
                 ));
             }
-            return $directions[$n - 1];
+            return $seeds[$n - 1];
         }
 
-        if (count($directions) === 1) {
-            return $directions[0];
+        if ($seeds === []) {
+            return self::SEED_FALLBACK;
         }
-
-        try {
-            $judgePrompt = $this->renderer->render('direction-judge.md', [
-                'user_prompt' => $brief,
-                'candidates'  => self::renderCandidates($directions),
-            ]);
-            $opts = ['log_label' => 'direction-judge'];
-            if ($this->judgeModel !== null) {
-                $opts['model'] = $this->judgeModel;
-            }
-            $verdict = $this->llm->completeJson($judgePrompt, $opts);
-            $n = (int) ($verdict['choice'] ?? 0);
-            if ($n >= 1 && $n <= count($directions)) {
-                return $directions[$n - 1];
-            }
-        } catch (Throwable) {
-            // Fall through to the random pick below.
-        }
-
-        return $directions[random_int(0, count($directions) - 1)];
+        return $seeds[random_int(0, count($seeds) - 1)];
     }
 
     /**
-     * Validate and coerce one raw candidate into the persisted structure.
-     * Returns null when the candidate is unusable (no description). Everything
-     * else degrades gracefully: invalid palette hexes and unknown roles are
+     * Validate and coerce one raw seed ("Title — one vivid sentence"). The
+     * prompt asks for bare strings; an object carrying a `title` key is
+     * tolerated. Returns null when nothing non-empty is present. Pure —
+     * unit-testable.
+     *
+     * @param mixed $raw
+     */
+    public static function normalizeSeed($raw): ?string
+    {
+        if (is_array($raw)) {
+            $raw = $raw['title'] ?? null;
+        }
+        if (!is_string($raw)) {
+            return null;
+        }
+        $seed = trim($raw);
+        return $seed === '' ? null : $seed;
+    }
+
+    /**
+     * Validate and coerce the raw direction into the persisted structure.
+     * Returns null when it is unusable (no description). Everything else
+     * degrades gracefully: invalid palette hexes and unknown roles are
      * dropped, missing fields become empty strings — downstream renders only
      * what is present. Pure — unit-testable.
      *
@@ -259,22 +294,6 @@ final class DesignDirectionStep implements Step
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
-    }
-
-    /**
-     * Render the candidate list for the judge prompt: numbered, each with its
-     * full narrative + fact block, so the judge compares whole concepts. Pure
-     * — unit-testable.
-     *
-     * @param array<int,array<string,mixed>> $directions
-     */
-    public static function renderCandidates(array $directions): string
-    {
-        $blocks = [];
-        foreach ($directions as $i => $direction) {
-            $blocks[] = '### Candidate ' . ($i + 1) . "\n\n" . self::format($direction);
-        }
-        return implode("\n\n", $blocks);
     }
 
     /**
