@@ -20,19 +20,24 @@ final class AnthropicClient implements Llm
      * English because the surrounding instructions are English. Structural
      * output and machine-readable directives (e.g. the AI_IMAGE alt specs the
      * image pipeline parses) are exempt, so the JSON/markup/CSS/PHP steps and
-     * image generation are unaffected. Public so tests can assert it rides on
-     * every body.
+     * image generation are unaffected. The text lives in
+     * prompts/system-preamble.md with the rest of the prompts (it has no
+     * placeholders, so no PromptRenderer); read once per process and cached.
+     * Public so tests can assert it rides on every body.
      */
-    public const SYSTEM_PREAMBLE = 'Respect the language of the original user prompt. A request '
-        . 'may wrap or quote that prompt inside English instructions — the instruction language is '
-        . 'irrelevant; what counts is the language the user\'s own brief is written in. Write ALL '
-        . 'user-facing text you produce — titles, headings, body copy, labels, button text, '
-        . 'captions — in that language, unless the user explicitly asked for another language or '
-        . 'the request names the exact language to use. Output addressed to the build pipeline '
-        . 'rather than to site visitors (planning notes, design rationale, scores) is not '
-        . 'user-facing. Structural output is exempt: JSON keys, code, block markup, CSS, slugs, '
-        . 'file names, other identifiers, and machine-readable directives (such as AI_IMAGE '
-        . 'placeholder specs) keep the exact form their instructions prescribe.';
+    public static function systemPreamble(): string
+    {
+        static $preamble = null;
+        if ($preamble === null) {
+            $file = dirname(__DIR__) . '/prompts/system-preamble.md';
+            $text = is_file($file) ? (string) file_get_contents($file) : '';
+            if (trim($text) === '') {
+                throw new RuntimeException("Missing prompt template: {$file}");
+            }
+            $preamble = trim($text);
+        }
+        return $preamble;
+    }
 
     /**
      * Appended to the system prompt of every JSON call (single and batch) to
@@ -244,12 +249,14 @@ final class AnthropicClient implements Llm
      * Build one streaming Messages API request body from a request spec — the
      * single place the optional per-request knobs (model, max_tokens,
      * temperature, system) are mapped onto the wire format, shared by the
-     * single-call and batch paths. Every body carries SYSTEM_PREAMBLE (the
-     * respect-the-prompt-language rule) as its system prompt, with any
-     * per-request system text appended after it. Temperature is only sent when the caller
+     * single-call and batch paths. Every body carries the system preamble (the
+     * respect-the-prompt-language rule from prompts/system-preamble.md) as its
+     * system prompt, with any per-request system text appended after it.
+     * Temperature is only sent when the caller
      * set one AND the target model still supports sampling parameters, so an
      * unset step keeps the API's default sampling and a step pointed at a
-     * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure — unit-testable.
+     * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure apart from the
+     * cached preamble read — unit-testable.
      *
      * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
      * @return array<string,mixed>
@@ -268,7 +275,7 @@ final class AnthropicClient implements Llm
         if (isset($req['temperature']) && self::supportsSampling($model)) {
             $body['temperature'] = (float) $req['temperature'];
         }
-        $system = self::SYSTEM_PREAMBLE;
+        $system = self::systemPreamble();
         if (trim((string) ($req['system'] ?? '')) !== '') {
             $system .= "\n\n" . $req['system'];
         }
