@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\ThemeValidator;
+
 function validator_project(): array
 {
     $tmp = sys_get_temp_dir() . '/builder_val_' . uniqid();

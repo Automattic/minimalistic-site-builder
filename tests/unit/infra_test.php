@@ -5,6 +5,7 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+
 // Infrastructure tests: ProjectStore, Project, PromptRenderer.
 
 test('slugify lowercases and hyphenates', function () {

@@ -8,6 +8,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function make_designdir_fixture(): array
 {

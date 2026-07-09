@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\LlmLogger;
 use Automattic\SiteBuild\Step;
+
 /**
  * Unit tests for LlmLogger: filename uniqueness (the section-hero -> section-hero-02
  * rule), filename sanitising, the formatted header/request/response layout, and

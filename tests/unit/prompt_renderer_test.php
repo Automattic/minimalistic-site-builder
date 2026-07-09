@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\PromptRenderer;
+
 /**
  * PromptRenderer::fill — plain {{placeholder}} substitution. Every placeholder
  * must resolve; anything left over is a wiring error and throws.

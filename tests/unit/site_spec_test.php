@@ -6,6 +6,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function make_sitespec_fixture(): array
 {

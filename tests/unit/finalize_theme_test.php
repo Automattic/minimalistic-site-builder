@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
+
 test('finalize-theme writes the deterministic functions.php loader', function () {
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');

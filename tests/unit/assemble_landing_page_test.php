@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
+
 /**
  * Unit tests for AssembleLandingPageStep: deterministic composition of the
  * landing page from the generated parts, in plan order, plus templateParts

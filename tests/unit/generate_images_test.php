@@ -5,6 +5,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\Tests\FakeImageClient;
+
 require_once __DIR__ . '/../FakeImageClient.php';
 
 function generate_fixture(): array
