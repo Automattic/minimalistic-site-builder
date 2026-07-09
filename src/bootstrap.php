@@ -9,6 +9,8 @@ declare(strict_types=1);
 use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\WpcomImageClient;
 
@@ -40,13 +42,40 @@ function llm_temperature(string $envSuffix, ?float $default): ?float
     return StepDefaults::temperature($envSuffix, $default);
 }
 
-/** Build the production LLM transport from environment configuration. */
-function make_llm(): AnthropicClient
+/**
+ * Build the production LLM transport from environment configuration.
+ *
+ * LLM_PROVIDER selects the wire client (default anthropic):
+ *   - anthropic — Anthropic Messages API (ANTHROPIC_API_KEY)
+ *   - xai       — OpenAI-compatible client pointed at api.x.ai (XAI_API_KEY)
+ *   - openai    — OpenAI-compatible client (OPENAI_API_KEY, optional OPENAI_BASE_URL)
+ *
+ * Model IDs stay in LLM_MODEL / LLM_MODEL_* (StepDefaults). For xAI set e.g.
+ * LLM_MODEL=grok-4.5 and per-step overrides as needed.
+ */
+function make_llm(): Llm
 {
-    return new AnthropicClient(
-        apiKey: Env::getRequired('ANTHROPIC_API_KEY'),
-        model:  default_llm_model(),
-    );
+    $provider = strtolower((string) Env::get('LLM_PROVIDER', 'anthropic'));
+
+    return match ($provider) {
+        'anthropic', '' => new AnthropicClient(
+            apiKey: Env::getRequired('ANTHROPIC_API_KEY'),
+            model:  default_llm_model(),
+        ),
+        'xai', 'grok' => new OpenAiCompatibleClient(
+            apiKey:  Env::getRequired('XAI_API_KEY'),
+            model:   default_llm_model(),
+            baseUrl: Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1') ?? 'https://api.x.ai/v1',
+        ),
+        'openai', 'openai-compatible' => new OpenAiCompatibleClient(
+            apiKey:  Env::getRequired('OPENAI_API_KEY'),
+            model:   default_llm_model(),
+            baseUrl: Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1') ?? 'https://api.openai.com/v1',
+        ),
+        default => throw new RuntimeException(
+            "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, or openai."
+        ),
+    };
 }
 
 /** Build the image-generation transport (WPCOM AI proxy → Google Vertex Imagen). */

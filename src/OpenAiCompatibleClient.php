@@ -1,0 +1,531 @@
+<?php
+declare(strict_types=1);
+
+namespace Automattic\SiteBuild;
+
+/**
+ * OpenAI Chat Completions API client (generic OpenAI-compatible HTTP transport).
+ *
+ * Zero dependencies: plain cURL POST to `{baseUrl}/chat/completions` with
+ * Bearer auth. Same Llm contract as AnthropicClient — streaming, concurrent
+ * batches, JSON steer, system preamble — so the pipeline can swap providers
+ * without step changes.
+ *
+ * Works with any OpenAI-compatible host. Defaults target OpenAI; for xAI set
+ * baseUrl to https://api.x.ai/v1 (see make_llm() LLM_PROVIDER=xai).
+ */
+final class OpenAiCompatibleClient implements Llm
+{
+    /**
+     * Appended to the system prompt of every JSON call (single and batch) to
+     * steer the model toward raw, fence-free JSON. Kept in sync with
+     * AnthropicClient's JSON_SYSTEM so decode failure logs reconstruct the same
+     * intent.
+     */
+    private const JSON_SYSTEM = "\nRespond with a single valid JSON value and nothing else. "
+        . 'No prose, no markdown fences.';
+
+    private int $requests = 0;
+    private int $inputTokens = 0;
+    private int $outputTokens = 0;
+    private string $endpoint;
+
+    /**
+     * @param string $apiKey            Bearer token (OPENAI_API_KEY / XAI_API_KEY)
+     * @param string $model             Default model when a request does not pin one
+     * @param string $baseUrl           API root, e.g. https://api.x.ai/v1 (no trailing slash required)
+     * @param int    $defaultMaxTokens  max_tokens default for completions
+     */
+    public function __construct(
+        private string $apiKey,
+        private string $model,
+        string $baseUrl = 'https://api.openai.com/v1',
+        private int $defaultMaxTokens = 16000,
+    ) {
+        $this->endpoint = rtrim($baseUrl, '/') . '/chat/completions';
+    }
+
+    /** Resolved chat-completions URL (for tests / diagnostics). */
+    public function endpoint(): string
+    {
+        return $this->endpoint;
+    }
+
+    /**
+     * Cumulative token usage across every request this client has made.
+     *
+     * @return array{requests:int,input_tokens:int,output_tokens:int,total_tokens:int}
+     */
+    public function usageTotals(): array
+    {
+        return [
+            'requests'      => $this->requests,
+            'input_tokens'  => $this->inputTokens,
+            'output_tokens' => $this->outputTokens,
+            'total_tokens'  => $this->inputTokens + $this->outputTokens,
+        ];
+    }
+
+    /**
+     * Pull token counts from an OpenAI-style usage object (or a full response
+     * that nests one under "usage"). Accepts both OpenAI names (prompt_tokens /
+     * completion_tokens) and Anthropic-style aliases some proxies emit.
+     *
+     * @param array<string,mixed> $response
+     * @return array{input:int,output:int}
+     */
+    public static function extractUsage(array $response): array
+    {
+        $u = isset($response['usage']) && is_array($response['usage'])
+            ? $response['usage']
+            : $response;
+        $input = (int) ($u['prompt_tokens'] ?? $u['input_tokens'] ?? 0)
+            + (int) ($u['prompt_cache_hit_tokens'] ?? 0);
+        $output = (int) ($u['completion_tokens'] ?? $u['output_tokens'] ?? 0);
+        return ['input' => $input, 'output' => $output];
+    }
+
+    public function complete(string $prompt, array $opts = []): string
+    {
+        $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens);
+
+        $label = (string) ($opts['log_label'] ?? 'request');
+        try {
+            $res = $this->requestWithRetry($body);
+        } catch (\Throwable $e) {
+            LlmLogger::log($label, $body, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
+            throw $e;
+        }
+
+        $this->requests++;
+        $this->inputTokens += $res['input'];
+        $this->outputTokens += $res['output'];
+
+        LlmLogger::log($label, $body, $res, $res['time']);
+
+        if (trim($res['text']) === '') {
+            throw new \RuntimeException('No text content in streamed response');
+        }
+        return $res['text'];
+    }
+
+    public function completeJson(string $prompt, array $opts = []): array
+    {
+        $opts['system'] = ($opts['system'] ?? '') . self::JSON_SYSTEM;
+        $text = $this->complete($prompt, $opts);
+
+        $data = AnthropicClient::decodeJson($text);
+        if ($data === null) {
+            $error = "Expected JSON, got: {$text}";
+            LlmLogger::log(
+                (string) ($opts['log_label'] ?? 'request'),
+                self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens),
+                ['text' => $text, 'input' => 0, 'output' => 0],
+                0.0,
+                $error,
+            );
+            throw new \RuntimeException($error);
+        }
+        return $data;
+    }
+
+    public function completeJsonBatch(array $requests): array
+    {
+        $out = [];
+        foreach ($this->textBatch($requests, true) as $key => $text) {
+            $data = AnthropicClient::decodeJson($text);
+            if ($data === null) {
+                $error = "batch request '{$key}': expected JSON, got: {$text}";
+                $req = $requests[$key];
+                LlmLogger::log(
+                    (string) ($req['log_label'] ?? $key),
+                    self::bodyFor(
+                        ['system' => (string) ($req['system'] ?? '') . self::JSON_SYSTEM] + $req,
+                        $this->model,
+                        $this->defaultMaxTokens,
+                    ),
+                    ['text' => $text, 'input' => 0, 'output' => 0],
+                    0.0,
+                    $error,
+                );
+                throw new \RuntimeException($error);
+            }
+            $out[$key] = $data;
+        }
+        return $out;
+    }
+
+    public function completeBatch(array $requests): array
+    {
+        return $this->textBatch($requests, false);
+    }
+
+    /**
+     * Shared concurrent-batch transport for completeJsonBatch and completeBatch.
+     *
+     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
+     * @return array<string,string>
+     */
+    private function textBatch(array $requests, bool $json): array
+    {
+        if ($requests === []) {
+            return [];
+        }
+
+        $bodies = [];
+        foreach ($requests as $key => $req) {
+            $system = (string) ($req['system'] ?? '');
+            if ($json) {
+                $system .= self::JSON_SYSTEM;
+            }
+            $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens);
+        }
+
+        $labelFor = fn (string $key): string => (string) ($requests[$key]['log_label'] ?? $key);
+
+        $results = AnthropicClient::retryTextBatch(
+            $bodies,
+            fn (array $subset): array => $this->streamMulti($subset),
+            [2, 5, 12],
+            function (string $key, string $error, float $time) use ($labelFor, &$bodies): void {
+                LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
+            },
+        );
+
+        $out = [];
+        foreach ($results as $key => $res) {
+            $this->requests++;
+            $this->inputTokens += $res['input'];
+            $this->outputTokens += $res['output'];
+
+            LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+
+            $out[$key] = $res['text'];
+        }
+        return $out;
+    }
+
+    /**
+     * Build one streaming Chat Completions request body. System text (preamble
+     * + optional per-request system) becomes a system message; the user prompt
+     * is the user message. stream_options.include_usage asks the provider to
+     * attach token usage on the final SSE chunk.
+     *
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
+     * @return array<string,mixed>
+     */
+    public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array
+    {
+        $model = (string) ($req['model'] ?? $defaultModel);
+        $system = AnthropicClient::systemPreamble();
+        if (trim((string) ($req['system'] ?? '')) !== '') {
+            $system .= "\n\n" . $req['system'];
+        }
+
+        $messages = [
+            ['role' => 'system', 'content' => $system],
+            ['role' => 'user', 'content' => (string) $req['prompt']],
+        ];
+
+        $body = [
+            'model'      => $model,
+            'max_tokens' => $req['max_tokens'] ?? $defaultMaxTokens,
+            'stream'     => true,
+            // So the final SSE chunk carries usage (OpenAI + most compat hosts).
+            'stream_options' => ['include_usage' => true],
+            'messages'   => $messages,
+        ];
+        if (isset($req['temperature'])) {
+            $body['temperature'] = (float) $req['temperature'];
+        }
+        return $body;
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $bodies
+     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float}>
+     */
+    private function streamMulti(array $bodies): array
+    {
+        $out = [];
+        foreach (AnthropicClient::concurrencyWindows($bodies) as $chunk) {
+            $out += $this->streamChunk($chunk);
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $bodies
+     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float}>
+     */
+    private function streamChunk(array $bodies): array
+    {
+        $multi = curl_multi_init();
+        $handles = [];
+        $raw = [];
+        foreach ($bodies as $key => $body) {
+            $raw[$key] = '';
+            $ch = curl_init($this->endpoint);
+            curl_setopt_array($ch, [
+                CURLOPT_POST          => true,
+                CURLOPT_HTTPHEADER    => $this->headers(),
+                CURLOPT_POSTFIELDS    => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                CURLOPT_TIMEOUT       => 600,
+                CURLOPT_LOW_SPEED_LIMIT => 1,
+                CURLOPT_LOW_SPEED_TIME  => 90,
+                CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key) {
+                    $raw[$key] .= $chunk;
+                    return strlen($chunk);
+                },
+            ]);
+            $handles[$key] = $ch;
+            curl_multi_add_handle($multi, $ch);
+        }
+
+        do {
+            $status = curl_multi_exec($multi, $running);
+            if ($running && curl_multi_select($multi, 1.0) === -1) {
+                usleep(1000);
+            }
+        } while ($running && $status === CURLM_OK);
+
+        $out = [];
+        foreach ($handles as $key => $ch) {
+            $errno  = curl_errno($ch);
+            $error  = curl_error($ch);
+            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+            curl_multi_remove_handle($multi, $ch);
+            curl_close($ch);
+            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus, $time);
+        }
+
+        curl_multi_close($multi);
+        return $out;
+    }
+
+    /**
+     * @return array{ok:bool,text?:string,input?:int,output?:int,time?:float,error?:string,transient?:bool,retry_without?:string}
+     */
+    private static function interpretStream(string $raw, int $errno, string $error, int $status, float $time = 0.0): array
+    {
+        if ($errno !== 0) {
+            return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}", 'time' => $time];
+        }
+        if ($status < 200 || $status >= 300) {
+            $out = ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw), 'time' => $time];
+            if (($param = AnthropicClient::rejectedParam($raw)) !== null) {
+                $out['retry_without'] = $param;
+            }
+            return $out;
+        }
+
+        $parsed = self::parseSse($raw);
+        if ($parsed['error'] !== null) {
+            // Treat provider "overloaded" style messages as transient when obvious.
+            $transient = str_contains(strtolower($parsed['error']), 'overloaded')
+                || str_contains(strtolower($parsed['error']), 'rate limit');
+            return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
+        }
+        if (trim($parsed['text']) === '') {
+            return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response', 'time' => $time];
+        }
+        return [
+            'ok'     => true,
+            'text'   => $parsed['text'],
+            'input'  => $parsed['input'],
+            'output' => $parsed['output'],
+            'time'   => $time,
+        ];
+    }
+
+    private static function isTransientCurl(int $errno): bool
+    {
+        return in_array($errno, [6, 7, 28, 35, 52, 55, 56], true);
+    }
+
+    private static function isTransientStatus(int $status): bool
+    {
+        return $status === 429 || $status >= 500;
+    }
+
+    /**
+     * @param array<string,mixed> $body
+     * @return array{text:string,input:int,output:int,time:float}
+     */
+    private function requestWithRetry(array &$body): array
+    {
+        $delays = [2, 5, 12];
+        $attempt = 0;
+        while (true) {
+            try {
+                return $this->streamRequest($body);
+            } catch (TransientApiException $e) {
+                if ($attempt >= count($delays)) {
+                    throw new \RuntimeException('OpenAI-compatible API failed after retries: ' . $e->getMessage(), 0, $e);
+                }
+                $wait = $delays[$attempt];
+                $attempt++;
+                fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
+                sleep($wait);
+            } catch (\RuntimeException $e) {
+                $param = AnthropicClient::rejectedParam($e->getMessage());
+                if ($param === null || !array_key_exists($param, $body)) {
+                    throw $e;
+                }
+                unset($body[$param]);
+                fwrite(STDERR, "    (model rejected '{$param}'; retrying without it)\n");
+            }
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $body
+     * @return array{text:string,input:int,output:int,time:float}
+     */
+    private function streamRequest(array $body): array
+    {
+        $payload = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $raw = '';
+
+        $ch = curl_init($this->endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_POST          => true,
+            CURLOPT_HTTPHEADER    => $this->headers(),
+            CURLOPT_POSTFIELDS    => $payload,
+            CURLOPT_TIMEOUT       => 600,
+            CURLOPT_LOW_SPEED_LIMIT => 1,
+            CURLOPT_LOW_SPEED_TIME  => 90,
+            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw) {
+                $raw .= $chunk;
+                return strlen($chunk);
+            },
+        ]);
+
+        curl_exec($ch);
+        $errno  = curl_errno($ch);
+        $error  = curl_error($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+        curl_close($ch);
+
+        if ($errno !== 0) {
+            if (self::isTransientCurl($errno)) {
+                throw new TransientApiException("cURL ({$errno}): {$error}");
+            }
+            throw new \RuntimeException("cURL error ({$errno}): {$error}");
+        }
+        if ($status < 200 || $status >= 300) {
+            if (self::isTransientStatus($status)) {
+                throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
+            }
+            throw new \RuntimeException("OpenAI-compatible API HTTP {$status}: " . self::truncate($raw));
+        }
+
+        $parsed = self::parseSse($raw);
+        if ($parsed['error'] !== null) {
+            $msg = "stream error: {$parsed['error']}";
+            if (str_contains(strtolower($parsed['error']), 'overloaded')
+                || str_contains(strtolower($parsed['error']), 'rate limit')) {
+                throw new TransientApiException($msg);
+            }
+            throw new \RuntimeException($msg);
+        }
+        if (trim($parsed['text']) === '') {
+            throw new TransientApiException('no text content in streamed response');
+        }
+
+        return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output'], 'time' => $time];
+    }
+
+    /** @return list<string> */
+    private function headers(): array
+    {
+        return [
+            'Authorization: Bearer ' . $this->apiKey,
+            'content-type: application/json',
+            'accept: text/event-stream',
+        ];
+    }
+
+    /**
+     * Parse an OpenAI-style Chat Completions SSE body into concatenated text
+     * and token usage. Handles:
+     *   - choices[0].delta.content (streaming tokens)
+     *   - choices[0].message.content (non-stream JSON body if a host ignores stream)
+     *   - usage on any chunk (final chunk when stream_options.include_usage)
+     *   - data: [DONE]
+     *   - top-level error objects some hosts send mid-stream
+     *
+     * @return array{text:string,input:int,output:int,error:?string}
+     */
+    public static function parseSse(string $raw): array
+    {
+        $text = '';
+        $input = 0;
+        $output = 0;
+        $error = null;
+
+        // Non-stream JSON response (provider ignored stream:true or returned error JSON).
+        $trimmed = trim($raw);
+        if ($trimmed !== '' && ($trimmed[0] === '{' || $trimmed[0] === '[')) {
+            $json = json_decode($trimmed, true);
+            if (is_array($json)) {
+                if (isset($json['error'])) {
+                    $err = $json['error'];
+                    $error = is_array($err)
+                        ? (string) ($err['message'] ?? json_encode($err))
+                        : (string) $err;
+                    return ['text' => '', 'input' => 0, 'output' => 0, 'error' => $error];
+                }
+                if (isset($json['choices'][0]['message']['content'])) {
+                    $text = (string) $json['choices'][0]['message']['content'];
+                    $usage = self::extractUsage($json);
+                    return ['text' => $text, 'input' => $usage['input'], 'output' => $usage['output'], 'error' => null];
+                }
+            }
+        }
+
+        foreach (preg_split('/\r?\n/', $raw) ?: [] as $line) {
+            if (!str_starts_with($line, 'data:')) {
+                continue;
+            }
+            $json = trim(substr($line, 5));
+            if ($json === '' || $json === '[DONE]') {
+                continue;
+            }
+            $evt = json_decode($json, true);
+            if (!is_array($evt)) {
+                continue;
+            }
+            if (isset($evt['error'])) {
+                $err = $evt['error'];
+                $error = is_array($err)
+                    ? (string) ($err['message'] ?? json_encode($err))
+                    : (string) $err;
+                continue;
+            }
+            $delta = $evt['choices'][0]['delta']['content'] ?? null;
+            if (is_string($delta) && $delta !== '') {
+                $text .= $delta;
+            }
+            // Some hosts send the full message on the last chunk instead of deltas.
+            $msgContent = $evt['choices'][0]['message']['content'] ?? null;
+            if (is_string($msgContent) && $msgContent !== '' && $text === '') {
+                $text = $msgContent;
+            }
+            if (isset($evt['usage']) && is_array($evt['usage'])) {
+                $usage = self::extractUsage($evt);
+                $input = $usage['input'];
+                $output = $usage['output'];
+            }
+        }
+
+        return ['text' => $text, 'input' => $input, 'output' => $output, 'error' => $error];
+    }
+
+    private static function truncate(string $s, int $max = 300): string
+    {
+        return strlen($s) > $max ? substr($s, 0, $max) . '…' : $s;
+    }
+}

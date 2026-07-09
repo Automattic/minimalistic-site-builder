@@ -8,7 +8,9 @@ emits into real assets via Google Imagen (through the WPCOM AI proxy).
 
 ```bash
 cp .env.example .env
-# then fill in ANTHROPIC_API_KEY (and GOOGLE_VERTEX_API_TOKEN for image generation)
+# Text/code LLM (default Anthropic): ANTHROPIC_API_KEY
+# Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
+# Images (optional): GOOGLE_VERTEX_API_TOKEN
 
 npm install   # once; installs the Node helper tools under bin/ (block-fixer, screenshot)
 ```
@@ -49,8 +51,9 @@ booted headless in WordPress Playground and a full-page screenshot is saved to
 `projects/<slug>/logs/home.png`. Re-runs never overwrite prior output — each
 build goes to the next free slug (`tbilisi` → `tbilisi2` → …).
 
-Needs `ANTHROPIC_API_KEY` and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js
-(for Playground) and a Chrome/Chromium binary (for the screenshot).
+Needs a text LLM key (`ANTHROPIC_API_KEY`, or `XAI_API_KEY` with `LLM_PROVIDER=xai`)
+and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js (for Playground) and a
+Chrome/Chromium binary (for the screenshot).
 
 Useful variants:
 
