@@ -91,12 +91,4 @@ final class FakeLlm implements Llm
         }
         return $out;
     }
-
-    /**
-     * @return array{input_tokens:int,output_tokens:int,requests:int}
-     */
-    public function usageTotals(): array
-    {
-        return ['input_tokens' => 0, 'output_tokens' => 0, 'requests' => count($this->calls)];
-    }
 }

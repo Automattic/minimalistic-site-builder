@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
@@ -41,18 +43,18 @@ if ($prompt === null || trim($prompt) === '') {
     exit(1);
 }
 
-$store = new ProjectStore(repo_path('projects'));
-// Without an explicit --slug, name the folder with a short arbitrary slug
-// (e.g. "amber-otter") rather than echoing the whole prompt. freeSlug() adds
-// repetition protection so a repeat name never overwrites an existing project.
-$slug ??= $store->freeSlug(ProjectStore::randomSlug());
-$project = $store->create($slug);
-$project->writeJson('meta.json', [
-    'prompt' => $prompt, 'provisional_slug' => $project->slug(), 'created_at' => gmdate('c'),
-]);
-
 $llm = make_llm();
-$pipeline = build_pipeline($llm);
+$builder = new SiteBuilder(
+    llm: $llm,
+    promptsDir: Package::promptsDir(),
+    outputRoot: repo_path('projects'),
+    blockFixer: NodeBlockFixer::default(),
+    models: step_models(),
+);
+// Without an explicit --slug, createProject picks a free random adjective-noun
+// name rather than echoing the whole prompt.
+$project = $builder->createProject($prompt, $slug);
+$pipeline = $builder->pipeline();
 
 // step id => model, so the report can show which model each LLM step ran on.
 // Deterministic steps aren't in this map and render as "—".

@@ -2,8 +2,9 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BuildReport;
-use Automattic\SiteBuild\Pipeline;
-use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
@@ -60,7 +61,14 @@ if ($prompt === null || trim($prompt) === '') {
 }
 
 $llm = make_llm();
-$pipeline = build_pipeline($llm);
+$builder = new SiteBuilder(
+    llm: $llm,
+    promptsDir: Package::promptsDir(),
+    outputRoot: repo_path('projects'),
+    blockFixer: NodeBlockFixer::default(),
+    models: step_models(),
+);
+$pipeline = $builder->pipeline();
 
 // Validate --until BEFORE creating the project, so an unknown id fails loud
 // (instead of silently running the whole build) without leaving a stray project
@@ -71,25 +79,10 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
     exit(1);
 }
 
-$store = new ProjectStore(repo_path('projects'));
-
-// Without an explicit --slug, name the folder with a short arbitrary slug
-// (e.g. "amber-otter") rather than echoing the whole prompt. freeSlug() adds
-// the same repetition protection demo builds get, so a repeat name never
-// overwrites an existing project.
-$slug ??= $store->freeSlug(ProjectStore::randomSlug());
-$project = $store->create($slug);
-
-// Seed meta.json (provisional slug = directory name; the canonical site slug
-// comes from siteSpec.json once generated). Merge over any existing meta so an
-// orchestrator (bin/build-demos.php) can pre-seed extra fields — demo_source,
-// demo_id — before delegating the build to this script.
-$meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-$project->writeJson('meta.json', array_merge($meta, [
-    'prompt'           => $prompt,
-    'provisional_slug' => $project->slug(),
-    'created_at'       => gmdate('c'),
-]));
+// Without an explicit --slug, createProject picks a free random adjective-noun
+// name. Explicit --slug reuses that directory across re-runs. meta.json is
+// seeded (and merged) inside createProject so demo orchestrators can pre-seed.
+$project = $builder->createProject($prompt, $slug);
 
 echo "Building '{$project->slug()}'\n";
 

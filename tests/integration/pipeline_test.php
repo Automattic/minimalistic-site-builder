@@ -1,21 +1,31 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\Pipeline;
-use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\ThemeValidator;
+
 /**
  * Full step sequence as a deterministic integration test: runs the real
- * Pipeline (build_pipeline) with a FakeLlm scripted with realistic canned
+ * pipeline via SiteBuilder with a FakeLlm scripted with realistic canned
  * outputs, then asserts the produced theme passes structural validation.
  */
 
+function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
+{
+    return new SiteBuilder(
+        llm: $llm,
+        promptsDir: Package::promptsDir(),
+        outputRoot: $outputRoot,
+        blockFixer: NodeBlockFixer::default(),
+        models: [],
+    );
+}
+
 test('full pipeline produces a structurally valid theme', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
-
     $llm = new FakeLlm();
 
     // refine-prompt (text) — fast small-model clean-up of the raw prompt, runs first
@@ -96,7 +106,9 @@ test('full pipeline produces a structurally valid theme', function () {
         . "});\n"
     );
 
-    build_pipeline($llm)->runThrough($project);
+    $builder = make_integration_builder($llm, $tmp);
+    $project = $builder->createProject('A cozy neighborhood bakery', 'demo');
+    $builder->pipeline()->runThrough($project);
 
     $problems = ThemeValidator::validate($project);
     assert_eq([], $problems, 'theme should validate; problems: ' . implode('; ', $problems));
@@ -138,10 +150,12 @@ test('full pipeline produces a structurally valid theme', function () {
 });
 
 test('pipeline step order is correct', function () {
-    $ids = build_pipeline(new FakeLlm())->stepIds();
+    $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
+    $ids = make_integration_builder(new FakeLlm(), $tmp)->pipeline()->stepIds();
     assert_eq([
         'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+section-plan', 'sections', 'assemble-landing-page',
         'collect-images', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
     ], $ids);
+    exec('rm -rf ' . escapeshellarg($tmp));
 });

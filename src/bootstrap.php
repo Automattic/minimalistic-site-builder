@@ -3,31 +3,12 @@ declare(strict_types=1);
 
 /**
  * Loads Composer autoloader and env. Global factory helpers for the CLI remain
- * here until consumers fully construct SiteBuilder themselves.
+ * here (make_llm, step_models, …). Pipeline assembly lives on SiteBuilder.
  */
 
 use Automattic\SiteBuild\AnthropicClient;
-use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
-use Automattic\SiteBuild\Llm;
-use Automattic\SiteBuild\NodeBlockFixer;
-use Automattic\SiteBuild\Pipeline;
-use Automattic\SiteBuild\PromptRenderer;
-use Automattic\SiteBuild\Steps\ApplyIdentityStep;
-use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
-use Automattic\SiteBuild\Steps\CollectImagesStep;
-use Automattic\SiteBuild\Steps\DesignDirectionStep;
-use Automattic\SiteBuild\Steps\FinalizeThemeStep;
-use Automattic\SiteBuild\Steps\FixBlocksStep;
-use Automattic\SiteBuild\Steps\FontsPhpStep;
-use Automattic\SiteBuild\Steps\PageStylesStep;
-use Automattic\SiteBuild\Steps\RefinePromptStep;
-use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
-use Automattic\SiteBuild\Steps\SectionPlanStep;
-use Automattic\SiteBuild\Steps\SectionsStep;
-use Automattic\SiteBuild\Steps\SiteSpecStep;
-use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\WpcomImageClient;
 
 require_once dirname(__DIR__) . '/vendor/autoload.php';
@@ -156,60 +137,4 @@ function repo_path(string $rel = ''): string
 {
     $root = dirname(__DIR__);
     return $rel === '' ? $root : $root . '/' . ltrim($rel, '/');
-}
-
-/**
- * Assemble the full site-creation pipeline in order. Steps are added here as
- * they are implemented; this is the single source of step ordering.
- */
-function build_pipeline(Llm $llm): Pipeline
-{
-    $renderer = new PromptRenderer(repo_path('prompts'));
-    $models = step_models();
-    $temps = step_temperatures();
-    return new Pipeline([
-        new ScaffoldThemeStep(),
-        // Cheap, fast first pass on a small model: expand short/vague prompts and
-        // normalize the brief before any expensive step reads it. Rewrites the
-        // `prompt` in meta.json (original kept as `original_prompt`), so every
-        // step below benefits with no further wiring.
-        new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
-        new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
-        new ApplyIdentityStep(),
-        // Commit to ONE creative concept BEFORE theme.json / the section plan, so
-        // both derive from a strong, specific direction instead of converging on
-        // safe defaults. Writes designDirection.json, read by the steps below.
-        // Tradeoff: this is an extra serial LLM round-trip on the critical path
-        // (the concurrent group now depends on its output) — a deliberate cost
-        // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
-        new DesignDirectionStep($llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['design-direction-seeds']),
-        // theme.json and the section plan both derive from the prompt + siteSpec +
-        // the design direction, so run them concurrently. Design decisions are
-        // made inline, steered by designDirection.json.
-        new ConcurrentGroup($llm, [
-            new ThemeJsonStep($llm, $renderer, $models['theme-json'], $temps['theme-json']),
-            new SectionPlanStep($llm, $renderer, $models['section-plan'], $temps['section-plan']),
-        ]),
-        // Generate the header, footer, and every section part in one concurrent
-        // batch, then stitch them into the page deterministically.
-        new SectionsStep($llm, $renderer, $models['sections'], $temps['sections']),
-        new AssembleLandingPageStep(),
-        // Collect image placeholders BEFORE fix-blocks: the block re-serializer
-        // strips the alt from wp:cover background images (core cover save()
-        // resets it to ""), which would lose every hero's AI_IMAGE spec.
-        new CollectImagesStep(),
-        new FixBlocksStep(NodeBlockFixer::default()),
-        // AFTER fix-blocks: reads the final (re-serialized) markup for which
-        // layout utility classes survived, and appends their CSS to style.css —
-        // a file the fixer never touches, so nothing here can be stripped.
-        new PageStylesStep($llm, $renderer, $models['page-styles'], $temps['page-styles']),
-        // Also after fix-blocks: writes fonts.php from the design direction,
-        // validated against a deterministic scan of the final theme.json +
-        // markup (every family/weight/italic the build uses MUST be requested;
-        // scan-built fallback otherwise).
-        new FontsPhpStep($llm, $renderer, $models['fonts-php'], $temps['fonts-php']),
-        // Sole owner of functions.php: the deterministic loader that enqueues
-        // style.css and require_once's the generated fonts.php.
-        new FinalizeThemeStep(),
-    ]);
 }
