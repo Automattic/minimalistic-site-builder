@@ -6,7 +6,7 @@
 
 **Architecture:** Thin facade only: constructor injects `Llm`, prompts dir, output root, `BlockFixer`, and optional model overrides; `pipeline()` relocates today's step assembly; `store()` / `createProject()` own project dirs + `meta.json` seeding. Reporting, images, and Playground stay in the CLI. No `build()` method. No host-composed graphs.
 
-**Tech Stack:** PHP 8.1+, existing zero-dependency harness (`php tests/run.php`), Composer PSR-4 package surface from M1 Tasks 1–3.
+**Tech Stack:** PHP 8.1+, existing zero-dependency harness (`php tests/run.php`), dependency-free PSR-4 autoload (`autoload.php`) + package namespaces from M1 Tasks 1–3.
 
 **Spec:** [`docs/superpowers/specs/2026-07-09-site-builder-facade-design.md`](../specs/2026-07-09-site-builder-facade-design.md)
 
@@ -14,18 +14,18 @@
 
 ## Prerequisites (hard gate)
 
-This plan **starts only after** Milestone 1 Tasks 1–3 are done. As of plan authoring the repo still lacks them (`composer.json`, `Package`, `BlockFixer` / `NodeBlockFixer`, namespaces).
+This plan **starts only after** Milestone 1 Tasks 1–3 are done. As of plan authoring the repo still lacks them (`autoload.php`, `Package`, `BlockFixer` / `NodeBlockFixer`, namespaces).
 
 | Required | Source |
 |---|---|
-| Composer + PSR-4 `Automattic\SiteBuild\` | [M1 plan Task 1](2026-07-01-site-build-package-milestone-1.md) |
+| Dependency-free PSR-4 `Automattic\SiteBuild\` via `autoload.php` | [M1 plan Task 1](2026-07-01-site-build-package-milestone-1.md) (no Composer) |
 | `Package::root()` / `promptsDir()` / `blockFixerScript()` | M1 plan Task 2 |
 | `BlockFixer`, `NodeBlockFixer`, `FixBlocksStep(BlockFixer)` | M1 plan Task 3 |
 
 **Before any Task below:**
 
 ```bash
-test -f composer.json && test -f src/Package.php && test -f src/BlockFixer.php && test -f src/NodeBlockFixer.php && test -d src/Steps && composer dump-autoload -q && php tests/run.php
+test -f autoload.php && test -f src/Package.php && test -f src/BlockFixer.php && test -f src/NodeBlockFixer.php && test -d src/Steps && php tests/run.php
 ```
 
 Expected: suite green, classes under `Automattic\SiteBuild\`. If missing, **stop** and execute M1 Tasks 1–3 first (keep the post-fix `constrainedPart` repair on header/footer inside `FixBlocksStep` when extracting `NodeBlockFixer` — do not drop it).
@@ -341,7 +341,7 @@ Notes for the implementer:
 
 - [ ] **Step 2: Regenerate autoload if needed and run unit tests**
 
-Run: `composer dump-autoload && php tests/run.php`
+Run: `php tests/run.php`
 Expected: new `site_builder_test` cases PASS; full suite still green (callers still use `build_pipeline`).
 
 If `createProject` random-slug assertion is flaky (astronomically unlikely collision with `a-test-cafe`), keep the assertion as written.

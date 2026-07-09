@@ -5,8 +5,9 @@ namespace Automattic\SiteBuild;
 
 /**
  * Default BlockFixer: shells out to the bundled Node block-fixer
- * (bin/block-fixer/fix-templates.js), which parses each file with
- * @wordpress/blocks and re-serializes it to match WordPress save() exactly.
+ * (bin/block-fixer/fix-templates.js). Needs Node 18+ and the script's npm
+ * deps (`npm install` at the package root). Hosts without Node should inject
+ * their own BlockFixer.
  */
 final class NodeBlockFixer implements BlockFixer
 {
@@ -15,6 +16,7 @@ final class NodeBlockFixer implements BlockFixer
         private string $nodeBinary = 'node',
     ) {}
 
+    /** Bundled fixer; node binary from NODE_BIN (default: PATH). */
     public static function default(): self
     {
         $node = Env::get('NODE_BIN', 'node');
@@ -27,23 +29,19 @@ final class NodeBlockFixer implements BlockFixer
             throw new \RuntimeException("block-fixer script not found: {$this->script}");
         }
 
-        $cmd = sprintf(
-            '%s %s %s',
-            escapeshellarg($this->nodeBinary),
-            escapeshellarg($this->script),
-            escapeshellarg($themeDir)
-        );
-
-        // stderr → temp FILE, not a pipe: @wordpress/blocks can emit a large
-        // volume of output, and reading stdout to EOF while the child blocks on a
-        // full stderr pipe buffer would deadlock. A file sink never blocks.
+        // stderr → file (or null device), not a pipe: large @wordpress/blocks
+        // output can deadlock if stderr fills a pipe nobody drains. stdin from
+        // null so the child never waits on the host's stdin. Array form proc_open
+        // skips the shell so paths reach Node byte-for-byte.
         $errFile = tempnam(sys_get_temp_dir(), 'blockfixer-');
+        $nullDevice = DIRECTORY_SEPARATOR === '\\' ? 'NUL' : '/dev/null';
         $descriptors = [
+            0 => ['file', $nullDevice, 'r'],
             1 => ['pipe', 'w'],
-            2 => $errFile !== false ? ['file', $errFile, 'w'] : ['pipe', 'w'],
+            2 => ['file', $errFile !== false ? $errFile : $nullDevice, 'w'],
         ];
 
-        $proc = proc_open($cmd, $descriptors, $pipes);
+        $proc = proc_open([$this->nodeBinary, $this->script, $themeDir], $descriptors, $pipes);
         if (!is_resource($proc)) {
             if ($errFile !== false) {
                 @unlink($errFile);
@@ -66,14 +64,13 @@ final class NodeBlockFixer implements BlockFixer
             );
         }
 
+        // First line = human summary for the console; rest = full report for the log.
         $summary = self::summaryLine($stdout);
-        if (trim($stderr) !== '') {
-            return $summary . "\n\n--- stderr ---\n" . rtrim($stderr);
-        }
-        // Keep full stdout in the returned log body so FixBlocksStep can write
-        // the detailed report; prefix is the human summary for the console.
         $log = rtrim($stdout);
-        return $log !== '' ? $log : $summary;
+        if (trim($stderr) !== '') {
+            $log .= ($log !== '' ? "\n\n" : '') . "--- stderr ---\n" . rtrim($stderr);
+        }
+        return $log !== '' ? $summary . "\n" . $log : $summary;
     }
 
     /** The single human summary line the fixer prints last. Pure — unit-testable. */

@@ -16,7 +16,6 @@ This is a **repackaging** change. It does not change prompt templates, step logi
 ## Non-goals
 
 - Host-composed / alternate step graphs (`docs/composition-and-extension.md` remains a later concern)
-- Injectable temperatures on the constructor
 - A thick `build()` that owns reporting, images, or Playground serve
 - Host-specific `Llm` adapters (stay with the host; not part of this package)
 - `Package`, `BlockFixer`, `NodeBlockFixer` (Tasks 2–3; assumed present when Task 4 lands)
@@ -75,6 +74,7 @@ final class SiteBuilder
 | `string $outputRoot` | Root for project folders (CLI: `repo_path('projects')`; hosts pass their own dir) |
 | `BlockFixer $blockFixer` | Injected into `FixBlocksStep` (CLI: `NodeBlockFixer::default()`) |
 | `array $models` | Partial map of step id → model id; merged over package defaults |
+| `array $temperatures` | Optional partial map of step id → temperature; merged over package defaults (null = omit) |
 
 No factory helpers (`withDefaults`, etc.) in this design. Callers pass paths and fixer explicitly.
 
@@ -86,8 +86,8 @@ Relocates the **exact** step assembly currently in `build_pipeline()` (`src/boot
 |---|---|
 | `$llm` | `$this->llm` |
 | `new PromptRenderer(repo_path('prompts'))` | `new PromptRenderer($this->promptsDir)` |
-| `step_models()` | package default map **merged with** `$this->models` (consumer wins per key) |
-| `step_temperatures()` | same helper / same defaults as today (not constructor-injected) |
+| `step_models()` | `StepDefaults::models()` **merged with** `$this->models` (consumer wins per key) |
+| `step_temperatures()` | `StepDefaults::temperatures()` **merged with** `$this->temperatures` |
 | `new FixBlocksStep()` | `new FixBlocksStep($this->blockFixer)` |
 
 Constraints:
@@ -96,7 +96,7 @@ Constraints:
 - `GenerateImagesStep` stays **out** of the default pipeline (CLI opt-in after a full run).
 - `pipeline()` returns a **fresh** `Pipeline` on every call (no memoization).
 - Model merge must apply defaults first, then overlay `$this->models`. Do not pass bare `$models['site-spec'] ?? null` without the default layer — that would drop intentional model selection.
-- Temperatures remain assembly-internal via the existing `step_temperatures()` / env-override behavior for CLI parity. Injectable temperatures are out of scope for M1.
+- Temperatures: package defaults (with env overrides) overlaid with constructor `$temperatures`, same merge shape as models.
 
 After this task, **`build_pipeline()` is removed**. `SiteBuilder::pipeline()` is the only assembler of the default sequence.
 
@@ -161,7 +161,7 @@ $project = $builder->createProject($prompt, $slug);
 | `step_models()`, `step_temperatures()`, `default_llm_model()`, `llm_temperature()` | |
 | `repo_path()` (CLI path helper until fully superseded by `Package` for package assets) | |
 
-`step_models()` / `step_temperatures()` remain shared helpers so CLI env overrides and `SiteBuilder` assembly stay one map.
+`StepDefaults` holds the model/temperature maps (with env overrides). CLI helpers `step_models()` / `step_temperatures()` delegate there; `SiteBuilder` calls `StepDefaults` directly so hosts need not load bootstrap.
 
 ## Host consumption (informational)
 
@@ -238,7 +238,7 @@ Host constructs SiteBuilder(llm, promptsDir, outputRoot, blockFixer, models?)
 | Question | Decision |
 |---|---|
 | Brainstorm focus | Lock Task 4 SiteBuilder API (not full composition redesign) |
-| Temperatures | Models only on constructor; temps stay assembly-internal |
+| Temperatures | Optional constructor map, merged like models over StepDefaults |
 | Null slug | `freeSlug(randomSlug())` (match CLI) |
 | Facade thickness | Thin: `pipeline` / `store` / `createProject` only |
 | Shape | Plan-literal (Approach A); no `withDefaults`, no pipeline memoization |

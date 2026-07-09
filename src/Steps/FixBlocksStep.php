@@ -33,8 +33,13 @@ final class FixBlocksStep implements Step
 
     public function run(Project $project): void
     {
-        $summary = $this->fixer->fix($project->themePath());
-        file_put_contents($project->logPath(self::LOG_FILE), $summary . "\n");
+        try {
+            $summary = $this->fixer->fix($project->themePath());
+        } catch (\RuntimeException $e) {
+            $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
+            throw $e;
+        }
+        $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
 
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert

@@ -10,6 +10,9 @@ namespace Automattic\SiteBuild;
  */
 interface BlockFixer
 {
-    /** Re-serialize every block template under $themeDir; return a one-line summary. */
+    /**
+     * Re-serialize block templates under $themeDir. First line = console summary;
+     * further lines = log detail.
+     */
     public function fix(string $themeDir): string;
 }

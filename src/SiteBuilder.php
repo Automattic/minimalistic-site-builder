@@ -25,29 +25,38 @@ use Automattic\SiteBuild\Steps\ThemeJsonStep;
  * then createProject() and pipeline()->runThrough(). Replaces the procedural
  * build_pipeline() bootstrap so embedding hosts inject their own dependencies.
  *
- * @param array<string,string> $models step id => model id overrides
+ * Run at most one build per process: LlmLogger is process-global and
+ * Pipeline::runThrough() points it at the current project's logs/.
+ *
+ * @param array<string,string>  $models       step id => model id overrides
+ * @param array<string,?float>  $temperatures step id => temperature overrides
+ *        (null = don't send temperature; API default applies)
  */
 final class SiteBuilder
 {
-    /** @param array<string,string> $models */
+    /**
+     * @param array<string,string> $models
+     * @param array<string,?float> $temperatures
+     */
     public function __construct(
         private Llm $llm,
         private string $promptsDir,
         private string $outputRoot,
         private BlockFixer $blockFixer,
         private array $models = [],
+        private array $temperatures = [],
     ) {}
 
     /**
      * Assemble the full site-creation pipeline in order. Fresh Pipeline each
-     * call. Model map is package defaults (step_models()) overlaid with the
-     * constructor overrides; temperatures come from step_temperatures().
+     * call. Models and temperatures are package defaults (StepDefaults)
+     * overlaid with constructor overrides.
      */
     public function pipeline(): Pipeline
     {
         $renderer = new PromptRenderer($this->promptsDir);
-        $models = array_merge(step_models(), $this->models);
-        $temps = step_temperatures();
+        $models = array_merge(StepDefaults::models(), $this->models);
+        $temps = array_merge(StepDefaults::temperatures(), $this->temperatures);
 
         return new Pipeline([
             new ScaffoldThemeStep(),
@@ -103,16 +112,15 @@ final class SiteBuilder
 
     /**
      * Create a project directory and seed meta.json. Null slug → free random
-     * adjective-noun name (same as bin/build.php). Explicit slug is used as-is
+     * adjective-noun name (claimed atomically). Explicit slug is used as-is
      * (re-runs can target the same folder). Merges over any pre-seeded meta.
      */
     public function createProject(string $prompt, ?string $slug = null): Project
     {
         $store = $this->store();
-        if ($slug === null) {
-            $slug = $store->freeSlug(ProjectStore::randomSlug());
-        }
-        $project = $store->create($slug);
+        $project = $slug === null
+            ? $store->claimNew(ProjectStore::randomSlug())
+            : $store->create($slug);
 
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
         $project->writeJson('meta.json', array_merge($meta, [

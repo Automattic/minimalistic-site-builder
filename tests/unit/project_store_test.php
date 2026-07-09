@@ -48,6 +48,23 @@ test('freeSlug appends 2, 3, 4 … against existing folders', function () {
     rmdir($base);
 });
 
+test('claimNew creates the base dir, then claims the next suffix when taken', function () {
+    $base = sys_get_temp_dir() . '/builder-store-' . getmypid() . '-' . uniqid();
+    mkdir($base, 0775, true);
+    $store = new ProjectStore($base);
+
+    $first = $store->claimNew('Tbilisi Tavern');
+    assert_eq('tbilisi-tavern', $first->slug());
+    assert_true(is_dir($base . '/tbilisi-tavern'));
+
+    $second = $store->claimNew('tbilisi-tavern');
+    assert_eq('tbilisi-tavern2', $second->slug());
+
+    rmdir($base . '/tbilisi-tavern2');
+    rmdir($base . '/tbilisi-tavern');
+    rmdir($base);
+});
+
 test('freeSlug slugifies its input before checking, like create()', function () {
     $base = sys_get_temp_dir() . '/builder-store-' . getmypid() . '-' . uniqid();
     mkdir($base . '/tbilisi-tavern', 0775, true);

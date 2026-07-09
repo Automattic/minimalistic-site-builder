@@ -25,6 +25,28 @@ final class ProjectStore
         return new Project($root);
     }
 
+    /**
+     * Atomically create a project at the first free slug for $base (base,
+     * base2, …). mkdir is the claim so concurrent callers never share a dir.
+     */
+    public function claimNew(string $base): Project
+    {
+        $base = self::slugify($base);
+        $slug = $base;
+        $n = 2;
+        while (true) {
+            $root = $this->baseDir . '/' . $slug;
+            if (@mkdir($root, 0775, true)) {
+                return new Project($root);
+            }
+            if (!is_dir($root)) {
+                throw new \RuntimeException("Could not create project directory: {$root}");
+            }
+            $slug = $base . $n;
+            $n++;
+        }
+    }
+
     public function open(string $slug): Project
     {
         $root = $this->baseDir . '/' . self::slugify($slug);
