@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+
 /**
  * Quick content/quality inspector for a generated site.
  *   php bin/inspect.php <slug>

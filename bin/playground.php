@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\ProjectStore;
+
 /**
  * Start a local WordPress Playground instance with a generated theme activated.
  *

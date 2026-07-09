@@ -6,6 +6,7 @@ use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
+
 /**
  * One-shot: build a site from a prompt, report tokens + wall time, then boot it
  * in WordPress Playground and print the URL.

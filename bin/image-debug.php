@@ -7,6 +7,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\WpcomImageClient;
+
 /**
  * Image-prompt debugger.
  *

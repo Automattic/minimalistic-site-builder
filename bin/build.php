@@ -7,6 +7,7 @@ use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
+
 /**
  * Build a site from a prompt.
  *

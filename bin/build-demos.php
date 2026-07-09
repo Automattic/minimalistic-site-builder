@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
