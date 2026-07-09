@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Runs steps in order. No agentic loop — a fixed, deterministic sequence where
  * each step is one shot. Callers can stop after a given step id and observe

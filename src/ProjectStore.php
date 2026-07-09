@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Creates and locates projects under a base directory (default: projects/).
  */
@@ -9,7 +11,7 @@ final class ProjectStore
     public function __construct(private string $baseDir)
     {
         if (!is_dir($this->baseDir) && !mkdir($this->baseDir, 0775, true) && !is_dir($this->baseDir)) {
-            throw new RuntimeException("Could not create base directory: {$this->baseDir}");
+            throw new \RuntimeException("Could not create base directory: {$this->baseDir}");
         }
     }
 
@@ -18,7 +20,7 @@ final class ProjectStore
         $slug = self::slugify($slug);
         $root = $this->baseDir . '/' . $slug;
         if (!is_dir($root) && !mkdir($root, 0775, true) && !is_dir($root)) {
-            throw new RuntimeException("Could not create project directory: {$root}");
+            throw new \RuntimeException("Could not create project directory: {$root}");
         }
         return new Project($root);
     }
@@ -27,7 +29,7 @@ final class ProjectStore
     {
         $root = $this->baseDir . '/' . self::slugify($slug);
         if (!is_dir($root)) {
-            throw new RuntimeException("Project does not exist: {$root}");
+            throw new \RuntimeException("Project does not exist: {$root}");
         }
         return new Project($root);
     }

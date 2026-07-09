@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
 test('slugify lowercases, hyphenates and trims', function () {
     assert_eq('tbilisi-tavern', ProjectStore::slugify('  Tbilisi Tavern!! '));
     assert_eq('site', ProjectStore::slugify('   '));

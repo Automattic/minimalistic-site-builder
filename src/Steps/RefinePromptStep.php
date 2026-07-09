@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step 1b (LLM, fast/cheap): refine the raw user prompt before anything else.
  *
@@ -46,7 +54,7 @@ final class RefinePromptStep implements Step
         $meta = $project->readJson('meta.json');
         $prompt = trim((string) ($meta['prompt'] ?? ''));
         if ($prompt === '') {
-            throw new RuntimeException('meta.json has no "prompt"');
+            throw new \RuntimeException('meta.json has no "prompt"');
         }
 
         $rendered = $this->renderer->render('refine-prompt.md', ['user_prompt' => $prompt]);
@@ -57,7 +65,7 @@ final class RefinePromptStep implements Step
         // empty/garbage response, fall back to the original prompt untouched.
         try {
             $improved = trim($this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()])));
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $improved = '';
         }
 

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Anthropic Messages API client (direct to api.anthropic.com).
  *
@@ -87,7 +89,7 @@ final class AnthropicClient implements Llm
         LlmLogger::log($label, $body, $res, $res['time']);
 
         if (trim($res['text']) === '') {
-            throw new RuntimeException('No text content in streamed response');
+            throw new \RuntimeException('No text content in streamed response');
         }
         return $res['text'];
     }
@@ -117,7 +119,7 @@ final class AnthropicClient implements Llm
                 0.0,
                 $error,
             );
-            throw new RuntimeException($error);
+            throw new \RuntimeException($error);
         }
         return $data;
     }
@@ -143,7 +145,7 @@ final class AnthropicClient implements Llm
                     0.0,
                     $error,
                 );
-                throw new RuntimeException($error);
+                throw new \RuntimeException($error);
             }
             $out[$key] = $data;
         }
@@ -323,7 +325,7 @@ final class AnthropicClient implements Llm
                     if ($onFailure !== null) {
                         $onFailure($key, $error, (float) ($outcome['time'] ?? 0));
                     }
-                    throw new RuntimeException("Anthropic batch request '{$key}' failed: {$error}");
+                    throw new \RuntimeException("Anthropic batch request '{$key}' failed: {$error}");
                 }
             }
 
@@ -509,13 +511,13 @@ final class AnthropicClient implements Llm
                 return $this->streamRequest($body);
             } catch (TransientApiException $e) {
                 if ($attempt >= count($delays)) {
-                    throw new RuntimeException('Anthropic API failed after retries: ' . $e->getMessage(), 0, $e);
+                    throw new \RuntimeException('Anthropic API failed after retries: ' . $e->getMessage(), 0, $e);
                 }
                 $wait = $delays[$attempt];
                 $attempt++;
                 fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
-            } catch (RuntimeException $e) {
+            } catch (\RuntimeException $e) {
                 $param = self::rejectedParam($e->getMessage());
                 if ($param === null || !array_key_exists($param, $body)) {
                     throw $e;
@@ -576,13 +578,13 @@ final class AnthropicClient implements Llm
             if (self::isTransientCurl($errno)) {
                 throw new TransientApiException("cURL ({$errno}): {$error}");
             }
-            throw new RuntimeException("cURL error ({$errno}): {$error}");
+            throw new \RuntimeException("cURL error ({$errno}): {$error}");
         }
         if ($status < 200 || $status >= 300) {
             if (self::isTransientStatus($status)) {
                 throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
             }
-            throw new RuntimeException("Anthropic API HTTP {$status}: " . self::truncate($raw));
+            throw new \RuntimeException("Anthropic API HTTP {$status}: " . self::truncate($raw));
         }
 
         $parsed = self::parseSse($raw);
@@ -590,7 +592,7 @@ final class AnthropicClient implements Llm
             if (in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true)) {
                 throw new TransientApiException("stream error: {$parsed['error']}");
             }
-            throw new RuntimeException("stream error: {$parsed['error']}");
+            throw new \RuntimeException("stream error: {$parsed['error']}");
         }
         // An empty body is usually a transient hiccup (a stop with no content),
         // so retry it — matching the batch path's interpretStream().

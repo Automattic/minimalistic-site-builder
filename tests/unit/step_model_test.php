@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\DesignDirectionStep;
+use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Steps\SectionsStep;
+use Automattic\SiteBuild\Steps\SiteSpecStep;
+use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\Tests\FakeLlm;
 /**
  * Guards the per-step model wiring: the optional model arg each LLM step takes
  * must reach the LLM call's opts, and stay absent when unset so the client

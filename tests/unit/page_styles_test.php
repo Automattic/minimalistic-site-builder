@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\PageStylesStep;
+use Automattic\SiteBuild\Tests\FakeLlm;
 /**
  * PageStylesStep: the CSS-appendix validator (namespaced selectors only, preset
  * variables for color, @media only), the used-class scan, and the run behavior

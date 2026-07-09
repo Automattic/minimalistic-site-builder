@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\ImagePromptComposer;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\WpcomImageClient;
 /**
  * Image-prompt debugger.
  *

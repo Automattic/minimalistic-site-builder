@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AnthropicClient;
 test('extractUsage sums input, cache, and output tokens', function () {
     $resp = ['usage' => [
         'input_tokens' => 100,

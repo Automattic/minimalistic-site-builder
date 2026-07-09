@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ImageLogger;
 /** slug() makes an asset filename safe and keeps dots/dashes. */
 test('image-logger slug keeps dots and dashes, lowercases the rest', function () {
     assert_eq('hero.jpg', ImageLogger::slug('hero.jpg'));

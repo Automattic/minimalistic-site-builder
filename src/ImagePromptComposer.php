@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * The single place that turns a collected AI_IMAGE placeholder into the text
  * prompt we send to the image-generation endpoint.

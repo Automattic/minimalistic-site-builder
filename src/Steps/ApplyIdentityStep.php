@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step 3 (deterministic): apply the project identity to the scaffolded theme.
  *

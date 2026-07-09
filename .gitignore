@@ -4,3 +4,4 @@ eval_run.log
 .playground-blueprint.json
 **/node_modules/
 docs/evidence/issue-31/fixture/img/
+/vendor/

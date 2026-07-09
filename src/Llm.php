@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Transport-agnostic LLM interface. Implementations call a single prompt and
  * return the model's text. Keeping this an interface lets steps depend on the

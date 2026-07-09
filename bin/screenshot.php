@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
 /**
  * Boot a built project in WordPress Playground (headless), capture a full-page
  * screenshot of its home page, and save it under the project's logs/ directory.

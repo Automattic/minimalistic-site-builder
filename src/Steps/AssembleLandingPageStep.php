@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (deterministic): compose the landing page from the parts the sections
  * step generated. No LLM call — just stitch the template parts in plan order.
@@ -31,13 +36,13 @@ final class AssembleLandingPageStep implements Step
         $plan = $project->readJson('sections.json');
         $sections = $plan['sections'] ?? [];
         if (!is_array($sections) || $sections === []) {
-            throw new RuntimeException('assemble-landing-page: sections.json has no sections');
+            throw new \RuntimeException('assemble-landing-page: sections.json has no sections');
         }
 
         // Header and footer must exist before we reference them.
         foreach (['parts/header.html', 'parts/footer.html'] as $rel) {
             if (!$project->exists('theme/' . $rel)) {
-                throw new RuntimeException("assemble-landing-page: missing {$rel}");
+                throw new \RuntimeException("assemble-landing-page: missing {$rel}");
             }
         }
 
@@ -46,7 +51,7 @@ final class AssembleLandingPageStep implements Step
             $slug = SectionsStep::SECTION_PREFIX . (string) ($section['slug'] ?? '');
             $rel = "parts/{$slug}.html";
             if (!$project->exists('theme/' . $rel)) {
-                throw new RuntimeException("assemble-landing-page: missing section part {$rel}");
+                throw new \RuntimeException("assemble-landing-page: missing section part {$rel}");
             }
             $slugs[] = $slug;
         }

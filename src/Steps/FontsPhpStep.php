@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (LLM): write theme/fonts.php — the module that loads the theme's Google
  * Fonts (telex-style file split: the deterministic functions.php only wires
@@ -64,7 +73,7 @@ final class FontsPhpStep implements Step
         if ($requirements === []) {
             $fontsFile = $project->themePath('fonts.php');
             if (is_file($fontsFile) && !unlink($fontsFile)) {
-                throw new RuntimeException("Could not remove stale file: {$fontsFile}");
+                throw new \RuntimeException("Could not remove stale file: {$fontsFile}");
             }
             echo "  no Google-hosted families; fonts.php not needed\n";
             return;

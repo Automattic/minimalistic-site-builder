@@ -2,39 +2,36 @@
 declare(strict_types=1);
 
 /**
- * Loads all source files and env. No composer/autoloader — the source set is
- * small and explicit. require_once keeps it safe to include more than once.
+ * Loads Composer autoloader and env. Global factory helpers for the CLI remain
+ * here until consumers fully construct SiteBuilder themselves.
  */
 
-$src = __DIR__;
-require_once $src . '/Env.php';
-require_once $src . '/Llm.php';
-require_once $src . '/TransientApiException.php';
-require_once $src . '/LlmLogger.php';
-require_once $src . '/AnthropicClient.php';
-require_once $src . '/ImageLogger.php';
-require_once $src . '/ImageClient.php';
-require_once $src . '/WpcomImageClient.php';
-require_once $src . '/ImagePromptComposer.php';
-require_once $src . '/ImageTransparency.php';
-require_once $src . '/Project.php';
-require_once $src . '/ProjectStore.php';
-require_once $src . '/PromptRenderer.php';
-require_once $src . '/LlmOptions.php';
-require_once $src . '/Step.php';
-require_once $src . '/ConcurrentStep.php';
-require_once $src . '/ConcurrentGroup.php';
-require_once $src . '/Pipeline.php';
-require_once $src . '/BuildReport.php';
-require_once $src . '/ThemeValidator.php';
-require_once $src . '/PlaygroundArtifact.php';
+use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\ConcurrentGroup;
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\ApplyIdentityStep;
+use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
+use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\DesignDirectionStep;
+use Automattic\SiteBuild\Steps\FinalizeThemeStep;
+use Automattic\SiteBuild\Steps\FixBlocksStep;
+use Automattic\SiteBuild\Steps\FontsPhpStep;
+use Automattic\SiteBuild\Steps\PageStylesStep;
+use Automattic\SiteBuild\Steps\RefinePromptStep;
+use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
+use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Steps\SectionsStep;
+use Automattic\SiteBuild\Steps\SiteSpecStep;
+use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\WpcomImageClient;
 
-// Steps.
-foreach (glob($src . '/steps/*.php') ?: [] as $stepFile) {
-    require_once $stepFile;
-}
+require_once dirname(__DIR__) . '/vendor/autoload.php';
 
-Env::load(dirname($src) . '/.env');
+Env::load(dirname(__DIR__) . '/.env');
 
 /** The model used by any LLM step that isn't given a more specific one. */
 function default_llm_model(): string

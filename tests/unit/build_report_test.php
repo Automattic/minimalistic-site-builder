@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BuildReport;
 test('build-report formats a row with right-aligned, thousands-separated tokens', function () {
     $row = BuildReport::formatRow('site-spec', 2.34, 3000, 210);
     assert_contains('site-spec', $row);

@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\ThemeValidator;
 /**
  * Full step sequence as a deterministic integration test: runs the real
  * Pipeline (build_pipeline) with a FakeLlm scripted with realistic canned

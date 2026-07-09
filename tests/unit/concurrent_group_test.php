@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ConcurrentGroup;
+use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Tests\FakeLlm;
 /**
  * Unit tests for ConcurrentGroup: it merges its members' requests into one
  * batched call and routes each result back to the member that asked for it,

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Steps\FixBlocksStep;
 /**
  * Unit tests for FixBlocksStep::summaryLine — the one console line distilled
  * from the fixer's verbose stdout (the full report goes to the project log).

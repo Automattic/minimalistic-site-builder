@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step 8 (deterministic): repair block-validation issues in the generated markup.
  *
@@ -33,7 +39,7 @@ final class FixBlocksStep implements Step
     {
         $script = repo_path('bin/block-fixer/fix-templates.js');
         if (!is_file($script)) {
-            throw new RuntimeException("block-fixer script not found: {$script}");
+            throw new \RuntimeException("block-fixer script not found: {$script}");
         }
 
         $cmd = sprintf(
@@ -58,7 +64,7 @@ final class FixBlocksStep implements Step
             if ($errFile !== false) {
                 @unlink($errFile);
             }
-            throw new RuntimeException('Could not start block-fixer (proc_open failed)');
+            throw new \RuntimeException('Could not start block-fixer (proc_open failed)');
         }
 
         $stdout = (string) stream_get_contents($pipes[1]);
@@ -80,7 +86,7 @@ final class FixBlocksStep implements Step
         file_put_contents($project->logPath(self::LOG_FILE), $log . "\n");
 
         if ($exit !== 0) {
-            throw new RuntimeException(
+            throw new \RuntimeException(
                 "block-fixer exited with code {$exit}; see logs/" . self::LOG_FILE . "\n" . trim($stderr)
             );
         }

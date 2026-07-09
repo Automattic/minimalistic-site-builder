@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Tests\FakeLlm;
 /**
  * Unit tests for SectionPlanStep: normalization (unique file-safe slugs,
  * defaults), the art-direction field validation (archetype/background enums,

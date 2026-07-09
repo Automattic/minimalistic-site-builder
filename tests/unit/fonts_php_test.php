@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\FontsPhpStep;
+use Automattic\SiteBuild\Tests\FakeLlm;
 /**
  * FontsPhpStep: the usage scan (weights/italics from theme.json + markup), the
  * css2 URL builder, the fonts.php validator (scan floor, Google-only

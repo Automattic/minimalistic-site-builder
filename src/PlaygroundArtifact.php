@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Builds a shareable WordPress Playground Blueprint bundle for one project.
  *
@@ -12,9 +14,9 @@ final class PlaygroundArtifact
 {
     public const DEFAULT_ARTIFACT_BRANCH = 'playground-artifacts';
 
-    public static function defaultAssetName(Project $project, ?DateTimeImmutable $now = null): string
+    public static function defaultAssetName(Project $project, ?\DateTimeImmutable $now = null): string
     {
-        $now ??= new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $now ??= new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         return $project->slug() . '-playground-' . $now->format('Ymd\THis\Z') . '.zip';
     }
 
@@ -147,7 +149,7 @@ final class PlaygroundArtifact
         self::assertTool('zip');
 
         if (!is_file($project->themePath('style.css'))) {
-            throw new RuntimeException("No built theme at {$project->themePath()} (need style.css).");
+            throw new \RuntimeException("No built theme at {$project->themePath()} (need style.css).");
         }
 
         $assetName ??= self::defaultAssetName($project);
@@ -157,7 +159,7 @@ final class PlaygroundArtifact
         $out = self::absolutePath($out);
         $outDir = dirname($out);
         if (!is_dir($outDir) && !mkdir($outDir, 0775, true) && !is_dir($outDir)) {
-            throw new RuntimeException("Could not create output directory: {$outDir}");
+            throw new \RuntimeException("Could not create output directory: {$outDir}");
         }
 
         $tmp = sys_get_temp_dir() . '/builder-playground-' . getmypid() . '-' . bin2hex(random_bytes(4));
@@ -170,7 +172,7 @@ final class PlaygroundArtifact
 
             $blueprint = json_encode(self::blueprint($project), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             if ($blueprint === false || file_put_contents($bundleDir . '/blueprint.json', $blueprint . "\n") === false) {
-                throw new RuntimeException('Could not write blueprint.json.');
+                throw new \RuntimeException('Could not write blueprint.json.');
             }
 
             // The full generated project is stored once, as a nested archive.
@@ -186,7 +188,7 @@ final class PlaygroundArtifact
         }
 
         if (!is_file($out)) {
-            throw new RuntimeException("Packaging finished without creating {$out}");
+            throw new \RuntimeException("Packaging finished without creating {$out}");
         }
 
         return $out;
@@ -208,7 +210,7 @@ final class PlaygroundArtifact
         if ($project->exists('siteSpec.json')) {
             try {
                 $spec = $project->readJson('siteSpec.json');
-            } catch (RuntimeException) {
+            } catch (\RuntimeException) {
                 $spec = [];
             }
             $blogname = (string) ($spec['name'] ?? $blogname);
@@ -243,7 +245,7 @@ final class PlaygroundArtifact
             || str_starts_with($assetName, '-')
             || preg_match('/[^A-Za-z0-9._-]/', $assetName)
         ) {
-            throw new RuntimeException('--name must be a .zip filename using letters, numbers, dots, underscores, or hyphens.');
+            throw new \RuntimeException('--name must be a .zip filename using letters, numbers, dots, underscores, or hyphens.');
         }
     }
 
@@ -258,7 +260,7 @@ final class PlaygroundArtifact
     private static function mkdirp(string $dir): void
     {
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            throw new RuntimeException("Could not create directory: {$dir}");
+            throw new \RuntimeException("Could not create directory: {$dir}");
         }
     }
 
@@ -266,7 +268,7 @@ final class PlaygroundArtifact
     {
         $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
         if ($path === '') {
-            throw new RuntimeException("{$bin} is required to build Playground artifacts.");
+            throw new \RuntimeException("{$bin} is required to build Playground artifacts.");
         }
     }
 
@@ -276,7 +278,7 @@ final class PlaygroundArtifact
         $rc = 0;
         exec(self::commandForCwd($cmd, $cwd) . ' 2>&1', $out, $rc);
         if ($rc !== 0) {
-            throw new RuntimeException("Command failed ({$rc}): {$cmd}\n" . implode("\n", $out));
+            throw new \RuntimeException("Command failed ({$rc}): {$cmd}\n" . implode("\n", $out));
         }
     }
 
@@ -300,10 +302,10 @@ final class PlaygroundArtifact
         }
 
         try {
-            return (new DateTimeImmutable($createdAt))
-                ->setTimezone(new DateTimeZone('UTC'))
+            return (new \DateTimeImmutable($createdAt))
+                ->setTimezone(new \DateTimeZone('UTC'))
                 ->format('Y-m-d H:i:s \U\T\C');
-        } catch (Throwable) {
+        } catch (\Throwable) {
             return $createdAt;
         }
     }

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Tiny .env loader. No dependencies. Loads KEY=VALUE pairs into a static map
  * and exposes them via Env::get(). Values already present in the real

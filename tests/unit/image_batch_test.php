@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ImagePromptComposer;
+use Automattic\SiteBuild\WpcomImageClient;
 /**
  * Unit tests for the batch retry orchestration (WpcomImageClient::retryBatch).
  * The transport is faked so we exercise the transient-retry accounting without

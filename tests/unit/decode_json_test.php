@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AnthropicClient;
 test('decodeJson parses plain JSON', function () {
     $data = AnthropicClient::decodeJson('{"a": 1, "b": [2, 3]}');
     assert_eq(1, $data['a']);

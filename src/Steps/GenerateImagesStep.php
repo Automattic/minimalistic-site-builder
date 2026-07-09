@@ -1,6 +1,16 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\ImageClient;
+use Automattic\SiteBuild\ImageLogger;
+use Automattic\SiteBuild\ImagePromptComposer;
+use Automattic\SiteBuild\ImageTransparency;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\WpcomImageClient;
+
 /**
  * Step (opt-in, networked): generate the images collected by CollectImagesStep
  * and wire them into the theme.
@@ -62,7 +72,7 @@ final class GenerateImagesStep implements Step
 
         $assetDir = $project->themePath('assets');
         if (!is_dir($assetDir) && !mkdir($assetDir, 0775, true) && !is_dir($assetDir)) {
-            throw new RuntimeException("Could not create assets directory: {$assetDir}");
+            throw new \RuntimeException("Could not create assets directory: {$assetDir}");
         }
 
         $resolved = []; // theme: src => served URL, for the markup rewrite
@@ -141,7 +151,7 @@ final class GenerateImagesStep implements Step
                 // generation failure and a write failure (disk full, bad path).
                 try {
                     if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
-                        throw new RuntimeException((string) ($result['error'] ?? 'unknown error'));
+                        throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
                     }
                     $bytes = (string) $result['bytes'];
                     if ($batchSpecs[$pos]['mime'] === 'image/png') {
@@ -160,7 +170,7 @@ final class GenerateImagesStep implements Step
                         'path'  => 'theme/assets/' . $filename,
                         'bytes' => strlen((string) $result['bytes']),
                     ]);
-                } catch (Throwable $e) {
+                } catch (\Throwable $e) {
                     $specs[$i]['status'] = 'failed';
                     $specs[$i]['error']  = $e->getMessage();
                     fwrite(STDERR, "    FAILED {$filename}: {$e->getMessage()}\n");

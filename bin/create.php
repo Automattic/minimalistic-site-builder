@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
  * One-shot: build a site from a prompt, report tokens + wall time, then boot it
  * in WordPress Playground and print the URL.

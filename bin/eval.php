@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\ThemeValidator;
 /**
  * Phase 2 evaluation: generate the 5 eval sites, record per-step speed and
  * structural quality, and write eval/report.md + eval/results.json.

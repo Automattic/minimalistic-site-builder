@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AnthropicClient;
 /**
  * Unit tests for the concurrent-batch retry orchestration
  * (AnthropicClient::retryTextBatch). The transport is faked so we exercise the

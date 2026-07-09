@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\PlaygroundArtifact;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
 test('playground artifact bundles runnable blueprint and full project archive once', function () {
     $tmp = sys_get_temp_dir() . '/builder_playground_artifact_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Demo Site');

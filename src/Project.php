@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * A single project on disk: projects/<slug>/. All artifacts (meta.json,
  * siteSpec.json, theme/...) live under its root. Files are the
@@ -36,7 +38,7 @@ final class Project
     {
         $dir = $this->path('logs');
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            throw new RuntimeException("Could not create logs directory: {$dir}");
+            throw new \RuntimeException("Could not create logs directory: {$dir}");
         }
         return $rel === '' ? $dir : $dir . '/' . ltrim($rel, '/');
     }
@@ -51,10 +53,10 @@ final class Project
         $full = $this->path($rel);
         $dir = dirname($full);
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            throw new RuntimeException("Could not create directory: {$dir}");
+            throw new \RuntimeException("Could not create directory: {$dir}");
         }
         if (file_put_contents($full, $content) === false) {
-            throw new RuntimeException("Could not write file: {$full}");
+            throw new \RuntimeException("Could not write file: {$full}");
         }
     }
 
@@ -62,7 +64,7 @@ final class Project
     {
         $full = $this->path($rel);
         if (!is_file($full)) {
-            throw new RuntimeException("Missing file: {$full}");
+            throw new \RuntimeException("Missing file: {$full}");
         }
         return (string) file_get_contents($full);
     }
@@ -81,7 +83,7 @@ final class Project
     {
         $data = json_decode($this->readText($rel), true);
         if (!is_array($data)) {
-            throw new RuntimeException("File is not valid JSON: {$this->path($rel)}");
+            throw new \RuntimeException("File is not valid JSON: {$this->path($rel)}");
         }
         return $data;
     }

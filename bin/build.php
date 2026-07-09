@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BuildReport;
+use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
  * Build a site from a prompt.
  *
