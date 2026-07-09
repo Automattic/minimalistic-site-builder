@@ -1,10 +1,10 @@
 # Composition & extension — the step library, per-host graphs, and extending a build
 
-> Design note (2026-07-02), from a DX/extensibility review. **Supersedes** the "the wpcom workflow encodes the *same* DAG as `build_pipeline()`" framing in `site-build-portable-pipeline.md`: hosts compose *different* graphs on purpose.
+> Design note (2026-07-02), from a DX/extensibility review. **Supersedes** the "the host workflow encodes the *same* DAG as the library's default composition" framing in `site-build-portable-pipeline.md`: hosts compose *different* graphs on purpose.
 
 ## The shift: a library, not a fixed pipeline
 
-The shared surface of the toolset is **not a fixed graph**. It is a **library of reusable site-creation steps and units** — the deterministic operations, the prompts, the fan-out units, the `Llm` interface. Each host **composes its own graph** over that library. `build_pipeline()` is the **default / CLI composition**, one among several — not "the pipeline." The wpcom workflow, Studio's build, and a harness user's flow are each their own composition of the same library.
+The shared surface of the toolset is **not a fixed graph**. It is a **library of reusable site-creation steps and units** — the deterministic operations, the prompts, the fan-out units, the `Llm` interface. Each host **composes its own graph** over that library. `SiteBuilder::pipeline()` is the **default / CLI composition**, one among several — not "the pipeline." Host workflows and harness flows are each their own composition of the same library.
 
 Different hosts legitimately want different steps. That divergence is a feature, not drift to be prevented.
 

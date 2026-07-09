@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * A step whose LLM work is expressed as a set of independent JSON requests, so
  * the requests can be fired CONCURRENTLY — either on their own (run() batches

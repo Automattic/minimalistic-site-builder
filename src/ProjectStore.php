@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Creates and locates projects under a base directory (default: projects/).
  */
@@ -9,7 +11,7 @@ final class ProjectStore
     public function __construct(private string $baseDir)
     {
         if (!is_dir($this->baseDir) && !mkdir($this->baseDir, 0775, true) && !is_dir($this->baseDir)) {
-            throw new RuntimeException("Could not create base directory: {$this->baseDir}");
+            throw new \RuntimeException("Could not create base directory: {$this->baseDir}");
         }
     }
 
@@ -18,16 +20,38 @@ final class ProjectStore
         $slug = self::slugify($slug);
         $root = $this->baseDir . '/' . $slug;
         if (!is_dir($root) && !mkdir($root, 0775, true) && !is_dir($root)) {
-            throw new RuntimeException("Could not create project directory: {$root}");
+            throw new \RuntimeException("Could not create project directory: {$root}");
         }
         return new Project($root);
+    }
+
+    /**
+     * Atomically create a project at the first free slug for $base (base,
+     * base2, …). mkdir is the claim so concurrent callers never share a dir.
+     */
+    public function claimNew(string $base): Project
+    {
+        $base = self::slugify($base);
+        $slug = $base;
+        $n = 2;
+        while (true) {
+            $root = $this->baseDir . '/' . $slug;
+            if (@mkdir($root, 0775, true)) {
+                return new Project($root);
+            }
+            if (!is_dir($root)) {
+                throw new \RuntimeException("Could not create project directory: {$root}");
+            }
+            $slug = $base . $n;
+            $n++;
+        }
     }
 
     public function open(string $slug): Project
     {
         $root = $this->baseDir . '/' . self::slugify($slug);
         if (!is_dir($root)) {
-            throw new RuntimeException("Project does not exist: {$root}");
+            throw new \RuntimeException("Project does not exist: {$root}");
         }
         return new Project($root);
     }

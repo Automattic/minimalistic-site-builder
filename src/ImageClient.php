@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Transport-agnostic image-generation interface. Implementations turn a text
  * prompt into raw image bytes. Mirrors the Llm interface: steps depend on the

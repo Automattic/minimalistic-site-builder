@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Step;
+
 /**
  * Final step (deterministic): write theme/functions.php.
  *

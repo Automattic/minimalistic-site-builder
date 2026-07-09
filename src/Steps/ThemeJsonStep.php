@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (LLM): generate the block theme's theme.json.
  *
@@ -53,7 +62,7 @@ final class ThemeJsonStep implements ConcurrentStep
     {
         $theme = $results[self::REQ] ?? null;
         if (!is_array($theme)) {
-            throw new RuntimeException('theme-json: missing model output');
+            throw new \RuntimeException('theme-json: missing model output');
         }
 
         // Force the schema fields and validate the contract templates rely on.
@@ -113,12 +122,12 @@ final class ThemeJsonStep implements ConcurrentStep
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
-            throw new RuntimeException('theme.json missing settings.color.palette');
+            throw new \RuntimeException('theme.json missing settings.color.palette');
         }
         $slugs = array_column($palette, 'slug');
         foreach (self::REQUIRED_COLORS as $needed) {
             if (!in_array($needed, $slugs, true)) {
-                throw new RuntimeException("theme.json palette missing slug: {$needed}");
+                throw new \RuntimeException("theme.json palette missing slug: {$needed}");
             }
         }
     }
@@ -128,12 +137,12 @@ final class ThemeJsonStep implements ConcurrentStep
     {
         $families = $theme['settings']['typography']['fontFamilies'] ?? null;
         if (!is_array($families)) {
-            throw new RuntimeException('theme.json missing settings.typography.fontFamilies');
+            throw new \RuntimeException('theme.json missing settings.typography.fontFamilies');
         }
         $slugs = array_column($families, 'slug');
         foreach (self::REQUIRED_FONTS as $needed) {
             if (!in_array($needed, $slugs, true)) {
-                throw new RuntimeException("theme.json fontFamilies missing slug: {$needed}");
+                throw new \RuntimeException("theme.json fontFamilies missing slug: {$needed}");
             }
         }
     }

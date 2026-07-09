@@ -1,6 +1,16 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (LLM, concurrent): plan the landing page as an ordered list of sections.
  *
@@ -74,24 +84,24 @@ final class SectionPlanStep implements ConcurrentStep
     {
         $plan = $results[self::REQ] ?? null;
         if (!is_array($plan)) {
-            throw new RuntimeException('section-plan: missing model output');
+            throw new \RuntimeException('section-plan: missing model output');
         }
 
         try {
             $sections = self::normalize($plan['sections'] ?? null);
             if ($sections === []) {
-                throw new RuntimeException(
+                throw new \RuntimeException(
                     'section-plan: the plan has no sections — return the full JSON object with a non-empty "sections" array'
                 );
             }
-        } catch (RuntimeException $e) {
+        } catch (\RuntimeException $e) {
             // The art-direction rules (adjacency, enums, card-grid cap) are
             // creative constraints the model occasionally violates. Re-ask ONCE
             // with the specific rejections; a still-invalid repair aborts the build.
             $repaired = $this->repair($project, $plan, $e->getMessage());
             $sections = self::normalize($repaired['sections'] ?? null);
             if ($sections === []) {
-                throw new RuntimeException('section-plan produced no sections');
+                throw new \RuntimeException('section-plan produced no sections');
             }
         }
 
@@ -193,7 +203,7 @@ final class SectionPlanStep implements ConcurrentStep
         // Report every violation at once so the single repair call can fix them all.
         $errors = array_merge($errors, self::varietyErrors($out));
         if ($errors !== []) {
-            throw new RuntimeException(implode("\n", $errors));
+            throw new \RuntimeException(implode("\n", $errors));
         }
         return $out;
     }

@@ -414,9 +414,9 @@ You're done when a fresh build visibly clears the "AI slop" bar Telex targets:
   `prompts/image-generation.md`.
 - `src/steps/ScaffoldThemeStep.php` — append `.equal-cards` CSS to `style.css`;
   (optional) write `functions.php` for font enqueue.
-- `src/bootstrap.php` — `step_models()` / `build_pipeline()` if you tune models
-  or add a fonts/CSS step. Pipeline order already matches Telex's intent; no
-  reordering needed.
+- `src/StepDefaults.php` / `src/SiteBuilder.php` — model defaults and the default
+  pipeline composition if you tune models or add a fonts/CSS step. Pipeline
+  order already matches Telex's intent; no reordering needed.
 
 **builder2 invariants to preserve:**
 - Five color slugs `base/contrast/primary/secondary/accent`; two font slugs

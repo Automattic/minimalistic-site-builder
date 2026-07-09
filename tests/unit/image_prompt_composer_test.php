@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ImagePromptComposer;
+use Automattic\SiteBuild\WpcomImageClient;
+
 /**
  * ImagePromptComposer turns the structured AI_IMAGE fields (subject | page-context
  * | style) plus the site context into the single text prompt sent to the endpoint.

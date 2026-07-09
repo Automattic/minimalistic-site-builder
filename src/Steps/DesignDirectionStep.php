@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (LLM): commit to ONE distinctive creative concept for the site BEFORE any
  * theme, palette, or layout is chosen.
@@ -82,7 +91,7 @@ final class DesignDirectionStep implements Step
         $meta = $project->readJson('meta.json');
         $prompt = (string) ($meta['prompt'] ?? '');
         if (trim($prompt) === '') {
-            throw new RuntimeException('meta.json has no "prompt"');
+            throw new \RuntimeException('meta.json has no "prompt"');
         }
         $spec = $project->readText('siteSpec.json');
 
@@ -97,7 +106,7 @@ final class DesignDirectionStep implements Step
 
         $direction = self::normalize($payload['direction'] ?? null);
         if ($direction === null) {
-            throw new RuntimeException('design-direction: model returned no usable direction');
+            throw new \RuntimeException('design-direction: model returned no usable direction');
         }
 
         $project->writeJson(self::FILE, $direction);
@@ -141,7 +150,7 @@ final class DesignDirectionStep implements Step
                     $seeds[] = $seed;
                 }
             }
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             if ($isForced) {
                 throw $e;
             }
@@ -151,7 +160,7 @@ final class DesignDirectionStep implements Step
         if ($isForced) {
             $n = (int) $forced;
             if ($n < 1 || $n > count($seeds)) {
-                throw new RuntimeException(sprintf(
+                throw new \RuntimeException(sprintf(
                     'design-direction: %s=%s is out of range (1..%d)',
                     self::CHOICE_ENV,
                     $forced,

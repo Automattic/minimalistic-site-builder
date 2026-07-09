@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Tests;
+
+use Automattic\SiteBuild\Llm;
+
 /**
  * Test double for Llm. Returns queued canned responses (FIFO) and records the
  * prompts/options it received so tests can assert on what a step sent.
@@ -29,7 +33,7 @@ final class FakeLlm implements Llm
     {
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->textQueue === []) {
-            throw new RuntimeException('FakeLlm: no queued text response');
+            throw new \RuntimeException('FakeLlm: no queued text response');
         }
         return array_shift($this->textQueue);
     }
@@ -38,7 +42,7 @@ final class FakeLlm implements Llm
     {
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->jsonQueue === []) {
-            throw new RuntimeException('FakeLlm: no queued json response');
+            throw new \RuntimeException('FakeLlm: no queued json response');
         }
         return array_shift($this->jsonQueue);
     }
@@ -59,7 +63,7 @@ final class FakeLlm implements Llm
             unset($opts['prompt']);
             $this->calls[] = ['prompt' => (string) $req['prompt'], 'opts' => $opts];
             if ($this->jsonQueue === []) {
-                throw new RuntimeException('FakeLlm: no queued json response');
+                throw new \RuntimeException('FakeLlm: no queued json response');
             }
             $out[$key] = array_shift($this->jsonQueue);
         }
@@ -81,7 +85,7 @@ final class FakeLlm implements Llm
             unset($opts['prompt']);
             $this->calls[] = ['prompt' => (string) $req['prompt'], 'opts' => $opts];
             if ($this->textQueue === []) {
-                throw new RuntimeException('FakeLlm: no queued text response');
+                throw new \RuntimeException('FakeLlm: no queued text response');
             }
             $out[$key] = array_shift($this->textQueue);
         }

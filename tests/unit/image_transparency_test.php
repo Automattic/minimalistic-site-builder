@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ImageTransparency;
+
 /**
  * ImageTransparency keys the flat solid background Imagen was prompted to
  * render (it cannot produce real alpha) out to PNG transparency: a flood fill

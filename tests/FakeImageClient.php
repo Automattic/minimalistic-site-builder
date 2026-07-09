@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Tests;
+
+use Automattic\SiteBuild\ImageClient;
+
 /**
  * Test double for ImageClient. Returns canned bytes and records the prompts and
  * aspect ratios it was asked for. Can be told to throw to exercise failure paths.
@@ -30,7 +34,7 @@ final class FakeImageClient implements ImageClient
     {
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->fail) {
-            throw new RuntimeException('fake image failure');
+            throw new \RuntimeException('fake image failure');
         }
         return $this->bytes;
     }

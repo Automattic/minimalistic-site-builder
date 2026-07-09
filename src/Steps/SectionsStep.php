@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (LLM, concurrent): generate every landing-page part in ONE batch — the
  * header, the footer, and one template part per planned section — fired together
@@ -134,7 +142,7 @@ final class SectionsStep implements Step
         $plan = $project->readJson('sections.json');
         $sections = $plan['sections'] ?? null;
         if (!is_array($sections) || $sections === []) {
-            throw new RuntimeException('sections: sections.json has no sections (run section-plan first)');
+            throw new \RuntimeException('sections: sections.json has no sections (run section-plan first)');
         }
         return $sections;
     }
@@ -175,7 +183,7 @@ final class SectionsStep implements Step
         $slug = (string) ($section['slug'] ?? "section-{$i}");
         foreach (['layout_archetype', 'background', 'handoff'] as $field) {
             if (trim((string) ($section[$field] ?? '')) === '') {
-                throw new RuntimeException("sections: section '{$slug}' is missing {$field} from section-plan");
+                throw new \RuntimeException("sections: section '{$slug}' is missing {$field} from section-plan");
             }
         }
 
@@ -290,7 +298,7 @@ final class SectionsStep implements Step
     {
         $markup = self::stripFences(trim($text));
         if ($markup === '' || !str_contains($markup, 'wp:')) {
-            throw new RuntimeException("sections: part '{$key}' is not block markup");
+            throw new \RuntimeException("sections: part '{$key}' is not block markup");
         }
         return self::normalizePresetRefs(rtrim($markup));
     }
@@ -307,7 +315,7 @@ final class SectionsStep implements Step
     public static function normalizePresetRefs(string $markup): string
     {
         // `--` may also appear as the serializer's `--` escape.
-        $dashes = '(?:--|(?:\\\\u002d){2})';
+        $dashes = '(?:--|(?:\\\u002d){2})';
         return (string) preg_replace(
             "/var:preset{$dashes}(color|gradient|shadow|spacing|font-size|font-family|aspect-ratio|duotone){$dashes}/",
             'var:preset|$1|',

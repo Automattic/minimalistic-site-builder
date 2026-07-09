@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\PlaygroundArtifact;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+
 /**
  * Package and publish a built project as a shareable WordPress Playground link.
  *

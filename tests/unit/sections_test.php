@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\SectionsStep;
+use Automattic\SiteBuild\Tests\FakeLlm;
+
 /**
  * Unit tests for SectionsStep: it fires one request per part (header, footer,
  * each section), validates the markup, and writes the part files.

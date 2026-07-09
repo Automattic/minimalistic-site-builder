@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Turns a generated image's solid background into real PNG alpha.
  *
@@ -57,14 +59,14 @@ final class ImageTransparency
         }
 
         try {
-            $im = new Imagick();
+            $im = new \Imagick();
             $im->readImageBlob($pngBytes);
-            $im->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+            $im->setImageAlphaChannel(\Imagick::ALPHACHANNEL_SET);
 
             $w = $im->getImageWidth();
             $h = $im->getImageHeight();
-            $fuzz = self::FUZZ_PERCENT / 100 * Imagick::getQuantum();
-            $transparent = new ImagickPixel('transparent');
+            $fuzz = self::FUZZ_PERCENT / 100 * \Imagick::getQuantum();
+            $transparent = new \ImagickPixel('transparent');
 
             // Corners plus edge midpoints: enough seeds to reach every
             // border-connected background region even when the subject touches
@@ -77,11 +79,11 @@ final class ImageTransparency
             $seedColors = [];
             foreach ($seeds as [$x, $y]) {
                 $seed = $im->getImagePixelColor($x, $y);
-                if ($seed->getColorValue(Imagick::COLOR_ALPHA) < 0.5) {
+                if ($seed->getColorValue(\Imagick::COLOR_ALPHA) < 0.5) {
                     continue; // already keyed by an earlier seed's fill
                 }
                 $seedColors[] = $seed;
-                $im->floodFillPaintImage($transparent, $fuzz, $seed, $x, $y, false, Imagick::CHANNEL_ALPHA);
+                $im->floodFillPaintImage($transparent, $fuzz, $seed, $x, $y, false, \Imagick::CHANNEL_ALPHA);
             }
 
             // If almost nothing opaque survived, the fill ate the subject too
@@ -89,8 +91,8 @@ final class ImageTransparency
             // BEFORE the global pass: thin line art can legitimately end up
             // with ~1% ink once its enclosed pockets are keyed, and must not
             // trip this guard.
-            $alpha = $im->getImageChannelMean(Imagick::CHANNEL_ALPHA);
-            if (($alpha['mean'] ?? 0) / Imagick::getQuantum() < 0.01) {
+            $alpha = $im->getImageChannelMean(\Imagick::CHANNEL_ALPHA);
+            if (($alpha['mean'] ?? 0) / \Imagick::getQuantum() < 0.01) {
                 return $pngBytes;
             }
 
@@ -104,7 +106,7 @@ final class ImageTransparency
 
             $im->setImageFormat('png');
             return $im->getImageBlob();
-        } catch (Throwable) {
+        } catch (\Throwable) {
             return $pngBytes;
         }
     }

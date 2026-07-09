@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * One site-creation step. Reads artifacts written by earlier steps from the
  * project and writes its own output. Each step is individually runnable and
