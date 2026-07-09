@@ -3,7 +3,7 @@
 **Date:** 2026-07-09  
 **Status:** approved for implementation planning  
 **Scope:** Milestone 1 Task 4 public API only  
-**Related:** [`docs/superpowers/plans/2026-07-01-site-build-package-milestone-1.md`](../plans/2026-07-01-site-build-package-milestone-1.md) (Task 4), Linear ticket *WPCOM: Create the WpcomAiLlm transport adapter* (depends on this facade; lives in the internal repo)
+**Related:** [`docs/superpowers/plans/2026-07-01-site-build-package-milestone-1.md`](../plans/2026-07-01-site-build-package-milestone-1.md) (Task 4)
 
 ## Goal
 
@@ -18,10 +18,10 @@ This is a **repackaging** change. It does not change prompt templates, step logi
 - Host-composed / alternate step graphs (`docs/composition-and-extension.md` remains a later concern)
 - Injectable temperatures on the constructor
 - A thick `build()` that owns reporting, images, or Playground serve
-- `WpcomAiLlm` implementation (Task 5 / internal repo)
+- Host-specific `Llm` adapters (stay with the host; not part of this package)
 - `Package`, `BlockFixer`, `NodeBlockFixer` (Tasks 2–3; assumed present when Task 4 lands)
 - Stateless `Unit` extraction (prerequisite after Task 4)
-- Studio HTTP transport / multi-harness resolution
+- Alternate HTTP transports / multi-harness resolution
 
 ## Role
 
@@ -72,7 +72,7 @@ final class SiteBuilder
 |---|---|
 | `Llm $llm` | Transport shared by every LLM step and `ConcurrentGroup` |
 | `string $promptsDir` | Directory of `*.md` prompt templates (typically `Package::promptsDir()`) |
-| `string $outputRoot` | Root for project folders (CLI: `repo_path('projects')`; wpcom: host-chosen dir) |
+| `string $outputRoot` | Root for project folders (CLI: `repo_path('projects')`; hosts pass their own dir) |
 | `BlockFixer $blockFixer` | Injected into `FixBlocksStep` (CLI: `NodeBlockFixer::default()`) |
 | `array $models` | Partial map of step id → model id; merged over package defaults |
 
@@ -163,18 +163,16 @@ $project = $builder->createProject($prompt, $slug);
 
 `step_models()` / `step_temperatures()` remain shared helpers so CLI env overrides and `SiteBuilder` assembly stay one map.
 
-## wpcom consumption (informational)
+## Host consumption (informational)
 
-Not implemented in the public package. Documents the intended use of this API:
+The public package only ships the `Llm` interface and `SiteBuilder`. Hosts implement `Llm` for their own transport and construct the facade:
 
 ```php
-require_lib( 'a8c/site-build' );
-
 $builder = new \Automattic\SiteBuild\SiteBuilder(
-    llm:        new \WPCOM\SiteBuild\WpcomAiLlm(feature: 'block-theme-generator'),
+    llm:        $hostLlm, // any Automattic\SiteBuild\Llm
     promptsDir: \Automattic\SiteBuild\Package::promptsDir(),
     outputRoot: $themes_output_dir,
-    blockFixer: /* host BlockFixer, or NodeBlockFixer::default() if Node is available */,
+    blockFixer: \Automattic\SiteBuild\NodeBlockFixer::default(), // or a host BlockFixer
     models:     ['sections' => 'claude-opus-4-8'],
 );
 
@@ -182,12 +180,6 @@ $project = $builder->createProject($user_prompt);
 $builder->pipeline()->runThrough($project);
 // partial: $builder->pipeline()->runThrough($project, 'theme-json');
 ```
-
-Notes for the adapter ticket (separate design/implementation):
-
-- `WpcomAiLlm` implements the frozen `Llm` interface over wpcom’s provider factory; batch methods run **sequentially**.
-- JSON path matches the library Anthropic client (instruct JSON-only + decode), not schema structured-output.
-- Adapter lives in the **internal** repo; the public package only exposes the `Llm` port + this facade.
 
 ## Error handling
 
@@ -231,7 +223,7 @@ Host constructs SiteBuilder(llm, promptsDir, outputRoot, blockFixer, models?)
 
 ## Relation to composition-and-extension
 
-`docs/composition-and-extension.md` argues hosts will eventually compose **different** graphs. This design intentionally hardcodes the **default / CLI composition** inside `SiteBuilder::pipeline()` for Milestone 1. That matches Task 4 and unblocks wpcom’s simple in-process path. Alternate graphs are a follow-on; they should not block this facade.
+`docs/composition-and-extension.md` argues hosts will eventually compose **different** graphs. This design intentionally hardcodes the **default / CLI composition** inside `SiteBuilder::pipeline()` for Milestone 1. That matches Task 4 and gives embedding hosts a stable entry point. Alternate graphs are a follow-on; they should not block this facade.
 
 ## Implementation notes for Task 4
 

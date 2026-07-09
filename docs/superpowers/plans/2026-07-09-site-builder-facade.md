@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace `build_pipeline()` and host-side project seeding with an injectable `SiteBuilder` facade so CLI and wpcom construct one object with their own `Llm` and run the default pipeline (full or partial).
+**Goal:** Replace `build_pipeline()` and host-side project seeding with an injectable `SiteBuilder` facade so the CLI and any embedding host construct one object with their own `Llm` and run the default pipeline (full or partial).
 
 **Architecture:** Thin facade only: constructor injects `Llm`, prompts dir, output root, `BlockFixer`, and optional model overrides; `pipeline()` relocates today's step assembly; `store()` / `createProject()` own project dirs + `meta.json` seeding. Reporting, images, and Playground stay in the CLI. No `build()` method. No host-composed graphs.
 
@@ -52,7 +52,7 @@ Expected: suite green, classes under `Automattic\SiteBuild\`. If missing, **stop
 | `tests/integration/pipeline_test.php` | Call `SiteBuilder` instead of `build_pipeline` |
 | Any other `build_pipeline` callers (grep at implement time) | Same |
 
-**Not modified by this plan:** prompts, step logic (except already-done FixBlocks injection), `make_llm()`, `WpcomAiLlm` (internal repo).
+**Not modified by this plan:** prompts, step logic (except already-done FixBlocks injection), `make_llm()`, host-specific `Llm` adapters.
 
 ---
 
@@ -505,88 +505,21 @@ git commit -m "feat: drive CLI and tests through SiteBuilder; remove build_pipel
 
 ---
 
-### Task 4: Dotcom fire-gun driver note (no public-package code)
+### Task 4: Host consumption note (no package code)
 
-Not a public-package commit. Documents the sandbox driver rewrite so the Linear done criterion can use the facade after vendoring.
-
-**Target (internal):** `bin/site-builder/build.php` (or equivalent under wpcom)
-
-- [ ] **Step 1: Replace procedural globals with SiteBuilder**
+Hosts wire their own `Llm` and call the facade. No host-specific adapters or wiring land in this public package — only the generic extension point:
 
 ```php
-<?php
-/**
- * Sandbox driver: run site-build through WpcomAiLlm with ambient credentials.
- *
- * Usage: php bin/site-builder/build.php "<prompt>" [--until=<step-id>] [--output=<dir>]
- */
-declare(strict_types=1);
-
-// ... argv parse for $prompt, $until, $output unchanged ...
-
-define('DOING_CRON', true);
-require dirname(__DIR__, 2) . '/wp-load.php';
-
-require_lib('a8c/site-builder'); // or a8c/site-build — match the vendored slug
-
-if (!interface_exists(\Automattic\SiteBuild\Llm::class)
-    || !class_exists(\WPCOM\AI\SiteBuilder\WpcomAiLlm::class)
-    || !class_exists(\Automattic\SiteBuild\SiteBuilder::class)
-) {
-    fwrite(STDERR, "a8c/site-builder did not load; check the php error log.\n");
-    exit(1);
-}
-
-$llm = new \WPCOM\AI\SiteBuilder\WpcomAiLlm(/* feature: 'block-theme-generator' if required */);
-
-$outputRoot = $cli_options['output'] ?? sys_get_temp_dir() . '/site-builder-projects';
-
 $builder = new \Automattic\SiteBuild\SiteBuilder(
-    llm: $llm,
+    llm: $hostLlm,
     promptsDir: \Automattic\SiteBuild\Package::promptsDir(),
     outputRoot: $outputRoot,
-    blockFixer: \Automattic\SiteBuild\NodeBlockFixer::default(), // or a wpcom BlockFixer
+    blockFixer: \Automattic\SiteBuild\NodeBlockFixer::default(),
     models: [],
 );
-
-$pipeline = $builder->pipeline();
-$until = isset($cli_options['until']) ? (string) $cli_options['until'] : null;
-if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
-    fwrite(STDERR, 'Unknown --until step. Valid: ' . implode(', ', $pipeline->stopIds()) . "\n");
-    exit(1);
-}
-
 $project = $builder->createProject($prompt);
-echo 'Project: ' . $project->path() . "\n";
-
-$pipeline->runThrough(
-    $project,
-    $until,
-    static function (\Automattic\SiteBuild\Step $step, float $seconds): void {
-        printf("  done  %-32s %6.1fs\n", $step->id(), $seconds);
-    },
-    static function (\Automattic\SiteBuild\Step $step): void {
-        printf("  start %s\n", $step->label());
-    }
-);
-
-// Prefer usageTotals() if the adapter implements the library naming;
-// keep usage_totals() only if the adapter defines that method.
-$usage = method_exists($llm, 'usageTotals') ? $llm->usageTotals() : $llm->usage_totals();
-printf(
-    "Done. %d request(s), %d input + %d output tokens.\nTheme: %s\n",
-    $usage['requests'],
-    $usage['input_tokens'],
-    $usage['output_tokens'],
-    $project->themePath()
-);
+$builder->pipeline()->runThrough($project, $until);
 ```
-
-- [ ] **Step 2: Done criterion for the adapter ticket**
-
-A full or partial (`--until=site-spec`) run on a sandbox with ambient credentials, no API key, theme path printed. SiteBuilder is the supported host API; the adapter still owns ambient completions.
-
-This step is executed in the **internal** repo after the public package is vendored — not as part of the public plan's green suite.
 
 ---
 
@@ -606,10 +539,10 @@ This step is executed in the **internal** repo after the public package is vendo
 | Integration tests off `build_pipeline` | Task 3 |
 | No `build()`, no injectable temps | Task 2 (explicit non-features) |
 | Unit tests with FakeLlm + noop/real fixer | Task 1 |
-| Dotcom fire-gun shape | Task 4 (internal) |
+| Host consumption sketch (generic, no host wiring) | Task 4 |
 | Prerequisites Package / BlockFixer / namespaces | Hard gate |
 
-**Placeholder scan:** no TBD/TODO steps; full class body and rewire snippets included. Task 4 is internal documentation with complete PHP.
+**Placeholder scan:** no TBD/TODO steps; full class body and rewire snippets included.
 
 **Type consistency:** `SiteBuilder::__construct(Llm, string, string, BlockFixer, array)`, `pipeline(): Pipeline`, `store(): ProjectStore`, `createProject(string, ?string): Project`, `BlockFixer::fix(string): string`, `NodeBlockFixer::default()`, `Package::promptsDir()` — same names as the design doc.
 
