@@ -1,10 +1,13 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
+
 /**
- * Unit tests for FixBlocksStep::summaryLine — the one console line distilled
- * from the fixer's verbose stdout (the full report goes to the project log).
+ * Unit tests for NodeBlockFixer::summaryLine and FixBlocksStep → BlockFixer.
  */
 
 test('summaryLine returns the [fix-templates] summary, ignoring the verbose report', function () {
@@ -15,12 +18,33 @@ test('summaryLine returns the [fix-templates] summary, ignoring the verbose repo
 
     assert_eq(
         '[fix-templates] 7/11 file(s) re-serialized, 14 issue(s) fixed across 1 theme(s).',
-        FixBlocksStep::summaryLine($stdout)
+        NodeBlockFixer::summaryLine($stdout)
     );
 });
 
 test('summaryLine falls back when no summary line is present', function () {
-    assert_eq('block-fixer: no files changed', FixBlocksStep::summaryLine("   \n  noise\n"));
+    assert_eq('block-fixer: no files changed', NodeBlockFixer::summaryLine("   \n  noise\n"));
+});
+
+test('FixBlocksStep delegates repair to the injected BlockFixer', function () {
+    $fake = new class implements BlockFixer {
+        /** @var string[] */
+        public array $calls = [];
+        public function fix(string $themeDir): string
+        {
+            $this->calls[] = $themeDir;
+            return '[fix-templates] 0/0 file(s) re-serialized';
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/sb-' . uniqid();
+    mkdir($tmp . '/theme', 0775, true);
+    $project = new Project($tmp);
+
+    (new FixBlocksStep($fake))->run($project);
+
+    assert_eq(1, count($fake->calls), 'fix() called once');
+    assert_eq($project->themePath(), $fake->calls[0], 'given the theme dir');
 });
 
 test('block fixer keeps the card-media class hook the card recipe relies on', function () {

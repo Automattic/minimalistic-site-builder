@@ -11,6 +11,7 @@ use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
@@ -197,7 +198,7 @@ function build_pipeline(Llm $llm): Pipeline
         // strips the alt from wp:cover background images (core cover save()
         // resets it to ""), which would lose every hero's AI_IMAGE spec.
         new CollectImagesStep(),
-        new FixBlocksStep(),
+        new FixBlocksStep(NodeBlockFixer::default()),
         // AFTER fix-blocks: reads the final (re-serialized) markup for which
         // layout utility classes survived, and appends their CSS to style.css —
         // a file the fixer never touches, so nothing here can be stripped.
