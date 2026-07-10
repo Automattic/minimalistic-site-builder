@@ -367,7 +367,7 @@ final class ContrastFix
         $attrs = $this->doc->attrs($i) ?? [];
         $attrs['textColor'] = $slug;
         unset($attrs['style']['color']['text']);
-        $this->pruneEmpty($attrs);
+        self::pruneEmpty($attrs);
         $this->doc->setAttrs($i, $attrs);
         if ($oldSlug !== null && $oldSlug !== $slug) {
             $this->doc->replaceInOwnHtml($i, "has-{$oldSlug}-color", "has-{$slug}-color");
@@ -413,7 +413,7 @@ final class ContrastFix
     }
 
     /** Drop style/color scaffolding left empty by an unset. @param array<mixed> $attrs */
-    private function pruneEmpty(array &$attrs): void
+    public static function pruneEmpty(array &$attrs): void
     {
         if (isset($attrs['style']['color']) && $attrs['style']['color'] === []) {
             unset($attrs['style']['color']);

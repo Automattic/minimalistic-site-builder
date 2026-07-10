@@ -213,6 +213,7 @@ final class CoverContrastStep implements Step
                 }
                 $textAttrs['textColor'] = $slug;
                 unset($textAttrs['style']['color']['text']);
+                ContrastFix::pruneEmpty($textAttrs);
                 $doc->setAttrs($textIndex, $textAttrs);
                 $oldSlug = $ownSlugs[$textIndex] ?? null;
                 if ($oldSlug !== null && $oldSlug !== $slug) {
