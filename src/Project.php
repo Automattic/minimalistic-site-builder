@@ -29,6 +29,12 @@ final class Project
         return $this->path('theme' . ($rel === '' ? '' : '/' . ltrim($rel, '/')));
     }
 
+    /** Absolute path under the companion content plugin's directory. */
+    public function pluginPath(string $rel = ''): string
+    {
+        return $this->path('plugin' . ($rel === '' ? '' : '/' . ltrim($rel, '/')));
+    }
+
     /**
      * Absolute path under the project's logs/ directory, creating it on demand.
      * Steps route their verbose output here (one file per step) so the console

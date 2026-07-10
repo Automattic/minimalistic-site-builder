@@ -8,7 +8,8 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 
 /**
- * Step 3 (deterministic): apply the project identity to the scaffolded theme.
+ * Step 3 (deterministic): apply the project identity to the scaffolded theme
+ * and content plugin.
  *
  * Input:  siteSpec.json (name, slug, factual fields) + scaffolded theme files
  * Output: theme/style.css and theme/readme.txt with {{placeholders}} replaced.
@@ -41,7 +42,14 @@ final class ApplyIdentityStep implements Step
             'AUTHOR'      => (string) ($spec['author'] ?? 'Builder'),
         ];
 
-        foreach (['theme/style.css', 'theme/readme.txt'] as $file) {
+        // The content plugin's header carries the same identity; it may be
+        // absent in compositions that build a theme only.
+        $files = ['theme/style.css', 'theme/readme.txt'];
+        if ($project->exists(ScaffoldPluginStep::MAIN_FILE)) {
+            $files[] = ScaffoldPluginStep::MAIN_FILE;
+        }
+
+        foreach ($files as $file) {
             $filled = PromptRenderer::fill($project->readText($file), $vars);
             $project->writeText($file, $filled);
         }
