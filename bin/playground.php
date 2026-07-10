@@ -7,28 +7,40 @@ use Automattic\SiteBuild\ProjectStore;
 /**
  * Start a local WordPress Playground instance with a generated theme activated.
  *
- *   php bin/playground.php <slug> [--port=9400]
+ *   php bin/playground.php <slug> [--port=9400] [--workers=2]
  *
  * Mounts projects/<slug>/theme into wp-content/themes/<slug> and activates it
  * via a Blueprint, then boots Playground (downloads WordPress on first run).
  * Requires Node.js (uses `npx @wp-playground/cli`). Runs in the foreground;
  * Ctrl-C to stop.
+ *
+ * --workers caps the request-handling worker threads (each one holds its own
+ * PHP wasm runtime, so fewer workers = less memory). Accepts a positive
+ * integer or "auto" (one per CPU core minus one).
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
 $slug = null;
 $port = 9400;
+$workers = '2';
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--port=')) {
         $port = (int) substr($a, 7);
+    } elseif (str_starts_with($a, '--workers=')) {
+        $workers = substr($a, 10);
     } elseif ($slug === null) {
         $slug = $a;
     }
 }
 
+if ($workers !== 'auto' && (int) $workers < 1) {
+    fwrite(STDERR, "--workers must be a positive integer or \"auto\".\n");
+    exit(1);
+}
+
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400]\n");
+    fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
     fwrite(STDERR, "Available themes:\n");
     foreach (glob(repo_path('projects/*/theme/style.css')) ?: [] as $f) {
         fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
@@ -78,34 +90,29 @@ file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JS
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 
-// `start` is the recommended (and fast) Playground CLI command; --skip-browser
-// keeps it headless-friendly (it opens a browser tab by default). --no-auto-mount
-// disables auto-detecting a project from the cwd (the repo root, which is not a
-// WP project) — we specify exactly what to mount with --mount, and the CLI's own
-// help recommends pairing --mount with --no-auto-mount for deterministic mounts.
+// `server` (not `start`) because it accepts --workers, which caps the
+// request-handling worker threads — each one holds a full PHP wasm runtime, so
+// the CLI default of min(6, cpus-1) costs several hundred MB we don't need for
+// a single-user preview. The CLI warns that fewer than 6 workers raises the
+// odds of deadlock on file locks; with our sequential preview/screenshot
+// traffic that hasn't been an issue, and 2 keeps a spare worker for loopback
+// subrequests. Override with --workers=auto to get the old behaviour.
 //
-// --reset wipes the persisted site directory before booting. Without it the theme
-// silently fails to activate with "Stylesheet is missing": Playground persists the
-// site under ~/.wordpress-playground/sites/<sha256(cwd)> and writes the *mount
-// point* wp-content/themes/<slug> to disk as an empty folder (the bind-mounted
-// theme content itself is never persisted). On the next boot that persisted empty
-// folder shadows our theme --mount, so WordPress sees a theme dir with no
-// style.css. Resetting guarantees the mounted theme is the only thing at that path.
+// `server` also boots an ephemeral site (nothing persisted under
+// ~/.wordpress-playground/sites), which sidesteps the persisted-mount-point
+// problem that used to require `start --reset`: a persisted empty
+// wp-content/themes/<slug> folder would shadow the theme --mount on the next
+// boot and activation failed with "Stylesheet is missing". No persisted site,
+// no shadowing — and no auto-mount either (for `server` it is opt-in), so the
+// only mount is the one we pass. Booting from scratch costs no extra time
+// versus the old `start --reset`, which wiped the site every run anyway.
 $cmd = sprintf(
-    'npx --yes @wp-playground/cli@latest start --skip-browser --no-auto-mount --reset --port=%d --mount=%s --blueprint=%s',
+    'npx --yes @wp-playground/cli@latest server --login --workers=%s --port=%d --mount=%s --blueprint=%s',
+    escapeshellarg($workers),
     $port,
     escapeshellarg($mount),
     escapeshellarg($blueprintPath)
 );
-
-// The site id is sha256(cwd) when --no-auto-mount is set, so launching every
-// project from the repo root funnels them all into ONE shared persisted site
-// (whose themes/ then accumulates a stale empty folder per project, and whose
-// --reset would clobber another project's still-running --keep-alive server).
-// Launch from the project directory instead: each project gets its own site id,
-// so --reset only ever touches this project's own site. Paths above are absolute,
-// so the cwd change is safe.
-chdir(repo_path("projects/{$slug}"));
 
 echo "Starting WordPress Playground for '{$slug}'" . ($name !== '' ? " ({$name})" : '') . "\n";
 echo "  theme:  {$themeDir}\n";
