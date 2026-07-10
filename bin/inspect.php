@@ -7,7 +7,7 @@ use Automattic\SiteBuild\ProjectStore;
  * Quick content/quality inspector for a generated site.
  *   php bin/inspect.php <slug>
  *
- * Prints the front-page outline (headings, buttons, images, parts) and checks
+ * Prints each page's outline (headings, buttons, images) and checks
  * that colors/fonts used in markup actually exist as theme.json presets.
  */
 
@@ -32,28 +32,52 @@ $specFonts = array_map(
 );
 echo 'fonts: ' . ($specFonts === [] ? '?' : implode(' / ', $specFonts)) . "\n\n";
 
-$front = $project->readText('theme/templates/front-page.html');
-
-echo "## Front-page outline\n";
-if (preg_match_all('/<h([1-6])[^>]*>(.*?)<\/h\1>/s', $front, $hm, PREG_SET_ORDER)) {
-    foreach ($hm as $h) {
-        echo str_repeat('  ', (int) $h[1] - 1) . 'H' . $h[1] . ': ' . trim(strip_tags($h[2])) . "\n";
+// The site's content lives in the companion plugin (one file per page); the
+// chrome lives in the theme parts. Inspect both.
+$pages = $project->exists('plugin/pages.json')
+    ? ($project->readJson('plugin/pages.json')['pages'] ?? [])
+    : [];
+$all = '';
+foreach (['parts/header.html', 'parts/footer.html'] as $rel) {
+    if ($project->exists('theme/' . $rel)) {
+        $all .= "\n" . $project->readText('theme/' . $rel);
     }
 }
 
-echo "\n## CTAs (buttons)\n";
-if (preg_match_all('/wp-block-button__link[^>]*>(.*?)<\/a>/s', $front, $bm)) {
-    foreach ($bm[1] as $b) {
-        echo '  • ' . trim(strip_tags($b)) . "\n";
+foreach ($pages as $page) {
+    $slug = (string) ($page['slug'] ?? '');
+    $rel = "plugin/pages/{$slug}.html";
+    if (!$project->exists($rel)) {
+        continue;
     }
-}
+    $markup = $project->readText($rel);
+    $all .= "\n" . $markup;
 
-echo "\n## Images (alt text)\n";
-$imgs = preg_match_all('/<img[^>]*alt="([^"]*)"/', $front, $im);
-foreach ($im[1] ?? [] as $alt) {
-    echo '  • ' . ($alt === '' ? '(empty alt)' : $alt) . "\n";
+    $frontMark = !empty($page['front']) ? ' (front)' : '';
+    echo "## Page: {$page['title']}{$frontMark} — /{$slug}/\n";
+    if (preg_match_all('/<h([1-6])[^>]*>(.*?)<\/h\1>/s', $markup, $hm, PREG_SET_ORDER)) {
+        foreach ($hm as $h) {
+            echo str_repeat('  ', (int) $h[1] - 1) . 'H' . $h[1] . ': ' . trim(strip_tags($h[2])) . "\n";
+        }
+    }
+
+    if (preg_match_all('/wp-block-button__link[^>]*>(.*?)<\/a>/s', $markup, $bm) && $bm[1] !== []) {
+        echo "  CTAs:\n";
+        foreach ($bm[1] as $b) {
+            echo '  • ' . trim(strip_tags($b)) . "\n";
+        }
+    }
+
+    $imgs = preg_match_all('/<img[^>]*alt="([^"]*)"/', $markup, $im);
+    if ($imgs > 0) {
+        echo "  Images ({$imgs}):\n";
+        foreach ($im[1] as $alt) {
+            echo '  • ' . ($alt === '' ? '(empty alt)' : $alt) . "\n";
+        }
+    }
+    echo "\n";
 }
-echo "  total <img>: {$imgs}\n";
+$front = $all;
 
 // Preset usage vs declared.
 $theme = json_decode($project->readText('theme/theme.json'), true);

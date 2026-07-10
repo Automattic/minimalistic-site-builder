@@ -1,8 +1,17 @@
 # builder2
 
-Generates a WordPress block theme (theme.json + landing page + template parts)
-from a one-line prompt, then optionally turns the `AI_IMAGE` placeholders it
-emits into real assets via Google Imagen (through the WPCOM AI proxy).
+Generates a complete multi-page WordPress site from a one-line prompt: a block
+theme (theme.json + templates + header/footer parts) plus a companion content
+plugin that seeds every generated page on activation and removes them on
+deactivation. The site spec carries a page tree (home, menu, about, …); every
+page gets its own planned and generated sections. Optionally turns the
+`AI_IMAGE` placeholders it emits into real assets via Google Imagen (through
+the WPCOM AI proxy).
+
+The split is deliberate: design lives in the theme, content lives in
+`projects/<slug>/plugin/` (static seeder code + `pages.json` manifest +
+`pages/<slug>.html` block markup). The homepage is a seeded page too —
+`page_on_front` points at it; there is no front-page.html template.
 
 ## Setup
 

@@ -20,7 +20,7 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * and reuse it across re-runs.
  *
  * --until=<step-id> stops after that step (an unknown id errors with the list).
- * Steps that run concurrently share one id (e.g. theme-json+section-plan), but
+ * Steps that run concurrently share one id (e.g. theme-json+page-plan), but
  * --until also accepts a member id (theme-json) and stops once the group is done.
  *
  * --with-images additionally generates the AI image placeholders into real
