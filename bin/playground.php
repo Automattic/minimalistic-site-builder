@@ -5,11 +5,12 @@ use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
- * Start a local WordPress Playground instance with a generated theme activated.
+ * Start a local WordPress Playground instance with a generated theme activated
+ * (plus the companion content plugin, when the project has one).
  *
  *   php bin/playground.php <slug> [--port=9400]
  *
- * Mounts projects/<slug>/theme into wp-content/themes/<slug> and activates it
+ * Mounts projects/<slug>/theme (and plugin) into wp-content and activates them
  * via a Blueprint, then boots Playground (downloads WordPress on first run).
  * Requires Node.js (uses `npx @wp-playground/cli`). Runs in the foreground;
  * Ctrl-C to stop.
@@ -61,22 +62,32 @@ if ($port !== $requestedPort) {
     fwrite(STDERR, "Port {$requestedPort} is in use — using {$port} instead.\n");
 }
 
-// Blueprint: set the site identity, activate the mounted theme, log in. The
-// identity comes from PlaygroundArtifact::siteOptions so this local preview
-// matches the published Playground bundles.
+// Blueprint: set the site identity, activate the mounted theme (and the
+// mounted content plugin, which seeds the pages), log in. The identity comes
+// from PlaygroundArtifact::siteOptions so this local preview matches the
+// published Playground bundles.
+$steps = [
+    ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
+    ['step' => 'activateTheme', 'themeFolderName' => $slug],
+];
+$pluginDir = repo_path("projects/{$slug}/plugin");
+$hasPlugin = is_file($pluginDir . '/site-content.php');
+if ($hasPlugin) {
+    // AFTER the theme: the seeder resolves asset URLs against the active
+    // stylesheet when it creates the pages.
+    $steps[] = ['step' => 'activatePlugin', 'pluginPath' => "{$slug}-content/site-content.php"];
+}
 $blueprint = [
     '$schema'      => 'https://playground.wordpress.net/blueprint-schema.json',
     'landingPage'  => '/',
     'login'        => true,
-    'steps'        => [
-        ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
-        ['step' => 'activateTheme', 'themeFolderName' => $slug],
-    ],
+    'steps'        => $steps,
 ];
 $blueprintPath = repo_path("projects/{$slug}/.playground-blueprint.json");
 file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
+$pluginMount = $hasPlugin ? $pluginDir . ':/wordpress/wp-content/plugins/' . $slug . '-content' : null;
 
 // `start` is the recommended (and fast) Playground CLI command; --skip-browser
 // keeps it headless-friendly (it opens a browser tab by default). --no-auto-mount
@@ -92,9 +103,10 @@ $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 // folder shadows our theme --mount, so WordPress sees a theme dir with no
 // style.css. Resetting guarantees the mounted theme is the only thing at that path.
 $cmd = sprintf(
-    'npx --yes @wp-playground/cli@latest start --skip-browser --no-auto-mount --reset --port=%d --mount=%s --blueprint=%s',
+    'npx --yes @wp-playground/cli@latest start --skip-browser --no-auto-mount --reset --port=%d --mount=%s%s --blueprint=%s',
     $port,
     escapeshellarg($mount),
+    $pluginMount !== null ? ' --mount=' . escapeshellarg($pluginMount) : '',
     escapeshellarg($blueprintPath)
 );
 

@@ -13,7 +13,7 @@ function collect_fixture(): array
 
 test('collect-images parses img alt placeholders into specs', function () {
     [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/templates/front-page.html',
+    $project->writeText('theme/templates/page.html',
         '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/hero-dawn.jpg" '
         . 'alt="AI_IMAGE: A misty valley at dawn, soft light | full-bleed hero with text overlay | photorealistic | landscape"/></figure><!-- /wp:image -->'
     );
@@ -80,7 +80,7 @@ test('collect-images ignores plain images with no AI_IMAGE marker', function () 
 
 test('collect-images keeps subject pipes and parses the three trailing fields', function () {
     [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/templates/front-page.html',
+    $project->writeText('theme/templates/page.html',
         '<img src="theme:./assets/combo.jpg" alt="AI_IMAGE: Coffee | tea | pastries on a table | menu item card | flat-design | square"/>'
     );
 
