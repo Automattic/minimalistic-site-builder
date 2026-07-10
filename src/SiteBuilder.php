@@ -121,8 +121,12 @@ final class SiteBuilder
      * Create a project directory and seed meta.json. Null slug → free random
      * adjective-noun name (claimed atomically). Explicit slug is used as-is
      * (re-runs can target the same folder). Merges over any pre-seeded meta.
+     *
+     * $multiPage lets the site-spec step plan inner pages; the default builds
+     * ONLY the landing page. Recorded in meta.json as `multi_page` so the
+     * pipeline needs no further wiring.
      */
-    public function createProject(string $prompt, ?string $slug = null): Project
+    public function createProject(string $prompt, ?string $slug = null, bool $multiPage = false): Project
     {
         $store = $this->store();
         $project = $slug === null
@@ -134,6 +138,7 @@ final class SiteBuilder
             'prompt'           => $prompt,
             'provisional_slug' => $project->slug(),
             'created_at'       => gmdate('c'),
+            'multi_page'       => $multiPage,
         ]));
 
         return $project;

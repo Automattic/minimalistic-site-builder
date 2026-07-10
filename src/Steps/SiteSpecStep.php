@@ -39,6 +39,24 @@ final class SiteSpecStep implements Step
     /** Identity keys the model may invent (and must then flag in `invented`). */
     private const IDENTITY_KEYS = ['name', 'persona_name', 'email_domain'];
 
+    /** {{page_tree_scope}} / {{page_tree_rule}} when inner pages are enabled (--multi-page). */
+    private const MULTI_PAGE_SCOPE = '1-6 top-level pages; nest "children" ONLY where the site genuinely'
+        . ' needs a second level (max depth 2). A one-page site (e.g. a simple landing page) is just the'
+        . ' homepage entry.';
+    private const MULTI_PAGE_RULE = '**Pages are factual scope decisions** — what the site covers, not how'
+        . ' it looks. Ground the tree in `site_type` / `area` and what the prompt actually calls for: a'
+        . ' restaurant wants something like home / menu / about / visit; a portfolio wants home / work /'
+        . ' about / contact; a simple landing-page request wants ONLY the homepage. Each page\'s `purpose`'
+        . ' states what content lives there so no two pages overlap. `sections` stays the homepage\'s'
+        . ' section hint list.';
+
+    /** The default: the build produces ONLY the landing page. */
+    private const SINGLE_PAGE_SCOPE = 'exactly ONE entry — the homepage. This build is a one-page site:'
+        . ' no inner pages, no "children".';
+    private const SINGLE_PAGE_RULE = '**This is a one-page site** — `pages` holds exactly the homepage'
+        . ' entry, and everything the site covers lives there. Fold what would otherwise be separate pages'
+        . ' (about, menu, contact, …) into the homepage\'s `sections` list instead.';
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -64,10 +82,19 @@ final class SiteSpecStep implements Step
             throw new \RuntimeException('meta.json has no "prompt"');
         }
 
-        $rendered = $this->renderer->render('site-spec.md', ['user_prompt' => $prompt]);
+        // Inner pages are opt-in: the runner records the --multi-page flag in
+        // meta.json; without it the spec plans (and normalize() enforces) a
+        // landing page only.
+        $multiPage = (bool) ($meta['multi_page'] ?? false);
+
+        $rendered = $this->renderer->render('site-spec.md', [
+            'user_prompt'     => $prompt,
+            'page_tree_scope' => $multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE,
+            'page_tree_rule'  => $multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE,
+        ]);
         $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
 
-        $spec = self::normalize($spec);
+        $spec = self::normalize($spec, $multiPage);
         $project->writeJson('siteSpec.json', $spec);
     }
 
@@ -93,7 +120,7 @@ final class SiteSpecStep implements Step
      * @param array<mixed> $spec
      * @return array<mixed>
      */
-    private static function normalize(array $spec): array
+    private static function normalize(array $spec, bool $multiPage): array
     {
         $name = trim((string) ($spec['name'] ?? ''));
         if ($name === '') {
@@ -124,7 +151,7 @@ final class SiteSpecStep implements Step
 
         // The page tree drives multi-page generation; every downstream step
         // may rely on at least a homepage entry existing.
-        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec);
+        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage);
 
         // `invented` lists which identity values the model made up; keep only
         // the identity keys so downstream features can trust its contents.
@@ -164,16 +191,22 @@ final class SiteSpecStep implements Step
      * dropped; a missing/empty tree degrades to a single homepage so a
      * one-page build is the floor, never a failure. The FIRST page is the
      * homepage — position is the contract, no flag is stored here.
+     * When $multiPage is false the tree is CUT DOWN to the homepage — the
+     * prompt already asks for one page, but the model doesn't always comply,
+     * and the flag (not the model) owns that decision.
      * Pure — unit-testable.
      *
      * @param mixed        $raw
      * @param array<mixed> $spec
      * @return array<int,array<string,mixed>>
      */
-    public static function normalizePages($raw, array $spec): array
+    public static function normalizePages($raw, array $spec, bool $multiPage = true): array
     {
         $seen = [];
         $pages = is_array($raw) ? self::normalizePageList($raw, $seen) : [];
+        if (!$multiPage && $pages !== []) {
+            $pages = [array_merge($pages[0], ['children' => []])];
+        }
         if ($pages === []) {
             return [[
                 'title'    => 'Home',

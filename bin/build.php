@@ -12,7 +12,7 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--with-images] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--multi-page] [--with-images] [--port=9400] [--no-serve]
  *
  * --provider=<anthropic|openai|xai> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
@@ -27,6 +27,9 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * --until=<step-id> stops after that step (an unknown id errors with the list).
  * Steps that run concurrently share one id (e.g. theme-json+page-plan), but
  * --until also accepts a member id (theme-json) and stops once the group is done.
+ *
+ * --multi-page lets the site plan inner pages (about, contact, …) beyond the
+ * homepage. Off by default: the build produces ONLY the landing page.
  *
  * --with-images additionally generates the AI image placeholders into real
  * assets via the WPCOM AI proxy (slow + networked; off by default).
@@ -43,6 +46,7 @@ $prompt = null;
 $slug = null;
 $until = null;
 $withImages = false;
+$multiPage = false;
 $port = null;
 $serve = true;
 $provider = null;
@@ -59,13 +63,15 @@ foreach ($args as $a) {
         $serve = false;
     } elseif ($a === '--with-images') {
         $withImages = true;
+    } elseif ($a === '--multi-page') {
+        $multiPage = true;
     } elseif ($prompt === null) {
         $prompt = $a;
     }
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai] [--slug=...] [--until=step-id] [--with-images] [--port=9400] [--no-serve]\n");
+    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai] [--slug=...] [--until=step-id] [--multi-page] [--with-images] [--port=9400] [--no-serve]\n");
     exit(1);
 }
 
@@ -105,7 +111,7 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
 // Without an explicit --slug, createProject picks a free random adjective-noun
 // name. Explicit --slug reuses that directory across re-runs. meta.json is
 // seeded (and merged) inside createProject so demo orchestrators can pre-seed.
-$project = $builder->createProject($prompt, $slug);
+$project = $builder->createProject($prompt, $slug, $multiPage);
 
 echo "Building '{$project->slug()}'\n";
 

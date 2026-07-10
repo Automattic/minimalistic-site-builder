@@ -11,9 +11,11 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * One-shot: build a site from a prompt, report tokens + wall time, then boot it
  * in WordPress Playground and print the URL.
  *
- *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--with-images]
+ *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--multi-page] [--with-images]
  *
  * --no-serve builds and reports metrics without launching Playground.
+ * --multi-page lets the site plan inner pages beyond the homepage (off by
+ *   default: the build produces ONLY the landing page).
  * --with-images also generates real assets for the AI_IMAGE placeholders
  *   (slow + networked; via the WPCOM proxy).
  */
@@ -25,6 +27,7 @@ $slug = null;
 $port = null;
 $serve = true;
 $withImages = false;
+$multiPage = false;
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
@@ -34,13 +37,15 @@ foreach (array_slice($argv, 1) as $a) {
         $serve = false;
     } elseif ($a === '--with-images') {
         $withImages = true;
+    } elseif ($a === '--multi-page') {
+        $multiPage = true;
     } elseif ($prompt === null) {
         $prompt = $a;
     }
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve]\n");
+    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page]\n");
     exit(1);
 }
 
@@ -54,7 +59,7 @@ $builder = new SiteBuilder(
 );
 // Without an explicit --slug, createProject picks a free random adjective-noun
 // name rather than echoing the whole prompt.
-$project = $builder->createProject($prompt, $slug);
+$project = $builder->createProject($prompt, $slug, $multiPage);
 $pipeline = $builder->pipeline();
 
 // step id => model, so the report can show which model each LLM step ran on.
