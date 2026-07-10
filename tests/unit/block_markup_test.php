@@ -64,6 +64,36 @@ test('multiple mutations apply at the right offsets', function () {
     assert_contains('<!-- wp:paragraph {"b":8} -->', $out);
 });
 
+test('malformed attrs (missing closing brace) cannot swallow later blocks', function () {
+    // The broken opener must simply not parse as a block; the attrs scan must
+    // not run past --> to a later } and turn everything between into one node
+    // whose mutation would then delete the intervening content.
+    $src = '<!-- wp:group {"broken":1 --><div>x</div><!-- /wp:group -->'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p>Keep me</p><!-- /wp:paragraph -->';
+    $doc = BlockMarkup::parse($src);
+    $names = array_map(fn (int $i) => $doc->name($i), $doc->indices());
+    assert_true(in_array('paragraph', $names, true), 'the healthy paragraph must still parse');
+    $p = (int) array_search('paragraph', $names, true);
+    $attrs = $doc->attrs($p);
+    $attrs['textColor'] = 'contrast';
+    $doc->setAttrs($p, $attrs);
+    $out = $doc->render();
+    assert_contains('<div>x</div>', $out, 'content near the malformed opener must survive');
+    assert_contains('<p>Keep me</p>', $out);
+    assert_contains('<!-- wp:paragraph {"textColor":"contrast"} -->', $out);
+});
+
+test('replaceInOwnHtml rewrites class attributes only, never text content', function () {
+    $src = '<!-- wp:paragraph {"textColor":"secondary"} -->'
+        . '<p class="has-secondary-color has-text-color">Mention has-secondary-color here</p>'
+        . '<!-- /wp:paragraph -->';
+    $doc = BlockMarkup::parse($src);
+    $doc->replaceInOwnHtml(0, 'has-secondary-color', 'has-base-color');
+    $out = $doc->render();
+    assert_contains('<p class="has-base-color has-text-color">', $out);
+    assert_contains('Mention has-secondary-color here', $out, 'user copy must not be rewritten');
+});
+
 test('serializeComment escapes like WP serialize_block_attributes', function () {
     $expected = '<!-- wp:paragraph {"content":"a ' . '\\u002d\\u002d b \\u003C i \\u003E"} -->';
     assert_eq($expected, BlockMarkup::serializeComment('paragraph', ['content' => 'a -- b < i >'], false));

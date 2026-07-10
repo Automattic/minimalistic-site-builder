@@ -23,12 +23,15 @@ final class BlockMarkup
      * Block-comment delimiter pattern (namespace + name merged). The attrs
      * are scanned lazily up to the first `}` that closes the comment — the
      * approach of the @wordpress/block-serialization-default-parser
-     * tokenizer. Safe because serialized attributes can never contain `-->`
-     * (serialize_block_attributes escapes `--`).
+     * tokenizer. Serialized attributes can never contain `-->`
+     * (serialize_block_attributes escapes `--`), so the scan refuses to
+     * cross one: malformed LLM attributes (a missing `}`) make only that
+     * comment unparseable instead of swallowing every block up to the next
+     * stray `}` in the document.
      */
     private const DELIMITER =
         '/<!--\s+(?<closer>\/)?wp:(?<name>[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)\s+' .
-        '(?:(?<attrs>\{.*?\})\s*)?(?<void>\/)?-->/s';
+        '(?:(?<attrs>\{(?:(?!-->).)*?\})\s*)?(?<void>\/)?-->/s';
 
     /**
      * @param string $source the original document
@@ -153,9 +156,11 @@ final class BlockMarkup
     }
 
     /**
-     * String-replace inside the HTML this node itself owns: from its opening
-     * comment up to its first child block (or its closing comment when it has
-     * none) — i.e. the block's own root tag, untouched by descendants.
+     * String-replace inside `class="…"` attribute values of the HTML this
+     * node itself owns: from its opening comment up to its first child block
+     * (or its closing comment when it has none) — i.e. the block's own root
+     * tag, untouched by descendants. Text content is never rewritten: a
+     * paragraph that *mentions* `has-primary-color` must survive a repair.
      *
      * Needed when an attribute edit obsoletes a class token in the saved
      * HTML (e.g. a textColor swap leaving `has-old-color` behind): the block
@@ -211,7 +216,11 @@ final class BlockMarkup
                 'length'  => $edit['end'] - $edit['start'],
                 'content' => substr($this->source, $edit['start'], $edit['end'] - $edit['start']),
             ];
-            $regions[$key]['content'] = str_replace($edit['search'], $edit['replace'], $regions[$key]['content']);
+            $regions[$key]['content'] = (string) preg_replace_callback(
+                '/\bclass="[^"]*"/i',
+                static fn (array $m) => str_replace($edit['search'], $edit['replace'], $m[0]),
+                $regions[$key]['content']
+            );
         }
         foreach ($regions as $region) {
             $ops[] = $region;
