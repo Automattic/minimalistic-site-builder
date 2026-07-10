@@ -40,7 +40,7 @@ final class StepDefaults
             'design-direction-seeds' => Env::get('LLM_MODEL_DESIGN_DIRECTION_SEEDS', 'claude-haiku-4-5'),
             'theme-json'   => Env::get('LLM_MODEL_THEME_JSON',   $default),
             // Planning is light and structural — cheap/fast model by default.
-            'section-plan' => Env::get('LLM_MODEL_SECTION_PLAN', 'claude-haiku-4-5'),
+            'page-plan'    => Env::get('LLM_MODEL_PAGE_PLAN',     'claude-haiku-4-5'),
             // Section markup is the quality-critical work — best model by default.
             'sections'     => Env::get('LLM_MODEL_SECTIONS',     $default),
             // One small CSS appendix with a strict validator — best model by default.
@@ -64,7 +64,7 @@ final class StepDefaults
             'site-spec'        => self::temperature('SITE_SPEC', null),
             'design-direction' => self::temperature('DESIGN_DIRECTION', 1.0),
             'theme-json'       => self::temperature('THEME_JSON', null),
-            'section-plan'     => self::temperature('SECTION_PLAN', null),
+            'page-plan'        => self::temperature('PAGE_PLAN', null),
             'sections'         => self::temperature('SECTIONS', 0.9),
             'page-styles'      => self::temperature('PAGE_STYLES', null),
             'fonts-php'        => self::temperature('FONTS_PHP', null),

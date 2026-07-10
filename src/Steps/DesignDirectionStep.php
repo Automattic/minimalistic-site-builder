@@ -33,7 +33,7 @@ use Automattic\SiteBuild\Step;
  * call degrades to a built-in "invent one bold concept" seed instead of
  * aborting the build.
  *
- * This is the single source of design intent. The theme-json, section-plan and
+ * This is the single source of design intent. The theme-json, page-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
  * the structured fields into the injected brief), so two sites diverge in
  * concept — not just in hex values.

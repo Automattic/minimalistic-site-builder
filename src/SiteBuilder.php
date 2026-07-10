@@ -13,7 +13,7 @@ use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
-use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
@@ -79,7 +79,7 @@ final class SiteBuilder
             // made inline, steered by designDirection.json.
             new ConcurrentGroup($this->llm, [
                 new ThemeJsonStep($this->llm, $renderer, $models['theme-json'], $temps['theme-json']),
-                new SectionPlanStep($this->llm, $renderer, $models['section-plan'], $temps['section-plan']),
+                new PagePlanStep($this->llm, $renderer, $models['page-plan'], $temps['page-plan']),
             ]),
             // Generate the header, footer, and every section part in one concurrent
             // batch, then stitch them into the page deterministically.

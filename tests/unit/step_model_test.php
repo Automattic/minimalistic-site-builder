@@ -4,7 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
-use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
@@ -92,14 +92,14 @@ test('theme-json passes the configured model into the LLM opts', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('section-plan passes the configured model into every request', function () {
+test('page-plan passes the configured model into every request', function () {
     [$project, $tmp] = sm_project('builder_sm_sp_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo', 'sections' => ['Hero']]);
     $llm = new FakeLlm();
     $llm->queueJson(['sections' => [['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.']]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    (new SectionPlanStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
+    (new PagePlanStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
 
     assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null);
     exec('rm -rf ' . escapeshellarg($tmp));
