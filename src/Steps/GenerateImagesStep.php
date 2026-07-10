@@ -187,6 +187,30 @@ final class GenerateImagesStep implements Step
         if ($resolved !== []) {
             $this->rewriteMarkup($project, $resolved);
         }
+
+        $this->shipPluginImages($project);
+    }
+
+    /**
+     * Copy every generated asset the content plugin's manifest lists into
+     * plugin/images/, so the seeder can import them into the media library at
+     * activation. Content images stay in theme/assets/ too: chrome may share
+     * them, and the seeder falls back to the theme copy for any file it
+     * cannot import.
+     */
+    private function shipPluginImages(Project $project): void
+    {
+        if (!$project->exists('plugin/images.json')) {
+            return; // theme-only composition, or assemble-pages never ran
+        }
+        $manifest = $project->readJson('plugin/images.json');
+        foreach ((array) ($manifest['images'] ?? []) as $image) {
+            $filename = is_array($image) ? (string) ($image['filename'] ?? '') : '';
+            if ($filename === '' || !$project->exists('theme/assets/' . $filename)) {
+                continue;
+            }
+            $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
+        }
     }
 
     /**

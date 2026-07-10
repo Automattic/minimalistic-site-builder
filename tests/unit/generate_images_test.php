@@ -256,3 +256,45 @@ test('generate-images is a no-op when there are no placeholders', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('generate-images ships manifest-listed content images with the plugin', function () {
+    [$project, $tmp] = generate_fixture();
+    // The hero is referenced by page content (in the plugin manifest); a
+    // second, chrome-only image is not.
+    $project->writeText('theme/parts/header.html',
+        '<img src="theme:./assets/wordmark.png" alt="AI_IMAGE: wordmark | header | flat | square">');
+    (new CollectImagesStep())->run($project);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+    ]]);
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    // Content image: generated into the theme AND copied into the plugin.
+    assert_true($project->exists('plugin/images/hero.jpg'), 'content image shipped with the plugin');
+    assert_eq('JPEGDATA', $project->readText('plugin/images/hero.jpg'));
+    // Chrome-only image stays theme-only.
+    assert_true(!$project->exists('plugin/images/wordmark.png'), 'chrome image not shipped with the plugin');
+    assert_true($project->exists('theme/assets/wordmark.png'), 'chrome image in the theme');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images re-run copies an already-completed content image to the plugin', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($images))->run($project); // completes hero.jpg, no manifest yet
+
+    // The manifest appears later (e.g. assemble ran in a newer build) — a
+    // re-run must ship the completed asset without regenerating it.
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+    ]]);
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls), 'completed image not regenerated');
+    assert_true($project->exists('plugin/images/hero.jpg'), 'completed content image shipped');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
