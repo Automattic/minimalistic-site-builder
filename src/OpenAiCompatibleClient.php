@@ -35,12 +35,16 @@ final class OpenAiCompatibleClient implements Llm
      * @param string $model             Default model when a request does not pin one
      * @param string $baseUrl           API root, e.g. https://api.x.ai/v1 (no trailing slash required)
      * @param int    $defaultMaxTokens  max_tokens default for completions
+     * @param string $provider          Selects provider-specific request quirks
+     *                                   (token-limit key, temperature support):
+     *                                   'openai' or 'xai'. See maxTokensParam().
      */
     public function __construct(
         private string $apiKey,
         private string $model,
         string $baseUrl = 'https://api.openai.com/v1',
         private int $defaultMaxTokens = 16000,
+        private string $provider = 'openai',
     ) {
         $this->endpoint = rtrim($baseUrl, '/') . '/chat/completions';
     }
@@ -87,7 +91,7 @@ final class OpenAiCompatibleClient implements Llm
 
     public function complete(string $prompt, array $opts = []): string
     {
-        $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens);
+        $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens, $this->provider);
 
         $label = (string) ($opts['log_label'] ?? 'request');
         try {
@@ -119,7 +123,7 @@ final class OpenAiCompatibleClient implements Llm
             $error = "Expected JSON, got: {$text}";
             LlmLogger::log(
                 (string) ($opts['log_label'] ?? 'request'),
-                self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens),
+                self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens, $this->provider),
                 ['text' => $text, 'input' => 0, 'output' => 0],
                 0.0,
                 $error,
@@ -143,6 +147,7 @@ final class OpenAiCompatibleClient implements Llm
                         ['system' => (string) ($req['system'] ?? '') . self::JSON_SYSTEM] + $req,
                         $this->model,
                         $this->defaultMaxTokens,
+                        $this->provider,
                     ),
                     ['text' => $text, 'input' => 0, 'output' => 0],
                     0.0,
@@ -178,7 +183,7 @@ final class OpenAiCompatibleClient implements Llm
             if ($json) {
                 $system .= self::JSON_SYSTEM;
             }
-            $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens);
+            $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens, $this->provider);
         }
 
         $labelFor = fn (string $key): string => (string) ($requests[$key]['log_label'] ?? $key);
@@ -211,10 +216,15 @@ final class OpenAiCompatibleClient implements Llm
      * is the user message. stream_options.include_usage asks the provider to
      * attach token usage on the final SSE chunk.
      *
+     * The token-limit key and whether a custom temperature is sent both depend
+     * on $provider + model: OpenAI's o-series / gpt-5+ reasoning models want
+     * max_completion_tokens and only accept the default temperature. See
+     * maxTokensParam() and restrictsTemperature().
+     *
      * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
      * @return array<string,mixed>
      */
-    public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array
+    public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens, string $provider = 'openai'): array
     {
         $model = (string) ($req['model'] ?? $defaultModel);
         $system = AnthropicClient::systemPreamble();
@@ -227,18 +237,55 @@ final class OpenAiCompatibleClient implements Llm
             ['role' => 'user', 'content' => (string) $req['prompt']],
         ];
 
+        $maxTokens = (int) ($req['max_tokens'] ?? $defaultMaxTokens);
         $body = [
             'model'      => $model,
-            'max_tokens' => $req['max_tokens'] ?? $defaultMaxTokens,
             'stream'     => true,
             // So the final SSE chunk carries usage (OpenAI + most compat hosts).
             'stream_options' => ['include_usage' => true],
             'messages'   => $messages,
-        ];
-        if (isset($req['temperature'])) {
+        ] + self::maxTokensParam($provider, $model, $maxTokens);
+
+        // Reasoning models (OpenAI o-series / gpt-5+) reject any non-default
+        // temperature, so omit it rather than 400. Sending nothing == the API
+        // default (1), which is what those models require anyway.
+        if (isset($req['temperature']) && !self::restrictsTemperature($provider, $model)) {
             $body['temperature'] = (float) $req['temperature'];
         }
         return $body;
+    }
+
+    /**
+     * Correct token-limit key for a provider + model.
+     *
+     * OpenAI's o-series and gpt-5+ (reasoning) models and all xAI models want
+     * `max_completion_tokens`; legacy OpenAI (gpt-3*, gpt-4*) and everything
+     * else use `max_tokens`. Ported from telex's AiClientFactory::maxTokensParam.
+     *
+     * @return array{max_tokens?:int,max_completion_tokens?:int}
+     */
+    public static function maxTokensParam(string $provider, string $model, int $value): array
+    {
+        $needsMaxCompletionTokens = match ($provider) {
+            'xai'    => true,
+            'openai' => preg_match('/^gpt-[34]/', $model) !== 1,
+            default  => false,
+        };
+
+        return $needsMaxCompletionTokens
+            ? ['max_completion_tokens' => $value]
+            : ['max_tokens' => $value];
+    }
+
+    /**
+     * Whether $provider + $model only accepts the default sampling temperature.
+     * True for OpenAI reasoning models (o-series / gpt-5+), which 400 on any
+     * temperature other than 1. xAI (Grok) accepts arbitrary temperatures, so
+     * this is scoped to the OpenAI provider only.
+     */
+    public static function restrictsTemperature(string $provider, string $model): bool
+    {
+        return $provider === 'openai' && preg_match('/^gpt-[34]/', $model) !== 1;
     }
 
     /**
@@ -314,7 +361,7 @@ final class OpenAiCompatibleClient implements Llm
         }
         if ($status < 200 || $status >= 300) {
             $out = ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw), 'time' => $time];
-            if (($param = AnthropicClient::rejectedParam($raw)) !== null) {
+            if (($param = self::rejectedParam($raw)) !== null) {
                 $out['retry_without'] = $param;
             }
             return $out;
@@ -369,7 +416,7 @@ final class OpenAiCompatibleClient implements Llm
                 fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
             } catch (\RuntimeException $e) {
-                $param = AnthropicClient::rejectedParam($e->getMessage());
+                $param = self::rejectedParam($e->getMessage());
                 if ($param === null || !array_key_exists($param, $body)) {
                     throw $e;
                 }
@@ -527,5 +574,29 @@ final class OpenAiCompatibleClient implements Llm
     private static function truncate(string $s, int $max = 300): string
     {
         return strlen($s) > $max ? substr($s, 0, $max) . '…' : $s;
+    }
+
+    /**
+     * Name of a sampling parameter the model rejected, so the caller can drop it
+     * and retry. Safety net behind bodyFor()'s proactive omission: covers models
+     * or hosts whose temperature rules we didn't predict.
+     *
+     * Recognises OpenAI's wording — e.g.
+     *   "Unsupported value: 'temperature' does not support 0.9 with this model."
+     *   "Unsupported parameter: 'top_p' is not supported with this model."
+     * — then falls back to AnthropicClient's matcher for the shared Anthropic
+     * phrasing. Scoped to sampling params (never max_tokens, which we key
+     * correctly up front via maxTokensParam()).
+     */
+    public static function rejectedParam(string $error): ?string
+    {
+        if (preg_match(
+            "/'(temperature|top_p|top_k|presence_penalty|frequency_penalty)'\\s+(?:is not supported|does not support|is unsupported)/",
+            $error,
+            $m,
+        ) === 1) {
+            return $m[1];
+        }
+        return AnthropicClient::rejectedParam($error);
     }
 }

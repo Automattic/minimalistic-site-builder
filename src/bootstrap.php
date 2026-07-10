@@ -63,14 +63,16 @@ function make_llm(): Llm
             model:  default_llm_model(),
         ),
         'xai', 'grok' => new OpenAiCompatibleClient(
-            apiKey:  Env::getRequired('XAI_API_KEY'),
-            model:   default_llm_model(),
-            baseUrl: Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1') ?? 'https://api.x.ai/v1',
+            apiKey:   Env::getRequired('XAI_API_KEY'),
+            model:    default_llm_model(),
+            baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1') ?? 'https://api.x.ai/v1',
+            provider: 'xai',
         ),
         'openai', 'openai-compatible' => new OpenAiCompatibleClient(
-            apiKey:  Env::getRequired('OPENAI_API_KEY'),
-            model:   default_llm_model(),
-            baseUrl: Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1') ?? 'https://api.openai.com/v1',
+            apiKey:   Env::getRequired('OPENAI_API_KEY'),
+            model:    default_llm_model(),
+            baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1') ?? 'https://api.openai.com/v1',
+            provider: 'openai',
         ),
         default => throw new RuntimeException(
             "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, or openai."

@@ -18,13 +18,15 @@ test('OpenAiCompatibleClient endpoint joins baseUrl and /chat/completions', func
 });
 
 test('bodyFor builds OpenAI chat messages with system preamble and stream_options', function () {
+    // Legacy OpenAI model: keeps max_tokens and an explicit temperature.
     $body = OpenAiCompatibleClient::bodyFor(
         ['prompt' => 'Hi', 'temperature' => 0.9, 'system' => 'Be terse.'],
-        'grok-4.5',
+        'gpt-4o',
         16000,
+        'openai',
     );
 
-    assert_eq('grok-4.5', $body['model']);
+    assert_eq('gpt-4o', $body['model']);
     assert_eq(16000, $body['max_tokens']);
     assert_eq(0.9, $body['temperature']);
     assert_eq(true, $body['stream']);
@@ -43,14 +45,76 @@ test('bodyFor builds OpenAI chat messages with system preamble and stream_option
 
 test('bodyFor applies per-request model/max_tokens and omits temperature when unset', function () {
     $body = OpenAiCompatibleClient::bodyFor(
-        ['prompt' => 'Hi', 'model' => 'grok-mini', 'max_tokens' => 512],
-        'grok-4.5',
+        ['prompt' => 'Hi', 'model' => 'gpt-4o-mini', 'max_tokens' => 512],
+        'gpt-4o',
         16000,
+        'openai',
     );
-    assert_eq('grok-mini', $body['model']);
+    assert_eq('gpt-4o-mini', $body['model']);
     assert_eq(512, $body['max_tokens']);
     assert_true(!array_key_exists('temperature', $body), 'no temperature when unset');
     assert_eq(AnthropicClient::systemPreamble(), $body['messages'][0]['content']);
+});
+
+test('maxTokensParam picks the right token key per provider and model', function () {
+    // OpenAI reasoning / gpt-5+ → max_completion_tokens.
+    assert_eq(['max_completion_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-5.5', 100));
+    assert_eq(['max_completion_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'o1-mini', 100));
+    // Legacy OpenAI → max_tokens.
+    assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-4o', 100));
+    assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-4.1', 100));
+    assert_eq(['max_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-3.5-turbo', 100));
+    // xAI (Grok) → always max_completion_tokens.
+    assert_eq(['max_completion_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('xai', 'grok-4.5', 100));
+});
+
+test('bodyFor uses max_completion_tokens and drops temperature for GPT-5 reasoning models', function () {
+    $body = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'temperature' => 0.9, 'max_tokens' => 16000],
+        'gpt-5.5',
+        16000,
+        'openai',
+    );
+    assert_eq('gpt-5.5', $body['model']);
+    assert_eq(16000, $body['max_completion_tokens']);
+    assert_true(!array_key_exists('max_tokens', $body), 'no legacy max_tokens for gpt-5');
+    assert_true(!array_key_exists('temperature', $body), 'temperature dropped for gpt-5');
+});
+
+test('bodyFor keeps a custom temperature for xAI Grok (uses max_completion_tokens)', function () {
+    $body = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'temperature' => 0.9],
+        'grok-4.5',
+        16000,
+        'xai',
+    );
+    assert_eq(0.9, $body['temperature']);
+    assert_eq(16000, $body['max_completion_tokens']);
+});
+
+test('restrictsTemperature only flags OpenAI reasoning / gpt-5+ models', function () {
+    assert_true(OpenAiCompatibleClient::restrictsTemperature('openai', 'gpt-5.5'), 'gpt-5.5 restricted');
+    assert_true(OpenAiCompatibleClient::restrictsTemperature('openai', 'o3'), 'o3 restricted');
+    assert_true(!OpenAiCompatibleClient::restrictsTemperature('openai', 'gpt-4o'), 'gpt-4o free');
+    assert_true(!OpenAiCompatibleClient::restrictsTemperature('xai', 'grok-4.5'), 'grok free');
+});
+
+test('rejectedParam catches OpenAI temperature errors and falls back to Anthropic wording', function () {
+    $openaiTemp = "Unsupported value: 'temperature' does not support 0.9 with this model. "
+        . 'Only the default (1) value is supported.';
+    assert_eq('temperature', OpenAiCompatibleClient::rejectedParam($openaiTemp));
+
+    $openaiTopP = "Unsupported parameter: 'top_p' is not supported with this model.";
+    assert_eq('top_p', OpenAiCompatibleClient::rejectedParam($openaiTopP));
+
+    // max_tokens is keyed correctly up front, so it must NOT be treated as a
+    // droppable sampling param here.
+    $maxTokens = "Unsupported parameter: 'max_tokens' is not supported with this model.";
+    assert_eq(null, OpenAiCompatibleClient::rejectedParam($maxTokens));
+
+    // Delegates to AnthropicClient for the shared Anthropic phrasing.
+    assert_eq('temperature', OpenAiCompatibleClient::rejectedParam('`temperature` is not supported'));
+    assert_eq(null, OpenAiCompatibleClient::rejectedParam('some unrelated error'));
 });
 
 test('extractUsage reads OpenAI prompt/completion tokens and Anthropic-style aliases', function () {
