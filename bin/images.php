@@ -1,8 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
@@ -49,4 +51,8 @@ printf("  %d placeholder(s), %d to generate\n", count($specs), count($pending));
 $start = microtime(true);
 (new GenerateImagesStep(make_image_client()))->run($project);
 printf("  done in %.1fs\n", microtime(true) - $start);
+
+// With the real pixels on disk, verify cover text against the dimmed images.
+(new CoverContrastStep(NodeBlockFixer::default()))->run($project);
+
 echo "Output: {$project->themePath('assets')}\n";
