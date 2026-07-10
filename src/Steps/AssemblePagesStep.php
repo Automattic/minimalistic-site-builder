@@ -20,6 +20,8 @@ use Automattic\SiteBuild\Step;
  *     markup is embedded, not linked)
  *   - plugin/pages.json — the seeder manifest (slug/title/front/menu_order/
  *     parent), parents before children, in display order
+ *   - plugin/images.json — every asset the page content references, with a
+ *     media title; generate-images ships the files, the seeder imports them
  *   - theme/templates/page.html — header + bare post-content + footer (bare:
  *     sections carry their own layout; a constrained wrapper would break
  *     full-bleed bands). The seeded front page renders through this too.
@@ -86,6 +88,13 @@ final class AssemblePagesStep implements Step
         }
         $project->writeJson('plugin/pages.json', ['pages' => $manifest]);
 
+        // Content images are content: list every asset the page markup
+        // references so generate-images ships the files with the plugin and
+        // the seeder imports them into the media library. Subjects from
+        // images.json become the attachments' media titles.
+        $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
+        $project->writeJson('plugin/images.json', ['images' => self::contentImages($contents, $specs)]);
+
         $project->writeText('theme/templates/page.html', self::pageTemplate());
         $project->writeText('theme/templates/index.html', self::index());
         $this->registerTemplateParts($project);
@@ -97,6 +106,45 @@ final class AssemblePagesStep implements Step
                 @unlink($project->themePath("parts/{$part}.html"));
             }
         }
+    }
+
+    /**
+     * The plugin's image manifest: one entry per unique asset referenced by
+     * any page's content ("theme:./assets/<file>"), in first-appearance order.
+     * The title comes from the collected spec's subject (it becomes the media
+     * library title at import), falling back to a name derived from the
+     * filename. Pure — unit-testable.
+     *
+     * @param array<string,string>          $pageContents page slug => markup
+     * @param array<int,array<string,mixed>> $specs       images.json entries
+     * @return array<int,array{filename:string,title:string}>
+     */
+    public static function contentImages(array $pageContents, array $specs): array
+    {
+        $subjects = [];
+        foreach ($specs as $spec) {
+            if (is_array($spec) && isset($spec['filename'])) {
+                $subjects[(string) $spec['filename']] = trim((string) ($spec['subject'] ?? ''));
+            }
+        }
+
+        $images = [];
+        foreach ($pageContents as $content) {
+            if (!preg_match_all('/theme:\.\/assets\/([a-z0-9-]+\.(?:jpe?g|png))/i', $content, $m)) {
+                continue;
+            }
+            foreach ($m[1] as $filename) {
+                if (isset($images[$filename])) {
+                    continue;
+                }
+                $title = $subjects[$filename] ?? '';
+                if ($title === '') {
+                    $title = ucwords(str_replace('-', ' ', (string) preg_replace('/\.[a-z]+$/i', '', $filename)));
+                }
+                $images[$filename] = ['filename' => $filename, 'title' => $title];
+            }
+        }
+        return array_values($images);
     }
 
     /**
