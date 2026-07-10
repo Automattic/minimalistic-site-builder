@@ -168,12 +168,18 @@ final class CoverContrastStep implements Step
             if ($plan['dim'] !== $dim) {
                 $attrs['dimRatio'] = $plan['dim'];
                 $doc->setAttrs($i, $attrs);
+                ContrastFix::swapDimClass($doc, $i, $dim, $plan['dim']);
             }
+            $ownSlugs = array_column($texts, 'ownSlug', 'index');
             foreach ($plan['swaps'] as $textIndex => $slug) {
                 $textAttrs = $doc->attrs($textIndex) ?? [];
                 $textAttrs['textColor'] = $slug;
                 unset($textAttrs['style']['color']['text']);
                 $doc->setAttrs($textIndex, $textAttrs);
+                $oldSlug = $ownSlugs[$textIndex] ?? null;
+                if ($oldSlug !== null && $oldSlug !== $slug) {
+                    $doc->replaceInOwnHtml($textIndex, "has-{$oldSlug}-color", "has-{$slug}-color");
+                }
             }
             $repairs++;
 
@@ -313,9 +319,14 @@ final class CoverContrastStep implements Step
             $name = $doc->name($child);
             if (in_array($name, ['paragraph', 'heading', 'list', 'quote', 'pullquote', 'verse', 'site-title'], true)
                 && ContrastFix::visibleText($doc->innerHtml($child)) !== '') {
+                $childAttrs = $doc->attrs($child) ?? [];
+                $ownSlug = is_string($childAttrs['textColor'] ?? null)
+                    && $helper->rgbFor($childAttrs['textColor']) !== null
+                    ? $childAttrs['textColor'] : null;
                 $rows[] = [
                     'index'     => $child,
                     'rgb'       => $this->coverTextColor($doc, $child, $helper, $inherited),
+                    'ownSlug'   => $ownSlug,
                     'threshold' => in_array($name, ['heading', 'pullquote', 'site-title'], true)
                         ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT,
                 ];

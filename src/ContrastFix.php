@@ -221,7 +221,11 @@ final class ContrastFix
             $passes = $bestRatio >= $row['threshold'];
             $improves = $bestRatio >= ContrastMath::LARGE_TEXT && $bestRatio >= $ratio * 1.25;
             if ($bestSlug !== null && $repair && ($passes || $improves)) {
-                $this->setTextColor($row['index'], $bestSlug);
+                // When the failing color was an explicit preset on this very
+                // block, its has-<slug>-color class must be swapped too.
+                $oldSlug = ($fg['node'] ?? null) === $row['index'] && isset($this->palette[$fg['label']])
+                    ? $fg['label'] : null;
+                $this->setTextColor($row['index'], $bestSlug, $oldSlug);
                 $this->findings[] = [
                     'kind' => 'text', 'block' => $row['name'],
                     'detail' => $detail . " → textColor={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')'
@@ -332,6 +336,7 @@ final class ContrastFix
                 $attrs = $this->doc->attrs($cover['index']) ?? [];
                 $attrs['dimRatio'] = self::COVER_DIM_FLOOR;
                 $this->doc->setAttrs($cover['index'], $attrs);
+                self::swapDimClass($this->doc, $cover['index'], $cover['dim'], self::COVER_DIM_FLOOR);
                 $this->findings[] = [
                     'kind' => 'cover-dim', 'block' => 'cover',
                     'detail' => $detail . ' → dimRatio=' . self::COVER_DIM_FLOOR,
@@ -345,13 +350,16 @@ final class ContrastFix
 
     // ── attribute mutations ──────────────────────────────────────────────
 
-    private function setTextColor(int $i, string $slug): void
+    private function setTextColor(int $i, string $slug, ?string $oldSlug = null): void
     {
         $attrs = $this->doc->attrs($i) ?? [];
         $attrs['textColor'] = $slug;
         unset($attrs['style']['color']['text']);
         $this->pruneEmpty($attrs);
         $this->doc->setAttrs($i, $attrs);
+        if ($oldSlug !== null && $oldSlug !== $slug) {
+            $this->doc->replaceInOwnHtml($i, "has-{$oldSlug}-color", "has-{$slug}-color");
+        }
     }
 
     /** @param list<array{0:int,1:int,2:int}> $bg */
@@ -366,6 +374,30 @@ final class ContrastFix
             ? 'accent' : $slug;
         $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $hover;
         $this->doc->setAttrs($i, $attrs);
+    }
+
+    /**
+     * Swap the stale `has-background-dim-N` class after a dimRatio change so
+     * the fixer's custom-classname rescue can't keep the old opacity around.
+     * Covers at dim 0 or 50 carry no numbered class (core save() omits it).
+     */
+    public static function swapDimClass(BlockMarkup $doc, int $i, int $oldDim, int $newDim): void
+    {
+        $oldClass = self::dimClass($oldDim);
+        if ($oldClass === null || $oldDim === $newDim) {
+            return;
+        }
+        // A duplicate has-background-dim token is harmless — the fixer
+        // re-serializes to the canonical class list anyway; the point is
+        // removing the stale numbered token.
+        $doc->replaceInOwnHtml($i, $oldClass, self::dimClass($newDim) ?? 'has-background-dim');
+    }
+
+    /** Core cover save(): numbered dim class, absent at 0 and at the 50 default. */
+    private static function dimClass(int $dim): ?string
+    {
+        $rounded = 10 * (int) round($dim / 10);
+        return $rounded === 0 || $rounded === 50 ? null : 'has-background-dim-' . $rounded;
     }
 
     /** Drop style/color scaffolding left empty by an unset. @param array<mixed> $attrs */

@@ -44,6 +44,9 @@ final class BlockMarkup
     /** @var array<int,array<mixed>> node index => replacement attrs */
     private array $mutations = [];
 
+    /** @var list<array{start:int, end:int, search:string, replace:string}> */
+    private array $innerEdits = [];
+
     public static function parse(string $source): self
     {
         $nodes = [];
@@ -149,25 +152,75 @@ final class BlockMarkup
         $this->mutations[$i] = $attrs;
     }
 
-    public function isMutated(): bool
+    /**
+     * String-replace inside the HTML this node itself owns: from its opening
+     * comment up to its first child block (or its closing comment when it has
+     * none) — i.e. the block's own root tag, untouched by descendants.
+     *
+     * Needed when an attribute edit obsoletes a class token in the saved
+     * HTML (e.g. a textColor swap leaving `has-old-color` behind): the block
+     * fixer's re-serialization would otherwise rescue the stale token into
+     * `className` via @wordpress/blocks' fixCustomClassname, and WP's
+     * !important preset rules can make the stale color win over the repair.
+     */
+    public function replaceInOwnHtml(int $i, string $search, string $replace): void
     {
-        return $this->mutations !== [];
+        $n = $this->nodes[$i];
+        $end = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        $this->innerEdits[] = [
+            'start'   => $n['innerStart'],
+            'end'     => $end,
+            'search'  => $search,
+            'replace' => $replace,
+        ];
     }
 
-    /** The document with every mutated opening comment rewritten in place. */
+    public function isMutated(): bool
+    {
+        return $this->mutations !== [] || $this->innerEdits !== [];
+    }
+
+    /** The document with every mutation applied at its original offsets. */
     public function render(): string
     {
-        if ($this->mutations === []) {
+        if (!$this->isMutated()) {
             return $this->source;
         }
-        // Apply back-to-front so earlier offsets stay valid.
-        $out = $this->source;
-        $indices = array_keys($this->mutations);
-        rsort($indices);
-        foreach ($indices as $i) {
+
+        // Collect ops, then apply back-to-front so earlier offsets stay
+        // valid. Ranges never overlap: a comment rewrite covers the
+        // delimiter, an inner edit covers [innerStart, first child).
+        $ops = [];
+        foreach ($this->mutations as $i => $attrs) {
             $n = $this->nodes[$i];
-            $comment = self::serializeComment($n['name'], $this->mutations[$i], $n['void']);
-            $out = substr_replace($out, $comment, $n['offset'], $n['length']);
+            $ops[] = [
+                'start'   => $n['offset'],
+                'length'  => $n['length'],
+                'content' => self::serializeComment($n['name'], $attrs, $n['void']),
+            ];
+        }
+        // Multiple edits to the same region compose (grouped so the second
+        // doesn't clobber the first when both rewrite the whole range).
+        $regions = [];
+        foreach ($this->innerEdits as $edit) {
+            $key = $edit['start'] . '-' . $edit['end'];
+            $regions[$key] ??= [
+                'start'   => $edit['start'],
+                'length'  => $edit['end'] - $edit['start'],
+                'content' => substr($this->source, $edit['start'], $edit['end'] - $edit['start']),
+            ];
+            $regions[$key]['content'] = str_replace($edit['search'], $edit['replace'], $regions[$key]['content']);
+        }
+        foreach ($regions as $region) {
+            $ops[] = $region;
+        }
+        usort($ops, static fn (array $a, array $b) => $b['start'] <=> $a['start']);
+
+        $out = $this->source;
+        foreach ($ops as $op) {
+            $out = substr_replace($out, $op['content'], $op['start'], $op['length']);
         }
         return $out;
     }

@@ -150,6 +150,36 @@ test('mid-tone background takes the best partial repair when nothing passes', fu
     assert_contains('best available', $res['findings'][0]['detail']);
 });
 
+test('swapping an explicit preset color also swaps the stale class in the HTML', function () {
+    // If the old has-secondary-color token survives, the block fixer rescues
+    // it into className and WP's !important preset rules can make it win.
+    $palette = contrast_test_palette();
+    $palette['secondary'] = '#555555'; // ~2.8:1 on the near-black contrast
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:paragraph {"textColor":"secondary"} -->'
+        . '<p class="has-secondary-color has-text-color">Dim caption</p>'
+        . '<!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = (new ContrastFix($palette, [], null))->process($src);
+    assert_contains('<!-- wp:paragraph {"textColor":"base"} -->', $res['markup']);
+    assert_contains('<p class="has-base-color has-text-color">', $res['markup']);
+    assert_true(!str_contains($res['markup'], 'has-secondary-color'), 'stale class must be gone');
+});
+
+test('the dimRatio floor swaps the stale has-background-dim-N class', function () {
+    $src = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":10} -->' . "\n"
+        . '<div class="wp-block-cover">'
+        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim-10 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"textColor":"base"} --><h1>Over the photo</h1><!-- /wp:heading -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    $res = contrast_fix()->process($src);
+    assert_contains('"dimRatio":40', $res['markup']);
+    assert_contains('has-background-dim-40', $res['markup']);
+    assert_true(!str_contains($res['markup'], 'has-background-dim-10'), 'stale dim class must be gone');
+});
+
 test('gradient backgrounds are checked against every stop', function () {
     $gradients = ['dusk' => 'linear-gradient(180deg, #FFFFFF 0%, #111111 100%)'];
     $fix = new ContrastFix(contrast_test_palette(), $gradients, null);
