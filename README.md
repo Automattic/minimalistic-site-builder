@@ -13,8 +13,9 @@ cp .env.example .env
 npm install   # once; installs the Node helper tools under bin/ (block-fixer, screenshot)
 ```
 
-Requires PHP 8.1+ (no Composer — the source set is loaded explicitly by
-`src/bootstrap.php`) and Node 18+.
+Requires PHP 8.1+ (no Composer — the source set autoloads via the
+dependency-free PSR-4 loader `autoload.php`, loaded by `src/bootstrap.php`)
+and Node 18+.
 
 The `bin/` helper tools (`bin/block-fixer`, `bin/screenshot`) are npm
 workspaces, so a single `npm install` at the repo root installs all of them.

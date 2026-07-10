@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Tiny .env loader. No dependencies. Loads KEY=VALUE pairs into a static map
  * and exposes them via Env::get(). Values already present in the real
@@ -48,7 +50,7 @@ final class Env
         return self::$vars[$key] ?? $default;
     }
 
-    public static function require(string $key): string
+    public static function getRequired(string $key): string
     {
         $val = self::get($key);
         if ($val === null || $val === '') {

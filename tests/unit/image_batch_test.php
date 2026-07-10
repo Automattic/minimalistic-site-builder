@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ImagePromptComposer;
+use Automattic\SiteBuild\WpcomImageClient;
+
 /**
  * Unit tests for the batch retry orchestration (WpcomImageClient::retryBatch).
  * The transport is faked so we exercise the transient-retry accounting without
@@ -102,6 +105,12 @@ test('sampleImageSize renders wide (full-bleed) images at 2K, the rest at 1K', f
     assert_eq('2K', WpcomImageClient::sampleImageSize('16:9'));
     assert_eq('1K', WpcomImageClient::sampleImageSize('1:1'));
     assert_eq('1K', WpcomImageClient::sampleImageSize('9:16'));
+});
+
+test('sampleImageSize keeps transparent decoratives at 1K even when wide', function () {
+    assert_eq('1K', WpcomImageClient::sampleImageSize('16:9', true));
+    assert_eq('1K', WpcomImageClient::sampleImageSize('1:1', true));
+    assert_eq('2K', WpcomImageClient::sampleImageSize('16:9', false));
 });
 
 test('mimeForFilename maps .png assets to PNG and everything else to JPEG', function () {

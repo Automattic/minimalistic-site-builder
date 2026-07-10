@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
+use Automattic\SiteBuild\Tests\FakeImageClient;
+
 require_once __DIR__ . '/../FakeImageClient.php';
 
 function generate_fixture(): array
@@ -112,6 +117,11 @@ test('generate-images requests 2K for landscape images and 1K otherwise', functi
             'subject' => 'a tall image', 'pageContext' => 'about portrait',
             'style' => 'photorealistic', 'aspectRatio' => 'portrait', 'status' => 'pending',
         ],
+        [
+            'filename' => 'divider.png', 'src' => 'theme:./assets/divider.png',
+            'subject' => 'a vine flourish', 'pageContext' => 'section divider',
+            'style' => 'line art', 'aspectRatio' => 'landscape', 'status' => 'pending',
+        ],
     ]);
     $images = new FakeImageClient('JPEGDATA');
 
@@ -120,6 +130,7 @@ test('generate-images requests 2K for landscape images and 1K otherwise', functi
     assert_eq('2K', $images->calls[0]['opts']['sample_image_size']); // landscape full-bleed
     assert_eq('1K', $images->calls[1]['opts']['sample_image_size']); // square thumb
     assert_eq('1K', $images->calls[2]['opts']['sample_image_size']); // portrait
+    assert_eq('1K', $images->calls[3]['opts']['sample_image_size']); // wide but transparent decorative
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

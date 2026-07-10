@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Image generation via the WPCOM AI proxy (Google Vertex Imagen).
  *
@@ -64,9 +66,18 @@ final class WpcomImageClient implements ImageClient
      * images are the ones used full-bleed (heroes, banners, wide features) where
      * a 1K render stretched past ~1366px goes soft — request 2K for those. The
      * smaller square/portrait slots stay at 1K to keep cost down.
+     *
+     * Transparent assets are always 1K, whatever their ratio: they are
+     * decorative line art (flourishes, ornaments, logo marks) rendered small
+     * on the page, never full-bleed, and line art downscales gracefully. A 1K
+     * render quarters the pixels to generate and key and roughly cuts the
+     * shipped PNG bytes to a third.
      */
-    public static function sampleImageSize(string $aspectRatio): string
+    public static function sampleImageSize(string $aspectRatio, bool $transparent = false): string
     {
+        if ($transparent) {
+            return '1K';
+        }
         return trim($aspectRatio) === '16:9' ? '2K' : '1K';
     }
 
@@ -242,7 +253,7 @@ final class WpcomImageClient implements ImageClient
                 $out[$i] = ['ok' => true, 'bytes' => self::interpret($raw, $errno, $error, (int) $httpStatus)];
             } catch (TransientApiException $e) {
                 $out[$i] = ['ok' => false, 'transient' => true, 'error' => $e->getMessage()];
-            } catch (Throwable $e) {
+            } catch (\Throwable $e) {
                 $out[$i] = ['ok' => false, 'transient' => false, 'error' => $e->getMessage()];
             }
         }
@@ -294,7 +305,7 @@ final class WpcomImageClient implements ImageClient
                 return $this->request($body);
             } catch (TransientApiException $e) {
                 if ($attempt >= count($delays)) {
-                    throw new RuntimeException('Image proxy failed after retries: ' . $e->getMessage(), 0, $e);
+                    throw new \RuntimeException('Image proxy failed after retries: ' . $e->getMessage(), 0, $e);
                 }
                 $wait = $delays[$attempt];
                 $attempt++;
@@ -364,25 +375,25 @@ final class WpcomImageClient implements ImageClient
             throw new TransientApiException("cURL ({$errno}): {$error}");
         }
         if ($errno !== 0) {
-            throw new RuntimeException("cURL error ({$errno}): {$error}");
+            throw new \RuntimeException("cURL error ({$errno}): {$error}");
         }
 
         if ($status === 429 || $status >= 500) {
             throw new TransientApiException("HTTP {$status}: " . substr($raw, 0, 300));
         }
         if ($status < 200 || $status >= 300) {
-            throw new RuntimeException("Image proxy HTTP {$status}: " . substr($raw, 0, 500));
+            throw new \RuntimeException("Image proxy HTTP {$status}: " . substr($raw, 0, 500));
         }
 
         $data = json_decode($raw, true);
         $b64 = $data['predictions'][0]['bytesBase64Encoded'] ?? null;
         if (!is_string($b64) || $b64 === '') {
-            throw new RuntimeException('Image proxy response had no image data: ' . substr($raw, 0, 300));
+            throw new \RuntimeException('Image proxy response had no image data: ' . substr($raw, 0, 300));
         }
 
         $bytes = base64_decode($b64, true);
         if ($bytes === false || $bytes === '') {
-            throw new RuntimeException('Image proxy returned undecodable base64');
+            throw new \RuntimeException('Image proxy returned undecodable base64');
         }
         return $bytes;
     }

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Runs several ConcurrentSteps as ONE batched LLM call, so independent steps
  * that only share an upstream input (e.g. theme.json and the section plan, both
@@ -21,7 +23,7 @@ final class ConcurrentGroup implements Step
     public function __construct(private Llm $llm, array $steps)
     {
         if ($steps === []) {
-            throw new InvalidArgumentException('ConcurrentGroup needs at least one step');
+            throw new \InvalidArgumentException('ConcurrentGroup needs at least one step');
         }
         $this->steps = array_values($steps);
     }

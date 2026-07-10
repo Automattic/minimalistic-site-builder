@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step 2 (LLM): produce the site spec from the user's creation prompt.
  *
@@ -52,7 +61,7 @@ final class SiteSpecStep implements Step
         $meta = $project->readJson('meta.json');
         $prompt = (string) ($meta['prompt'] ?? '');
         if (trim($prompt) === '') {
-            throw new RuntimeException('meta.json has no "prompt"');
+            throw new \RuntimeException('meta.json has no "prompt"');
         }
 
         $rendered = $this->renderer->render('site-spec.md', ['user_prompt' => $prompt]);
@@ -88,7 +97,7 @@ final class SiteSpecStep implements Step
     {
         $name = trim((string) ($spec['name'] ?? ''));
         if ($name === '') {
-            throw new RuntimeException('site spec has no "name"');
+            throw new \RuntimeException('site spec has no "name"');
         }
 
         $slug = ProjectStore::slugify((string) ($spec['slug'] ?? $name));
@@ -124,10 +133,10 @@ final class SiteSpecStep implements Step
         // one would let each downstream prompt pick its own.
         $language = trim((string) ($spec['language'] ?? ''));
         if ($language === '') {
-            throw new RuntimeException('site spec has no "language"');
+            throw new \RuntimeException('site spec has no "language"');
         }
         if (!self::plausibleLanguage($language)) {
-            throw new RuntimeException("site spec \"language\" is not a plausible language code or name: {$language}");
+            throw new \RuntimeException("site spec \"language\" is not a plausible language code or name: {$language}");
         }
         $spec['language'] = $language;
 

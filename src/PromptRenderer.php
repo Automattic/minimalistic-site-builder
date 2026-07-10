@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Loads a prompt template from the prompts/ directory and fills {{placeholders}}
  * from a context map. Every placeholder must resolve — an unresolved one means a
@@ -16,7 +18,7 @@ final class PromptRenderer
     {
         $file = $this->promptDir . '/' . $template;
         if (!is_file($file)) {
-            throw new RuntimeException("Missing prompt template: {$file}");
+            throw new \RuntimeException("Missing prompt template: {$file}");
         }
         return self::fill((string) file_get_contents($file), $vars);
     }
@@ -35,7 +37,7 @@ final class PromptRenderer
         // Any leftover {{...}} means an unknown placeholder — the template/wiring
         // is wrong, so fail loud rather than send a broken prompt to the model.
         if (preg_match('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/', $out, $m)) {
-            throw new RuntimeException("Unresolved placeholder in prompt: {{{$m[1]}}}");
+            throw new \RuntimeException("Unresolved placeholder in prompt: {{{$m[1]}}}");
         }
         return $out;
     }

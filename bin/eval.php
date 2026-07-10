@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\SiteBuilder;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\ThemeValidator;
+
 /**
  * Phase 2 evaluation: generate the 5 eval sites, record per-step speed and
  * structural quality, and write eval/report.md + eval/results.json.
@@ -35,6 +44,13 @@ if ($only === '--report') {
 }
 
 $llm = make_llm();
+$builder = new SiteBuilder(
+    llm: $llm,
+    promptsDir: Package::promptsDir(),
+    outputRoot: repo_path('projects'),
+    blockFixer: NodeBlockFixer::default(),
+    models: step_models(),
+);
 
 $results = [];
 foreach (SITES as $slug => $prompt) {
@@ -42,16 +58,13 @@ foreach (SITES as $slug => $prompt) {
         continue;
     }
     echo "\n=== {$slug} ===\n";
-    $project = $store->create($slug);
-    $project->writeJson('meta.json', [
-        'prompt' => $prompt, 'provisional_slug' => $slug, 'created_at' => gmdate('c'),
-    ]);
+    $project = $builder->createProject($prompt, $slug);
 
     $timings = [];
     $error = null;
     $total = 0.0;
     try {
-        build_pipeline($llm)->runThrough($project, null, function (Step $s, float $secs) use (&$timings, &$total) {
+        $builder->pipeline()->runThrough($project, null, function (Step $s, float $secs) use (&$timings, &$total) {
             $timings[$s->id()] = round($secs, 1);
             $total += $secs;
             printf("  %-22s %6.1fs\n", $s->id(), $secs);

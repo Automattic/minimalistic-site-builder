@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Steps\DesignDirectionStep;
+use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Steps\SectionsStep;
+use Automattic\SiteBuild\Steps\SiteSpecStep;
+use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\Tests\FakeLlm;
+
 /**
  * Guards the per-step model wiring: the optional model arg each LLM step takes
  * must reach the LLM call's opts, and stay absent when unset so the client
@@ -45,14 +54,14 @@ test('design-direction passes the configured model into the LLM opts', function 
     [$project, $tmp] = sm_project('builder_sm_dd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['directions' => [
-        ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.'],
-    ]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
+    $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer, 'claude-haiku-4-5'))->run($project);
 
-    assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null);
+    assert_true(!array_key_exists('model', $llm->calls[0]['opts']), 'seed call has no model key when no seed model is set');
+    assert_eq('claude-haiku-4-5', $llm->calls[1]['opts']['model'] ?? null);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -60,14 +69,13 @@ test('design-direction sends no model key when none is configured', function () 
     [$project, $tmp] = sm_project('builder_sm_ddd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['directions' => [
-        ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.'],
-    ]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
+    $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction: raw concrete palette, mono type.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer))->run($project);
 
-    assert_true(!array_key_exists('model', $llm->calls[0]['opts']), 'no model key when default');
+    assert_true(!array_key_exists('model', $llm->calls[1]['opts']), 'no model key when default');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -143,13 +151,14 @@ test('design-direction passes the configured temperature into the LLM opts', fun
     [$project, $tmp] = sm_project('builder_sm_ddt_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    // A single candidate → no judge call, so only the generation opts matter.
-    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction.']]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
+    $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer, null, 1.0))->run($project);
 
-    assert_eq(1.0, $llm->calls[0]['opts']['temperature'] ?? null);
+    assert_eq(1.0, $llm->calls[0]['opts']['temperature'] ?? null, 'seed call runs at the step temperature');
+    assert_eq(1.0, $llm->calls[1]['opts']['temperature'] ?? null, 'expansion call runs at the step temperature');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -157,12 +166,14 @@ test('design-direction sends no temperature key when none is configured', functi
     [$project, $tmp] = sm_project('builder_sm_ddtd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $llm = new FakeLlm();
-    $llm->queueJson(['directions' => [['title' => 'Brut', 'description' => 'Brutalist direction.']]]);
+    $llm->queueJson(['seeds' => ['Brut']]);
+    $llm->queueJson(['direction' => ['title' => 'Brut', 'description' => 'Brutalist direction.']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new DesignDirectionStep($llm, $renderer))->run($project);
 
-    assert_true(!array_key_exists('temperature', $llm->calls[0]['opts']), 'no temperature key when default');
+    assert_true(!array_key_exists('temperature', $llm->calls[0]['opts']), 'no temperature key on the seed call when default');
+    assert_true(!array_key_exists('temperature', $llm->calls[1]['opts']), 'no temperature key when default');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

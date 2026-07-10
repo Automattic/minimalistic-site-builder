@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Shared per-step LLM option wiring. Every LLM step takes an optional model
  * override and an optional sampling temperature in its constructor (a

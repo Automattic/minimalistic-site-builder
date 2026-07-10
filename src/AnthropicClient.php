@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Anthropic Messages API client (direct to api.anthropic.com).
  *
@@ -12,6 +14,40 @@ final class AnthropicClient implements Llm
 {
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
+
+    /**
+     * System preamble sent on EVERY request, single-call and batch alike.
+     * Each prompt embeds the user's site brief; whatever the step, user-facing
+     * text must come back in that brief's language rather than drifting into
+     * English because the surrounding instructions are English. Structural
+     * output and machine-readable directives (e.g. the AI_IMAGE alt specs the
+     * image pipeline parses) are exempt, so the JSON/markup/CSS/PHP steps and
+     * image generation are unaffected. The text lives in
+     * prompts/system-preamble.md with the rest of the prompts (it has no
+     * placeholders, so no PromptRenderer); read once per process and cached.
+     * Public so tests can assert it rides on every body.
+     */
+    public static function systemPreamble(): string
+    {
+        static $preamble = null;
+        if ($preamble === null) {
+            $file = dirname(__DIR__) . '/prompts/system-preamble.md';
+            $text = is_file($file) ? (string) file_get_contents($file) : '';
+            if (trim($text) === '') {
+                throw new RuntimeException("Missing prompt template: {$file}");
+            }
+            $preamble = trim($text);
+        }
+        return $preamble;
+    }
+
+    /**
+     * Appended to the system prompt of every JSON call (single and batch) to
+     * steer the model toward raw, fence-free JSON. One constant so the wire
+     * request and the decode-failure log reconstruction can never drift apart.
+     */
+    private const JSON_SYSTEM = "\nRespond with a single valid JSON value and nothing else. "
+        . 'No prose, no markdown fences.';
 
     /**
      * Most concurrent in-flight requests per batch. A landing page can fan out
@@ -87,7 +123,7 @@ final class AnthropicClient implements Llm
         LlmLogger::log($label, $body, $res, $res['time']);
 
         if (trim($res['text']) === '') {
-            throw new RuntimeException('No text content in streamed response');
+            throw new \RuntimeException('No text content in streamed response');
         }
         return $res['text'];
     }
@@ -95,29 +131,26 @@ final class AnthropicClient implements Llm
     public function completeJson(string $prompt, array $opts = []): array
     {
         // Steer toward raw JSON; still strip fences defensively.
-        $opts['system'] = ($opts['system'] ?? '')
-            . "\nRespond with a single valid JSON value and nothing else. "
-            . 'No prose, no markdown fences.';
+        $opts['system'] = ($opts['system'] ?? '') . self::JSON_SYSTEM;
         $text = $this->complete($prompt, $opts);
 
         $data = self::decodeJson($text);
         if ($data === null) {
             // The transport call succeeded and was logged OK above; log the
             // decode failure as its own FAILED entry so the transcript reflects
-            // that the build died on THIS call, not somewhere downstream.
+            // that the build died on THIS call, not somewhere downstream. The
+            // body is rebuilt through bodyFor so the log carries the request as
+            // built (system preamble included) — a sampling parameter stripped
+            // mid-retry is the one divergence it can't see.
             $error = "Expected JSON, got: {$text}";
             LlmLogger::log(
                 (string) ($opts['log_label'] ?? 'request'),
-                [
-                    'model'    => $opts['model'] ?? $this->model,
-                    'system'   => $opts['system'],
-                    'messages' => [['role' => 'user', 'content' => $prompt]],
-                ],
+                self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens),
                 ['text' => $text, 'input' => 0, 'output' => 0],
                 0.0,
                 $error,
             );
-            throw new RuntimeException($error);
+            throw new \RuntimeException($error);
         }
         return $data;
     }
@@ -129,21 +162,24 @@ final class AnthropicClient implements Llm
             $data = self::decodeJson($text);
             if ($data === null) {
                 // Same as completeJson: the transport entry was logged OK, so
-                // log the decode failure as its own FAILED entry too.
+                // log the decode failure as its own FAILED entry too, with the
+                // body rebuilt as textBatch built it (preamble + JSON steer
+                // included; a sampling parameter stripped mid-retry is the one
+                // divergence it can't see).
                 $error = "batch request '{$key}': expected JSON, got: {$text}";
                 $req = $requests[$key];
                 LlmLogger::log(
                     (string) ($req['log_label'] ?? $key),
-                    [
-                        'model'    => $req['model'] ?? $this->model,
-                        'system'   => $req['system'] ?? null,
-                        'messages' => [['role' => 'user', 'content' => (string) $req['prompt']]],
-                    ],
+                    self::bodyFor(
+                        ['system' => (string) ($req['system'] ?? '') . self::JSON_SYSTEM] + $req,
+                        $this->model,
+                        $this->defaultMaxTokens,
+                    ),
                     ['text' => $text, 'input' => 0, 'output' => 0],
                     0.0,
                     $error,
                 );
-                throw new RuntimeException($error);
+                throw new \RuntimeException($error);
             }
             $out[$key] = $data;
         }
@@ -177,8 +213,7 @@ final class AnthropicClient implements Llm
         foreach ($requests as $key => $req) {
             $system = (string) ($req['system'] ?? '');
             if ($json) {
-                $system .= "\nRespond with a single valid JSON value and nothing else. "
-                    . 'No prose, no markdown fences.';
+                $system .= self::JSON_SYSTEM;
             }
             $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens);
         }
@@ -216,10 +251,14 @@ final class AnthropicClient implements Llm
      * Build one streaming Messages API request body from a request spec — the
      * single place the optional per-request knobs (model, max_tokens,
      * temperature, system) are mapped onto the wire format, shared by the
-     * single-call and batch paths. Temperature is only sent when the caller
+     * single-call and batch paths. Every body carries the system preamble (the
+     * respect-the-prompt-language rule from prompts/system-preamble.md) as its
+     * system prompt, with any per-request system text appended after it.
+     * Temperature is only sent when the caller
      * set one AND the target model still supports sampling parameters, so an
      * unset step keeps the API's default sampling and a step pointed at a
-     * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure — unit-testable.
+     * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure apart from the
+     * cached preamble read — unit-testable.
      *
      * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
      * @return array<string,mixed>
@@ -238,9 +277,11 @@ final class AnthropicClient implements Llm
         if (isset($req['temperature']) && self::supportsSampling($model)) {
             $body['temperature'] = (float) $req['temperature'];
         }
+        $system = self::systemPreamble();
         if (trim((string) ($req['system'] ?? '')) !== '') {
-            $body['system'] = $req['system'];
+            $system .= "\n\n" . $req['system'];
         }
+        $body['system'] = $system;
         return $body;
     }
 
@@ -323,7 +364,7 @@ final class AnthropicClient implements Llm
                     if ($onFailure !== null) {
                         $onFailure($key, $error, (float) ($outcome['time'] ?? 0));
                     }
-                    throw new RuntimeException("Anthropic batch request '{$key}' failed: {$error}");
+                    throw new \RuntimeException("Anthropic batch request '{$key}' failed: {$error}");
                 }
             }
 
@@ -509,13 +550,13 @@ final class AnthropicClient implements Llm
                 return $this->streamRequest($body);
             } catch (TransientApiException $e) {
                 if ($attempt >= count($delays)) {
-                    throw new RuntimeException('Anthropic API failed after retries: ' . $e->getMessage(), 0, $e);
+                    throw new \RuntimeException('Anthropic API failed after retries: ' . $e->getMessage(), 0, $e);
                 }
                 $wait = $delays[$attempt];
                 $attempt++;
                 fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
-            } catch (RuntimeException $e) {
+            } catch (\RuntimeException $e) {
                 $param = self::rejectedParam($e->getMessage());
                 if ($param === null || !array_key_exists($param, $body)) {
                     throw $e;
@@ -576,13 +617,13 @@ final class AnthropicClient implements Llm
             if (self::isTransientCurl($errno)) {
                 throw new TransientApiException("cURL ({$errno}): {$error}");
             }
-            throw new RuntimeException("cURL error ({$errno}): {$error}");
+            throw new \RuntimeException("cURL error ({$errno}): {$error}");
         }
         if ($status < 200 || $status >= 300) {
             if (self::isTransientStatus($status)) {
                 throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
             }
-            throw new RuntimeException("Anthropic API HTTP {$status}: " . self::truncate($raw));
+            throw new \RuntimeException("Anthropic API HTTP {$status}: " . self::truncate($raw));
         }
 
         $parsed = self::parseSse($raw);
@@ -590,7 +631,7 @@ final class AnthropicClient implements Llm
             if (in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true)) {
                 throw new TransientApiException("stream error: {$parsed['error']}");
             }
-            throw new RuntimeException("stream error: {$parsed['error']}");
+            throw new \RuntimeException("stream error: {$parsed['error']}");
         }
         // An empty body is usually a transient hiccup (a stop with no content),
         // so retry it — matching the batch path's interpretStream().

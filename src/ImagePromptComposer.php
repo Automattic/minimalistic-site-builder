@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * The single place that turns a collected AI_IMAGE placeholder into the text
  * prompt we send to the image-generation endpoint.
@@ -54,7 +56,7 @@ final class ImagePromptComposer
      *        ImageTransparency keys out after generation; the photographic
      *        grade is omitted so no lighting/backdrop gets painted behind the
      *        subject.
-     * @param PromptRenderer|null $renderer    defaults to the repo's prompts/ dir;
+     * @param PromptRenderer|null $renderer    defaults to the package's prompts/ dir;
      *        injectable so the template lookup can be redirected in tests
      */
     public static function compose(
@@ -66,7 +68,7 @@ final class ImagePromptComposer
         bool $transparent = false,
         ?PromptRenderer $renderer = null
     ): string {
-        $renderer ??= new PromptRenderer(repo_path('prompts'));
+        $renderer ??= new PromptRenderer(Package::promptsDir());
 
         $subject     = trim($subject);
         $style       = trim($style);

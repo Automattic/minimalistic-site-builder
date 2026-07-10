@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
+
 /**
  * Generate (or regenerate) the AI images for an already-built project.
  *

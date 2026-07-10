@@ -1,0 +1,115 @@
+<?php
+declare(strict_types=1);
+
+use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\SiteBuilder;
+use Automattic\SiteBuild\Tests\FakeLlm;
+
+/**
+ * SiteBuilder facade: assembles the default pipeline from injected deps and
+ * seeds projects the same way bin/build.php does.
+ */
+
+/** @param array<string,string> $models */
+function make_test_builder(FakeLlm $llm, string $outputRoot, ?BlockFixer $fixer = null, array $models = []): SiteBuilder
+{
+    $fixer ??= new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return '[fix-templates] noop';
+        }
+    };
+
+    return new SiteBuilder(
+        llm: $llm,
+        promptsDir: Package::promptsDir(),
+        outputRoot: $outputRoot,
+        blockFixer: $fixer,
+        models: $models,
+    );
+}
+
+test('SiteBuilder pipeline exposes the default step order and stop ids', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    assert_eq([
+        'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'theme-json+section-plan', 'sections', 'assemble-landing-page',
+        'collect-images', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
+    ], $builder->pipeline()->stepIds());
+    assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
+    assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true), 'group member is a valid stop');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder createProject uses a free random slug when slug is null', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    $project = $builder->createProject('a test cafe');
+    $meta = $project->readJson('meta.json');
+
+    assert_eq('a test cafe', $meta['prompt']);
+    assert_eq($project->slug(), $meta['provisional_slug']);
+    assert_true(isset($meta['created_at']) && $meta['created_at'] !== '');
+    // Random slugs are adjective-noun, not a slugify of the full prompt.
+    assert_true($project->slug() !== 'a-test-cafe', 'must not slugify the prompt');
+    assert_true(is_dir($project->path()));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder createProject respects an explicit slug and merges meta', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    $pre = $builder->store()->create('fixed-slug');
+    $pre->writeJson('meta.json', ['demo_source' => 'unit-test']);
+
+    $project = $builder->createProject('prompt text', 'fixed-slug');
+    $meta = $project->readJson('meta.json');
+
+    assert_eq('fixed-slug', $project->slug());
+    assert_eq('prompt text', $meta['prompt']);
+    assert_eq('unit-test', $meta['demo_source'], 'pre-seeded meta must survive merge');
+    assert_eq('fixed-slug', $meta['provisional_slug']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
+    $llm = new FakeLlm();
+    // refine-prompt (text), then site-spec (json) — same order as the integration harness
+    $llm->queueText('A cozy neighborhood bakery selling artisan bread and pastries.');
+    $llm->queueJson([
+        'name' => 'Test Cafe', 'slug' => 'test-cafe',
+        'title' => 'Test Cafe', 'description' => 'A test cafe',
+        'site_type' => 'cafe', 'topic' => 'coffee', 'area' => 'cafe',
+        'audience' => 'locals', 'visual_vibe' => 'warm',
+        'language' => 'en', 'persona_name' => '',
+        'email_domain' => 'testcafe.example', 'invented' => ['name', 'email_domain'],
+        'sections' => ['Hero', 'About'],
+    ]);
+
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder($llm, $tmp);
+
+    $project = $builder->createProject('a test cafe', 'test-cafe');
+    $builder->pipeline()->runThrough($project, 'site-spec');
+
+    assert_true($project->exists('siteSpec.json'), 'ran through site-spec to disk');
+    assert_eq('Test Cafe', $project->readJson('siteSpec.json')['name']);
+    assert_true($project->exists('theme/style.css'), 'scaffold-theme ran first');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder accepts partial model overrides without fatalling', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp, models: ['sections' => 'claude-haiku-4-5']);
+    assert_true(in_array('sections', $builder->pipeline()->stepIds(), true));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

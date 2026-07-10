@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (LLM, concurrent): generate every landing-page part in ONE batch — the
  * header, the footer, and one template part per planned section — fired together
@@ -86,7 +95,7 @@ final class SectionsStep implements Step
                 'design_direction'     => $designDirection,
                 'hero_brief'           => self::heroBrief($sections),
                 'outline'              => $outline,
-                'archetype_assignment' => self::headerAssignment($sections),
+                'archetype_assignment' => self::headerAssignment($sections, DesignDirectionStep::canvasFor($project)),
             ])]),
             'footer' => $this->withOptions(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'        => $siteSpec,
@@ -130,7 +139,11 @@ final class SectionsStep implements Step
                 $key === 'footer' => 'parts/footer.html',
                 default           => 'parts/' . $key . '.html', // section-<slug>
             };
-            $files[$rel] = self::markup($text, $key);
+            $markup = self::markup($text, $key);
+            if ($key === 'header' || $key === 'footer') {
+                $markup = self::constrainedPart($markup);
+            }
+            $files[$rel] = $markup;
         }
 
         foreach ($files as $rel => $markup) {
@@ -148,7 +161,7 @@ final class SectionsStep implements Step
         $plan = $project->readJson('sections.json');
         $sections = $plan['sections'] ?? null;
         if (!is_array($sections) || $sections === []) {
-            throw new RuntimeException('sections: sections.json has no sections (run section-plan first)');
+            throw new \RuntimeException('sections: sections.json has no sections (run section-plan first)');
         }
         return $sections;
     }
@@ -189,7 +202,7 @@ final class SectionsStep implements Step
         $slug = (string) ($section['slug'] ?? "section-{$i}");
         foreach (['layout_archetype', 'background', 'handoff'] as $field) {
             if (trim((string) ($section[$field] ?? '')) === '') {
-                throw new RuntimeException("sections: section '{$slug}' is missing {$field} from section-plan");
+                throw new \RuntimeException("sections: section '{$slug}' is missing {$field} from section-plan");
             }
         }
 
@@ -283,21 +296,23 @@ final class SectionsStep implements Step
     }
 
     /**
-     * The header archetypes compatible with the planned hero: minimal-overlay
-     * floats transparently over the first section, so it is only offered when
-     * the hero is an image-led cover it can read against. Pure — unit-testable.
+     * The header archetypes compatible with the planned hero and the direction's
+     * canvas: minimal-overlay floats transparently over the first section, so it
+     * is only offered when the hero is an image-led cover it can read against —
+     * and never on a "framed" canvas, whose mat of page background would sit
+     * under the overlay instead of the image. Pure — unit-testable.
      *
      * @param array<int,array<string,mixed>> $sections
      * @return string[]
      */
-    public static function headerArchetypePool(array $sections): array
+    public static function headerArchetypePool(array $sections, string $canvas = ''): array
     {
         $hero = self::heroSection($sections);
         $imageLed = is_array($hero) && (
             (string) ($hero['layout_archetype'] ?? '') === 'full-bleed-cover'
             || (string) ($hero['background'] ?? '') === 'image'
         );
-        return $imageLed
+        return $imageLed && $canvas !== 'framed'
             ? self::HEADER_ARCHETYPES
             : array_values(array_diff(self::HEADER_ARCHETYPES, [self::OVERLAY_ARCHETYPE]));
     }
@@ -311,12 +326,12 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $sections
      */
-    public static function headerAssignment(array $sections): string
+    public static function headerAssignment(array $sections, string $canvas = ''): string
     {
         $forced = Env::get(self::ARCHETYPE_ENV);
         if ($forced !== null && $forced !== '') {
             if (!in_array($forced, self::HEADER_ARCHETYPES, true)) {
-                throw new RuntimeException(sprintf(
+                throw new \RuntimeException(sprintf(
                     'sections: %s=%s is not a header archetype (use one of: %s)',
                     self::ARCHETYPE_ENV,
                     $forced,
@@ -326,12 +341,36 @@ final class SectionsStep implements Step
             return "ASSIGNED HEADER ARCHETYPE for this build: **{$forced}**. Build exactly this one.";
         }
 
-        $pool = self::headerArchetypePool($sections);
+        $pool = self::headerArchetypePool($sections, $canvas);
         $first = array_splice($pool, random_int(0, count($pool) - 1), 1)[0];
         $second = $pool[random_int(0, count($pool) - 1)];
         return "ASSIGNED HEADER ARCHETYPES for this build: **{$first}** or **{$second}**. "
             . 'Build EXACTLY ONE of these two — whichever serves the DESIGN DIRECTION and the planned hero better. '
             . 'Every other catalog entry below is reference only and is OFF the table for this build.';
+    }
+
+    /**
+     * Ensure a part's top-level wp:group declares a layout. The header and
+     * footer prompts demand `"layout":{"type":"constrained"}` on the top-level
+     * group, but the model sometimes drops it — and a group with no layout is
+     * flow, not constrained: no centering, no root-padding-aware gutter, so
+     * its content renders edge-to-edge at the viewport (a header's align:wide
+     * row hugs the screen corners; a footer's text touches the screen edge).
+     * Only adds a missing layout; an explicit one (e.g. a deliberate flex row)
+     * is left alone. Pure — unit-testable.
+     */
+    public static function constrainedPart(string $markup): string
+    {
+        if (preg_match('/^<!--\s*wp:group\s*(\{.*?\})?\s*-->/s', $markup, $m) !== 1) {
+            return $markup;
+        }
+        $attrs = isset($m[1]) && $m[1] !== '' ? json_decode($m[1], true) : [];
+        if (!is_array($attrs) || isset($attrs['layout'])) {
+            return $markup;
+        }
+        $attrs['layout'] = ['type' => 'constrained'];
+        $json = json_encode($attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return '<!-- wp:group ' . $json . ' -->' . substr($markup, strlen($m[0]));
     }
 
     /**
@@ -343,9 +382,29 @@ final class SectionsStep implements Step
     {
         $markup = self::stripFences(trim($text));
         if ($markup === '' || !str_contains($markup, 'wp:')) {
-            throw new RuntimeException("sections: part '{$key}' is not block markup");
+            throw new \RuntimeException("sections: part '{$key}' is not block markup");
         }
-        return rtrim($markup);
+        return self::normalizePresetRefs(rtrim($markup));
+    }
+
+    /**
+     * Repair the model's recurring preset-reference typo: `var:preset--type--slug`
+     * instead of `var:preset|type|slug` in block-comment attributes. WordPress
+     * resolves only the pipe form, so the malformed ref produces NO style — and
+     * the block-fixer then deletes the (correct) inline CSS as "not mirrored in
+     * attributes", leaving e.g. a section with zero padding beside 8rem siblings.
+     * The type names are a fixed vocabulary, so the rewrite is unambiguous.
+     * Pure — unit-testable.
+     */
+    public static function normalizePresetRefs(string $markup): string
+    {
+        // `--` may also appear as the serializer's `--` escape.
+        $dashes = '(?:--|(?:\\\u002d){2})';
+        return (string) preg_replace(
+            "/var:preset{$dashes}(color|gradient|shadow|spacing|font-size|font-family|aspect-ratio|duotone){$dashes}/",
+            'var:preset|$1|',
+            $markup
+        );
     }
 
     /** Strip a leading/trailing markdown code fence if the model added one. */

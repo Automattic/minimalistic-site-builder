@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (LLM): generate the CSS for the layout utility classes the sections used.
  *

@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Step;
+
 /**
  * Step (deterministic): collect the AI image placeholders the sections step
  * emitted into the theme markup, so they can be generated.

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Accumulates the per-step accounting of a build (wall time + token spend) plus
  * the image-generation tally, and renders the run overview shown on the console

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+namespace Automattic\SiteBuild;
+
 /**
  * Structural validation of a generated theme. Catches the failure modes that
  * matter for a WordPress block theme: missing required files, invalid

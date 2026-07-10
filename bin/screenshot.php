@@ -1,11 +1,13 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ProjectStore;
+
 /**
  * Boot a built project in WordPress Playground (headless), capture a full-page
  * screenshot of its home page, and save it under the project's logs/ directory.
  *
- *   php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--keep-alive]
+ *   php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]
  *
  * Reuses bin/playground.php to start the server (so the same blueprint, theme
  * mount and site options apply), waits until it reports ready, screenshots `/`
@@ -18,6 +20,8 @@ declare(strict_types=1);
  *   --out=<path>   screenshot destination (default projects/<slug>/logs/home.png).
  *   --timeout=<s>  seconds to wait for the server to come up (default 240; the
  *                  first run downloads WordPress, which is slow).
+ *   --workers=<n>  Playground worker threads, forwarded to playground.php
+ *                  (default 2 there; each worker holds a PHP wasm runtime).
  *   --keep-alive   after the screenshot, leave Playground running in the
  *                  foreground (don't tear it down) so the site can be inspected
  *                  in a browser. Ctrl-C to stop the server.
@@ -33,21 +37,23 @@ $port = 9400;
 $out = null;
 $timeout = 240;
 $keepAlive = false;
+$workers = null;
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
     elseif (str_starts_with($a, '--out=')) { $out = substr($a, 6); }
     elseif (str_starts_with($a, '--timeout=')) { $timeout = (int) substr($a, 10); }
+    elseif (str_starts_with($a, '--workers=')) { $workers = substr($a, 10); }
     elseif ($a === '--keep-alive') { $keepAlive = true; }
     elseif ($slug === null && !str_starts_with($a, '--')) { $slug = $a; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--keep-alive]\n");
+        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
         exit(1);
     }
 }
 
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--keep-alive]\n");
+    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
     exit(1);
 }
 
@@ -83,7 +89,8 @@ $serverLog = $project->logPath('playground-screenshot.log');
 // itself, so teardown can walk and kill its npx/node subtree.
 @unlink($serverLog);
 $cmd = 'exec php ' . escapeshellarg(repo_path('bin/playground.php'))
-    . ' ' . escapeshellarg($slug) . ' --port=' . (int) $port;
+    . ' ' . escapeshellarg($slug) . ' --port=' . (int) $port
+    . ($workers !== null ? ' --workers=' . escapeshellarg($workers) : '');
 $proc = proc_open(
     $cmd,
     [0 => ['file', '/dev/null', 'r'], 1 => ['file', $serverLog, 'w'], 2 => ['file', $serverLog, 'a']],
