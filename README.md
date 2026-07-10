@@ -10,7 +10,8 @@ the WPCOM AI proxy).
 
 The split is deliberate: design lives in the theme, content lives in
 `projects/<slug>/plugin/` (static seeder code + `pages.json` manifest +
-`pages/<slug>.html` block markup). The homepage is a seeded page too —
+`pages/<slug>.html` block markup + `images/` content images, which the
+seeder imports into the media library on activation). The homepage is a seeded page too —
 `page_on_front` points at it; there is no front-page.html template.
 
 ## Setup
