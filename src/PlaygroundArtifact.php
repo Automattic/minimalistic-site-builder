@@ -108,34 +108,52 @@ final class PlaygroundArtifact
     {
         $options = self::siteOptions($project);
 
+        $steps = [
+            ['step' => 'setSiteOptions', 'options' => $options],
+            [
+                'step' => 'mkdir',
+                'path' => '/wordpress/wp-content/builder-project-archive',
+            ],
+            [
+                'step'          => 'unzip',
+                'zipFile'       => [
+                    'resource' => 'bundled',
+                    'path'     => '/project.zip',
+                ],
+                'extractToPath' => '/wordpress/wp-content/builder-project-archive',
+            ],
+            [
+                'step'     => 'mv',
+                'fromPath' => '/wordpress/wp-content/builder-project-archive/project/' . $project->slug() . '/theme',
+                'toPath'   => '/wordpress/wp-content/themes/' . $project->slug(),
+            ],
+            [
+                'step'            => 'activateTheme',
+                'themeFolderName' => $project->slug(),
+            ],
+        ];
+
+        // The companion content plugin ships next to the theme and activates
+        // AFTER it: the seeder resolves theme:./assets/ refs against the
+        // ACTIVE stylesheet when it creates the pages.
+        if ($project->exists('plugin/site-content.php')) {
+            $pluginDir = $project->slug() . '-content';
+            $steps[] = [
+                'step'     => 'mv',
+                'fromPath' => '/wordpress/wp-content/builder-project-archive/project/' . $project->slug() . '/plugin',
+                'toPath'   => '/wordpress/wp-content/plugins/' . $pluginDir,
+            ];
+            $steps[] = [
+                'step'       => 'activatePlugin',
+                'pluginPath' => $pluginDir . '/site-content.php',
+            ];
+        }
+
         return [
             '$schema'     => 'https://playground.wordpress.net/blueprint-schema.json',
             'landingPage' => '/',
             'login'       => true,
-            'steps'       => [
-                ['step' => 'setSiteOptions', 'options' => $options],
-                [
-                    'step' => 'mkdir',
-                    'path' => '/wordpress/wp-content/builder-project-archive',
-                ],
-                [
-                    'step'          => 'unzip',
-                    'zipFile'       => [
-                        'resource' => 'bundled',
-                        'path'     => '/project.zip',
-                    ],
-                    'extractToPath' => '/wordpress/wp-content/builder-project-archive',
-                ],
-                [
-                    'step'     => 'mv',
-                    'fromPath' => '/wordpress/wp-content/builder-project-archive/project/' . $project->slug() . '/theme',
-                    'toPath'   => '/wordpress/wp-content/themes/' . $project->slug(),
-                ],
-                [
-                    'step'            => 'activateTheme',
-                    'themeFolderName' => $project->slug(),
-                ],
-            ],
+            'steps'       => $steps,
         ];
     }
 
@@ -222,6 +240,10 @@ final class PlaygroundArtifact
         return [
             'blogname'        => $blogname,
             'blogdescription' => $blogdescription,
+            // Pretty permalinks so the seeded page tree's paths (/menu/,
+            // /menu/breads/) resolve; WP rebuilds rewrite rules lazily and
+            // the content plugin flushes them on activation.
+            'permalink_structure' => '/%postname%/',
         ];
     }
 
