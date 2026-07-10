@@ -117,10 +117,14 @@ final class SiteSpecStep implements Step
             }
         }
 
-        // Sections must be a list so the section-plan step can build on it.
+        // Sections must be a list so the page-plan step can build on it.
         if (!isset($spec['sections']) || !is_array($spec['sections'])) {
             $spec['sections'] = [];
         }
+
+        // The page tree drives multi-page generation; every downstream step
+        // may rely on at least a homepage entry existing.
+        $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec);
 
         // `invented` lists which identity values the model made up; keep only
         // the identity keys so downstream features can trust its contents.
@@ -152,6 +156,70 @@ final class SiteSpecStep implements Step
         $spec['invented'] = array_values(array_unique($invented));
 
         return $spec;
+    }
+
+    /**
+     * Normalize the page tree: slugified, tree-wide unique slugs, title
+     * fallback from the slug, children always a list. Junk entries are
+     * dropped; a missing/empty tree degrades to a single homepage so a
+     * one-page build is the floor, never a failure. The FIRST page is the
+     * homepage — position is the contract, no flag is stored here.
+     * Pure — unit-testable.
+     *
+     * @param mixed        $raw
+     * @param array<mixed> $spec
+     * @return array<int,array<string,mixed>>
+     */
+    public static function normalizePages($raw, array $spec): array
+    {
+        $seen = [];
+        $pages = is_array($raw) ? self::normalizePageList($raw, $seen) : [];
+        if ($pages === []) {
+            return [[
+                'title'    => 'Home',
+                'slug'     => 'home',
+                'purpose'  => trim((string) ($spec['description'] ?? '')),
+                'children' => [],
+            ]];
+        }
+        return $pages;
+    }
+
+    /**
+     * One level of the page tree; $seen carries slug uniqueness across the
+     * WHOLE tree (slugs become file names, permalinks, and manifest keys).
+     *
+     * @param array<mixed>       $raw
+     * @param array<string,true> $seen
+     * @return array<int,array<string,mixed>>
+     */
+    private static function normalizePageList(array $raw, array &$seen): array
+    {
+        $out = [];
+        foreach ($raw as $i => $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $title = trim((string) ($page['title'] ?? ''));
+            $slug = ProjectStore::slugify((string) ($page['slug'] ?? ($title !== '' ? $title : 'page-' . $i)));
+            $base = $slug;
+            $n = 2;
+            while (isset($seen[$slug])) {
+                $slug = "{$base}-{$n}";
+                $n++;
+            }
+            $seen[$slug] = true;
+
+            $out[] = [
+                'title'    => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
+                'slug'     => $slug,
+                'purpose'  => trim((string) ($page['purpose'] ?? '')),
+                'children' => is_array($page['children'] ?? null)
+                    ? self::normalizePageList($page['children'], $seen)
+                    : [],
+            ];
+        }
+        return $out;
     }
 
     /** A BCP-47-ish code ("en", "es-AR", "pt_BR") or a plain language name ("Spanish"). */

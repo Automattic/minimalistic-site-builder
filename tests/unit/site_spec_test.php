@@ -142,6 +142,66 @@ test('site-spec throws when language missing or implausible', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site-spec normalizes the pages tree: slugs slugified and globally unique', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Our Menu', 'purpose' => 'The menu', 'children' => [
+                ['title' => 'Breads', 'slug' => 'Our Menu', 'purpose' => 'Bread list'], // slugifies to our-menu -> collides
+            ]],
+            ['title' => 'Visit', 'slug' => 'visit', 'purpose' => 'Hours and address', 'children' => 'nope'],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq('home', $pages[0]['slug']);
+    assert_eq('our-menu', $pages[1]['slug']);                 // derived from title
+    assert_eq('our-menu-2', $pages[1]['children'][0]['slug']); // deduped across the whole tree
+    assert_eq('Breads', $pages[1]['children'][0]['title']);
+    assert_eq([], $pages[2]['children']);                      // non-array children dropped
+    assert_eq('Hours and address', $pages[2]['purpose']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec defaults pages to a single homepage when the model omits them', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Solo', 'language' => 'en',
+        'description' => 'A one-page site about one thing.',
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(1, count($pages));
+    assert_eq('home', $pages[0]['slug']);
+    assert_eq('Home', $pages[0]['title']);
+    assert_eq('A one-page site about one thing.', $pages[0]['purpose']);
+    assert_eq([], $pages[0]['children']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec pages entries get title fallback from slug and drop junk entries', function () {
+    $pages = SiteSpecStep::normalizePages([
+        ['slug' => 'about-us'],           // no title -> Ucwords from slug
+        'not-a-page',                     // junk entry dropped
+        ['purpose' => 'no slug, no title'], // unsluggable -> page-N fallback
+    ], ['description' => '']);
+
+    assert_eq('About Us', $pages[0]['title']);
+    assert_eq('about-us', $pages[0]['slug']);
+    assert_eq(2, count($pages));
+    assert_true($pages[1]['slug'] !== '', 'fallback slug non-empty');
+
+    exec('true');
+});
+
 test('site-spec throws when meta prompt missing', function () {
     $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
