@@ -1,0 +1,30 @@
+{
+    "$comment": "Default LLM models per provider for each pipeline step. Pick the active provider with `php bin/build.php --provider=<name>` or the LLM_PROVIDER env var (falls back to default_provider below). Every step is tagged with a tier (large | small); the active provider's model for that tier is used. Small = fast/cheap structural steps; large = quality-critical creative/generation steps. OVERRIDES (any model id, always win): LLM_MODEL_<STEP> for one step (e.g. LLM_MODEL_SITE_SPEC=gpt-5.5), LLM_MODEL for the whole run's large tier, LLM_MODEL_SMALL for the small tier.",
+    "version": 1,
+    "default_provider": "anthropic",
+    "providers": {
+        "anthropic": {
+            "large": "claude-opus-4-8",
+            "small": "claude-haiku-4-5"
+        },
+        "openai": {
+            "large": "gpt-5.5",
+            "small": "gpt-5.4-mini"
+        },
+        "xai": {
+            "large": "grok-4.5",
+            "small": "grok-4.5"
+        }
+    },
+    "step_tiers": {
+        "refine-prompt": "small",
+        "site-spec": "small",
+        "design-direction-seeds": "small",
+        "design-direction": "large",
+        "theme-json": "large",
+        "page-plan": "small",
+        "sections": "large",
+        "page-styles": "large",
+        "fonts-php": "large"
+    }
+}

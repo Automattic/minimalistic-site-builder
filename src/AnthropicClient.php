@@ -364,7 +364,7 @@ final class AnthropicClient implements Llm
                     if ($onFailure !== null) {
                         $onFailure($key, $error, (float) ($outcome['time'] ?? 0));
                     }
-                    throw new \RuntimeException("Anthropic batch request '{$key}' failed: {$error}");
+                    throw new \RuntimeException("LLM batch request '{$key}' failed: {$error}");
                 }
             }
 
