@@ -102,8 +102,8 @@ final class LayoutFixer
     private static function addMissingRootLayout(array $roots, array &$notes): void
     {
         foreach ($roots as $node) {
-            if (self::is($node, 'group') && !isset($node->attrs['layout'])) {
-                $node->attrs['layout'] = ['type' => 'constrained'];
+            if (self::is($node, 'group') && !isset($node->attrs->layout)) {
+                $node->attrs->layout = (object) ['type' => 'constrained'];
                 $node->dirty = true;
                 $notes[] = 'top-level wp:group had no "layout" — added {"type":"constrained"} so children get page gutters instead of rendering edge-to-edge';
             }
@@ -122,27 +122,32 @@ final class LayoutFixer
     private static function promoteAlignClassNames(array $all, array &$notes): void
     {
         foreach ($all as $node) {
-            if (!self::is($node, 'group') && !self::is($node, 'columns') && !self::is($node, 'cover')) {
+            if (!self::is($node, 'group') && !self::is($node, 'columns') && !self::is($node, 'cover')
+                && !self::is($node, 'gallery') && !self::is($node, 'media-text')) {
                 continue;
             }
-            if (isset($node->attrs['align'])) {
-                continue;
-            }
-            $classes = preg_split('/\s+/', trim((string) ($node->attrs['className'] ?? ''))) ?: [];
+            $className = $node->attrs->className ?? '';
+            $classes = is_string($className) ? (preg_split('/\s+/', trim($className)) ?: []) : [];
             $aligns = array_intersect(['alignfull', 'alignwide'], $classes);
             if ($aligns === []) {
                 continue;
             }
-            $align = in_array('alignfull', $aligns, true) ? 'full' : 'wide';
-            $node->attrs['align'] = $align;
+
+            if (!isset($node->attrs->align)) {
+                $align = in_array('alignfull', $aligns, true) ? 'full' : 'wide';
+                $node->attrs->align = $align;
+                $notes[] = "wp:{$node->name} carried an align class with no \"align\" attribute — promoted to \"align\":\"{$align}\"";
+            } else {
+                $notes[] = "wp:{$node->name} carried an align class alongside an \"align\" attribute — removed the conflicting class token";
+            }
+
             $classes = array_values(array_diff($classes, ['alignfull', 'alignwide']));
             if ($classes === []) {
-                unset($node->attrs['className']);
+                unset($node->attrs->className);
             } else {
-                $node->attrs['className'] = implode(' ', $classes);
+                $node->attrs->className = implode(' ', $classes);
             }
             $node->dirty = true;
-            $notes[] = "wp:{$node->name} carried an align class with no \"align\" attribute — promoted to \"align\":\"{$align}\"";
         }
     }
 
@@ -160,28 +165,28 @@ final class LayoutFixer
     {
         $root = $roots[0] ?? null;
         if ($root === null || !self::is($root, 'group')
-            || !in_array($root->attrs['align'] ?? '', ['wide', 'full'], true)) {
+            || !in_array(self::align($root), ['wide', 'full'], true)) {
             return; // deliberate content-width footer band — widening inside it is a no-op
         }
         foreach ($all as $node) {
-            if (!self::is($node, 'columns') || isset($node->attrs['align']) || self::columnCount($node) < 3) {
+            if (!self::is($node, 'columns') || self::columnCount($node) < 3) {
                 continue;
             }
             // Only promote through plain group wrappers; anything else
             // (a column cell, a cover) means this isn't a top-level row.
-            $chain = [];
-            for ($p = $node->parent; $p !== null && $p !== $root; $p = $p->parent) {
-                if (!self::is($p, 'group')) {
-                    continue 2;
-                }
-                $chain[] = $p;
+            $chain = self::plainGroupPathTo($node, $root);
+            if ($chain === null) {
+                continue;
             }
-            $node->attrs['align'] = 'wide';
-            $node->dirty = true;
-            $notes[] = 'footer wp:columns with ' . self::columnCount($node) . ' columns sat at content width — set "align":"wide"';
+
+            if (self::align($node) !== 'wide') {
+                $node->attrs->align = 'wide';
+                $node->dirty = true;
+                $notes[] = 'footer wp:columns with ' . self::columnCount($node) . ' columns did not use the canonical row width — set "align":"wide"';
+            }
             foreach ($chain as $wrapper) {
-                if (!isset($wrapper->attrs['align'])) {
-                    $wrapper->attrs['align'] = 'wide';
+                if (self::align($wrapper) !== 'wide') {
+                    $wrapper->attrs->align = 'wide';
                     $wrapper->dirty = true;
                     $notes[] = 'widened the wp:group wrapping the footer columns so the wide width flows down';
                 }
@@ -202,7 +207,7 @@ final class LayoutFixer
     private static function evenOutFooterRows(array $all, array &$notes): void
     {
         foreach ($all as $node) {
-            if (!self::is($node, 'group') || (($node->attrs['layout']['type'] ?? '') !== 'constrained')) {
+            if (!self::is($node, 'group') || self::layoutType($node) !== 'constrained') {
                 continue;
             }
             // Only the footer band itself and its immediate wrappers hold
@@ -215,15 +220,15 @@ final class LayoutFixer
                 $node->children,
                 static fn (object $c): bool => self::is($c, 'group') || self::is($c, 'columns') || self::is($c, 'separator')
             ));
-            $hasWide = array_filter($rows, static fn (object $c): bool => in_array($c->attrs['align'] ?? '', ['wide', 'full'], true));
-            if ($hasWide === [] || count($hasWide) === count($rows)) {
+            $hasWide = array_filter($rows, static fn (object $c): bool => in_array(self::align($c), ['wide', 'full'], true));
+            if ($hasWide === []) {
                 continue;
             }
             foreach ($rows as $row) {
-                if (!isset($row->attrs['align'])) {
-                    $row->attrs['align'] = 'wide';
+                if (self::align($row) !== 'wide') {
+                    $row->attrs->align = 'wide';
                     $row->dirty = true;
-                    $notes[] = "footer wp:{$row->name} sat at content width beside wide sibling rows — set \"align\":\"wide\" so all rows share one edge";
+                    $notes[] = "footer wp:{$row->name} did not use the canonical wide row width — set \"align\":\"wide\" so all rows share one edge";
                 }
             }
         }
@@ -239,9 +244,9 @@ final class LayoutFixer
      *    Turning Points" ran its media-text timeline at 860px inside a 1320px
      *    band). Promote the row to align:wide; text siblings keep the measure.
      *
-     * 2. A direct-child group hard-caps contentSize around content that
-     *    includes grid rows. Drop the cap, widen the wrapper, and widen the
-     *    rows inside it the same way.
+     * 2. One or more nested group wrappers interrupt that wide context.
+     *    Widen each group on the path to the grid and drop any explicit
+     *    contentSize cap. Paths stop at non-group component boundaries.
      *
      * @param object[] $roots
      * @param string[] $notes
@@ -250,48 +255,60 @@ final class LayoutFixer
     {
         $root = $roots[0] ?? null;
         if ($root === null || !self::is($root, 'group')
-            || !in_array($root->attrs['align'] ?? '', ['wide', 'full'], true)
-            || (($root->attrs['layout']['type'] ?? '') !== 'constrained')) {
+            || !in_array(self::align($root), ['wide', 'full'], true)
+            || self::layoutType($root) !== 'constrained') {
             return;
         }
-        self::widenGridRows($root, $notes, 'inside the wide band (text siblings keep the reading measure)');
-
-        foreach ($root->children as $group) {
-            if (!self::is($group, 'group')
-                || (($group->attrs['layout']['type'] ?? '') !== 'constrained')
-                || !isset($group->attrs['layout']['contentSize'])
-                || !self::subtreeHasGrid($group)) {
-                continue;
-            }
-            unset($group->attrs['layout']['contentSize']);
-            if (!isset($group->attrs['align'])) {
-                $group->attrs['align'] = 'wide';
-            }
-            $group->dirty = true;
-            $notes[] = 'grid content was boxed into a narrow contentSize wrapper inside a wide band — removed the cap and widened the wrapper';
-            self::widenGridRows($group, $notes, 'inside the freed wrapper');
-        }
+        self::widenGridPaths($root, $notes);
     }
 
     /**
-     * Give every non-aligned direct-child grid row of $container
-     * "align":"wide".
+     * Widen grid rows reachable through group-only wrapper paths. Each group
+     * on a matching path must itself be wide or the descendant's align:wide
+     * is still resolved inside a content-width box. Other block boundaries
+     * (columns, covers, etc.) end the path so component internals stay local.
      *
      * @param string[] $notes
      */
-    private static function widenGridRows(object $container, array &$notes, string $where): void
+    private static function widenGridPaths(object $container, array &$notes): bool
     {
+        $foundGrid = false;
         foreach ($container->children as $child) {
-            if (isset($child->attrs['align'])) {
-                continue;
-            }
             if ((self::is($child, 'columns') && self::columnCount($child) >= 2)
                 || self::is($child, 'gallery') || self::is($child, 'media-text')) {
-                $child->attrs['align'] = 'wide';
+                $foundGrid = true;
+                if (!isset($child->attrs->align)) {
+                    $child->attrs->align = 'wide';
+                    $child->dirty = true;
+                    $notes[] = "wp:{$child->name} grid row sat at content width — set \"align\":\"wide\" inside the wide band";
+                }
+                continue;
+            }
+            if (!self::is($child, 'group') || !self::widenGridPaths($child, $notes)) {
+                continue;
+            }
+
+            $foundGrid = true;
+            $changed = false;
+            $removedCap = false;
+            $layout = self::layout($child);
+            if ($layout !== null && isset($layout->contentSize)) {
+                unset($layout->contentSize);
+                $changed = true;
+                $removedCap = true;
+            }
+            if (!in_array(self::align($child), ['wide', 'full'], true)) {
+                $child->attrs->align = 'wide';
+                $changed = true;
+            }
+            if ($changed) {
                 $child->dirty = true;
-                $notes[] = "wp:{$child->name} grid row sat at content width — set \"align\":\"wide\" {$where}";
+                $notes[] = $removedCap
+                    ? 'widened a wp:group on the path to grid content and removed its explicit contentSize cap'
+                    : 'widened a wp:group on the path to grid content so the wide width flows down';
             }
         }
+        return $foundGrid;
     }
 
     /**
@@ -308,19 +325,35 @@ final class LayoutFixer
         if ($contentSize === null) {
             return;
         }
-        foreach ($all as $node) {
-            if (!self::is($node, 'group') || !self::insideCover($node)) {
+        foreach ($all as $cover) {
+            if (!self::is($cover, 'cover')) {
                 continue;
             }
-            $size = $node->attrs['layout']['contentSize'] ?? null;
-            if (($node->attrs['layout']['type'] ?? '') !== 'constrained'
+
+            // The first direct group is the cover's primary overlay wrapper;
+            // utility blocks such as a leading spacer may precede it. Do not
+            // scan descendants: nested cards, captions, and badges can carry
+            // an intentionally narrower component-local measure.
+            $node = null;
+            foreach ($cover->children as $child) {
+                if (self::is($child, 'group')) {
+                    $node = $child;
+                    break;
+                }
+            }
+            if ($node === null) {
+                continue;
+            }
+            $layout = self::layout($node);
+            $size = $layout->contentSize ?? null;
+            if (self::layoutType($node) !== 'constrained'
                 || !is_string($size) || preg_match('/^([0-9.]+)px$/', $size, $m) !== 1) {
                 continue;
             }
             if ((float) $m[1] >= $contentSize * self::COVER_MEASURE_FLOOR) {
                 continue;
             }
-            unset($node->attrs['layout']['contentSize']);
+            unset($layout->contentSize);
             $node->dirty = true;
             $notes[] = "cover content was capped at {$size} — removed the override so it uses the theme's contentSize";
         }
@@ -357,10 +390,10 @@ final class LayoutFixer
                 }
                 continue;
             }
-            $attrs = [];
+            $attrs = new \stdClass();
             if (isset($t[3]) && $t[3][1] !== -1 && $t[3][0] !== '') {
-                $attrs = json_decode($t[3][0], true);
-                if (!is_array($attrs)) {
+                $attrs = json_decode($t[3][0]);
+                if (!$attrs instanceof \stdClass) {
                     return null;
                 }
             }
@@ -400,7 +433,7 @@ final class LayoutFixer
         $dirty = array_values(array_filter($all, static fn (object $n): bool => $n->dirty));
         usort($dirty, static fn (object $a, object $b): int => $b->start <=> $a->start);
         foreach ($dirty as $n) {
-            $json = $n->attrs === []
+            $json = get_object_vars($n->attrs) === []
                 ? ''
                 : ' ' . json_encode($n->attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $comment = '<!-- wp:' . $n->name . $json . ($n->selfClosing ? ' /-->' : ' -->');
@@ -425,26 +458,42 @@ final class LayoutFixer
         ));
     }
 
-    private static function insideCover(object $node): bool
+    /** Attribute align value, normalized to an empty string when absent. */
+    private static function align(object $node): string
     {
-        for ($p = $node->parent; $p !== null; $p = $p->parent) {
-            if (self::is($p, 'cover')) {
-                return true;
-            }
-        }
-        return false;
+        $align = $node->attrs->align ?? '';
+        return is_string($align) ? $align : '';
     }
 
-    /** Does the subtree contain a multi-column row, gallery, or media-text? */
-    private static function subtreeHasGrid(object $node): bool
+    /** Layout object when the attribute has the expected JSON shape. */
+    private static function layout(object $node): ?object
     {
-        foreach ($node->children as $child) {
-            if ((self::is($child, 'columns') && self::columnCount($child) >= 2)
-                || self::is($child, 'gallery') || self::is($child, 'media-text')
-                || self::subtreeHasGrid($child)) {
-                return true;
+        $layout = $node->attrs->layout ?? null;
+        return $layout instanceof \stdClass ? $layout : null;
+    }
+
+    private static function layoutType(object $node): string
+    {
+        $type = self::layout($node)?->type ?? '';
+        return is_string($type) ? $type : '';
+    }
+
+    /**
+     * Group ancestors from $node's parent up to but excluding $root, or null
+     * when another block boundary intervenes or the node is under another
+     * top-level root.
+     *
+     * @return object[]|null
+     */
+    private static function plainGroupPathTo(object $node, object $root): ?array
+    {
+        $path = [];
+        for ($p = $node->parent; $p !== null && $p !== $root; $p = $p->parent) {
+            if (!self::is($p, 'group')) {
+                return null;
             }
+            $path[] = $p;
         }
-        return false;
+        return $p === $root ? $path : null;
     }
 }

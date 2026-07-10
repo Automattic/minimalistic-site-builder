@@ -50,6 +50,26 @@ test('layout fixer promotes an alignwide className to the real align attribute',
     assert_true(!str_contains($r['markup'], 'alignwide"'), 'alignwide class token should be gone from attributes');
 });
 
+test('layout fixer preserves JSON object and array shapes when rewriting a dirty node', function () {
+    $markup = '<!-- wp:group {"align":"full","metadata":{},"items":[],"numeric":{"0":"zero"}} -->'
+        . '<div class="wp-block-group alignfull"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"metadata":{}', $r['markup']);
+    assert_contains('"items":[]', $r['markup']);
+    assert_contains('"numeric":{"0":"zero"}', $r['markup']);
+});
+
+test('layout fixer promotes align classes on gallery and media-text grids', function () {
+    $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:gallery {"className":"alignfull mosaic"} --><figure class="wp-block-gallery"></figure><!-- /wp:gallery -->'
+        . '<!-- wp:media-text {"align":"wide","className":"alignfull timeline"} --><div class="wp-block-media-text"></div><!-- /wp:media-text -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('wp:gallery {"className":"mosaic","align":"full"}', $r['markup']);
+    assert_contains('wp:media-text {"align":"wide","className":"timeline"}', $r['markup']);
+    assert_true(!str_contains($r['markup'], '"className":"alignfull'), 'align class tokens should be removed from grid className values');
+});
+
 test('layout fixer evens out mixed-width footer rows', function () {
     // portfolio/naturaleza footers: site-title lockup at content width beside
     // alignwide link columns — two competing left edges.
@@ -61,6 +81,18 @@ test('layout fixer evens out mixed-width footer rows', function () {
     $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
     assert_contains('wp:group {"layout":{"type":"flex"},"align":"wide"}', $r['markup']);
     assert_contains('wp:separator {"align":"wide"}', $r['markup']);
+});
+
+test('layout fixer canonicalizes full and wide footer rows to wide', function () {
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"align":"full","layout":{"type":"flex"}} --><div class="wp-block-group alignfull"></div><!-- /wp:group -->'
+        . lf_columns(2, '{"align":"wide"}')
+        . '<!-- wp:separator {"align":"full"} --><hr class="wp-block-separator alignfull"/><!-- /wp:separator -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
+    assert_contains('wp:group {"align":"wide","layout":{"type":"flex"}}', $r['markup']);
+    assert_contains('wp:separator {"align":"wide"}', $r['markup']);
+    assert_true(!str_contains($r['markup'], 'wp:separator {"align":"full"}'), 'full-width structural row should be canonicalized');
 });
 
 test('layout fixer keeps a consistent content-width footer untouched', function () {
@@ -84,6 +116,18 @@ test('layout fixer widens a 3+ column footer row and its wrappers', function () 
     $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
     assert_contains('wp:columns {"align":"wide"}', $r['markup']);
     assert_contains('"layout":{"type":"constrained"},"align":"wide"', $r['markup']);
+});
+
+test('layout fixer widens footer wrapper ancestors even when columns are already aligned', function () {
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:group --><div class="wp-block-group">'
+        . lf_columns(3, '{"align":"wide"}')
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
+    assert_eq(3, substr_count($r['markup'], '"align":"wide"'), 'columns and both group ancestors should be wide');
 });
 
 test('layout fixer does not widen footer columns when the band itself is content width', function () {
@@ -120,6 +164,27 @@ test('layout fixer frees a grid boxed inside a narrow contentSize wrapper', func
     assert_contains('wp:columns {"align":"wide"}', $r['markup']);
 });
 
+test('layout fixer propagates grid width through nested wrappers without contentSize', function () {
+    $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:group --><div class="wp-block-group">'
+        . lf_columns(2, '{"align":"wide"}')
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq(4, substr_count($r['markup'], '"align":"wide"'), 'root, grid, and both wrapper ancestors should be wide');
+});
+
+test('layout fixer only follows plain group paths when widening grids', function () {
+    $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:cover --><div class="wp-block-cover">'
+        . '<!-- wp:group --><div class="wp-block-group">' . lf_columns(2) . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq([], LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
 test('layout fixer leaves grid rows alone in a content-width section', function () {
     $markup = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
         . lf_columns(2)
@@ -132,6 +197,7 @@ test('layout fixer restores the cover measure when squeezed far below the theme 
     // portfolio2 hero: display headline pinned into a 640px box of an 88vh cover.
     $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
         . '<!-- wp:cover {"align":"wide"} --><div class="wp-block-cover alignwide">'
+        . '<!-- wp:spacer {"height":"20px"} --><div class="wp-block-spacer"></div><!-- /wp:spacer -->'
         . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"640px"}} --><div class="wp-block-group">'
         . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">H</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
@@ -148,10 +214,27 @@ test('layout fixer restores the cover measure when squeezed far below the theme 
     assert_eq([], LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, null)['notes']);
 });
 
+test('layout fixer preserves narrow component measures nested inside cover content', function () {
+    $markup = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:cover {"align":"wide"} --><div class="wp-block-cover alignwide">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"640px"}} --><div class="wp-block-group">'
+        . '<!-- wp:group {"className":"card","layout":{"type":"constrained","contentSize":"320px"}} --><div class="wp-block-group card"></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:group {"className":"badge","layout":{"type":"constrained","contentSize":"240px"}} --><div class="wp-block-group badge"></div><!-- /wp:group -->'
+        . '</div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_true(!str_contains($r['markup'], '"contentSize":"640px"'), 'primary cover measure should be restored');
+    assert_contains('"contentSize":"320px"', $r['markup']);
+    assert_contains('"contentSize":"240px"', $r['markup']);
+});
+
 test('layout fixer is idempotent on everything it fixes', function () {
     $fixtures = [
         [LayoutFixer::ROLE_SECTION, '<!-- wp:group {"align":"full"} --><div class="wp-block-group alignfull">' . lf_columns(2, '{"align":"wide"}') . '</div><!-- /wp:group -->'],
         [LayoutFixer::ROLE_FOOTER, '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull"><!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">' . lf_columns(3) . '</div><!-- /wp:group --></div><!-- /wp:group -->'],
+        [LayoutFixer::ROLE_SECTION, '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group"><!-- wp:group --><div class="wp-block-group"><!-- wp:group {"layout":{"type":"constrained","contentSize":"700px"}} --><div class="wp-block-group">' . lf_columns(2, '{"align":"wide"}') . '</div><!-- /wp:group --></div><!-- /wp:group --></div><!-- /wp:group -->'],
+        [LayoutFixer::ROLE_FOOTER, '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group"><!-- wp:group {"align":"full"} --><div class="wp-block-group">' . lf_columns(3, '{"align":"wide"}') . '</div><!-- /wp:group --></div><!-- /wp:group -->'],
     ];
     foreach ($fixtures as [$role, $markup]) {
         $first = LayoutFixer::fix($markup, $role, 860.0);
