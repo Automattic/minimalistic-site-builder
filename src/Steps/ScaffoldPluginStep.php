@@ -18,7 +18,8 @@ use Automattic\SiteBuild\Step;
  * on activation it creates one WordPress page per entry in the bundled
  * pages.json manifest from the markup in pages/<slug>.html (written later by
  * the assemble-pages step), points the site's front page at the seeded
- * homepage, and records everything in one option; on deactivation it deletes
+ * homepage, unpublishes the stock "Sample Page" so it leaves the nav, and
+ * records everything in one option; on deactivation it deletes
  * exactly what it created and restores the front-page options. No LLM ever
  * touches this code.
  */
@@ -83,10 +84,21 @@ final class ScaffoldPluginStep implements Step
 
             $state = array(
                 'page_ids'      => array(),
+                'unpublished'   => array(),
                 'show_on_front' => get_option('show_on_front'),
                 'page_on_front' => get_option('page_on_front'),
                 'changed_front' => false,
             );
+
+            // A fresh WordPress ships a published "Sample Page"; the header's
+            // wp:page-list would render it in the nav next to the seeded
+            // pages. Unpublish it (draft, not delete — it isn't ours) and
+            // remember it so deactivation can restore it.
+            $sample = get_page_by_path('sample-page');
+            if ($sample && $sample->post_status === 'publish') {
+                wp_update_post(array('ID' => (int) $sample->ID, 'post_status' => 'draft'));
+                $state['unpublished'][] = (int) $sample->ID;
+            }
 
             // The markup is trusted build output; bypass kses so block comments
             // survive even when activation runs without a privileged user
@@ -159,6 +171,12 @@ final class ScaffoldPluginStep implements Step
             $ids = isset($state['page_ids']) && is_array($state['page_ids']) ? $state['page_ids'] : array();
             foreach ($ids as $id) {
                 wp_delete_post((int) $id, true);
+            }
+
+            // Republish whatever activation unpublished (the stock sample page).
+            $unpublished = isset($state['unpublished']) && is_array($state['unpublished']) ? $state['unpublished'] : array();
+            foreach ($unpublished as $id) {
+                wp_update_post(array('ID' => (int) $id, 'post_status' => 'publish'));
             }
 
             if (!empty($state['changed_front'])) {

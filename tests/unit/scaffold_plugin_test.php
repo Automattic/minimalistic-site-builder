@@ -53,6 +53,23 @@ if (!function_exists('get_option')) {
         unset($GLOBALS['wp_posts'][$id]);
         return true;
     }
+    function wp_update_post(array $post): int
+    {
+        $id = (int) ($post['ID'] ?? 0);
+        if (isset($GLOBALS['wp_posts'][$id])) {
+            $GLOBALS['wp_posts'][$id] = array_merge($GLOBALS['wp_posts'][$id], $post);
+        }
+        return $id;
+    }
+    function get_page_by_path(string $path)
+    {
+        foreach ($GLOBALS['wp_posts'] as $id => $post) {
+            if (($post['post_name'] ?? '') === $path && ($post['post_type'] ?? '') === 'page') {
+                return (object) ['ID' => $id, 'post_status' => (string) ($post['post_status'] ?? '')];
+            }
+        }
+        return null;
+    }
     function is_wp_error($thing): bool
     {
         return false;
@@ -144,16 +161,25 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     $project->writeText('plugin/pages/breads.html', '<!-- wp:heading --><h2>Breads</h2><!-- /wp:heading -->');
 
     wp_stub_reset();
+    // A fresh WordPress ships a published "Sample Page" — wp:page-list would
+    // show it in the nav next to the seeded pages.
+    $GLOBALS['wp_posts'][2] = [
+        'post_type' => 'page', 'post_status' => 'publish',
+        'post_title' => 'Sample Page', 'post_name' => 'sample-page',
+    ];
     require_once $project->pluginPath('site-content.php');
 
     // ── Activation seeds every page in manifest order. ──
     builder_content_activate();
 
     $posts = $GLOBALS['wp_posts'];
-    assert_eq(3, count($posts));
-    $ids = array_keys($posts);
-    assert_eq(['home', 'menu', 'breads'], array_column($posts, 'post_name'));
-    assert_eq([0, 10, 20], array_column($posts, 'menu_order'));
+    assert_eq(4, count($posts)); // sample page + 3 seeded
+    // The stock sample page is unpublished (not deleted) so it leaves the nav.
+    assert_eq('draft', $posts[2]['post_status']);
+    $seeded = array_filter($posts, fn (array $p) => ($p['post_name'] ?? '') !== 'sample-page');
+    $ids = array_keys($seeded);
+    assert_eq(['home', 'menu', 'breads'], array_column($seeded, 'post_name'));
+    assert_eq([0, 10, 20], array_column($seeded, 'menu_order'));
 
     // The child page hangs off its parent's freshly created id.
     $byName = [];
@@ -177,13 +203,14 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // kses was bypassed only around the seeding.
     assert_eq(['remove', 'init'], $GLOBALS['wp_kses_calls']);
 
-    // ── A second activation is a no-op (no duplicate pages). ──
+    // ── A second activation is a no-op (no duplicate pages, no re-recording). ──
     builder_content_activate();
-    assert_eq(3, count($GLOBALS['wp_posts']), 'no duplicates on re-activation');
+    assert_eq(4, count($GLOBALS['wp_posts']), 'no duplicates on re-activation');
 
-    // ── Deactivation deletes exactly what was created and restores options. ──
+    // ── Deactivation deletes exactly what was created and restores the rest. ──
     builder_content_deactivate();
-    assert_eq([], $GLOBALS['wp_posts']);
+    assert_eq([2], array_keys($GLOBALS['wp_posts']), 'only the sample page survives');
+    assert_eq('publish', $GLOBALS['wp_posts'][2]['post_status'], 'sample page republished');
     assert_eq('posts', get_option('show_on_front'));
     assert_eq(0, get_option('page_on_front'));
     assert_eq(false, get_option(BUILDER_CONTENT_STATE_OPTION));
