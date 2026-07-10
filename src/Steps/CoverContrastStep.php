@@ -40,6 +40,18 @@ final class CoverContrastStep implements Step
     /** Above this the image is more curtain than picture. */
     public const MAX_DIM = 80;
 
+    /**
+     * A region whose interquartile luminance spread exceeds this is "busy"
+     * (sky + buildings + crowd in one area): flat-sample ratios can pass
+     * while the texture still defeats the text, so busy regions additionally
+     * require a real overlay behind the content (BUSY_MIN_ALPHA effective
+     * opacity) before any ratio is trusted.
+     */
+    public const BUSY_SPREAD = 0.25;
+
+    /** Minimum effective overlay opacity (stop alpha × dim) behind text on a busy region. */
+    public const BUSY_MIN_ALPHA = 0.35;
+
     public function __construct(private BlockFixer $fixer) {}
 
     public function id(): string
@@ -144,7 +156,7 @@ final class CoverContrastStep implements Step
             }
 
             $position = is_string($attrs['contentPosition'] ?? null) ? $attrs['contentPosition'] : '';
-            $image = self::regionAverage($path, $position);
+            $image = self::regionStats($path, $position);
             if ($image === null) {
                 $report[] = "[{$rel}] cover image unreadable, skipped: " . basename($path);
                 continue;
@@ -158,14 +170,37 @@ final class CoverContrastStep implements Step
             ]);
 
             $plan = self::planCover($texts, $overlay, $dim, $image, $candidates);
-            $luma = sprintf('image luminance %.2f', ContrastMath::luminance($image));
+            $luma = sprintf(
+                'image luminance %.2f–%.2f',
+                ContrastMath::luminance($image[0]),
+                ContrastMath::luminance($image[count($image) - 1])
+            );
 
-            if ($plan['dim'] === $dim && $plan['swaps'] === []) {
+            if ($plan['dim'] === $dim && $plan['swaps'] === [] && $plan['overlay'] === null) {
                 $report[] = "[{$rel}] cover ok at dimRatio {$dim} ({$luma})";
                 continue;
             }
 
-            if ($plan['dim'] !== $dim) {
+            if ($plan['overlay'] !== null) {
+                // The designed overlay can't make any text color read (busy
+                // image, or a gradient with ~zero alpha behind the content):
+                // replace it with a solid palette overlay. Strip the stale
+                // gradient/overlay class tokens so the fixer's custom-class
+                // rescue can't keep the old span styling around.
+                $oldOverlaySlug = is_string($attrs['overlayColor'] ?? null) ? $attrs['overlayColor'] : null;
+                $gradientSlug = is_string($attrs['gradient'] ?? null) ? $attrs['gradient'] : null;
+                unset($attrs['gradient'], $attrs['customGradient']);
+                $attrs['overlayColor'] = $plan['overlay'];
+                foreach (array_filter([
+                    $gradientSlug !== null ? "has-{$gradientSlug}-gradient-background" : null,
+                    'wp-block-cover__gradient-background',
+                    'has-background-gradient',
+                    $oldOverlaySlug !== null ? "has-{$oldOverlaySlug}-background-color" : null,
+                ]) as $stale) {
+                    $doc->replaceInOwnHtml($i, ' ' . $stale, '');
+                }
+            }
+            if ($plan['dim'] !== $dim || $plan['overlay'] !== null) {
                 $attrs['dimRatio'] = $plan['dim'];
                 $doc->setAttrs($i, $attrs);
                 ContrastFix::swapDimClass($doc, $i, $dim, $plan['dim']);
@@ -173,6 +208,9 @@ final class CoverContrastStep implements Step
             $ownSlugs = array_column($texts, 'ownSlug', 'index');
             foreach ($plan['swaps'] as $textIndex => $slug) {
                 $textAttrs = $doc->attrs($textIndex) ?? [];
+                if (($textAttrs['textColor'] ?? null) === $slug) {
+                    continue;
+                }
                 $textAttrs['textColor'] = $slug;
                 unset($textAttrs['style']['color']['text']);
                 $doc->setAttrs($textIndex, $textAttrs);
@@ -184,8 +222,9 @@ final class CoverContrastStep implements Step
             $repairs++;
 
             $report[] = sprintf(
-                '[%s] cover repaired: dimRatio %d → %d%s (%s)%s',
+                '[%s] cover repaired: dimRatio %d → %d%s%s (%s)%s',
                 $rel, $dim, $plan['dim'],
+                $plan['overlay'] === null ? '' : ", overlay → solid {$plan['overlay']} (designed overlay ineffective behind the content)",
                 $plan['swaps'] === [] ? '' : ', text → ' . implode(', ', array_unique($plan['swaps'])),
                 $luma,
                 $plan['pass'] ? '' : ' — still below threshold at max dim, best effort'
@@ -197,16 +236,24 @@ final class CoverContrastStep implements Step
     /**
      * Decide how to make a cover's text readable against the measured image:
      * first try raising dimRatio alone (keeping the design's colors), then
-     * dimRatio plus swapping failing texts to a candidate palette color, and
-     * as a last resort max dim + the best available candidate.
+     * dimRatio plus swapping failing texts to a candidate palette color.
+     *
+     * When neither works the overlay itself is the problem — a busy image
+     * whose dark and bright areas defeat every text color, or a gradient
+     * whose stop behind the content has ~zero alpha (gradient darkening the
+     * bottom, contentPosition at the top), which makes raising dimRatio a
+     * no-op. Escalation: replace the overlay with a SOLID palette color at
+     * the lowest dim that makes a candidate text color read everywhere
+     * ('overlay' in the result). Last resort: max dim + best candidate.
      *
      * Pure — unit-testable without imagick or files.
      *
      * @param list<array{index:int, rgb: array{0:int,1:int,2:int}, threshold: float}> $texts
      * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
-     * @param array{0:int,1:int,2:int} $image region-average color behind the content
+     * @param list<array{0:int,1:int,2:int}> $image region samples behind the
+     *        content (see regionStats) — every one must pass
      * @param array<string, array{0:int,1:int,2:int}> $candidates slug => rgb
-     * @return array{dim:int, swaps: array<int,string>, pass: bool}
+     * @return array{dim:int, swaps: array<int,string>, overlay: ?string, pass: bool}
      */
     public static function planCover(array $texts, array $overlay, int $dim, array $image, array $candidates): array
     {
@@ -219,16 +266,29 @@ final class CoverContrastStep implements Step
             $steps = [$dim]; // already dimmed past the cap — evaluate as-is
         }
 
-        // Keep the designed text colors if any dim step lets them all pass.
-        foreach ($steps as $d) {
+        // On a busy region, ratios against flat samples aren't enough — the
+        // texture itself defeats text without a real veil behind it. Only
+        // trust dim steps whose effective overlay opacity reaches the busy
+        // minimum; a zero-alpha gradient stop can never qualify, which is
+        // what pushes misaligned gradients into the solid-overlay escalation.
+        $busy = ContrastMath::luminance($image[count($image) - 1]) - ContrastMath::luminance($image[0])
+            > self::BUSY_SPREAD;
+        $maxStopAlpha = array_reduce($overlay, static fn (float $m, array $s) => max($m, $s['alpha']), 0.0);
+        $trusted = array_values(array_filter(
+            $steps,
+            fn (int $d) => !$busy || $maxStopAlpha * $d / 100 >= self::BUSY_MIN_ALPHA
+        ));
+
+        // Keep the designed text colors if any trusted dim step lets them all pass.
+        foreach ($trusted as $d) {
             if (self::failing($texts, $overlay, $d, $image) === []) {
-                return ['dim' => $d, 'swaps' => [], 'pass' => true];
+                return ['dim' => $d, 'swaps' => [], 'overlay' => null, 'pass' => true];
             }
         }
 
-        // Otherwise the smallest dim where a candidate color rescues the
-        // failing texts (texts that already pass keep their color).
-        foreach ($steps as $d) {
+        // Otherwise the smallest trusted dim where a candidate color rescues
+        // the failing texts (texts that already pass keep their color).
+        foreach ($trusted as $d) {
             foreach ($candidates as $slug => $rgb) {
                 $failing = self::failing($texts, $overlay, $d, $image);
                 $rescued = array_filter(
@@ -240,7 +300,40 @@ final class CoverContrastStep implements Step
                     foreach ($failing as $t) {
                         $swaps[$t['index']] = $slug;
                     }
-                    return ['dim' => $d, 'swaps' => $swaps, 'pass' => true];
+                    return ['dim' => $d, 'swaps' => $swaps, 'overlay' => null, 'pass' => true];
+                }
+            }
+        }
+
+        // Escalation: solid overlay + matching text. Try the darker overlay
+        // with the lighter text first (the common photographic treatment).
+        $ordered = $candidates;
+        uasort($ordered, static fn (array $a, array $b) => ContrastMath::luminance($a) <=> ContrastMath::luminance($b));
+        $slugs = array_keys($ordered);
+        $pairs = [];
+        for ($i = 0; $i < count($slugs); $i++) {
+            for ($j = count($slugs) - 1; $j >= 0; $j--) {
+                if ($i !== $j) {
+                    $pairs[] = [$slugs[$i], $slugs[$j]]; // [overlay, text]
+                }
+            }
+        }
+        foreach ($pairs as [$overlaySlug, $textSlug]) {
+            foreach ([50, 60, 70, self::MAX_DIM] as $d) {
+                $solid = [['rgb' => $candidates[$overlaySlug], 'alpha' => 1.0]];
+                $ok = true;
+                foreach ($texts as $t) {
+                    if (self::minRatio($candidates[$textSlug], $solid, $d, $image) < $t['threshold']) {
+                        $ok = false;
+                        break;
+                    }
+                }
+                if ($ok) {
+                    $swaps = [];
+                    foreach ($texts as $t) {
+                        $swaps[$t['index']] = $textSlug;
+                    }
+                    return ['dim' => $d, 'swaps' => $swaps, 'overlay' => $overlaySlug, 'pass' => true];
                 }
             }
         }
@@ -262,13 +355,13 @@ final class CoverContrastStep implements Step
                 $swaps[$t['index']] = $bestSlug;
             }
         }
-        return ['dim' => $d, 'swaps' => $swaps, 'pass' => false];
+        return ['dim' => $d, 'swaps' => $swaps, 'overlay' => null, 'pass' => false];
     }
 
     /**
      * @param list<array{index:int, rgb: array{0:int,1:int,2:int}, threshold: float}> $texts
      * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
-     * @param array{0:int,1:int,2:int} $image
+     * @param list<array{0:int,1:int,2:int}> $image
      * @return list<array{index:int, rgb: array{0:int,1:int,2:int}, threshold: float}>
      */
     private static function failing(array $texts, array $overlay, int $dim, array $image): array
@@ -280,18 +373,21 @@ final class CoverContrastStep implements Step
     }
 
     /**
-     * Worst-case ratio of a text color against the overlay-dimmed image.
+     * Worst-case ratio of a text color against the overlay-dimmed image:
+     * the minimum across every overlay stop × every image sample.
      *
      * @param array{0:int,1:int,2:int} $fg
      * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
-     * @param array{0:int,1:int,2:int} $image
+     * @param list<array{0:int,1:int,2:int}> $image
      */
     private static function minRatio(array $fg, array $overlay, int $dim, array $image): float
     {
         $min = PHP_FLOAT_MAX;
         foreach ($overlay as $stop) {
-            $bg = ContrastMath::compositeOver($stop['rgb'], $stop['alpha'] * $dim / 100, $image);
-            $min = min($min, ContrastMath::ratio($fg, $bg));
+            foreach ($image as $sample) {
+                $bg = ContrastMath::compositeOver($stop['rgb'], $stop['alpha'] * $dim / 100, $sample);
+                $min = min($min, ContrastMath::ratio($fg, $bg));
+            }
         }
         return $min;
     }
@@ -374,14 +470,23 @@ final class CoverContrastStep implements Step
     }
 
     /**
-     * Average color of the image region behind the cover content. The
+     * Luminance statistics of the image region behind the cover content. The
      * content sits where contentPosition says (default: center), so sample
      * that half of the image instead of averaging light and dark areas the
-     * text never touches. Null when the image can't be read.
+     * text never touches.
      *
-     * @return array{0:int,1:int,2:int}|null
+     * Returns three representative colors — the pixels at the 25th and 75th
+     * luminance percentiles plus the mean — because a busy photo (crowds,
+     * architecture) has no single background color: text must read against
+     * the region's typical dark AND bright areas, and an average of the two
+     * is a color that exists nowhere in the image. The interquartile ends
+     * (not the extremes) keep small specks from vetoing every color.
+     *
+     * Null when the image can't be read.
+     *
+     * @return list<array{0:int,1:int,2:int}>|null [low, mean, high]
      */
-    public static function regionAverage(string $path, string $contentPosition): ?array
+    public static function regionStats(string $path, string $contentPosition): ?array
     {
         if (!extension_loaded('imagick')) {
             return null;
@@ -399,9 +504,32 @@ final class CoverContrastStep implements Step
             $y = str_contains($pos, 'top') ? 0 : (str_contains($pos, 'bottom') ? intdiv($h, 2) : intdiv($h, 4));
             $im->cropImage(intdiv($w, 2), intdiv($h, 2), $x, $y);
 
-            $im->resizeImage(1, 1, \Imagick::FILTER_BOX, 1);
-            $px = $im->getImagePixelColor(0, 0)->getColor();
-            return [(int) $px['r'], (int) $px['g'], (int) $px['b']];
+            $im->resizeImage(24, 24, \Imagick::FILTER_BOX, 1);
+            $pixels = [];
+            $sum = [0, 0, 0];
+            foreach ($im->getPixelIterator() as $row) {
+                foreach ($row as $px) {
+                    $c = $px->getColor();
+                    $rgb = [(int) $c['r'], (int) $c['g'], (int) $c['b']];
+                    $pixels[] = ['rgb' => $rgb, 'lum' => ContrastMath::luminance($rgb)];
+                    $sum[0] += $rgb[0];
+                    $sum[1] += $rgb[1];
+                    $sum[2] += $rgb[2];
+                }
+            }
+            if ($pixels === []) {
+                return null;
+            }
+            usort($pixels, static fn (array $a, array $b) => $a['lum'] <=> $b['lum']);
+            $n = count($pixels);
+            $mean = [
+                (int) round($sum[0] / $n), (int) round($sum[1] / $n), (int) round($sum[2] / $n),
+            ];
+            return [
+                $pixels[(int) floor($n * 0.25)]['rgb'],
+                $mean,
+                $pixels[min($n - 1, (int) floor($n * 0.75))]['rgb'],
+            ];
         } catch (\Throwable) {
             return null;
         }
