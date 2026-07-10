@@ -60,6 +60,14 @@ final class ThemeJsonStep implements ConcurrentStep
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
 
+        // blockGap must be non-null: when it is null WordPress emits NO blockGap
+        // layout CSS on the frontend while the editor still emulates it, so any
+        // per-block "blockGap" the parts set (e.g. the branded-lockup header's
+        // zero-gap title/tagline stack) renders editor-only and the frontend
+        // falls back to browser default margins.
+        $theme['settings']['spacing']['blockGap'] ??= true;
+        $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
+
         self::assertColors($theme);
         self::assertFonts($theme);
 

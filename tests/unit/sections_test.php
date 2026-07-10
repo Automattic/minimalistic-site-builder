@@ -132,6 +132,66 @@ test('heroBrief summarizes the hero section and falls back to the first section'
     assert_eq('(No hero section planned.)', SectionsStep::heroBrief([]));
 });
 
+test('header archetype pool offers minimal-overlay only for image-led heroes', function () {
+    $imageHero = [['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image']];
+    assert_eq(SectionsStep::HEADER_ARCHETYPES, SectionsStep::headerArchetypePool($imageHero));
+
+    $imageBand = [['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'image']];
+    assert_true(in_array('minimal-overlay', SectionsStep::headerArchetypePool($imageBand), true), 'image band hero allows overlay');
+
+    $plainHero = [['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']];
+    $pool = SectionsStep::headerArchetypePool($plainHero);
+    assert_true(!in_array('minimal-overlay', $pool, true), 'plain hero excludes overlay');
+    assert_eq(count(SectionsStep::HEADER_ARCHETYPES) - 1, count($pool));
+});
+
+test('header assignment offers two distinct archetypes from the pool', function () {
+    $sections = [['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']];
+    for ($i = 0; $i < 10; $i++) {
+        $assignment = SectionsStep::headerAssignment($sections);
+        assert_true((bool) preg_match('/\*\*([a-z-]+)\*\* or \*\*([a-z-]+)\*\*/', $assignment, $m), 'two archetypes offered');
+        assert_true($m[1] !== $m[2], 'the two picks are distinct');
+        foreach ([$m[1], $m[2]] as $pick) {
+            assert_true(in_array($pick, SectionsStep::headerArchetypePool($sections), true), "'{$pick}' is in the compatible pool");
+        }
+    }
+});
+
+test('HEADER_ARCHETYPE env forces the header archetype in the header prompt', function () {
+    [$project, $tmp] = sections_fixture();
+    putenv(SectionsStep::ARCHETYPE_ENV . '=branded-lockup');
+    try {
+        $renderer = new PromptRenderer(repo_path('prompts'));
+        $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+        assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **branded-lockup**', $reqs['header']['prompt']);
+    } finally {
+        putenv(SectionsStep::ARCHETYPE_ENV);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('an unknown HEADER_ARCHETYPE aborts instead of silently generating', function () {
+    putenv(SectionsStep::ARCHETYPE_ENV . '=mega-header');
+    try {
+        assert_throws(function () {
+            SectionsStep::headerAssignment([['slug' => 'hero', 'type' => 'hero']]);
+        }, 'not a header archetype');
+    } finally {
+        putenv(SectionsStep::ARCHETYPE_ENV);
+    }
+});
+
+test('the header prompt carries an archetype assignment and the full catalog', function () {
+    [$project, $tmp] = sections_fixture();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    assert_contains('ASSIGNED HEADER ARCHETYPES for this build:', $reqs['header']['prompt']);
+    assert_contains('branded-lockup', $reqs['header']['prompt']); // new catalog entries render
+    assert_contains('wp:site-logo', $reqs['header']['prompt']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('sections writes header, footer and a part per section', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();

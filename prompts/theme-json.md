@@ -48,7 +48,8 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
   Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
   Include EXACTLY these two fontFamilies and no others — do NOT add a third entry (e.g. a "mono" or "accent" family). Two families only: heading and body.
-- settings.spacing: include "spacingSizes" with slugs sm, md, lg, xl, xxl (a comfortable rising scale).
+- settings.spacing: include "spacingSizes" with slugs sm, md, lg, xl, xxl (a comfortable rising scale), and set "blockGap": true — a null blockGap makes WordPress skip ALL frontend block-gap CSS while the editor still previews it, so the two render different spacing.
+- styles.spacing.blockGap: a default vertical rhythm between sibling blocks, from the spacing scale (e.g. "var:preset|spacing|md").
 - styles.color.background = var(--wp--preset--color--base), styles.color.text = var(--wp--preset--color--contrast).
 - styles.typography.fontFamily = body font var, fontSize = var(--wp--preset--font-size--body), lineHeight 1.5–1.65.
 - styles.elements.heading.typography.lineHeight = a tight heading line-height (1.1–1.3).

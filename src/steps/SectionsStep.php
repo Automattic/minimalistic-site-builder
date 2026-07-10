@@ -25,6 +25,23 @@ final class SectionsStep implements Step
     /** Prefix for a section part's request key, filename, and template-part slug. */
     public const SECTION_PREFIX = 'section-';
 
+    /** Env var: force a header archetype (e.g. HEADER_ARCHETYPE=branded-lockup). */
+    public const ARCHETYPE_ENV = 'HEADER_ARCHETYPE';
+
+    /** Header archetype menu — must match the catalog in header.md. */
+    public const HEADER_ARCHETYPES = [
+        'standard-row',
+        'centered-masthead',
+        'minimal-overlay',
+        'oversized-wordmark',
+        'branded-lockup',
+        'double-decker',
+        'split-nav',
+    ];
+
+    /** Floats transparently over the hero, so it needs an image-led hero under it. */
+    private const OVERLAY_ARCHETYPE = 'minimal-overlay';
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -63,12 +80,13 @@ final class SectionsStep implements Step
 
         $requests = [
             'header' => $this->withOptions(['prompt' => $this->renderer->render('header.md', [
-                'site_spec'        => $siteSpec,
-                'language'         => $language,
-                'theme_json'       => $themeJson,
-                'design_direction' => $designDirection,
-                'hero_brief'       => self::heroBrief($sections),
-                'outline'          => $outline,
+                'site_spec'            => $siteSpec,
+                'language'             => $language,
+                'theme_json'           => $themeJson,
+                'design_direction'     => $designDirection,
+                'hero_brief'           => self::heroBrief($sections),
+                'outline'              => $outline,
+                'archetype_assignment' => self::headerAssignment($sections),
             ])]),
             'footer' => $this->withOptions(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'        => $siteSpec,
@@ -231,14 +249,7 @@ final class SectionsStep implements Step
      */
     public static function heroBrief(array $sections): string
     {
-        $hero = null;
-        foreach ($sections as $s) {
-            if ((string) ($s['type'] ?? '') === 'hero') {
-                $hero = $s;
-                break;
-            }
-        }
-        $hero ??= $sections[0] ?? null;
+        $hero = self::heroSection($sections);
         if (!is_array($hero)) {
             return '(No hero section planned.)';
         }
@@ -251,6 +262,76 @@ final class SectionsStep implements Step
             }
         }
         return $lines === [] ? '(No hero section planned.)' : implode("\n", $lines);
+    }
+
+    /**
+     * The planned hero section, falling back to the first section when the plan
+     * has no hero-typed one.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @return array<string,mixed>|null
+     */
+    private static function heroSection(array $sections): ?array
+    {
+        foreach ($sections as $s) {
+            if ((string) ($s['type'] ?? '') === 'hero') {
+                return $s;
+            }
+        }
+        $first = $sections[0] ?? null;
+        return is_array($first) ? $first : null;
+    }
+
+    /**
+     * The header archetypes compatible with the planned hero: minimal-overlay
+     * floats transparently over the first section, so it is only offered when
+     * the hero is an image-led cover it can read against. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @return string[]
+     */
+    public static function headerArchetypePool(array $sections): array
+    {
+        $hero = self::heroSection($sections);
+        $imageLed = is_array($hero) && (
+            (string) ($hero['layout_archetype'] ?? '') === 'full-bleed-cover'
+            || (string) ($hero['background'] ?? '') === 'image'
+        );
+        return $imageLed
+            ? self::HEADER_ARCHETYPES
+            : array_values(array_diff(self::HEADER_ARCHETYPES, [self::OVERLAY_ARCHETYPE]));
+    }
+
+    /**
+     * The archetype assignment injected into header.md: the forced archetype
+     * (HEADER_ARCHETYPE env var) or two random picks from the compatible pool
+     * for the model to choose between. Randomizing the shortlist in code is
+     * what actually spreads header variety across builds — offered the full
+     * menu, the model gravitates to the same one or two archetypes every time.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     */
+    public static function headerAssignment(array $sections): string
+    {
+        $forced = Env::get(self::ARCHETYPE_ENV);
+        if ($forced !== null && $forced !== '') {
+            if (!in_array($forced, self::HEADER_ARCHETYPES, true)) {
+                throw new RuntimeException(sprintf(
+                    'sections: %s=%s is not a header archetype (use one of: %s)',
+                    self::ARCHETYPE_ENV,
+                    $forced,
+                    implode(', ', self::HEADER_ARCHETYPES),
+                ));
+            }
+            return "ASSIGNED HEADER ARCHETYPE for this build: **{$forced}**. Build exactly this one.";
+        }
+
+        $pool = self::headerArchetypePool($sections);
+        $first = array_splice($pool, random_int(0, count($pool) - 1), 1)[0];
+        $second = $pool[random_int(0, count($pool) - 1)];
+        return "ASSIGNED HEADER ARCHETYPES for this build: **{$first}** or **{$second}**. "
+            . 'Build EXACTLY ONE of these two — whichever serves the DESIGN DIRECTION and the planned hero better. '
+            . 'Every other catalog entry below is reference only and is OFF the table for this build.';
     }
 
     /**
