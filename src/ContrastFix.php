@@ -269,13 +269,25 @@ final class ContrastFix
             $detail = sprintf('links %s on %s: %.2f < %.1f', $linkLabel, $row['bgLabel'], $ratio, ContrastMath::NORMAL_TEXT);
 
             if ($key === -1) {
-                // Root region: the global theme.json link default fails on the
-                // page background — ContrastFixStep repairs theme.json itself.
-                $this->findings[] = [
-                    'kind' => 'link', 'block' => 'document',
-                    'detail' => $detail . ' (global theme.json link default — fix at theme level)',
-                    'repaired' => false,
-                ];
+                // Root region (page background). A block-authored elements.link
+                // is repaired at that block; the global theme.json default is
+                // not ours to fix — ContrastFixStep repairs theme.json itself.
+                if ($link !== null && $link['fromNode'] !== null && $repair
+                    && $bestSlug !== null && $bestRatio >= ContrastMath::NORMAL_TEXT) {
+                    $this->setLinkColor($link['fromNode'], $bestSlug, $row['bg']);
+                    $injected[$link['fromNode']] = true;
+                    $this->findings[] = [
+                        'kind' => 'link', 'block' => $this->doc->name($link['fromNode']),
+                        'detail' => $detail . " → elements.link={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')',
+                        'repaired' => true,
+                    ];
+                } else {
+                    $this->findings[] = [
+                        'kind' => 'link', 'block' => 'document',
+                        'detail' => $detail . ' (global theme.json link default — fix at theme level)',
+                        'repaired' => false,
+                    ];
+                }
                 continue;
             }
             if ($bestSlug === null || $bestRatio < ContrastMath::NORMAL_TEXT || !$repair) {

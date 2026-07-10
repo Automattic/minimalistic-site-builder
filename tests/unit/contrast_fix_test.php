@@ -84,6 +84,19 @@ test('links on a dark band get an explicit elements.link injected on the band', 
     assert_true(in_array('link', $kinds, true), 'expected a link finding');
 });
 
+test('a block-authored failing link color on the page background is repaired at that block', function () {
+    // The group sets its own elements.link to secondary (fails on base) — the
+    // failure is block-authored, not the theme default, so fix it in place.
+    $src = '<!-- wp:group {"style":{"elements":{"link":{"color":{"text":"var:preset|color|secondary"}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-link-color"><!-- wp:paragraph --><p><a href="/x">barely there</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_eq('link', $res['findings'][0]['kind']);
+    assert_eq(true, $res['findings'][0]['repaired']);
+    assert_true(!str_contains($res['markup'], 'var:preset|color|secondary'), 'failing link color replaced');
+});
+
 test('failing global link on the page background is reported, not repaired here', function () {
     $fix = new ContrastFix(contrast_test_palette(), [], 'var(--wp--preset--color--secondary)');
     $src = '<!-- wp:paragraph --><p>See <a href="/x">details</a>.</p><!-- /wp:paragraph -->';
