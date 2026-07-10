@@ -154,6 +154,38 @@ test('keyOutBackground trims the empty margin around a small ornament', function
     assert_true(alpha_at($out, intdiv($w, 2), intdiv($h, 2)) > 0.99, 'ornament stays opaque');
 });
 
+test('keyOutBackground unmattes anti-aliased edge pixels instead of keeping them opaque', function () {
+    // A pixel that blends ink 50/50 with the white background — the
+    // anti-aliased edge Imagen renders. The binary key passes leave it fully
+    // opaque with the white baked in (a white fringe on dark pages); the
+    // unmatting pass must turn the white share into translucency and divide
+    // the contamination out of the color. Solid ink must stay untouched.
+    $im = new Imagick();
+    $im->newImage(60, 60, new ImagickPixel('white'));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel('red'));
+    $draw->rectangle(20, 20, 40, 40);
+    $draw->setFillColor(new ImagickPixel('rgb(255,128,128)')); // 50% red on white
+    $draw->rectangle(19, 20, 19, 40);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+
+    $out = ImageTransparency::keyOutBackground($im->getImageBlob());
+
+    $px = new Imagick();
+    $px->readImageBlob($out);
+    // The trim pads the 19..40 ink box; locate the blend column relative to it.
+    $pad = max(2, intdiv(max($px->getImageWidth(), $px->getImageHeight()), 50));
+    $blend = $px->getImagePixelColor($pad, $pad + 10);
+    $solid = $px->getImagePixelColor($pad + 10, $pad + 10);
+
+    assert_true($blend->getColorValue(Imagick::COLOR_ALPHA) < 0.95, 'blend pixel is translucent');
+    assert_true($blend->getColorValue(Imagick::COLOR_ALPHA) > 0.5, 'blend pixel keeps its ink share');
+    assert_true($blend->getColorValue(Imagick::COLOR_GREEN) < 0.45, 'white contamination is divided out');
+    assert_true($solid->getColorValue(Imagick::COLOR_ALPHA) > 0.99, 'solid ink stays fully opaque');
+    assert_true($solid->getColorValue(Imagick::COLOR_RED) > 0.99, 'solid ink color is untouched');
+});
+
 test('keyOutBackground returns undecodable bytes unchanged', function () {
     assert_eq('NOT A PNG', ImageTransparency::keyOutBackground('NOT A PNG'));
 });
