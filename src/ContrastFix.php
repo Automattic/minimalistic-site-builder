@@ -448,13 +448,18 @@ final class ContrastFix
      */
     private function ownBackground(array $attrs, ?array $parentColors): ?array
     {
+        $solid = null;
+        $solidLabel = null;
         $slug = $attrs['backgroundColor'] ?? null;
         if (is_string($slug) && ($rgb = $this->rgbFor($slug)) !== null) {
-            return ['colors' => [$rgb], 'label' => $slug];
-        }
-        $raw = $attrs['style']['color']['background'] ?? null;
-        if (is_string($raw) && ($resolved = $this->resolveColorValue($raw)) !== null) {
-            return ['colors' => [$resolved['rgb']], 'label' => $resolved['label']];
+            $solid = $rgb;
+            $solidLabel = $slug;
+        } else {
+            $raw = $attrs['style']['color']['background'] ?? null;
+            if (is_string($raw) && ($resolved = $this->resolveColorValue($raw)) !== null) {
+                $solid = $resolved['rgb'];
+                $solidLabel = $resolved['label'];
+            }
         }
 
         $gradientCss = null;
@@ -467,12 +472,19 @@ final class ContrastFix
             $gradientCss = $attrs['style']['color']['gradient'];
             $label = 'custom gradient';
         }
+        // A gradient paints over the co-authored background color (WP layers
+        // it as background-image), so it wins — composited over the solid
+        // where translucent stops let it show through.
         if ($gradientCss !== null) {
-            $stops = ContrastMath::parseCssColors($gradientCss);
+            $stops = ContrastMath::gradientStops($gradientCss);
             if ($stops !== []) {
-                $colors = $this->compositeStops($stops, 1.0, $parentColors ?? [[255, 255, 255]]);
+                $parents = $solid !== null ? [$solid] : ($parentColors ?? [[255, 255, 255]]);
+                $colors = $this->compositeStops($stops, 1.0, $parents);
                 return ['colors' => $colors, 'label' => (string) $label];
             }
+        }
+        if ($solid !== null) {
+            return ['colors' => [$solid], 'label' => (string) $solidLabel];
         }
         return null;
     }
@@ -486,26 +498,54 @@ final class ContrastFix
      */
     public function coverOverlayColors(array $attrs): array
     {
+        $solid = null;
         $slug = $attrs['overlayColor'] ?? null;
         if (is_string($slug) && ($rgb = $this->rgbFor($slug)) !== null) {
-            return [['rgb' => $rgb, 'alpha' => 1.0]];
-        }
-        $custom = $attrs['customOverlayColor'] ?? null;
-        if (is_string($custom) && ($rgb = ContrastMath::hexToRgb($custom)) !== null) {
-            return [['rgb' => $rgb, 'alpha' => 1.0]];
-        }
-        $gradientSlug = $attrs['gradient'] ?? null;
-        if (is_string($gradientSlug) && isset($this->gradients[$gradientSlug])) {
-            return ContrastMath::parseCssColors($this->gradients[$gradientSlug]);
-        }
-        $customGradient = $attrs['customGradient'] ?? null;
-        if (is_string($customGradient)) {
-            $stops = ContrastMath::parseCssColors($customGradient);
-            if ($stops !== []) {
-                return $stops;
+            $solid = $rgb;
+        } else {
+            $custom = $attrs['customOverlayColor'] ?? null;
+            if (is_string($custom) && ($rgb = ContrastMath::hexToRgb($custom)) !== null) {
+                $solid = $rgb;
             }
         }
+
+        // A co-authored gradient paints over the solid overlay color within
+        // the same span, so it wins; translucent stops show the solid, which
+        // makes the composite opaque.
+        $gradientCss = $this->coverGradientCss($attrs);
+        if ($gradientCss !== null) {
+            $stops = ContrastMath::gradientStops($gradientCss);
+            if ($stops !== []) {
+                if ($solid === null) {
+                    return $stops;
+                }
+                return array_map(
+                    static fn (array $s) => [
+                        'rgb'   => ContrastMath::compositeOver($s['rgb'], $s['alpha'], $solid),
+                        'alpha' => 1.0,
+                    ],
+                    $stops
+                );
+            }
+        }
+        if ($solid !== null) {
+            return [['rgb' => $solid, 'alpha' => 1.0]];
+        }
         return [['rgb' => [0, 0, 0], 'alpha' => 1.0]]; // core default overlay
+    }
+
+    /**
+     * The CSS of a cover's overlay gradient (preset or custom), if any.
+     * Public: CoverContrastStep needs it to read the gradient's direction.
+     */
+    public function coverGradientCss(array $attrs): ?string
+    {
+        $slug = $attrs['gradient'] ?? null;
+        if (is_string($slug) && isset($this->gradients[$slug])) {
+            return $this->gradients[$slug];
+        }
+        $custom = $attrs['customGradient'] ?? null;
+        return is_string($custom) ? $custom : null;
     }
 
     /**

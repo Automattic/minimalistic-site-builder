@@ -35,14 +35,24 @@ test('compositeOver blends by alpha', function () {
     assert_eq([128, 128, 128], ContrastMath::compositeOver([0, 0, 0], 0.5, [255, 255, 255]));
 });
 
-test('parseCssColors extracts hex and rgba stops with alpha', function () {
+test('parseCssColors extracts hex and rgba stops with alpha, in source order', function () {
     $stops = ContrastMath::parseCssColors(
         'linear-gradient(160deg, rgba(46,33,26,0.15) 0%, #FF0000 50%, rgb(1, 2, 3) 100%)'
     );
     assert_eq(3, count($stops));
-    // Hex stops are listed first, then rgb()/rgba().
-    assert_eq(['rgb' => [255, 0, 0], 'alpha' => 1.0], $stops[0]);
-    assert_eq([46, 33, 26], $stops[1]['rgb']);
-    assert_true(abs($stops[1]['alpha'] - 0.15) < 1e-9);
+    assert_eq([46, 33, 26], $stops[0]['rgb'], 'first stop first, notation must not reorder');
+    assert_true(abs($stops[0]['alpha'] - 0.15) < 1e-9);
+    assert_eq(['rgb' => [255, 0, 0], 'alpha' => 1.0], $stops[1]);
     assert_eq(['rgb' => [1, 2, 3], 'alpha' => 1.0], $stops[2]);
+});
+
+test('gradientStops inserts the interpolated midpoint between adjacent stops', function () {
+    $stops = ContrastMath::gradientStops('linear-gradient(180deg, #000000 0%, rgba(255,255,255,0.5) 100%)');
+    assert_eq(3, count($stops));
+    assert_eq([0, 0, 0], $stops[0]['rgb'], 'endpoints must stay in place');
+    assert_eq([128, 128, 128], $stops[1]['rgb'], 'the mid-grey the gradient renders must be checked');
+    assert_true(abs($stops[1]['alpha'] - 0.75) < 1e-9);
+    assert_eq([255, 255, 255], $stops[2]['rgb']);
+    // Single-color values gain nothing to interpolate.
+    assert_eq(1, count(ContrastMath::gradientStops('#123456')));
 });

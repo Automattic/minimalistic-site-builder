@@ -126,6 +126,24 @@ test('gradient overlays: content position picks the stop the text sits on', func
     assert_eq($overlay, CoverContrastStep::overlayForPosition($overlay, ''));
 });
 
+test('gradient overlays: stop selection respects the gradient direction', function () {
+    $overlay = [
+        ['rgb' => [0, 0, 0], 'alpha' => 0.1],
+        ['rgb' => [0, 0, 0], 'alpha' => 0.8],
+    ];
+    $up = 'linear-gradient(0deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.8) 100%)';
+    // 0deg runs bottom→top: the FIRST stop is at the bottom of the cover.
+    assert_eq([$overlay[0]], CoverContrastStep::overlayForPosition($overlay, 'bottom left', $up));
+    assert_eq([$overlay[1]], CoverContrastStep::overlayForPosition($overlay, 'top center', $up));
+    $down = 'linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.8))';
+    assert_eq([$overlay[1]], CoverContrastStep::overlayForPosition($overlay, 'bottom left', $down));
+    // Horizontal or angled gradients have no vertical stop order to trust.
+    $angled = 'linear-gradient(135deg, rgba(0,0,0,0.1), rgba(0,0,0,0.8))';
+    assert_eq($overlay, CoverContrastStep::overlayForPosition($overlay, 'bottom left', $angled));
+    $horizontal = 'linear-gradient(to right, rgba(0,0,0,0.1), rgba(0,0,0,0.8))';
+    assert_eq($overlay, CoverContrastStep::overlayForPosition($overlay, 'top left', $horizontal));
+});
+
 test('regionStats measures the sampled half and spreads low/high on a split image', function () {
     if (!extension_loaded('imagick')) {
         return; // environment without imagick: the step skips itself the same way

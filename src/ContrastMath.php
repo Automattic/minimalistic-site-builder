@@ -87,25 +87,26 @@ final class ContrastMath
 
     /**
      * Extract every color occurring in a CSS value (a gradient, typically):
-     * #hex, rgb() and rgba() notations, each with its own alpha. Used to
-     * evaluate text contrast against every stop of a gradient background.
+     * #hex, rgb() and rgba() notations, each with its own alpha — in source
+     * order, so the first entry is the gradient's first stop and the last
+     * entry its last stop regardless of how each color is written.
      *
      * @return list<array{rgb: array{0:int,1:int,2:int}, alpha: float}>
      */
     public static function parseCssColors(string $css): array
     {
         $colors = [];
-        if (preg_match_all('/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b/i', $css, $m)) {
-            foreach ($m[0] as $hex) {
-                $rgb = self::hexToRgb($hex);
-                if ($rgb !== null) {
-                    $colors[] = ['rgb' => $rgb, 'alpha' => 1.0];
-                }
-            }
-        }
-        $rgbPattern = '/rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9.]+)\s*)?\)/i';
-        if (preg_match_all($rgbPattern, $css, $m, PREG_SET_ORDER)) {
+        $pattern = '/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b'
+            . '|rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9.]+)\s*)?\)/i';
+        if (preg_match_all($pattern, $css, $m, PREG_SET_ORDER)) {
             foreach ($m as $c) {
+                if ($c[0][0] === '#') {
+                    $rgb = self::hexToRgb($c[0]);
+                    if ($rgb !== null) {
+                        $colors[] = ['rgb' => $rgb, 'alpha' => 1.0];
+                    }
+                    continue;
+                }
                 $colors[] = [
                     'rgb'   => [min(255, (int) $c[1]), min(255, (int) $c[2]), min(255, (int) $c[3])],
                     'alpha' => isset($c[4]) && $c[4] !== '' ? max(0.0, min(1.0, (float) $c[4])) : 1.0,
@@ -113,5 +114,38 @@ final class ContrastMath
             }
         }
         return $colors;
+    }
+
+    /**
+     * The colors a gradient actually renders: its stops in source order plus
+     * the interpolated midpoint between each adjacent pair. Text sits on the
+     * in-between colors too — black and white endpoints both pass a mid-grey
+     * that reaches 1:1 somewhere inside the gradient — so contrast checks
+     * must include them. CSS interpolates sRGB per channel; the midpoint is
+     * the worst-case interior approximation for a two-stop gradient.
+     *
+     * @return list<array{rgb: array{0:int,1:int,2:int}, alpha: float}>
+     */
+    public static function gradientStops(string $css): array
+    {
+        $stops = self::parseCssColors($css);
+        if (count($stops) < 2) {
+            return $stops;
+        }
+        $out = [$stops[0]];
+        for ($k = 1, $n = count($stops); $k < $n; $k++) {
+            $prev = $stops[$k - 1];
+            $stop = $stops[$k];
+            $out[] = [
+                'rgb'   => [
+                    (int) round(($prev['rgb'][0] + $stop['rgb'][0]) / 2),
+                    (int) round(($prev['rgb'][1] + $stop['rgb'][1]) / 2),
+                    (int) round(($prev['rgb'][2] + $stop['rgb'][2]) / 2),
+                ],
+                'alpha' => ($prev['alpha'] + $stop['alpha']) / 2,
+            ];
+            $out[] = $stop;
+        }
+        return $out;
     }
 }

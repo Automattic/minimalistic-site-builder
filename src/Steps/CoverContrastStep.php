@@ -162,7 +162,11 @@ final class CoverContrastStep implements Step
                 continue;
             }
 
-            $overlay = self::overlayForPosition($helper->coverOverlayColors($attrs), $position);
+            $overlay = self::overlayForPosition(
+                $helper->coverOverlayColors($attrs),
+                $position,
+                $helper->coverGradientCss($attrs)
+            );
             $dim = (int) ($attrs['dimRatio'] ?? 100);
             $candidates = array_filter([
                 'base'     => $helper->rgbFor('base'),
@@ -537,26 +541,66 @@ final class CoverContrastStep implements Step
     }
 
     /**
-     * The overlay stop the content actually sits on. Overlay gradients run
-     * with the cover's composition (built that way by the section prompt), so
-     * a bottom-positioned content block sits on the LAST stop, top on the
-     * first; centered content is evaluated against every stop (worst case).
+     * The overlay stop(s) the content actually sits on. Picking a single
+     * stop by contentPosition is only sound for a plain vertical gradient
+     * whose direction is known: CSS `0deg` runs bottom→top, so its FIRST
+     * stop is the bottom. Angled/horizontal/radial gradients, and centered
+     * content, are evaluated against every stop (worst case).
      *
      * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
      * @return list<array{rgb: array{0:int,1:int,2:int}, alpha: float}>
      */
-    public static function overlayForPosition(array $overlay, string $contentPosition): array
+    public static function overlayForPosition(array $overlay, string $contentPosition, ?string $gradientCss = null): array
     {
         if (count($overlay) <= 1) {
             return $overlay;
         }
         $pos = strtolower($contentPosition);
-        if (str_contains($pos, 'bottom')) {
-            return [$overlay[count($overlay) - 1]];
+        if (!str_contains($pos, 'top') && !str_contains($pos, 'bottom')) {
+            return $overlay;
         }
-        if (str_contains($pos, 'top')) {
-            return [$overlay[0]];
+        $direction = self::gradientVerticalDirection($gradientCss);
+        if ($direction === null) {
+            return $overlay;
         }
-        return $overlay;
+        $first = $overlay[0];
+        $last = $overlay[count($overlay) - 1];
+        [$top, $bottom] = $direction === 'down' ? [$first, $last] : [$last, $first];
+        return [str_contains($pos, 'top') ? $top : $bottom];
+    }
+
+    /**
+     * 'down' when the gradient runs top→bottom (the CSS default), 'up' for
+     * the reverse (`0deg` / `to top`), null when it isn't a plain vertical
+     * linear gradient. A null css keeps the legacy top→bottom assumption
+     * (callers that never had the gradient source).
+     */
+    private static function gradientVerticalDirection(?string $gradientCss): ?string
+    {
+        if ($gradientCss === null || trim($gradientCss) === '') {
+            return 'down';
+        }
+        $css = strtolower($gradientCss);
+        $at = strpos($css, 'linear-gradient(');
+        if ($at === false) {
+            return null; // radial/conic — no vertical stop order to trust
+        }
+        $inner = substr($css, $at + strlen('linear-gradient('));
+        if (preg_match('/^\s*(-?\d+(?:\.\d+)?)(deg|grad|rad|turn)\s*,/', $inner, $m)) {
+            if ($m[2] !== 'deg') {
+                return null;
+            }
+            $deg = fmod(fmod((float) $m[1], 360.0) + 360.0, 360.0);
+            return $deg === 180.0 ? 'down' : ($deg === 0.0 ? 'up' : null);
+        }
+        if (preg_match('/^\s*to\s+([a-z][a-z ]*?)\s*,/', $inner, $m)) {
+            $sides = preg_split('/\s+/', trim($m[1])) ?: [];
+            if (in_array('left', $sides, true) || in_array('right', $sides, true)) {
+                return null;
+            }
+            return in_array('top', $sides, true) ? 'up'
+                : (in_array('bottom', $sides, true) ? 'down' : null);
+        }
+        return 'down'; // no direction token = CSS default, "to bottom"
     }
 }

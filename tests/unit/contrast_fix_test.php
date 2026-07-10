@@ -193,6 +193,32 @@ test('the dimRatio floor swaps the stale has-background-dim-N class', function (
     assert_true(!str_contains($res['markup'], 'has-background-dim-10'), 'stale dim class must be gone');
 });
 
+test('a gradient co-authored with a solid backgroundColor is not ignored', function () {
+    // Solid white background + a gradient ending near-black: text passing on
+    // white alone still fails against the gradient's dark end.
+    $gradients = ['veil' => 'linear-gradient(180deg, rgba(17,17,17,0) 0%, #111111 100%)'];
+    $fix = new ContrastFix(contrast_test_palette(), $gradients, null);
+    $src = '<!-- wp:group {"backgroundColor":"base","gradient":"veil"} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph {"textColor":"contrast"} --><p>Dies on the dark end</p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_true($res['findings'] !== [], 'the gradient stops must be part of the background set');
+});
+
+test('gradient interior colors are checked, not just the endpoints', function () {
+    // A grey that clears 4.5:1 against BOTH black and white endpoints still
+    // hits ~1:1 against the mid-grey the gradient renders between them.
+    $palette = contrast_test_palette();
+    $palette['secondary'] = '#767676';
+    $gradients = ['sweep' => 'linear-gradient(180deg, #000000 0%, #FFFFFF 100%)'];
+    $fix = new ContrastFix($palette, $gradients, null);
+    $src = '<!-- wp:group {"gradient":"sweep"} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph {"textColor":"secondary"} --><p>Vanishes mid-gradient</p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = $fix->process($src);
+    assert_true($res['findings'] !== [], 'the interpolated midpoint must fail this pair');
+});
+
 test('gradient backgrounds are checked against every stop', function () {
     $gradients = ['dusk' => 'linear-gradient(180deg, #FFFFFF 0%, #111111 100%)'];
     $fix = new ContrastFix(contrast_test_palette(), $gradients, null);
