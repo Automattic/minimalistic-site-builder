@@ -10,17 +10,21 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 
 /**
- * Step (LLM, concurrent): generate every landing-page part in ONE batch — the
- * header, the footer, and one template part per planned section — fired together
- * instead of one giant landing-page call.
+ * Step (LLM, concurrent): generate every part of every page in ONE batch — the
+ * header, the footer, and one part per planned section of every page in
+ * pages.json — fired together instead of one giant per-page call.
  *
- * Input:  siteSpec.json + theme/theme.json + sections.json (the plan).
+ * Input:  siteSpec.json + theme/theme.json + pages.json (the plan).
  * Output: theme/parts/header.html, theme/parts/footer.html, and
- *         theme/parts/section-<slug>.html for each planned section.
+ *         theme/parts/page-<pageSlug>--<sectionSlug>.html per planned section.
+ *         The page-* parts are transient build artifacts: assemble-pages later
+ *         inlines them into the content plugin's page files and removes them
+ *         from the theme (header/footer stay — they are the site chrome).
  *
- * Each section is generated independently with the full section list as context
- * (for coherence) plus its own brief, so the model focuses on one section at a
- * time and they all run concurrently. The assemble step then composes them.
+ * Each section is generated independently with ITS page's section list as
+ * context (for coherence) plus its own brief, so the model focuses on one
+ * section at a time and they all run concurrently. Every part also receives
+ * the site's page list so buttons and links can point at real sibling pages.
  * Image placeholders use the same AI_IMAGE convention collect-images parses.
  *
  * Each part's response IS the block markup (raw text, via completeBatch) — not
@@ -30,8 +34,17 @@ final class SectionsStep implements Step
 {
     use LlmOptions;
 
-    /** Prefix for a section part's request key, filename, and template-part slug. */
+    /** Prefix for a page section part's request key and filename. */
+    public const PART_PREFIX = 'page-';
+
+    /** @deprecated transitional — only the legacy assemble step still reads this. */
     public const SECTION_PREFIX = 'section-';
+
+    /** The part slug (request key and file basename) for one page's section. */
+    public static function partSlug(string $pageSlug, string $sectionSlug): string
+    {
+        return self::PART_PREFIX . $pageSlug . '--' . $sectionSlug;
+    }
 
     public function __construct(
         private Llm $llm,
@@ -47,7 +60,7 @@ final class SectionsStep implements Step
 
     public function label(): string
     {
-        return 'Build landing-page sections';
+        return "Build every page's sections";
     }
 
     public function requests(Project $project): array
@@ -55,10 +68,13 @@ final class SectionsStep implements Step
         $siteSpec = $project->readText('siteSpec.json');
         $themeJson = $project->readText('theme/theme.json');
         $language = SiteSpecStep::languageOf($project);
-        $sections = self::sections($project);
+        $pages = self::pages($project);
+        $sitePages = PagePlanStep::sitePagesList($pages);
 
-        // A compact outline of the whole page, so each section knows its place.
-        $outline = self::outline($sections);
+        // The chrome is briefed on the FRONT page: that's what the header sits
+        // directly above (or floats on) and what sets the site's opening tone.
+        $front = self::frontPage($pages);
+        $frontSections = $front['sections'];
 
         // The AI_IMAGE authoring rules live in their own prompt file so they stay
         // in sync with what CollectImagesStep parses; injected into every section
@@ -66,7 +82,7 @@ final class SectionsStep implements Step
         $imageInstructions = $this->renderer->render('image-generation.md', []);
 
         // The committed creative concept, shared by every section so the whole
-        // page honors one direction (shape language, signature device, mood).
+        // site honors one direction (shape language, signature device, mood).
         $designDirection = DesignDirectionStep::readFor($project);
 
         $requests = [
@@ -75,33 +91,42 @@ final class SectionsStep implements Step
                 'language'         => $language,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
-                'hero_brief'       => self::heroBrief($sections),
-                'outline'          => $outline,
+                'hero_brief'       => self::heroBrief($frontSections),
+                'outline'          => self::outline($frontSections),
+                'site_pages'       => $sitePages,
             ])]),
             'footer' => $this->withOptions(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'        => $siteSpec,
                 'language'         => $language,
                 'theme_json'       => $themeJson,
                 'design_direction' => $designDirection,
-                'outline'          => $outline,
+                'outline'          => self::outline($frontSections),
+                'site_pages'       => $sitePages,
             ])]),
         ];
 
-        foreach ($sections as $i => $section) {
-            $key = self::SECTION_PREFIX . $section['slug'];
-            $requests[$key] = $this->withOptions(['prompt' => $this->renderer->render('section.md', [
-                'site_spec'        => $siteSpec,
-                'language'         => $language,
-                'theme_json'       => $themeJson,
-                'design_direction' => $designDirection,
-                'outline'          => $outline,
-                'section_title' => (string) ($section['title'] ?? ''),
-                'section_type'  => (string) ($section['type'] ?? 'content'),
-                'section_purpose' => (string) ($section['purpose'] ?? ''),
-                'content_notes' => (string) ($section['content_notes'] ?? ''),
-                'composition'   => $this->composition($sections, $i),
-                'image_instructions' => $imageInstructions,
-            ])]);
+        foreach ($pages as $page) {
+            $sections = $page['sections'];
+            // A compact outline of THIS page, so each section knows its place.
+            $outline = self::outline($sections);
+            foreach ($sections as $i => $section) {
+                $key = self::partSlug((string) $page['slug'], (string) $section['slug']);
+                $requests[$key] = $this->withOptions(['prompt' => $this->renderer->render('section.md', [
+                    'site_spec'        => $siteSpec,
+                    'language'         => $language,
+                    'theme_json'       => $themeJson,
+                    'design_direction' => $designDirection,
+                    'outline'          => $outline,
+                    'page_title'       => (string) ($page['title'] ?? ''),
+                    'site_pages'       => $sitePages,
+                    'section_title' => (string) ($section['title'] ?? ''),
+                    'section_type'  => (string) ($section['type'] ?? 'content'),
+                    'section_purpose' => (string) ($section['purpose'] ?? ''),
+                    'content_notes' => (string) ($section['content_notes'] ?? ''),
+                    'composition'   => $this->composition($sections, $i, (string) $page['slug']),
+                    'image_instructions' => $imageInstructions,
+                ])]);
+            }
         }
 
         return $requests;
@@ -118,7 +143,7 @@ final class SectionsStep implements Step
             $rel = match (true) {
                 $key === 'header' => 'parts/header.html',
                 $key === 'footer' => 'parts/footer.html',
-                default           => 'parts/' . $key . '.html', // section-<slug>
+                default           => 'parts/' . $key . '.html', // page-<page>--<section>
             };
             $markup = self::markup($text, $key);
             if ($key === 'header' || $key === 'footer') {
@@ -133,18 +158,36 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Pull and validate the planned section list from sections.json.
+     * Pull and validate the planned page list from pages.json — every page
+     * must carry a non-empty section list.
      *
      * @return array<int,array<string,mixed>>
      */
-    private static function sections(Project $project): array
+    private static function pages(Project $project): array
     {
-        $plan = $project->readJson('sections.json');
-        $sections = $plan['sections'] ?? null;
-        if (!is_array($sections) || $sections === []) {
-            throw new \RuntimeException('sections: sections.json has no sections (run section-plan first)');
+        $plan = $project->readJson('pages.json');
+        $pages = $plan['pages'] ?? null;
+        if (!is_array($pages) || $pages === []) {
+            throw new \RuntimeException('sections: pages.json has no pages (run page-plan first)');
         }
-        return $sections;
+        foreach ($pages as $page) {
+            $slug = (string) ($page['slug'] ?? '');
+            if (!is_array($page['sections'] ?? null) || $page['sections'] === []) {
+                throw new \RuntimeException("sections: page '{$slug}' has no sections (run page-plan first)");
+            }
+        }
+        return array_values($pages);
+    }
+
+    /** The front page entry (flagged, falling back to the first page). */
+    private static function frontPage(array $pages): array
+    {
+        foreach ($pages as $page) {
+            if (!empty($page['front'])) {
+                return $page;
+            }
+        }
+        return $pages[0];
     }
 
     /**
@@ -177,13 +220,13 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $sections
      */
-    private function composition(array $sections, int $i): string
+    private function composition(array $sections, int $i, string $pageSlug): string
     {
         $section = $sections[$i];
         $slug = (string) ($section['slug'] ?? "section-{$i}");
         foreach (['layout_archetype', 'background', 'handoff'] as $field) {
             if (trim((string) ($section[$field] ?? '')) === '') {
-                throw new \RuntimeException("sections: section '{$slug}' is missing {$field} from section-plan");
+                throw new \RuntimeException("sections: page '{$pageSlug}' section '{$slug}' is missing {$field} from page-plan");
             }
         }
 
@@ -235,7 +278,7 @@ final class SectionsStep implements Step
     }
 
     /**
-     * A plain-text brief of the planned hero section (from sections.json), so
+     * A plain-text brief of the FRONT page's planned hero section, so
      * the header prompt can pick the archetype that fits what it will sit
      * directly above — or float on top of. Pure — unit-testable.
      *

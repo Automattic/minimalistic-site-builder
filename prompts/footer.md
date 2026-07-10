@@ -9,8 +9,11 @@ THEME TOKENS (theme.json):
 DESIGN DIRECTION (the committed creative concept for THIS site — the footer is its closing note, not an afterthought):
 {{design_direction}}
 
-PAGE OUTLINE (for context):
+HOMEPAGE OUTLINE (for context):
 {{outline}}
+
+SITE PAGES (the whole site — hand-authored footer page links use these exact paths):
+{{site_pages}}
 
 Rules:
 - The footer shows the site name, a few useful links (and contact facts from the spec where given), and a small credit line at the very bottom, in a single top-level wp:group.

@@ -12,8 +12,11 @@ DESIGN DIRECTION (the committed creative concept for THIS site — the header mu
 PLANNED HERO SECTION (what the header will sit directly above — or float on top of):
 {{hero_brief}}
 
-PAGE OUTLINE (the sections the nav may link to):
+HOMEPAGE OUTLINE (what the header sits above — or floats on — on the front page):
 {{outline}}
+
+SITE PAGES (the whole site; a wp:page-list nav auto-lists exactly these pages in this order):
+{{site_pages}}
 
 Pick ONE header archetype — the one that serves the DESIGN DIRECTION and the planned hero composition above. Do NOT default to standard-row out of habit; choose deliberately:
 

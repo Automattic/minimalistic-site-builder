@@ -109,9 +109,12 @@ test('sections passes the configured model into every part request', function ()
     [$project, $tmp] = sm_project('builder_sm_sec_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
-    $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
-    ]]);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true, 'parent' => null, 'menu_order' => 0, 'purpose' => 'Welcome',
+        'sections' => [
+            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
+        ],
+    ]]]);
     $llm = new FakeLlm();
     // header, footer, one section — in requests() order.
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
@@ -132,9 +135,12 @@ test('sections sends no model key when none is configured', function () {
     [$project, $tmp] = sm_project('builder_sm_secd_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
-    $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
-    ]]);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true, 'parent' => null, 'menu_order' => 0, 'purpose' => 'Welcome',
+        'sections' => [
+            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header above and the footer below.'],
+        ],
+    ]]]);
     $llm = new FakeLlm();
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
@@ -181,9 +187,12 @@ test('sections passes the configured temperature into every part request', funct
     [$project, $tmp] = sm_project('builder_sm_sect_');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
-    $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the footer below.'],
-    ]]);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true, 'parent' => null, 'menu_order' => 0, 'purpose' => 'Welcome',
+        'sections' => [
+            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the footer below.'],
+        ],
+    ]]]);
     $llm = new FakeLlm();
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
