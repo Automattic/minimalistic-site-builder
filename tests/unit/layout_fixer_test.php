@@ -95,6 +95,42 @@ test('layout fixer canonicalizes full and wide footer rows to wide', function ()
     assert_true(!str_contains($r['markup'], 'wp:separator {"align":"full"}'), 'full-width structural row should be canonicalized');
 });
 
+test('layout fixer passes a wide constrained footer wrapper width to its leaf rows', function () {
+    // portfolio6: the wrappers and columns were wide, but the title, copy and
+    // rules inside each constrained wrapper still fell back to contentSize.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:paragraph --><p>Buenos Aires · Documentary Photojournalism</p><!-- /wp:paragraph -->'
+        . '<!-- wp:separator {"className":"is-style-wide"} --><hr class="wp-block-separator is-style-wide"/><!-- /wp:separator -->'
+        . '</div><!-- /wp:group -->'
+        . lf_columns(3, '{"align":"wide"}')
+        . '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:separator --><hr class="wp-block-separator"/><!-- /wp:separator -->'
+        . '<!-- wp:paragraph --><p>Built with WordPress</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
+    assert_contains('wp:site-title {"align":"wide"}', $r['markup']);
+    assert_eq(2, substr_count($r['markup'], 'wp:paragraph {"align":"wide"}'));
+    assert_contains('wp:separator {"className":"is-style-wide","align":"wide"}', $r['markup']);
+    assert_contains('wp:separator {"align":"wide"}', $r['markup']);
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_FOOTER, 860.0)['notes']);
+});
+
+test('layout fixer preserves a wide footer wrapper with an explicitly aligned composition', function () {
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} --><div class="wp-block-group alignwide">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:paragraph {"align":"center"} --><p class="has-text-align-center">Centered credit</p><!-- /wp:paragraph -->'
+        . '<!-- wp:separator --><hr class="wp-block-separator"/><!-- /wp:separator -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
+    assert_eq([], $r['notes']);
+    assert_eq($markup, $r['markup']);
+});
+
 test('layout fixer keeps a consistent content-width footer untouched', function () {
     // No wide sibling → no promotion; a deliberate content-width footer stays.
     $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'

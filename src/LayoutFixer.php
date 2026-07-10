@@ -195,11 +195,13 @@ final class LayoutFixer
     }
 
     /**
-     * Structural footer rows (groups, columns, separators) under one
-     * constrained container must share ONE width. When some rows are wide and
-     * their siblings sit at content width, two left edges compete on the same
-     * surface (portfolio's site-title lockup at 860px beside 1320px link
-     * columns; same in naturaleza). Promote the narrow siblings to wide.
+     * Structural footer rows under one constrained container must share ONE
+     * width. When some rows are wide and their siblings sit at content width,
+     * two left edges compete on the same surface (portfolio's site-title
+     * lockup at 860px beside 1320px link columns; same in naturaleza).
+     * Promote the narrow siblings to wide. A wide constrained wrapper also
+     * passes that width to its direct leaf rows: without their own align:wide,
+     * site-title/paragraph/separator children still fall back to contentSize.
      *
      * @param object[] $all
      * @param string[] $notes
@@ -216,12 +218,14 @@ final class LayoutFixer
             if ($node->parent !== null && $node->parent->parent !== null) {
                 continue;
             }
-            $rows = array_values(array_filter(
-                $node->children,
-                static fn (object $c): bool => self::is($c, 'group') || self::is($c, 'columns') || self::is($c, 'separator')
-            ));
+            $isWideWrapper = $node->parent !== null
+                && in_array(self::align($node), ['wide', 'full'], true);
+            if ($isWideWrapper && !self::widenFooterLeafRows($node, $notes)) {
+                continue;
+            }
+            $rows = array_values(array_filter($node->children, self::isFooterStructuralRow(...)));
             $hasWide = array_filter($rows, static fn (object $c): bool => in_array(self::align($c), ['wide', 'full'], true));
-            if ($hasWide === []) {
+            if (!$isWideWrapper && $hasWide === []) {
                 continue;
             }
             foreach ($rows as $row) {
@@ -476,6 +480,60 @@ final class LayoutFixer
     {
         $type = self::layout($node)?->type ?? '';
         return is_string($type) ? $type : '';
+    }
+
+    /** Container-like blocks that establish structural footer rows. */
+    private static function isFooterStructuralRow(object $node): bool
+    {
+        foreach (['group', 'columns', 'separator'] as $name) {
+            if (self::is($node, $name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A depth-one align:wide group can still constrain its direct children to
+     * contentSize. Promote known wide-capable leaf rows without changing the
+     * wrapper's layout semantics. An explicit left/center/right child align is
+     * treated as an intentional composition, so the entire wrapper is left
+     * alone instead of widening only some of its rows.
+     *
+     * @param string[] $notes
+     */
+    private static function widenFooterLeafRows(object $wrapper, array &$notes): bool
+    {
+        foreach ($wrapper->children as $child) {
+            if (in_array(self::align($child), ['left', 'center', 'right'], true)) {
+                return false;
+            }
+            if (self::is($child, 'group') || self::is($child, 'columns') || self::is($child, 'cover')
+                || self::is($child, 'gallery') || self::is($child, 'media-text')) {
+                return false;
+            }
+        }
+
+        foreach ($wrapper->children as $child) {
+            if (!self::isFooterWideLeaf($child) || self::align($child) !== '') {
+                continue;
+            }
+            $child->attrs->align = 'wide';
+            $child->dirty = true;
+            $notes[] = "footer wp:{$child->name} stayed at content width inside a wide constrained wrapper — set \"align\":\"wide\" so it shares the wrapper edge";
+        }
+        return true;
+    }
+
+    /** Direct footer leaves whose registered block support includes wide. */
+    private static function isFooterWideLeaf(object $node): bool
+    {
+        foreach (['site-title', 'paragraph', 'separator', 'heading', 'navigation', 'buttons'] as $name) {
+            if (self::is($node, $name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
