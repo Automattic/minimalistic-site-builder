@@ -4,16 +4,17 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
-use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
+use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
+use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
+use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
-use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
@@ -60,6 +61,9 @@ final class SiteBuilder
 
         return new Pipeline([
             new ScaffoldThemeStep(),
+            // The companion content plugin is pure static code — scaffold it up
+            // front next to the theme; apply-identity fills its header later.
+            new ScaffoldPluginStep(),
             // Cheap, fast first pass on a small model: expand short/vague prompts and
             // normalize the brief before any expensive step reads it. Rewrites the
             // `prompt` in meta.json (original kept as `original_prompt`), so every
@@ -81,15 +85,18 @@ final class SiteBuilder
                 new ThemeJsonStep($this->llm, $renderer, $models['theme-json'], $temps['theme-json']),
                 new PagePlanStep($this->llm, $renderer, $models['page-plan'], $temps['page-plan']),
             ]),
-            // Generate the header, footer, and every section part in one concurrent
-            // batch, then stitch them into the page deterministically.
+            // Generate the header, footer, and every page's section parts in one
+            // concurrent batch; the assemble step composes them deterministically.
             new SectionsStep($this->llm, $renderer, $models['sections'], $temps['sections']),
-            new AssembleLandingPageStep(),
             // Collect image placeholders BEFORE fix-blocks: the block re-serializer
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.
             new CollectImagesStep(),
             new FixBlocksStep($this->blockFixer),
+            // AFTER fix-blocks, so the markup inlined into the content plugin is
+            // the final re-serialized form: writes plugin/pages/* + the manifest,
+            // the theme's page/index templates, and drops the transient parts.
+            new AssemblePagesStep(),
             // AFTER fix-blocks: reads the final (re-serialized) markup for which
             // layout utility classes survived, and appends their CSS to style.css —
             // a file the fixer never touches, so nothing here can be stripped.

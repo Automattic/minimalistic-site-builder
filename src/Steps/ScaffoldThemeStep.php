@@ -109,6 +109,13 @@ final class ScaffoldThemeStep implements Step
             margin-block-start: 0;
         }
 
+        /* Page content is the same stack of self-padded section bands, seeded by
+           the companion content plugin into post content — kill the flow gap
+           there too, or a page-background stripe opens between adjacent bands. */
+        .wp-block-post-content > * {
+            margin-block-start: 0;
+        }
+
         CSS;
 
     private const README = <<<TXT

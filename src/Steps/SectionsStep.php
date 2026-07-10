@@ -37,9 +37,6 @@ final class SectionsStep implements Step
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = 'page-';
 
-    /** @deprecated transitional — only the legacy assemble step still reads this. */
-    public const SECTION_PREFIX = 'section-';
-
     /** The part slug (request key and file basename) for one page's section. */
     public static function partSlug(string $pageSlug, string $sectionSlug): string
     {
