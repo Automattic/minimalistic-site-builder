@@ -198,7 +198,7 @@ final class ContrastFixStep implements Step
             $ratio = ContrastMath::ratio($btnText['rgb'], $btnBg['rgb']);
             if ($ratio < ContrastMath::NORMAL_TEXT) {
                 [$slug, $best] = self::best($palette, ['base', 'contrast'], $btnBg['rgb']);
-                if ($slug !== null && $best > $ratio) {
+                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
                     $themeJson['styles']['elements']['button']['color']['text'] = "var(--wp--preset--color--{$slug})";
                     $report[] = sprintf(
                         '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) (repaired)',
@@ -206,6 +206,22 @@ final class ContrastFixStep implements Step
                     );
                     $repaired++;
                     $changed = true;
+                } elseif ($slug !== null && $best > $ratio) {
+                    // Mid-tone button background nothing passes against: take
+                    // the improvement but keep the failure on the record.
+                    $themeJson['styles']['elements']['button']['color']['text'] = "var(--wp--preset--color--{$slug})";
+                    $report[] = sprintf(
+                        '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) — best available, still below threshold (repaired)',
+                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
+                    );
+                    $repaired++;
+                    $changed = true;
+                } else {
+                    $report[] = sprintf(
+                        '[theme.json] button text %s on %s: %.2f < %.1f and no palette color improves it (warning)',
+                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT
+                    );
+                    $warnings++;
                 }
             }
         }
