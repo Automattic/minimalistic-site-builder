@@ -47,7 +47,7 @@ When creating multiple images that will be displayed together in a row or grid (
 - `watercolor` — Watercolor painting style
 
 **Transparent backgrounds (`.png`):**
-An image whose extension is `.png` is generated with a TRANSPARENT background, so it sits directly on whatever the page background is. Use `.png` only for assets that need this: small decorative ornaments, accent motifs and logo marks — typically `illustration`, `minimalist` or `flat-design` style. Everything photographic or full-bleed stays `.jpg` (photos have no transparency to preserve, and JPEG is much smaller).
+An image whose extension is `.png` is generated with a TRANSPARENT background, so it sits directly on whatever the page background is. Use `.png` only for assets that need this: small decorative ornaments, accent motifs and pictorial logo marks (an emblem or symbol — never lettering; see the no-rendered-text rule under Subject guidelines) — typically `illustration`, `minimalist` or `flat-design` style. Everything photographic or full-bleed stays `.jpg` (photos have no transparency to preserve, and JPEG is much smaller).
 
 Decorative ornaments are a scarce garnish, not a layout tool — ration them hard:
 - Most sections need NO decorative image. Emit one only where the design direction's signature device genuinely calls for a drawn motif, and never more than ONE decorative image per section.
@@ -58,6 +58,7 @@ For a `.png` image, describe ONLY the subject itself — never a backdrop. Do no
 
 **Subject guidelines:**
 - 1-3 specific sentences describing ONLY the image itself: what it shows and from what point of view (composition, framing, vantage, mood). This is the actual generation subject — do not put the page placement here, that goes in `page-context`.
+- NEVER ask the image to render text. No words, names, letters, numerals, wordmarks, monograms, mottos, signage copy, labels, or "calligraphy/hand-lettering of <words>" — in any language or script. Image models garble glyphs and invent fake scripts, and raster text can't be read by assistive tech, translated, or restyled. Everything meant to be read is real HTML typography styled by the theme. If a plan or design note asks for lettered imagery (a hand-lettered name, a calligraphic line), express it as styled heading/paragraph text instead and keep imagery purely pictorial. Incidental illegible text inside a photographic scene (a distant storefront, a menu blur) is fine — text as the subject is not.
 - Describe content and composition, NOT photographic grade or style treatment. A single site-wide grade (color vs black-and-white, film grain, light quality, color grading) is applied to every image automatically at generation time — do not restate or contradict it in the subject (no "black and white", "golden hour color", "muted grey tones", "35mm grain" and the like). Per-image grading would make adjacent images clash.
 - Make sibling images in the same section describe their distinct subject so they don't read alike.
 - For cover/hero backgrounds, keep the focal subject off-center with calm, low-detail areas so the overlaid text (described in `page-context`) stays legible.
