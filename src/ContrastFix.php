@@ -181,9 +181,29 @@ final class ContrastFix
                 'threshold' => in_array($name, self::LARGE_TEXT_BLOCKS, true)
                     ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT,
                 'hasText'   => $dynamic || self::visibleText($inner) !== '',
-                // Dynamic blocks color their own links via textColor
-                // (currentColor), so only raw anchors count here.
-                'hasAnchor' => !$dynamic && stripos($inner, '<a ') !== false,
+                // Navigation and site-title color their own runtime links via
+                // textColor (core sets a { color: inherit } on them), so only
+                // raw anchors count — but a post-title with isLink renders an
+                // anchor that follows elements.link like any other link.
+                'hasAnchor' => (!$dynamic && stripos($inner, '<a ') !== false)
+                    || ($name === 'post-title' && ($attrs['isLink'] ?? false) === true),
+                'link'      => $linkCtx,
+            ];
+        } elseif (in_array($name, ['quote', 'pullquote'], true)
+            && preg_match('/<cite\b[^>]*>(.*?)<\/cite>/is', $this->doc->innerHtml($i), $cite)
+            && self::visibleText($cite[1]) !== '') {
+            // The quote's paragraphs speak for themselves, but its <cite>
+            // lives in the quote's own HTML — check the attribution too.
+            $this->texts[] = [
+                'index'     => $i,
+                'name'      => $name,
+                'fg'        => $textCtx,
+                'bg'        => $bgColors,
+                'bgLabel'   => $bgLabel,
+                'provider'  => $bgProvider,
+                'threshold' => ContrastMath::NORMAL_TEXT,
+                'hasText'   => true,
+                'hasAnchor' => stripos($cite[1], '<a ') !== false,
                 'link'      => $linkCtx,
             ];
         }
@@ -242,7 +262,9 @@ final class ContrastFix
             }
         }
 
-        // Link/background pairs, one decision per background region.
+        // Link/background pairs, one decision per background region and
+        // distinct link color: a passing first paragraph must not hide a
+        // second whose links inherit a different (failing) color.
         $groups = []; // provider key => rows with anchors
         foreach ($this->texts as $row) {
             if ($row['bg'] === null || !$row['hasAnchor']) {
@@ -253,60 +275,14 @@ final class ContrastFix
 
         $injected = []; // provider index => true
         foreach ($groups as $key => $rows) {
-            $row = $rows[0];
-            $link = $row['link'];
-            $linkRgb = $link['rgb'] ?? $this->rgbFor('primary');
-            $linkLabel = $link['label'] ?? 'primary (theme default)';
-            if ($linkRgb === null) {
-                continue;
+            // Rows sharing a link source share its color — one check each.
+            $byLink = [];
+            foreach ($rows as $r) {
+                $byLink[$r['link']['fromNode'] ?? -1] ??= $r;
             }
-            $ratio = $this->minRatio($linkRgb, $row['bg']);
-            if ($ratio >= ContrastMath::NORMAL_TEXT) {
-                continue;
+            foreach ($byLink as $row) {
+                $this->checkLinkRow($row, (int) $key, $repair, $injected);
             }
-
-            [$bestSlug, $bestRatio] = $this->bestOf(['base', 'contrast', 'primary', 'secondary', 'accent'], $row['bg']);
-            $detail = sprintf('links %s on %s: %.2f < %.1f', $linkLabel, $row['bgLabel'], $ratio, ContrastMath::NORMAL_TEXT);
-
-            if ($key === -1) {
-                // Root region (page background). A block-authored elements.link
-                // is repaired at that block; the global theme.json default is
-                // not ours to fix — ContrastFixStep repairs theme.json itself.
-                if ($link !== null && $link['fromNode'] !== null && $repair
-                    && $bestSlug !== null && $bestRatio >= ContrastMath::NORMAL_TEXT) {
-                    $this->setLinkColor($link['fromNode'], $bestSlug, $row['bg']);
-                    $injected[$link['fromNode']] = true;
-                    $this->findings[] = [
-                        'kind' => 'link', 'block' => $this->doc->name($link['fromNode']),
-                        'detail' => $detail . " → elements.link={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')',
-                        'repaired' => true,
-                    ];
-                } else {
-                    $this->findings[] = [
-                        'kind' => 'link', 'block' => 'document',
-                        'detail' => $detail . ' (global theme.json link default — fix at theme level)',
-                        'repaired' => false,
-                    ];
-                }
-                continue;
-            }
-            if ($bestSlug === null || $bestRatio < ContrastMath::NORMAL_TEXT || !$repair) {
-                $this->findings[] = ['kind' => 'link', 'block' => $this->doc->name((int) $key), 'detail' => $detail, 'repaired' => false];
-                continue;
-            }
-
-            // Fix at the block that set the failing color when it's inside the
-            // region; otherwise inject on the background provider.
-            $target = ($link !== null && $link['fromNode'] !== null
-                && $this->isSelfOrDescendant($link['fromNode'], (int) $key))
-                ? $link['fromNode'] : (int) $key;
-            $this->setLinkColor($target, $bestSlug, $row['bg']);
-            $injected[$target] = true;
-            $this->findings[] = [
-                'kind' => 'link', 'block' => $this->doc->name($target),
-                'detail' => $detail . " → elements.link={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')',
-                'repaired' => true,
-            ];
         }
 
         // An injected link color cascades into nested background regions whose
@@ -317,10 +293,16 @@ final class ContrastFix
                 continue;
             }
             $row = $rows[0];
-            $hasOwnLink = ($row['link']['fromNode'] ?? null) !== null
-                && $this->isSelfOrDescendant($row['link']['fromNode'], (int) $key);
-            if ($hasOwnLink) {
-                continue; // explicit color already pinned in the region
+            $inherits = false;
+            foreach ($rows as $r) {
+                if (($r['link']['fromNode'] ?? null) === null
+                    || !$this->isSelfOrDescendant($r['link']['fromNode'], (int) $key)) {
+                    $inherits = true;
+                    break;
+                }
+            }
+            if (!$inherits) {
+                continue; // every row's color is already pinned in the region
             }
             foreach (array_keys($injected) as $p) {
                 if ($this->isSelfOrDescendant((int) $key, $p) && $key !== $p) {
@@ -360,6 +342,70 @@ final class ContrastFix
         }
     }
 
+    /**
+     * Check (and repair) one link-color source against its background region.
+     *
+     * @param array<string,mixed> $row a texts row with hasAnchor
+     * @param int $key background-provider node index, -1 for the root region
+     * @param array<int,bool> $injected provider index => true, updated in place
+     */
+    private function checkLinkRow(array $row, int $key, bool $repair, array &$injected): void
+    {
+        $link = $row['link'];
+        $linkRgb = $link['rgb'] ?? $this->rgbFor('primary');
+        $linkLabel = $link['label'] ?? 'primary (theme default)';
+        if ($linkRgb === null) {
+            return;
+        }
+        $ratio = $this->minRatio($linkRgb, $row['bg']);
+        if ($ratio >= ContrastMath::NORMAL_TEXT) {
+            return;
+        }
+
+        [$bestSlug, $bestRatio] = $this->bestOf(['base', 'contrast', 'primary', 'secondary', 'accent'], $row['bg']);
+        $detail = sprintf('links %s on %s: %.2f < %.1f', $linkLabel, $row['bgLabel'], $ratio, ContrastMath::NORMAL_TEXT);
+
+        if ($key === -1) {
+            // Root region (page background). A block-authored elements.link
+            // is repaired at that block; the global theme.json default is
+            // not ours to fix — ContrastFixStep repairs theme.json itself.
+            if ($link !== null && $link['fromNode'] !== null && $repair
+                && $bestSlug !== null && $bestRatio >= ContrastMath::NORMAL_TEXT) {
+                $this->setLinkColor($link['fromNode'], $bestSlug, $row['bg']);
+                $injected[$link['fromNode']] = true;
+                $this->findings[] = [
+                    'kind' => 'link', 'block' => $this->doc->name($link['fromNode']),
+                    'detail' => $detail . " → elements.link={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')',
+                    'repaired' => true,
+                ];
+            } else {
+                $this->findings[] = [
+                    'kind' => 'link', 'block' => 'document',
+                    'detail' => $detail . ' (global theme.json link default — fix at theme level)',
+                    'repaired' => false,
+                ];
+            }
+            return;
+        }
+        if ($bestSlug === null || $bestRatio < ContrastMath::NORMAL_TEXT || !$repair) {
+            $this->findings[] = ['kind' => 'link', 'block' => $this->doc->name($key), 'detail' => $detail, 'repaired' => false];
+            return;
+        }
+
+        // Fix at the block that set the failing color when it's inside the
+        // region; otherwise inject on the background provider.
+        $target = ($link !== null && $link['fromNode'] !== null
+            && $this->isSelfOrDescendant($link['fromNode'], $key))
+            ? $link['fromNode'] : $key;
+        $this->setLinkColor($target, $bestSlug, $row['bg']);
+        $injected[$target] = true;
+        $this->findings[] = [
+            'kind' => 'link', 'block' => $this->doc->name($target),
+            'detail' => $detail . " → elements.link={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')',
+            'repaired' => true,
+        ];
+    }
+
     // ── attribute mutations ──────────────────────────────────────────────
 
     private function setTextColor(int $i, string $slug, ?string $oldSlug = null): void
@@ -379,12 +425,20 @@ final class ContrastFix
     {
         $attrs = $this->doc->attrs($i) ?? [];
         $attrs['style']['elements']['link']['color']['text'] = 'var:preset|color|' . $slug;
-        // Keep the accent hover when it reads on this background; otherwise
-        // reuse the repaired color so hover never goes invisible either.
-        $accent = $this->rgbFor('accent');
-        $hover = ($accent !== null && $this->minRatio($accent, $bg) >= ContrastMath::LARGE_TEXT)
-            ? 'accent' : $slug;
-        $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $hover;
+        // Hover is body-size text too, so it gets the same 4.5:1 bar. Keep an
+        // authored hover that reads on this background; otherwise prefer the
+        // accent when it passes, else reuse the repaired color so hover never
+        // goes invisible either.
+        $authored = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
+        $authoredPasses = is_string($authored)
+            && ($resolved = $this->resolveColorValue($authored)) !== null
+            && $this->minRatio($resolved['rgb'], $bg) >= ContrastMath::NORMAL_TEXT;
+        if (!$authoredPasses) {
+            $accent = $this->rgbFor('accent');
+            $hover = ($accent !== null && $this->minRatio($accent, $bg) >= ContrastMath::NORMAL_TEXT)
+                ? 'accent' : $slug;
+            $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $hover;
+        }
         $this->doc->setAttrs($i, $attrs);
     }
 

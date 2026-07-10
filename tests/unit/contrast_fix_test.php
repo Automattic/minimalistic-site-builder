@@ -106,6 +106,70 @@ test('failing global link on the page background is reported, not repaired here'
     assert_contains('theme level', $res['findings'][0]['detail']);
 });
 
+test('a passing link color must not hide a different failing one in the same region', function () {
+    // Paragraph 1 pins its own elements.link to base (passes on the dark
+    // band); paragraph 2 inherits the global primary default, which fails.
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph {"style":{"elements":{"link":{"color":{"text":"var:preset|color|base"}}}}} -->'
+        . '<p class="has-link-color"><a href="/a">fine</a></p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p><a href="/b">invisible</a></p><!-- /wp:paragraph -->'
+        . '</div>' . "\n" . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":', $res['markup'],
+        'the inherited failing color must be repaired on the band');
+    assert_contains('"text":"var:preset|color|base"}', $res['markup']);
+});
+
+test('repaired hover is held to the 4.5:1 normal-text bar, not 3:1', function () {
+    // On #CCCCCC the accent (#B91C1C) sits at ~4.0:1 — good enough for large
+    // text, unreadable for body-size hover links. The hover must reuse the
+    // repaired link color instead.
+    $src = '<!-- wp:group {"style":{"color":{"background":"#CCCCCC"}}} -->' . "\n"
+        . '<div class="wp-block-group has-background"><!-- wp:paragraph --><p><a href="/x">read on</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('":hover":{"color":{"text":"var:preset|color|contrast"}}', $res['markup']);
+    assert_true(!str_contains($res['markup'], 'var:preset|color|accent'), 'accent hover fails body-size text on #CCCCCC');
+});
+
+test('an authored hover that reads on the background is preserved by a link repair', function () {
+    // The resting link (primary) fails on the dark band, but the authored
+    // hover (secondary, ~6.6:1 on contrast) passes — repair must not touch it.
+    $src = '<!-- wp:group {"backgroundColor":"contrast","style":{"elements":{"link":{"color":{"text":"var:preset|color|primary"},":hover":{"color":{"text":"var:preset|color|secondary"}}}}}} -->' . "\n"
+        . '<div class="wp-block-group has-link-color"><!-- wp:paragraph {"textColor":"base"} --><p><a href="/x">dim link</a></p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_true(!str_contains($res['markup'], '"link":{"color":{"text":"var:preset|color|primary"}'), 'failing resting color repaired');
+    assert_contains('":hover":{"color":{"text":"var:preset|color|secondary"}}', $res['markup'], 'passing authored hover kept');
+});
+
+test('a quote cite is checked even when paragraphs carry the quote body', function () {
+    // The paragraph is explicitly readable; the <cite> inherits the default
+    // (dark) text and dies on the dark band. Old behavior recorded no row at
+    // all for the quote because it has text-block children.
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:quote --><blockquote class="wp-block-quote">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p>Wise words</p><!-- /wp:paragraph -->'
+        . '<cite>A. Person</cite></blockquote><!-- /wp:quote --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('<!-- wp:quote {"textColor":"base"} -->', $res['markup'], 'cite repair lands on the quote');
+});
+
+test('a post-title with isLink is checked as a link', function () {
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:post-title {"isLink":true,"textColor":"base"} /--></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    $kinds = array_column($res['findings'], 'kind');
+    assert_true(in_array('link', $kinds, true), 'isLink post-title must produce a link check');
+});
+
 test('cover with image and text gets the dimRatio floor', function () {
     $src = '<!-- wp:cover {"url":"theme:./assets/hero.jpg","dimRatio":10} -->' . "\n"
         . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'

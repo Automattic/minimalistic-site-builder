@@ -154,6 +154,32 @@ final class ContrastFixStep implements Step
             }
         }
 
+        // Global link hover color on the page background — hover text is
+        // body-size too, so it gets the same 4.5:1 bar as the resting state.
+        $hoverValue = $themeJson['styles']['elements']['link'][':hover']['color']['text'] ?? null;
+        $hover = is_string($hoverValue) ? self::resolve($palette, $hoverValue) : null;
+        if ($base !== null && $hover !== null) {
+            $ratio = ContrastMath::ratio($hover['rgb'], $base);
+            if ($ratio < ContrastMath::NORMAL_TEXT) {
+                [$slug, $best] = self::best($palette, ['primary', 'contrast', 'secondary', 'accent'], $base);
+                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
+                    $themeJson['styles']['elements']['link'][':hover']['color']['text'] = "var(--wp--preset--color--{$slug})";
+                    $report[] = sprintf(
+                        '[theme.json] global link hover color %s on base: %.2f < %.1f → %s (%.2f) (repaired)',
+                        $hover['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
+                    );
+                    $repaired++;
+                    $changed = true;
+                } else {
+                    $report[] = sprintf(
+                        '[theme.json] global link hover color %s on base: %.2f < %.1f and no palette color passes (warning)',
+                        $hover['label'], $ratio, ContrastMath::NORMAL_TEXT
+                    );
+                    $warnings++;
+                }
+            }
+        }
+
         // Button label on the button background.
         $btnBgValue = $themeJson['styles']['elements']['button']['color']['background'] ?? null;
         $btnTextValue = $themeJson['styles']['elements']['button']['color']['text'] ?? null;
