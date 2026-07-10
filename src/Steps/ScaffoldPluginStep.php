@@ -15,13 +15,16 @@ use Automattic\SiteBuild\Step;
  *         name/slug are known.
  *
  * The plugin is identical for every site (only its header identity varies):
- * on activation it creates one WordPress page per entry in the bundled
- * pages.json manifest from the markup in pages/<slug>.html (written later by
- * the assemble-pages step), points the site's front page at the seeded
+ * on activation it imports the bundled content images (plugin/images/, listed
+ * in images.json) into the media library, creates one WordPress page per
+ * entry in the bundled pages.json manifest from the markup in
+ * pages/<slug>.html (written later by the assemble-pages step) with its image
+ * references resolved to the imported attachments — the attachment ids exist
+ * only now, never at build time — points the site's front page at the seeded
  * homepage, unpublishes the stock "Sample Page" so it leaves the nav, and
- * records everything in one option; on deactivation it deletes
- * exactly what it created and restores the front-page options. No LLM ever
- * touches this code.
+ * records everything in one option; on deactivation it deletes exactly what
+ * it created (pages and attachments) and restores the front-page options.
+ * No LLM ever touches this code.
  */
 final class ScaffoldPluginStep implements Step
 {
@@ -83,11 +86,12 @@ final class ScaffoldPluginStep implements Step
                 : array();
 
             $state = array(
-                'page_ids'      => array(),
-                'unpublished'   => array(),
-                'show_on_front' => get_option('show_on_front'),
-                'page_on_front' => get_option('page_on_front'),
-                'changed_front' => false,
+                'page_ids'       => array(),
+                'attachment_ids' => array(),
+                'unpublished'    => array(),
+                'show_on_front'  => get_option('show_on_front'),
+                'page_on_front'  => get_option('page_on_front'),
+                'changed_front'  => false,
             );
 
             // A fresh WordPress ships a published "Sample Page"; the header's
@@ -99,6 +103,11 @@ final class ScaffoldPluginStep implements Step
                 wp_update_post(array('ID' => (int) $sample->ID, 'post_status' => 'draft'));
                 $state['unpublished'][] = (int) $sample->ID;
             }
+
+            // Content images are content: import the bundled files into the
+            // media library FIRST — the attachment ids the markup needs exist
+            // only after this import, never at build time.
+            $image_map = builder_content_import_images($state['attachment_ids']);
 
             // The markup is trusted build output; bypass kses so block comments
             // survive even when activation runs without a privileged user
@@ -115,8 +124,10 @@ final class ScaffoldPluginStep implements Step
 
                 $file = __DIR__ . '/pages/' . $slug . '.html';
                 $content = is_file($file) ? (string) file_get_contents($file) : '';
-                // Asset references are theme-relative at build time; resolve them
-                // against the ACTIVE theme, where the generated images live.
+                // Point the markup at the imported media (attachment ids +
+                // upload URLs), then resolve anything left — an image the
+                // build never generated — against the ACTIVE theme's assets.
+                $content = builder_content_resolve_images($content, $image_map);
                 $content = str_replace(
                     'theme:./assets/',
                     trailingslashit(get_stylesheet_directory_uri()) . 'assets/',
@@ -159,8 +170,114 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
-         * Delete every page this plugin created and restore the front-page
-         * options it changed; leaves anything the user created alone.
+         * Import every bundled content image (plugin/images/, listed in
+         * images.json) into the media library and return a map from the
+         * build-time placeholder ("theme:./assets/<file>") to the imported
+         * attachment's id and URL. Ids are appended to $attachment_ids so the
+         * state option can undo the import on deactivation. A file the build
+         * never shipped is skipped — its markup falls back to the theme.
+         */
+        function builder_content_import_images(&$attachment_ids) {
+            if (!is_file(__DIR__ . '/images.json')) {
+                return array();
+            }
+            $manifest = json_decode((string) file_get_contents(__DIR__ . '/images.json'), true);
+            $images = is_array($manifest) && isset($manifest['images']) && is_array($manifest['images'])
+                ? $manifest['images']
+                : array();
+
+            $map = array();
+            foreach ($images as $image) {
+                $filename = isset($image['filename']) ? (string) $image['filename'] : '';
+                $path = __DIR__ . '/images/' . $filename;
+                if ($filename === '' || !is_file($path)) {
+                    continue;
+                }
+
+                $upload = wp_upload_bits($filename, null, (string) file_get_contents($path));
+                if (!empty($upload['error'])) {
+                    continue;
+                }
+
+                $type = wp_check_filetype($upload['file']);
+                $attachment_id = wp_insert_attachment(array(
+                    'post_mime_type' => !empty($type['type']) ? (string) $type['type'] : 'image/jpeg',
+                    'post_title'     => isset($image['title']) && $image['title'] !== '' ? (string) $image['title'] : $filename,
+                    'post_status'    => 'inherit',
+                ), $upload['file']);
+                if (is_wp_error($attachment_id) || !$attachment_id) {
+                    continue;
+                }
+
+                // Sizes/srcset metadata; the generator lives in an admin include.
+                if (!function_exists('wp_generate_attachment_metadata')) {
+                    require_once ABSPATH . 'wp-admin/includes/image.php';
+                }
+                $meta = wp_generate_attachment_metadata((int) $attachment_id, $upload['file']);
+                if (is_array($meta)) {
+                    wp_update_attachment_metadata((int) $attachment_id, $meta);
+                }
+
+                $attachment_ids[] = (int) $attachment_id;
+                $map['theme:./assets/' . $filename] = array(
+                    'id'  => (int) $attachment_id,
+                    'url' => (string) $upload['url'],
+                );
+            }
+            return $map;
+        }
+
+        /**
+         * Point page markup at the imported media. wp:image blocks get the
+         * real attachment id injected into their block attributes and the
+         * paired wp-image-<id> class on the <img> (core keys srcset and
+         * lightbox off that pair); every other reference — cover url
+         * attributes, inline background styles — gets a plain URL swap, which
+         * keeps the block attrs and HTML in agreement. Placeholders not in
+         * the map are left for the caller's theme fallback.
+         */
+        function builder_content_resolve_images($content, $map) {
+            if ($map === array()) {
+                return $content;
+            }
+
+            $content = (string) preg_replace_callback(
+                '/<!--\s*wp:image(\s+\{.*?\})?\s*-->(.*?)<!--\s*\/wp:image\s*-->/s',
+                function ($m) use ($map) {
+                    $attrs = isset($m[1]) && trim($m[1]) !== '' ? json_decode(trim($m[1]), true) : array();
+                    $html = $m[2];
+                    if (!is_array($attrs)) {
+                        return $m[0];
+                    }
+                    if (!preg_match('/src=(["\'])(theme:\.\/assets\/[^"\']+)\1/', $html, $src) || !isset($map[$src[2]])) {
+                        return $m[0];
+                    }
+
+                    $id = (int) $map[$src[2]]['id'];
+                    $attrs['id'] = $id;
+                    $html = str_replace($src[2], (string) $map[$src[2]]['url'], $html);
+                    if (preg_match('/<img\b[^>]*\bclass=/', $html)) {
+                        $html = (string) preg_replace('/(<img\b[^>]*\bclass=(["\']))/', '$1wp-image-' . $id . ' ', $html, 1);
+                    } else {
+                        $html = (string) preg_replace('/<img\b/', '<img class="wp-image-' . $id . '"', $html, 1);
+                    }
+
+                    $json = json_encode($attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    return '<!-- wp:image ' . $json . ' -->' . $html . '<!-- /wp:image -->';
+                },
+                $content
+            );
+
+            foreach ($map as $placeholder => $image) {
+                $content = str_replace($placeholder, (string) $image['url'], $content);
+            }
+            return $content;
+        }
+
+        /**
+         * Delete every page and attachment this plugin created and restore
+         * the front-page options it changed; leaves anything the user created
+         * alone.
          */
         function builder_content_deactivate() {
             $state = get_option(BUILDER_CONTENT_STATE_OPTION);
@@ -171,6 +288,11 @@ final class ScaffoldPluginStep implements Step
             $ids = isset($state['page_ids']) && is_array($state['page_ids']) ? $state['page_ids'] : array();
             foreach ($ids as $id) {
                 wp_delete_post((int) $id, true);
+            }
+
+            $attachments = isset($state['attachment_ids']) && is_array($state['attachment_ids']) ? $state['attachment_ids'] : array();
+            foreach ($attachments as $id) {
+                wp_delete_attachment((int) $id, true);
             }
 
             // Republish whatever activation unpublished (the stock sample page).

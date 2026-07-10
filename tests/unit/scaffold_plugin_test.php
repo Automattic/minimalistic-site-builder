@@ -23,6 +23,7 @@ function wp_stub_reset(): void
 {
     $GLOBALS['wp_options'] = ['show_on_front' => 'posts', 'page_on_front' => 0];
     $GLOBALS['wp_posts'] = [];
+    $GLOBALS['wp_attachments'] = [];
     $GLOBALS['wp_next_id'] = 100;
     $GLOBALS['wp_kses_calls'] = [];
 }
@@ -99,6 +100,41 @@ if (!function_exists('get_option')) {
     function register_deactivation_hook(string $file, callable $cb): void
     {
     }
+    function wp_upload_bits(string $name, $deprecated, string $bits): array
+    {
+        $dir = sys_get_temp_dir() . '/wp-stub-uploads';
+        @mkdir($dir);
+        $file = $dir . '/' . $name;
+        file_put_contents($file, $bits);
+        return ['file' => $file, 'url' => 'http://example.test/wp-content/uploads/2026/07/' . $name, 'error' => false];
+    }
+    function wp_check_filetype(string $file): array
+    {
+        $ext = strtolower((string) pathinfo($file, PATHINFO_EXTENSION));
+        return ['ext' => $ext, 'type' => $ext === 'png' ? 'image/png' : 'image/jpeg'];
+    }
+    function wp_insert_attachment(array $args, string $file): int
+    {
+        $id = $GLOBALS['wp_next_id']++;
+        $GLOBALS['wp_attachments'][$id] = $args + ['file' => $file];
+        return $id;
+    }
+    function wp_generate_attachment_metadata(int $id, string $file): array
+    {
+        return ['file' => basename($file)];
+    }
+    function wp_update_attachment_metadata(int $id, array $meta): bool
+    {
+        if (isset($GLOBALS['wp_attachments'][$id])) {
+            $GLOBALS['wp_attachments'][$id]['meta'] = $meta;
+        }
+        return true;
+    }
+    function wp_delete_attachment(int $id, bool $force = false): bool
+    {
+        unset($GLOBALS['wp_attachments'][$id]);
+        return true;
+    }
 }
 
 /** Scaffold + identity-fill a project and return it (plugin ready to include). */
@@ -156,9 +192,21 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
         ['slug' => 'breads', 'title' => 'Breads', 'front' => false, 'menu_order' => 20, 'parent' => 'menu'],
     ]]);
     $project->writeText('plugin/pages/home.html', '<!-- wp:heading --><h2>Welcome</h2><!-- /wp:heading -->' . "\n"
-        . '<img src="theme:./assets/hero.jpg" alt="AI_IMAGE: a bakery | hero | photo | landscape">');
+        . '<!-- wp:image {"sizeSlug":"full"} --><figure class="wp-block-image size-full">'
+        . '<img src="theme:./assets/hero.jpg" alt="AI_IMAGE: a bakery | hero | photo | landscape"/></figure><!-- /wp:image -->' . "\n"
+        . '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} -->'
+        . '<div class="wp-block-cover" style="background-image:url(theme:./assets/hero.jpg)"></div><!-- /wp:cover -->' . "\n"
+        . '<img src="theme:./assets/never-generated.jpg" alt="AI_IMAGE: skipped | x | photo | landscape">');
     $project->writeText('plugin/pages/menu.html', '<!-- wp:heading --><h2>Menu</h2><!-- /wp:heading -->');
     $project->writeText('plugin/pages/breads.html', '<!-- wp:heading --><h2>Breads</h2><!-- /wp:heading -->');
+    // The content-image bundle: hero.jpg shipped; never-generated.jpg listed
+    // but absent (a build without --with-images), so it must fall back to the
+    // theme's assets URL.
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+        ['filename' => 'never-generated.jpg', 'title' => 'Skipped'],
+    ]]);
+    $project->writeText('plugin/images/hero.jpg', 'JPEGDATA');
 
     wp_stub_reset();
     // A fresh WordPress ships a published "Sample Page" — wp:page-list would
@@ -189,9 +237,25 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq(0, $byName['menu']['post_parent']);
     assert_eq($byName['menu']['id'], $byName['breads']['post_parent']);
 
-    // Asset refs resolved against the active theme at seed time.
-    assert_contains('https://example.test/wp-content/themes/demo/assets/hero.jpg', $byName['home']['post_content']);
-    assert_true(!str_contains($byName['home']['post_content'], 'theme:./assets/'), 'no theme: refs left');
+    // ── Bundled content images imported into the media library. ──
+    assert_eq(1, count($GLOBALS['wp_attachments']), 'one bundled image imported');
+    $attId = array_keys($GLOBALS['wp_attachments'])[0];
+    $att = $GLOBALS['wp_attachments'][$attId];
+    assert_eq('A bakery at dawn', $att['post_title']);
+    assert_eq('inherit', $att['post_status']);
+    assert_eq(['file' => 'hero.jpg'], $att['meta'], 'attachment metadata generated');
+
+    $home = $byName['home']['post_content'];
+    // The wp:image block carries the attachment id (unknown until import) and
+    // the paired wp-image class, and loads from the media library.
+    assert_contains('"id":' . $attId, $home);
+    assert_contains('wp-image-' . $attId, $home);
+    assert_contains('http://example.test/wp-content/uploads/2026/07/hero.jpg', $home);
+    // The cover's url attr and inline background got the plain URL swap.
+    assert_true(!str_contains($home, 'theme:./assets/hero.jpg'), 'no placeholder left for the imported image');
+    assert_contains('background-image:url(http://example.test/wp-content/uploads/2026/07/hero.jpg)', $home);
+    // An image the build never generated falls back to the theme's assets.
+    assert_contains('https://example.test/wp-content/themes/demo/assets/never-generated.jpg', $home);
 
     // The seeded homepage became the front page; previous options snapshotted.
     assert_eq('page', get_option('show_on_front'));
@@ -199,18 +263,21 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     $state = get_option(BUILDER_CONTENT_STATE_OPTION);
     assert_eq('posts', $state['show_on_front']);
     assert_eq($ids, $state['page_ids']);
+    assert_eq([$attId], $state['attachment_ids'], 'imported attachments recorded');
 
     // kses was bypassed only around the seeding.
     assert_eq(['remove', 'init'], $GLOBALS['wp_kses_calls']);
 
-    // ── A second activation is a no-op (no duplicate pages, no re-recording). ──
+    // ── A second activation is a no-op (no duplicate pages or attachments). ──
     builder_content_activate();
     assert_eq(4, count($GLOBALS['wp_posts']), 'no duplicates on re-activation');
+    assert_eq(1, count($GLOBALS['wp_attachments']), 'no duplicate imports on re-activation');
 
     // ── Deactivation deletes exactly what was created and restores the rest. ──
     builder_content_deactivate();
     assert_eq([2], array_keys($GLOBALS['wp_posts']), 'only the sample page survives');
     assert_eq('publish', $GLOBALS['wp_posts'][2]['post_status'], 'sample page republished');
+    assert_eq([], $GLOBALS['wp_attachments'], 'imported media removed');
     assert_eq('posts', get_option('show_on_front'));
     assert_eq(0, get_option('page_on_front'));
     assert_eq(false, get_option(BUILDER_CONTENT_STATE_OPTION));
