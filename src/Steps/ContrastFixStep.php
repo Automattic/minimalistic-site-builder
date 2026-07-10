@@ -67,7 +67,16 @@ final class ContrastFixStep implements Step
         }
 
         $globalLink = $themeJson['styles']['elements']['link']['color']['text'] ?? null;
-        $fix = new ContrastFix($palette, $gradients, is_string($globalLink) ? $globalLink : null);
+        $defaultText = $themeJson['styles']['color']['text'] ?? null;
+        $headingText = $themeJson['styles']['elements']['heading']['color']['text'] ?? null;
+        $fix = new ContrastFix(
+            $palette,
+            $gradients,
+            is_string($globalLink) ? $globalLink : null,
+            is_string($defaultText) ? $defaultText : null,
+            is_string($headingText) ? $headingText : null,
+            self::fontSizeMap($themeJson),
+        );
 
         foreach (['parts', 'templates'] as $dir) {
             foreach (glob($project->themePath($dir . '/*.html')) ?: [] as $abs) {
@@ -225,6 +234,18 @@ final class ContrastFixStep implements Step
         foreach (($themeJson['settings']['color']['gradients'] ?? []) as $entry) {
             if (is_array($entry) && isset($entry['slug'], $entry['gradient'])) {
                 $out[(string) $entry['slug']] = (string) $entry['gradient'];
+            }
+        }
+        return $out;
+    }
+
+    /** @param array<mixed> $themeJson @return array<string,string> slug => CSS size */
+    public static function fontSizeMap(array $themeJson): array
+    {
+        $out = [];
+        foreach (($themeJson['settings']['typography']['fontSizes'] ?? []) as $entry) {
+            if (is_array($entry) && isset($entry['slug'], $entry['size'])) {
+                $out[(string) $entry['slug']] = (string) $entry['size'];
             }
         }
         return $out;

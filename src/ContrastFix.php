@@ -69,11 +69,18 @@ final class ContrastFix
      * @param array<string,string> $gradients gradient slug => CSS gradient
      * @param string|null $globalLink         the theme's global link color
      *                                        (hex or preset reference), if set
+     * @param string|null $defaultText        theme.json styles.color.text — what
+     *                                        unstyled body text actually renders
+     * @param string|null $headingText        styles.elements.heading.color.text
+     * @param array<string,string> $fontSizes font-size preset slug => CSS size
      */
     public function __construct(
         private array $palette,
         private array $gradients = [],
         private ?string $globalLink = null,
+        private ?string $defaultText = null,
+        private ?string $headingText = null,
+        private array $fontSizes = [],
     ) {}
 
     /**
@@ -178,8 +185,7 @@ final class ContrastFix
                 'bg'        => $bgColors,
                 'bgLabel'   => $bgLabel,
                 'provider'  => $bgProvider,
-                'threshold' => in_array($name, self::LARGE_TEXT_BLOCKS, true)
-                    ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT,
+                'threshold' => $this->textThreshold($name, $attrs),
                 'hasText'   => $dynamic || self::visibleText($inner) !== '',
                 // Navigation and site-title color their own runtime links via
                 // textColor (core sets a { color: inherit } on them), so only
@@ -217,14 +223,12 @@ final class ContrastFix
 
     private function plan(bool $repair): void
     {
-        $contrastRgb = $this->rgbFor('contrast') ?? [0, 0, 0];
-
         // Text/background pairs.
         foreach ($this->texts as $row) {
             if ($row['bg'] === null || !$row['hasText']) {
                 continue; // image-backed cover (phase 2) or nothing visible
             }
-            $fg = $row['fg'] ?? ['rgb' => $contrastRgb, 'label' => 'contrast', 'node' => null];
+            $fg = $row['fg'] ?? $this->defaultTextFor($row['name']);
             $ratio = $this->minRatio($fg['rgb'], $row['bg']);
             if ($ratio >= $row['threshold']) {
                 continue;
@@ -478,6 +482,69 @@ final class ContrastFix
     }
 
     // ── color resolution helpers ─────────────────────────────────────────
+
+    /**
+     * What an unstyled block of this type actually renders: the theme's
+     * element default (headings), its global text default, or `contrast`.
+     *
+     * @return array{rgb: array{0:int,1:int,2:int}, label: string, node: null}
+     */
+    private function defaultTextFor(string $name): array
+    {
+        $isHeading = in_array($name, ['heading', 'site-title', 'post-title'], true);
+        $value = $isHeading ? ($this->headingText ?? $this->defaultText) : $this->defaultText;
+        if ($value !== null && ($resolved = $this->resolveColorValue($value)) !== null) {
+            return ['rgb' => $resolved['rgb'], 'label' => $resolved['label'] . ' (theme default)', 'node' => null];
+        }
+        return ['rgb' => $this->rgbFor('contrast') ?? [0, 0, 0], 'label' => 'contrast', 'node' => null];
+    }
+
+    /**
+     * The WCAG threshold this block's text must clear. Heading-scale blocks
+     * get the 3:1 large-text bar only when they actually render large: an
+     * explicit font size decides (WCAG large text is ≥24px, or ≥18.66px
+     * bold); without one, only h1–h3 are assumed to be at large scale.
+     * Public: CoverContrastStep classifies cover texts with the same rule.
+     */
+    public function textThreshold(string $name, array $attrs): float
+    {
+        if (!in_array($name, self::LARGE_TEXT_BLOCKS, true)) {
+            return ContrastMath::NORMAL_TEXT;
+        }
+        $px = $this->resolvedFontSizePx($attrs);
+        if ($px !== null) {
+            $weight = $attrs['style']['typography']['fontWeight'] ?? null;
+            $bold = $weight === 'bold' || (is_numeric($weight) && (int) $weight >= 700);
+            return ($px >= 24.0 || ($bold && $px >= 18.66))
+                ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT;
+        }
+        if ($name === 'heading') {
+            return ((int) ($attrs['level'] ?? 2)) <= 3
+                ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT;
+        }
+        return ContrastMath::LARGE_TEXT; // site-title, post-title, pullquote
+    }
+
+    /** The block's explicit font size in px, when one is set and parseable. */
+    private function resolvedFontSizePx(array $attrs): ?float
+    {
+        $size = null;
+        $slug = $attrs['fontSize'] ?? null;
+        if (is_string($slug) && isset($this->fontSizes[$slug])) {
+            $size = $this->fontSizes[$slug];
+        } elseif (is_string($attrs['style']['typography']['fontSize'] ?? null)) {
+            $size = $attrs['style']['typography']['fontSize'];
+        }
+        if ($size === null || !preg_match('/^([0-9.]+)(px|rem|em|pt)$/', trim($size), $m)) {
+            return null; // no explicit size, or clamp()/var() — undecidable
+        }
+        $n = (float) $m[1];
+        return match ($m[2]) {
+            'px'         => $n,
+            'rem', 'em'  => $n * 16,
+            'pt'         => $n * 4 / 3,
+        };
+    }
 
     /** @return array{rgb: array{0:int,1:int,2:int}, label: string}|null */
     private function ownTextColor(array $attrs): ?array

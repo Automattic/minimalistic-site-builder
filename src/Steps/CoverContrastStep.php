@@ -72,7 +72,7 @@ final class CoverContrastStep implements Step
         $themeJson = $project->readJson('theme/theme.json');
         $palette = ContrastFixStep::paletteMap($themeJson);
         $gradients = ContrastFixStep::gradientMap($themeJson);
-        $helper = new ContrastFix($palette, $gradients);
+        $helper = new ContrastFix($palette, $gradients, fontSizes: ContrastFixStep::fontSizeMap($themeJson));
 
         $report = [];
         $repaired = 0;
@@ -428,8 +428,7 @@ final class CoverContrastStep implements Step
                     'index'     => $child,
                     'rgb'       => $this->coverTextColor($doc, $child, $helper, $inherited),
                     'ownSlug'   => $ownSlug,
-                    'threshold' => in_array($name, ['heading', 'pullquote', 'site-title'], true)
-                        ? ContrastMath::LARGE_TEXT : ContrastMath::NORMAL_TEXT,
+                    'threshold' => $helper->textThreshold($name, $childAttrs),
                 ];
             }
             // Nested covers own their background; stop at their boundary.

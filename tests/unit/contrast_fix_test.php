@@ -64,6 +64,55 @@ test('heading large-text threshold (3:1) allows what body text cannot', function
     assert_contains('<!-- wp:paragraph {"textColor":"contrast"} -->', $res['markup'], 'paragraph fails at 4.5:1');
 });
 
+test('theme element heading default is used for unstyled headings', function () {
+    // The theme paints unstyled headings secondary (2.85:1 on white) via
+    // styles.elements.heading — assuming `contrast` would certify a failure.
+    $fix = new ContrastFix(
+        contrast_test_palette(), [], null,
+        null, 'var(--wp--preset--color--secondary)'
+    );
+    $src = '<!-- wp:heading --><h2>Reads muddy</h2><!-- /wp:heading -->';
+    $res = $fix->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('secondary (theme default)', $res['findings'][0]['detail']);
+    assert_contains('<!-- wp:heading {"textColor":"contrast"} -->', $res['markup']);
+});
+
+test('theme global text default is used for unstyled paragraphs', function () {
+    $fix = new ContrastFix(
+        contrast_test_palette(), [], null,
+        'var(--wp--preset--color--secondary)'
+    );
+    $src = '<!-- wp:paragraph --><p>Body copy in the theme default</p><!-- /wp:paragraph -->';
+    $res = $fix->process($src);
+    assert_eq(true, $res['changed'], 'the secondary body default fails 4.5:1 on base');
+    assert_contains('<!-- wp:paragraph {"textColor":"contrast"} -->', $res['markup']);
+});
+
+test('small headings get the 4.5:1 bar, not the blanket large-text 3:1', function () {
+    // #8A8A8A is ~3.5:1 on white: fine for genuinely large text, unreadable
+    // at a caption-scale preset. An h5 at 0.875rem must be held to 4.5.
+    $palette = contrast_test_palette();
+    $palette['secondary'] = '#8A8A8A';
+    $fix = new ContrastFix($palette, [], null, null, null, ['caption' => '0.875rem', 'jumbo' => '3rem']);
+    $src = '<!-- wp:heading {"level":5,"fontSize":"caption","textColor":"secondary"} --><h5 class="has-caption-font-size">Fine print</h5><!-- /wp:heading -->'
+        . '<!-- wp:heading {"level":5,"fontSize":"jumbo","textColor":"secondary"} --><h5 class="has-jumbo-font-size">Display size</h5><!-- /wp:heading -->'
+        . '<!-- wp:heading {"level":2,"textColor":"secondary"} --><h2>Assumed large</h2><!-- /wp:heading -->';
+    $res = $fix->process($src);
+    assert_contains('{"level":5,"fontSize":"caption","textColor":"contrast"}', $res['markup'], 'small heading must be repaired');
+    assert_contains('{"level":5,"fontSize":"jumbo","textColor":"secondary"}', $res['markup'], 'explicitly large heading keeps 3:1');
+    assert_contains('{"level":2,"textColor":"secondary"}', $res['markup'], 'unsized h2 keeps the large-text assumption');
+});
+
+test('unsized deep heading levels are held to 4.5:1', function () {
+    $palette = contrast_test_palette();
+    $palette['secondary'] = '#8A8A8A'; // ~3.5:1 on white
+    $fix = new ContrastFix($palette, [], null);
+    $src = '<!-- wp:heading {"level":5,"textColor":"secondary"} --><h5>Sub-sub-heading</h5><!-- /wp:heading -->';
+    $res = $fix->process($src);
+    assert_eq(true, $res['changed'], 'an h5 is not large text by default');
+});
+
 test('inherited group textColor is honored when computing pairs', function () {
     $src = '<!-- wp:group {"backgroundColor":"contrast","textColor":"base"} -->' . "\n"
         . '<div class="wp-block-group"><!-- wp:paragraph --><p>Light on dark, fine</p><!-- /wp:paragraph --></div>' . "\n"
