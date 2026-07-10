@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BuildReport;
+use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
@@ -11,7 +12,11 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--slug=my-slug] [--until=step-id] [--with-images] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--with-images] [--port=9400] [--no-serve]
+ *
+ * --provider=<anthropic|openai|xai> picks the model set (config/models.json):
+ * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
+ * env overrides still win. Unset falls back to LLM_PROVIDER / the config default.
  *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
  * printing per-step timing and token spend and writing the full run overview to
@@ -40,9 +45,12 @@ $until = null;
 $withImages = false;
 $port = null;
 $serve = true;
+$provider = null;
 foreach ($args as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
+    } elseif (str_starts_with($a, '--provider=')) {
+        $provider = substr($a, 11);
     } elseif (str_starts_with($a, '--until=')) {
         $until = substr($a, 8);
     } elseif (str_starts_with($a, '--port=')) {
@@ -57,8 +65,22 @@ foreach ($args as $a) {
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--slug=...] [--until=step-id] [--with-images] [--port=9400] [--no-serve]\n");
+    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai] [--slug=...] [--until=step-id] [--with-images] [--port=9400] [--no-serve]\n");
     exit(1);
+}
+
+// --provider selects the model set for the whole run. It just sets LLM_PROVIDER
+// (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
+// overrides still apply on top. Validate here for a friendly early error.
+if ($provider !== null) {
+    $provider = strtolower(trim($provider));
+    if (!ModelConfig::hasProvider($provider)) {
+        fwrite(STDERR, "Unknown --provider '{$provider}'. Known: "
+            . implode(', ', ModelConfig::providerNames()) . "\n");
+        exit(1);
+    }
+    putenv("LLM_PROVIDER={$provider}");
+    $_ENV['LLM_PROVIDER'] = $provider;
 }
 
 $llm = make_llm();

@@ -29,7 +29,28 @@ required for a normal build — not optional.
 ```bash
 php bin/build.php "A cozy neighborhood bakery"
 php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate images
+php bin/build.php "A cozy neighborhood bakery" --provider=openai   # build on GPT-5.x instead of Claude
 ```
+
+### Choosing the model / provider
+
+`--provider=<anthropic|openai|xai>` (or the `LLM_PROVIDER` env var) picks a whole
+model set at once. Each provider defines a **large** (quality-critical steps) and
+**small** (fast/cheap structural steps) model in
+[`config/models.json`](config/models.json), and each pipeline step is mapped to a
+tier there — so switching providers needs no per-step configuration. Defaults:
+
+| Provider | large | small |
+|----------|-------|-------|
+| `anthropic` (default) | `claude-opus-4-8` | `claude-haiku-4-5` |
+| `openai` | `gpt-5.5` | `gpt-5.4-mini` |
+| `xai` | `grok-4.5` | `grok-4.5` |
+
+Edit `config/models.json` to change those model ids. To override just one run or
+one step (any model id, wins over the config):
+
+- `LLM_MODEL` / `LLM_MODEL_SMALL` — the run-wide large / small tier
+- `LLM_MODEL_<STEP>` — a single step, e.g. `LLM_MODEL_SITE_SPEC=gpt-5.5`
 
 Output lands in `projects/<slug>/`. Each build also writes a run overview —
 per-step times and token spend, totals, and the image tally — to
@@ -59,6 +80,7 @@ Useful variants:
 
 ```bash
 php bin/build-demos.php --with-images --only=tbilisi     # just one demo
+php bin/build-demos.php --with-images --provider=openai  # build the set on GPT-5.x
 php bin/build-demos.php --with-images --parallel=2       # cap concurrent builds
 php bin/build-demos.php --with-images --no-screenshot    # skip the screenshots
 php bin/build-demos.php --with-images --serve            # serve all sites afterward

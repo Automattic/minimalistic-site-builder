@@ -10,6 +10,7 @@ use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\WpcomImageClient;
@@ -45,17 +46,18 @@ function llm_temperature(string $envSuffix, ?float $default): ?float
 /**
  * Build the production LLM transport from environment configuration.
  *
- * LLM_PROVIDER selects the wire client (default anthropic):
+ * LLM_PROVIDER selects the wire client (default from config/models.json):
  *   - anthropic — Anthropic Messages API (ANTHROPIC_API_KEY)
  *   - xai       — OpenAI-compatible client pointed at api.x.ai (XAI_API_KEY)
  *   - openai    — OpenAI-compatible client (OPENAI_API_KEY, optional OPENAI_BASE_URL)
  *
- * Model IDs stay in LLM_MODEL / LLM_MODEL_* (StepDefaults). For xAI set e.g.
- * LLM_MODEL=grok-4.5 and per-step overrides as needed.
+ * Model IDs come from the provider's tiers in config/models.json (StepDefaults),
+ * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
+ * model set without extra flags.
  */
 function make_llm(): Llm
 {
-    $provider = strtolower((string) Env::get('LLM_PROVIDER', 'anthropic'));
+    $provider = strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
 
     return match ($provider) {
         'anthropic', '' => new AnthropicClient(
