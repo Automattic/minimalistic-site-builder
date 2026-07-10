@@ -5,6 +5,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
+use Automattic\SiteBuild\ThemeValidator;
 
 /**
  * Unit tests for NodeBlockFixer::summaryLine and FixBlocksStep → BlockFixer.
@@ -40,11 +41,63 @@ test('FixBlocksStep delegates repair to the injected BlockFixer', function () {
     $tmp = sys_get_temp_dir() . '/sb-' . uniqid();
     mkdir($tmp . '/theme', 0775, true);
     $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"align":"full"} --><div class="wp-block-group alignfull"></div><!-- /wp:group -->'
+    );
 
     (new FixBlocksStep($fake))->run($project);
 
-    assert_eq(1, count($fake->calls), 'fix() called once');
+    assert_eq(1, count($fake->calls), 'an already-normalized file does not trigger a follow-up fix()');
     assert_eq($project->themePath(), $fake->calls[0], 'given the theme dir');
+});
+
+test('FixBlocksStep normalizes markup exposed by structural repair and re-serializes it', function () {
+    $fake = new class implements BlockFixer {
+        public int $calls = 0;
+
+        public function fix(string $themeDir): string
+        {
+            $this->calls++;
+            $path = $themeDir . '/parts/section.html';
+            $markup = (string) file_get_contents($path);
+
+            if ($this->calls === 1) {
+                // Faithfully model Node balancing the minimal malformed group.
+                file_put_contents(
+                    $path,
+                    "<!-- wp:group {\"align\":\"full\"} -->\n"
+                    . "<div class=\"wp-block-group alignfull\"></div>\n"
+                    . "<!-- /wp:group -->"
+                );
+                return '[fix-templates] first pass repaired malformed group';
+            }
+
+            assert_contains('"layout":{"type":"constrained"}', $markup);
+            return '[fix-templates] second pass re-serialized normalized group';
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/sb-' . uniqid();
+    mkdir($tmp . '/theme/parts', 0775, true);
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"align":"full"} --><div>'
+    );
+
+    try {
+        (new FixBlocksStep($fake))->run($project);
+
+        assert_eq(2, $fake->calls, 'post-repair layout change triggers one follow-up fix()');
+        assert_eq([], ThemeValidator::layoutWarnings($project));
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('first pass repaired malformed group', $log);
+        assert_contains('second pass re-serialized normalized group', $log);
+        assert_contains('post-repair normalization required a second block-fixer pass', $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('block fixer keeps the card-media class hook the card recipe relies on', function () {

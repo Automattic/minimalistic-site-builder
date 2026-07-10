@@ -80,18 +80,22 @@ For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOT
 ### Example: Complete Hero Section
 
 ```html
-<!-- wp:cover {"url":"theme:./assets/hero-mountain-dawn.jpg","dimRatio":50,"align":"full","minHeight":80,"minHeightUnit":"vh"} -->
-<div class="wp-block-cover alignfull" style="min-height:80vh">
-    <span aria-hidden="true" class="wp-block-cover__background has-background-dim-50 has-background-dim"></span>
-    <img class="wp-block-cover__image-background" alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
-    <div class="wp-block-cover__inner-container">
-        <!-- wp:heading {"textAlign":"center","textColor":"background","style":{"typography":{"fontSize":"clamp(2.5rem, 5vw, 3.5rem)"}}} -->
-        <h2 class="wp-block-heading has-text-align-center has-background-color has-text-color">Into the High Country</h2>
-        <!-- /wp:heading -->
-        <!-- wp:paragraph {"align":"center","textColor":"background"} -->
-        <p class="has-text-align-center has-background-color has-text-color">Guided treks through the alpine wilderness.</p>
-        <!-- /wp:paragraph -->
+<!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->
+<div class="wp-block-group alignfull" style="margin-top:0">
+    <!-- wp:cover {"url":"theme:./assets/hero-mountain-dawn.jpg","dimRatio":50,"align":"full","minHeight":80,"minHeightUnit":"vh"} -->
+    <div class="wp-block-cover alignfull" style="min-height:80vh">
+        <span aria-hidden="true" class="wp-block-cover__background has-background-dim-50 has-background-dim"></span>
+        <img class="wp-block-cover__image-background" alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
+        <div class="wp-block-cover__inner-container">
+            <!-- wp:heading {"level":1,"textAlign":"center","textColor":"base","fontFamily":"heading","fontSize":"display"} -->
+            <h1 class="wp-block-heading has-text-align-center has-base-color has-text-color has-heading-font-family has-display-font-size">Into the High Country</h1>
+            <!-- /wp:heading -->
+            <!-- wp:paragraph {"align":"center","textColor":"base","fontSize":"lead"} -->
+            <p class="has-text-align-center has-base-color has-text-color has-lead-font-size">Guided treks through the alpine wilderness.</p>
+            <!-- /wp:paragraph -->
+        </div>
     </div>
+    <!-- /wp:cover -->
 </div>
-<!-- /wp:cover -->
+<!-- /wp:group -->
 ```
