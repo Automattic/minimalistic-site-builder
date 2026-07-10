@@ -7,7 +7,8 @@ use Automattic\SiteBuild\ImageTransparency;
  * ImageTransparency keys the flat solid background Imagen was prompted to
  * render (it cannot produce real alpha) out to PNG transparency: a flood fill
  * inward from the image border, then an unconditional global key pass so
- * background-colored pockets enclosed by the subject go too. It fails soft —
+ * background-colored pockets enclosed by the subject go too, then a trim of
+ * the transparent margins down to the ink (plus a small pad). It fails soft —
  * undecodable bytes or a border fill that would erase the whole image return
  * the input unchanged.
  *
@@ -37,6 +38,14 @@ function alpha_at(string $pngBytes, int $x, int $y): float
     return $im->getImagePixelColor($x, $y)->getColorValue(Imagick::COLOR_ALPHA);
 }
 
+/** [width, height] of PNG bytes. */
+function png_size(string $pngBytes): array
+{
+    $im = new Imagick();
+    $im->readImageBlob($pngBytes);
+    return [$im->getImageWidth(), $im->getImageHeight()];
+}
+
 if (!ImageTransparency::available()) {
     test('image-transparency tests skipped (imagick not loaded)', function () {});
     return;
@@ -45,9 +54,10 @@ if (!ImageTransparency::available()) {
 test('keyOutBackground makes the white background transparent, keeps the subject', function () {
     $out = ImageTransparency::keyOutBackground(transparency_fixture('white', 'red'));
 
+    [$w, $h] = png_size($out);
     assert_true(alpha_at($out, 0, 0) < 0.01, 'corner background is transparent');
-    assert_true(alpha_at($out, 59, 59) < 0.01, 'opposite corner is transparent');
-    assert_true(alpha_at($out, 30, 30) > 0.99, 'subject center stays opaque');
+    assert_true(alpha_at($out, $w - 1, $h - 1) < 0.01, 'opposite corner is transparent');
+    assert_true(alpha_at($out, intdiv($w, 2), intdiv($h, 2)) > 0.99, 'subject center stays opaque');
 });
 
 test('keyOutBackground keys an off-white background via the fuzz', function () {
@@ -55,8 +65,9 @@ test('keyOutBackground keys an off-white background via the fuzz', function () {
     // absorb that.
     $out = ImageTransparency::keyOutBackground(transparency_fixture('rgb(250,247,242)', 'rgb(120,40,20)'));
 
+    [$w, $h] = png_size($out);
     assert_true(alpha_at($out, 0, 0) < 0.01, 'off-white background is keyed');
-    assert_true(alpha_at($out, 30, 30) > 0.99, 'dark subject stays opaque');
+    assert_true(alpha_at($out, intdiv($w, 2), intdiv($h, 2)) > 0.99, 'dark subject stays opaque');
 });
 
 test('keyOutBackground keys background pockets enclosed by the subject', function () {
@@ -73,9 +84,12 @@ test('keyOutBackground keys background pockets enclosed by the subject', functio
 
     $out = ImageTransparency::keyOutBackground($im->getImageBlob());
 
+    // The subject is the centered 20..40 square; after trim the pocket sits at
+    // the trimmed image's center and the ink just inside its pad.
+    [$w, $h] = png_size($out);
     assert_true(alpha_at($out, 0, 0) < 0.01, 'background is transparent');
-    assert_true(alpha_at($out, 30, 30) < 0.01, 'enclosed white pocket is keyed');
-    assert_true(alpha_at($out, 25, 25) > 0.99, 'subject stays opaque');
+    assert_true(alpha_at($out, intdiv($w, 2), intdiv($h, 2)) < 0.01, 'enclosed white pocket is keyed');
+    assert_true(alpha_at($out, intdiv($w, 2) - 5, intdiv($h, 2) - 5) > 0.99, 'subject stays opaque');
 });
 
 test('keyOutBackground keys pockets that outweigh the ink itself', function () {
@@ -95,9 +109,49 @@ test('keyOutBackground keys pockets that outweigh the ink itself', function () {
 
     $out = ImageTransparency::keyOutBackground($im->getImageBlob());
 
+    [$w, $h] = png_size($out);
+    $pad = max(2, intdiv(max($w, $h), 50));
     assert_true(alpha_at($out, 0, 0) < 0.01, 'border background is transparent');
-    assert_true(alpha_at($out, 12, 12) > 0.99, 'frame ink stays opaque');
-    assert_true(alpha_at($out, 30, 30) < 0.01, 'large enclosed interior is keyed');
+    assert_true(alpha_at($out, $pad + 2, $pad + 2) > 0.99, 'frame ink stays opaque');
+    assert_true(alpha_at($out, intdiv($w, 2), intdiv($h, 2)) < 0.01, 'large enclosed interior is keyed');
+});
+
+test('keyOutBackground keys a hairline divider instead of bailing', function () {
+    // The thinnest real asset class: a 2px hairline rule across a large white
+    // canvas (~0.5% ink). The erase-everything guard must NOT trip on it —
+    // that was shipping dividers with their white background baked in.
+    $im = new Imagick();
+    $im->newImage(400, 200, new ImagickPixel('white'));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel('rgb(193,94,60)'));
+    $draw->rectangle(20, 99, 379, 100);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+
+    $out = ImageTransparency::keyOutBackground($im->getImageBlob());
+
+    [$w, $h] = png_size($out);
+    assert_true($h < 100, 'canvas is trimmed to the hairline');
+    assert_true(alpha_at($out, intdiv($w, 2), intdiv($h, 2)) > 0.99, 'hairline ink survives');
+    assert_true(alpha_at($out, 0, 0) < 0.01, 'background around the hairline is keyed');
+});
+
+test('keyOutBackground trims the empty margin around a small ornament', function () {
+    // A small motif centered on a big canvas: the keyed asset must not keep
+    // the full canvas, or the page reserves a huge blank band for it.
+    $im = new Imagick();
+    $im->newImage(300, 300, new ImagickPixel('white'));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel('red'));
+    $draw->rectangle(140, 140, 160, 160);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+
+    $out = ImageTransparency::keyOutBackground($im->getImageBlob());
+
+    [$w, $h] = png_size($out);
+    assert_true($w < 40 && $h < 40, 'canvas shrinks to the ink plus a small pad');
+    assert_true(alpha_at($out, intdiv($w, 2), intdiv($h, 2)) > 0.99, 'ornament stays opaque');
 });
 
 test('keyOutBackground returns undecodable bytes unchanged', function () {

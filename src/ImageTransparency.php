@@ -26,6 +26,11 @@ namespace Automattic\SiteBuild;
  * outweighs the ink itself, so any "is it a deliberate white fill?" area
  * heuristic misfires on precisely the images this class exists to fix. A
  * background-colored subject fill is keyed too — the acceptable cost.
+ *
+ * After keying, the transparent margins are trimmed to the ink's bounding box
+ * (plus a small pad): Imagen centers a small ornament on a full-size canvas,
+ * and shipping all that empty margin makes the page reserve a huge blank band
+ * for a tiny motif.
  */
 final class ImageTransparency
 {
@@ -86,13 +91,16 @@ final class ImageTransparency
                 $im->floodFillPaintImage($transparent, $fuzz, $seed, $x, $y, false, \Imagick::CHANNEL_ALPHA);
             }
 
-            // If almost nothing opaque survived, the fill ate the subject too
-            // (subject color ≈ background color) — keep the original. Checked
-            // BEFORE the global pass: thin line art can legitimately end up
-            // with ~1% ink once its enclosed pockets are keyed, and must not
-            // trip this guard.
+            // If essentially nothing opaque survived, the fill ate the subject
+            // too (subject color ≈ background color) — keep the original.
+            // The threshold must sit BELOW the ink share of the thinnest real
+            // asset: a hairline divider on a 1408x768 canvas is ~0.2-0.8% ink,
+            // and a guard at 1% was returning those with their white background
+            // baked in — a white box on the page, the worst outcome this class
+            // exists to prevent. A true wipeout keys everything, so 0.05%
+            // still catches it while every hairline passes.
             $alpha = $im->getImageChannelMean(\Imagick::CHANNEL_ALPHA);
-            if (($alpha['mean'] ?? 0) / \Imagick::getQuantum() < 0.01) {
+            if (($alpha['mean'] ?? 0) / \Imagick::getQuantum() < 0.0005) {
                 return $pngBytes;
             }
 
@@ -104,10 +112,45 @@ final class ImageTransparency
                 $im->transparentPaintImage($seed, 0.0, $fuzz, false);
             }
 
+            self::trimToInk($im);
+
             $im->setImageFormat('png');
             return $im->getImageBlob();
         } catch (\Throwable) {
             return $pngBytes;
+        }
+    }
+
+    /**
+     * Crop the now-transparent margins down to the ink's bounding box plus a
+     * small transparent pad. Imagen centers a small ornament on a full-size
+     * canvas, so after keying, most of the asset is empty margin — which the
+     * page then reserves layout space for (a hairline rule shipped as a
+     * 1408x768 image renders as a huge blank band with a line in the middle).
+     * Trimming makes the asset's canvas mean what it shows. Failure-soft: any
+     * trim error leaves the image as it was.
+     */
+    private static function trimToInk(\Imagick $im): void
+    {
+        try {
+            $trimmed = clone $im;
+            $trimmed->trimImage(0.0);
+            $tw = $trimmed->getImageWidth();
+            $th = $trimmed->getImageHeight();
+            if ($tw < 1 || $th < 1 || ($tw === $im->getImageWidth() && $th === $im->getImageHeight())) {
+                return;
+            }
+            $trimmed->setImagePage(0, 0, 0, 0);
+
+            // A sliver of breathing room so anti-aliased edges don't sit on
+            // the canvas edge; proportional, at least a couple of pixels.
+            $pad = max(2, intdiv(max($tw, $th), 50));
+            $trimmed->setImageBackgroundColor(new \ImagickPixel('transparent'));
+            $trimmed->extentImage($tw + 2 * $pad, $th + 2 * $pad, -$pad, -$pad);
+
+            $im->setImage($trimmed);
+        } catch (\Throwable) {
+            // keep the untrimmed image
         }
     }
 }
