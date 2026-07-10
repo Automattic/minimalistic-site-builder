@@ -1,0 +1,29 @@
+================================================================================
+BUILD REPORT — portfolio7
+================================================================================
+Prompt       : Create a minimalist website for my photo-journalism portfolio. I'm an Argentinean photo-journalist based in Buenos Aires. I covered the most important social and political events of the country in the last 20 years.
+Generated at : 2026-07-10T15:28:12+00:00
+Output       : /home/matias/dev/a8c/builder4/projects/portfolio7
+
+Steps
+--------------------------------------------------------------------------------
+  scaffold-theme               0.0s            0 tok
+  refine-prompt                2.6s          666 tok
+  site-spec                    1.8s        1,340 tok
+  apply-identity               0.0s            0 tok
+  design-direction            19.7s        4,643 tok
+  theme-json+section-plan     68.7s       12,572 tok
+  sections                    85.5s      112,305 tok
+  assemble-landing-page        0.0s            0 tok
+  collect-images               0.0s            0 tok
+  fix-blocks                   8.6s            0 tok
+  page-styles                  7.6s        5,886 tok
+  fonts-php                    7.8s        1,679 tok
+  finalize-theme               0.0s            0 tok
+  generate-images             28.6s            0 tok
+--------------------------------------------------------------------------------
+  TOTAL                      231.0s      139,091 tok  (93,870 in + 45,221 out)
+
+LLM requests : 16
+Images: 15 generated, 0 failed (15 total)
+================================================================================

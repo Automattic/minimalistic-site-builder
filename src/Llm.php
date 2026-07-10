@@ -7,7 +7,7 @@ namespace Automattic\SiteBuild;
  * Transport-agnostic LLM interface. Implementations call a single prompt and
  * return the model's text. Keeping this an interface lets steps depend on the
  * contract while tests inject a fake and production injects the real transport
- * (today Anthropic-direct; a wpcom-proxy transport could be swapped in later).
+ * (AnthropicClient or OpenAiCompatibleClient via make_llm() / LLM_PROVIDER).
  */
 interface Llm
 {
