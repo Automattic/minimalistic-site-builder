@@ -36,6 +36,26 @@ final class Project
     }
 
     /**
+     * Absolute paths of every generated block-markup file: the theme's parts
+     * and templates plus the content plugin's page files. Markup-scanning
+     * consumers (page-styles, fonts-php, validator warnings) read the site
+     * through this one lens so content living in the plugin is never
+     * invisible to them.
+     *
+     * @return string[]
+     */
+    public function markupFiles(): array
+    {
+        $files = [];
+        foreach ([$this->themePath('parts'), $this->themePath('templates'), $this->pluginPath('pages')] as $dir) {
+            foreach (glob($dir . '/*.html') ?: [] as $file) {
+                $files[] = $file;
+            }
+        }
+        return $files;
+    }
+
+    /**
      * Absolute path under the project's logs/ directory, creating it on demand.
      * Steps route their verbose output here (one file per step) so the console
      * stays a concise summary and the full detail is kept for inspection.

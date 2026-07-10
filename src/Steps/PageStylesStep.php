@@ -142,18 +142,18 @@ final class PageStylesStep implements Step
     }
 
     /**
-     * Which documented utility classes the built theme actually references,
-     * scanning the final parts and templates.
+     * Which documented utility classes the built site actually references,
+     * scanning the final theme parts/templates AND the content plugin's pages
+     * — content markup renders with the theme stylesheet, so a class used
+     * only in a seeded page still needs its CSS here.
      *
      * @return string[]
      */
     public static function usedClasses(Project $project): array
     {
         $markup = '';
-        foreach (['parts', 'templates'] as $dir) {
-            foreach (glob($project->themePath($dir) . '/*.html') ?: [] as $file) {
-                $markup .= "\n" . (string) file_get_contents($file);
-            }
+        foreach ($project->markupFiles() as $file) {
+            $markup .= "\n" . (string) file_get_contents($file);
         }
         return self::classesIn($markup);
     }

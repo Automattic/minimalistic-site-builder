@@ -13,7 +13,7 @@ function validator_project(): array
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $ok = '<!-- wp:template-part {"slug":"header"} /--><!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->';
     $project->writeText('theme/templates/index.html', $ok);
-    $project->writeText('theme/templates/front-page.html', $ok);
+    $project->writeText('theme/templates/page.html', $ok);
     $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
     $project->writeText('theme/parts/footer.html', '<!-- wp:paragraph --><p>f</p><!-- /wp:paragraph -->');
     return [$project, $tmp];
@@ -28,7 +28,7 @@ test('validator passes a well-formed theme', function () {
 test('validator flags unbalanced block comments', function () {
     [$project, $tmp] = validator_project();
     // Opening with no close.
-    $project->writeText('theme/templates/front-page.html', '<!-- wp:group --><div>oops</div>');
+    $project->writeText('theme/templates/page.html', '<!-- wp:group --><div>oops</div>');
     $problems = ThemeValidator::validate($project);
     assert_true(count($problems) > 0, 'should report a problem');
     assert_contains('unbalanced', implode(' ', $problems));
@@ -118,5 +118,19 @@ test('validator flags bad theme.json and leftover placeholders', function () {
     $joined = implode(' ', $problems);
     assert_contains('theme.json', $joined);
     assert_contains('placeholder', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator checks the content plugin pages for balance and placeholders', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText('plugin/pages/home.html', '<!-- wp:group --><div>oops, never closed</div>');
+    $project->writeText('plugin/pages/menu.html', '<!-- wp:paragraph --><p>{{TITLE}}</p><!-- /wp:paragraph -->');
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('plugin/pages/home.html', $joined);
+    assert_contains('unbalanced', $joined);
+    assert_contains('plugin/pages/menu.html', $joined);
+    assert_contains('placeholder', $joined);
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });

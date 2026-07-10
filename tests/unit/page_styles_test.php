@@ -168,3 +168,15 @@ test('run rejects invalid CSS, leaves style.css untouched, and logs the problems
     assert_contains('not scoped', $project->readText('logs/page-styles.log'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('usedClasses sees classes that only appear in the content plugin pages', function () {
+    [$project, $tmp] = ps_project('builder_ps_plug_');
+    $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:group {"className":"hover-lift"} --><div class="wp-block-group hover-lift">x</div><!-- /wp:group -->'
+    );
+
+    assert_eq(['hover-lift'], PageStylesStep::usedClasses($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

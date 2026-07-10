@@ -36,16 +36,25 @@ final class ThemeValidator
             }
         }
 
-        // Required block files exist and have balanced block grammar.
+        // Required block files exist and have balanced block grammar. The
+        // content plugin's page files carry the site's actual markup now, so
+        // they get the same balance + placeholder checks when present.
         $required = [
             'theme/templates/index.html',
-            'theme/templates/front-page.html',
+            'theme/templates/page.html',
             'theme/parts/header.html',
             'theme/parts/footer.html',
         ];
-        foreach ($required as $rel) {
+        $checked = $required;
+        foreach (glob($project->pluginPath('pages') . '/*.html') ?: [] as $abs) {
+            $checked[] = 'plugin/pages/' . basename($abs);
+        }
+
+        foreach ($checked as $rel) {
             if (!$project->exists($rel)) {
-                $problems[] = "missing {$rel}";
+                if (in_array($rel, $required, true)) {
+                    $problems[] = "missing {$rel}";
+                }
                 continue;
             }
             $balanceProblem = self::blockBalance($project->readText($rel));
@@ -54,8 +63,8 @@ final class ThemeValidator
             }
         }
 
-        // Leftover unfilled placeholders anywhere in the theme.
-        foreach ($required as $rel) {
+        // Leftover unfilled placeholders anywhere in the generated markup.
+        foreach ($checked as $rel) {
             if ($project->exists($rel) && preg_match('/\{\{\s*[a-zA-Z0-9_]+\s*\}\}/', $project->readText($rel))) {
                 $problems[] = "{$rel}: contains unfilled {{placeholder}}";
             }
@@ -75,10 +84,7 @@ final class ThemeValidator
     public static function typographyWarnings(Project $project): array
     {
         $warnings = [];
-        $files = array_merge(
-            glob($project->themePath('parts') . '/*.html') ?: [],
-            glob($project->themePath('templates') . '/*.html') ?: []
-        );
+        $files = $project->markupFiles();
 
         $theme = $project->exists('theme/theme.json')
             ? json_decode($project->readText('theme/theme.json'), true)

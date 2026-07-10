@@ -699,14 +699,16 @@ final class FontsPhpStep implements Step
         }
     }
 
-    /** All generated parts + templates concatenated, for the usage scan. */
+    /**
+     * All generated markup concatenated for the usage scan: theme parts +
+     * templates + the content plugin's pages (a font style used only in
+     * seeded content must still be loaded by the theme).
+     */
     private static function themeMarkup(Project $project): string
     {
         $markup = '';
-        foreach (['parts', 'templates'] as $dir) {
-            foreach (glob($project->themePath($dir) . '/*.html') ?: [] as $file) {
-                $markup .= "\n" . (string) file_get_contents($file);
-            }
+        foreach ($project->markupFiles() as $file) {
+            $markup .= "\n" . (string) file_get_contents($file);
         }
         return $markup;
     }
