@@ -72,11 +72,13 @@ final class CoverContrastStep implements Step
         $themeJson = $project->readJson('theme/theme.json');
         $palette = ContrastFixStep::paletteMap($themeJson);
         $gradients = ContrastFixStep::gradientMap($themeJson);
+        $globalLink = $themeJson['styles']['elements']['link']['color']['text'] ?? null;
         $helper = new ContrastFix($palette, $gradients, fontSizes: ContrastFixStep::fontSizeMap($themeJson));
+        $linkDefault = is_string($globalLink) ? $helper->resolveColorValue($globalLink) : null;
 
         $report = [];
         $repaired = 0;
-        $changedFiles = false;
+        $written = []; // rel => original markup, for rollback on fixer failure
 
         if (!extension_loaded('imagick')) {
             $report[] = 'cover-contrast: imagick not available — covers not verified against images';
@@ -84,11 +86,12 @@ final class CoverContrastStep implements Step
             foreach (['parts', 'templates'] as $dir) {
                 foreach (glob($project->themePath($dir . '/*.html')) ?: [] as $abs) {
                     $rel = $dir . '/' . basename($abs);
-                    $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
-                    $fileRepairs = $this->fixCovers($project, $doc, $helper, $rel, $report);
+                    $original = $project->readText('theme/' . $rel);
+                    $doc = BlockMarkup::parse($original);
+                    $fileRepairs = $this->fixCovers($project, $doc, $helper, $linkDefault, $rel, $report);
                     if ($fileRepairs > 0) {
                         $project->writeText('theme/' . $rel, $doc->render());
-                        $changedFiles = true;
+                        $written[$rel] = $original;
                         $repaired += $fileRepairs;
                     }
                 }
@@ -98,7 +101,7 @@ final class CoverContrastStep implements Step
         // Re-sync the saved HTML with the rewritten attributes, and re-assert
         // the header/footer layout contract the fixer can migrate away
         // (same follow-up FixBlocksStep does).
-        if ($changedFiles) {
+        if ($written !== []) {
             try {
                 $this->fixer->fix($project->themePath());
                 foreach (['parts/header.html', 'parts/footer.html'] as $rel) {
@@ -112,7 +115,15 @@ final class CoverContrastStep implements Step
                     }
                 }
             } catch (\RuntimeException $e) {
-                $report[] = 'cover-contrast: block re-serialization failed: ' . $e->getMessage();
+                // The repaired attributes were already persisted with the OLD
+                // saved HTML — without the fixer's re-serialization that drift
+                // would ship. Restore the originals instead of keeping it.
+                foreach ($written as $rel => $original) {
+                    $project->writeText('theme/' . $rel, $original);
+                }
+                $repaired = 0;
+                $report[] = 'cover-contrast: block re-serialization failed, cover repairs rolled back: '
+                    . $e->getMessage();
             }
         }
 
@@ -136,9 +147,10 @@ final class CoverContrastStep implements Step
      * Find every image-backed cover with inner text in a parsed document and
      * repair the failing ones in place. Returns how many covers changed.
      *
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string}|null $linkDefault
      * @param list<string> $report
      */
-    private function fixCovers(Project $project, BlockMarkup $doc, ContrastFix $helper, string $rel, array &$report): int
+    private function fixCovers(Project $project, BlockMarkup $doc, ContrastFix $helper, ?array $linkDefault, string $rel, array &$report): int
     {
         $repairs = 0;
         foreach ($doc->indices() as $i) {
@@ -150,7 +162,10 @@ final class CoverContrastStep implements Step
             if (!is_string($url) || ($path = $this->assetPath($project, $url)) === null) {
                 continue;
             }
-            $texts = $this->coverTexts($doc, $i, $helper);
+            // Core renders unstyled cover text white (black with is-light) —
+            // not the theme's contrast default.
+            $coverDefault = ($attrs['isDark'] ?? true) === false ? [0, 0, 0] : [255, 255, 255];
+            $texts = $this->coverTexts($doc, $i, $helper, $coverDefault);
             if ($texts === []) {
                 continue;
             }
@@ -180,7 +195,19 @@ final class CoverContrastStep implements Step
                 ContrastMath::luminance($image[count($image) - 1])
             );
 
-            if ($plan['dim'] === $dim && $plan['swaps'] === [] && $plan['overlay'] === null) {
+            // Anchors inside the cover follow elements.link, not textColor —
+            // phase one deferred them because the background was unknown, so
+            // they must be checked here, against the plan's final state.
+            $finalOverlay = $plan['overlay'] !== null
+                ? [['rgb' => $candidates[$plan['overlay']], 'alpha' => 1.0]]
+                : $overlay;
+            $linkFixes = $this->planCoverLinks(
+                $doc, $i, $helper, $texts, $linkDefault,
+                $finalOverlay, $plan['dim'], $image, $candidates, $rel, $report
+            );
+
+            if ($plan['dim'] === $dim && $plan['swaps'] === [] && $plan['overlay'] === null
+                && $linkFixes === []) {
                 $report[] = "[{$rel}] cover ok at dimRatio {$dim} ({$luma})";
                 continue;
             }
@@ -224,13 +251,17 @@ final class CoverContrastStep implements Step
                     $doc->replaceInOwnHtml($textIndex, "has-{$oldSlug}-color", "has-{$slug}-color");
                 }
             }
+            foreach ($linkFixes as $target => $slug) {
+                $this->pinLinkColor($doc, $target, $helper, $slug, $finalOverlay, $plan['dim'], $image);
+            }
             $repairs++;
 
             $report[] = sprintf(
-                '[%s] cover repaired: dimRatio %d → %d%s%s (%s)%s',
+                '[%s] cover repaired: dimRatio %d → %d%s%s%s (%s)%s',
                 $rel, $dim, $plan['dim'],
                 $plan['overlay'] === null ? '' : ", overlay → solid {$plan['overlay']} (designed overlay ineffective behind the content)",
                 $plan['swaps'] === [] ? '' : ', text → ' . implode(', ', array_unique($plan['swaps'])),
+                $linkFixes === [] ? '' : ', links → ' . implode(', ', array_unique($linkFixes)),
                 $luma,
                 $plan['pass'] ? '' : ' — still below threshold at max dim, best effort'
             );
@@ -399,12 +430,18 @@ final class CoverContrastStep implements Step
 
     /**
      * The text rows inside one cover: every text-bearing leaf with its
-     * effective color (explicit, inherited within the cover, or the theme's
-     * `contrast` default) and WCAG threshold (3:1 for heading-scale blocks).
+     * effective color (explicit, inherited within the cover, or core's
+     * white/black cover default) and WCAG threshold. Descendants that paint
+     * their own background (an opaque group inside the cover) are skipped
+     * entirely: their text does not sit on the photograph — phase one
+     * already judged it against the real background, and "repairing" it
+     * against the image would break a correct result.
      *
-     * @return list<array{index:int, rgb: array{0:int,1:int,2:int}, threshold: float}>
+     * @param array{0:int,1:int,2:int} $inherited effective inherited color
+     * @return list<array{index:int, rgb: array{0:int,1:int,2:int}, ownSlug: ?string,
+     *                    threshold: float, hasAnchor: bool}>
      */
-    private function coverTexts(BlockMarkup $doc, int $cover, ContrastFix $helper, ?array $inherited = null): array
+    private function coverTexts(BlockMarkup $doc, int $cover, ContrastFix $helper, array $inherited): array
     {
         $attrs = $doc->attrs($cover) ?? [];
         $own = null;
@@ -417,10 +454,15 @@ final class CoverContrastStep implements Step
 
         $rows = [];
         foreach ($doc->children($cover) as $child) {
+            $childAttrs = $doc->attrs($child) ?? [];
+            // Nested covers own their background; so does anything painting
+            // its own — stop at both boundaries.
+            if ($doc->name($child) === 'cover' || self::paintsOwnBackground($childAttrs)) {
+                continue;
+            }
             $name = $doc->name($child);
             if (in_array($name, ['paragraph', 'heading', 'list', 'quote', 'pullquote', 'verse', 'site-title'], true)
                 && ContrastFix::visibleText($doc->innerHtml($child)) !== '') {
-                $childAttrs = $doc->attrs($child) ?? [];
                 $ownSlug = is_string($childAttrs['textColor'] ?? null)
                     && $helper->rgbFor($childAttrs['textColor']) !== null
                     ? $childAttrs['textColor'] : null;
@@ -429,18 +471,25 @@ final class CoverContrastStep implements Step
                     'rgb'       => $this->coverTextColor($doc, $child, $helper, $inherited),
                     'ownSlug'   => $ownSlug,
                     'threshold' => $helper->textThreshold($name, $childAttrs),
+                    'hasAnchor' => stripos($doc->innerHtml($child), '<a ') !== false,
                 ];
             }
-            // Nested covers own their background; stop at their boundary.
-            if ($name !== 'cover') {
-                $rows = array_merge($rows, $this->coverTexts($doc, $child, $helper, $inherited));
-            }
+            $rows = array_merge($rows, $this->coverTexts($doc, $child, $helper, $inherited));
         }
         return $rows;
     }
 
-    /** @param array{0:int,1:int,2:int}|null $inherited @return array{0:int,1:int,2:int} */
-    private function coverTextColor(BlockMarkup $doc, int $i, ContrastFix $helper, ?array $inherited): array
+    /** Whether a block paints its own background (color or gradient). */
+    private static function paintsOwnBackground(array $attrs): bool
+    {
+        return is_string($attrs['backgroundColor'] ?? null)
+            || is_string($attrs['style']['color']['background'] ?? null)
+            || is_string($attrs['gradient'] ?? null)
+            || is_string($attrs['style']['color']['gradient'] ?? null);
+    }
+
+    /** @param array{0:int,1:int,2:int} $inherited @return array{0:int,1:int,2:int} */
+    private function coverTextColor(BlockMarkup $doc, int $i, ContrastFix $helper, array $inherited): array
     {
         $attrs = $doc->attrs($i) ?? [];
         if (is_string($attrs['textColor'] ?? null) && ($rgb = $helper->rgbFor($attrs['textColor'])) !== null) {
@@ -450,7 +499,130 @@ final class CoverContrastStep implements Step
             && ($resolved = $helper->resolveColorValue($attrs['style']['color']['text'])) !== null) {
             return $resolved['rgb'];
         }
-        return $inherited ?? $helper->rgbFor('contrast') ?? [0, 0, 0];
+        return $inherited;
+    }
+
+    /**
+     * Check every distinct link-color source among the cover's anchor-bearing
+     * texts against the final overlay state, and decide the repairs: node
+     * (authoring block, or the cover for inherited colors) => passing slug.
+     * Failures nothing rescues are reported as warnings.
+     *
+     * @param list<array{index:int, rgb: array{0:int,1:int,2:int}, ownSlug: ?string,
+     *                    threshold: float, hasAnchor: bool}> $texts
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string}|null $linkDefault
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @param list<array{0:int,1:int,2:int}> $image
+     * @param array<string, array{0:int,1:int,2:int}> $candidates
+     * @param list<string> $report
+     * @return array<int,string> node index => link color slug
+     */
+    private function planCoverLinks(
+        BlockMarkup $doc,
+        int $cover,
+        ContrastFix $helper,
+        array $texts,
+        ?array $linkDefault,
+        array $overlay,
+        int $dim,
+        array $image,
+        array $candidates,
+        string $rel,
+        array &$report,
+    ): array {
+        $sources = []; // fromNode key => {rgb, label, fromNode}
+        foreach ($texts as $row) {
+            if (!$row['hasAnchor']) {
+                continue;
+            }
+            $ctx = $this->linkContextFor($doc, $row['index'], $helper, $linkDefault);
+            if ($ctx !== null) {
+                $sources[$ctx['fromNode'] ?? -1] ??= $ctx;
+            }
+        }
+
+        $fixes = [];
+        foreach ($sources as $ctx) {
+            $ratio = self::minRatio($ctx['rgb'], $overlay, $dim, $image);
+            if ($ratio >= ContrastMath::NORMAL_TEXT) {
+                continue;
+            }
+            $bestSlug = null;
+            $bestRatio = 0.0;
+            foreach ($candidates as $slug => $rgb) {
+                $r = self::minRatio($rgb, $overlay, $dim, $image);
+                if ($r > $bestRatio) {
+                    $bestRatio = $r;
+                    $bestSlug = $slug;
+                }
+            }
+            if ($bestSlug === null || $bestRatio < ContrastMath::NORMAL_TEXT) {
+                $report[] = sprintf(
+                    '[%s] cover links %s: %.2f < %.1f against the image and no candidate passes (warning)',
+                    $rel, $ctx['label'], $ratio, ContrastMath::NORMAL_TEXT
+                );
+                continue;
+            }
+            // Repair where the failing color was authored when that block is
+            // inside the cover; inherited/global colors are pinned on the cover.
+            $target = $ctx['fromNode'];
+            $fixes[$target !== null && $this->isWithin($doc, $target, $cover) ? $target : $cover] = $bestSlug;
+        }
+        return $fixes;
+    }
+
+    /**
+     * The link color anchors under $node render: the nearest authored
+     * elements.link on it or an ancestor, else the theme's global default.
+     *
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string}|null $linkDefault
+     * @return array{rgb: array{0:int,1:int,2:int}, label: string, fromNode: ?int}|null
+     */
+    private function linkContextFor(BlockMarkup $doc, int $node, ContrastFix $helper, ?array $linkDefault): ?array
+    {
+        for ($i = $node; $i !== null; $i = $doc->parent($i)) {
+            $value = ($doc->attrs($i) ?? [])['style']['elements']['link']['color']['text'] ?? null;
+            if (is_string($value) && ($resolved = $helper->resolveColorValue($value)) !== null) {
+                return ['rgb' => $resolved['rgb'], 'label' => $resolved['label'], 'fromNode' => $i];
+            }
+        }
+        if ($linkDefault !== null) {
+            return ['rgb' => $linkDefault['rgb'], 'label' => $linkDefault['label'] . ' (theme default)', 'fromNode' => null];
+        }
+        $primary = $helper->rgbFor('primary');
+        return $primary === null ? null
+            : ['rgb' => $primary, 'label' => 'primary (theme default)', 'fromNode' => null];
+    }
+
+    private function isWithin(BlockMarkup $doc, int $node, int $ancestor): bool
+    {
+        for ($i = $node; $i !== null; $i = $doc->parent($i)) {
+            if ($i === $ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Set elements.link (and a readable hover) on a node. An authored hover
+     * that reads against the final overlay state is preserved.
+     *
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @param list<array{0:int,1:int,2:int}> $image
+     */
+    private function pinLinkColor(BlockMarkup $doc, int $i, ContrastFix $helper, string $slug, array $overlay, int $dim, array $image): void
+    {
+        $attrs = $doc->attrs($i) ?? [];
+        $attrs['style']['elements']['link']['color']['text'] = 'var:preset|color|' . $slug;
+        $authored = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
+        $authoredPasses = is_string($authored)
+            && ($resolved = $helper->resolveColorValue($authored)) !== null
+            && self::minRatio($resolved['rgb'], $overlay, $dim, $image) >= ContrastMath::NORMAL_TEXT;
+        if (!$authoredPasses) {
+            $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $slug;
+        }
+        $doc->setAttrs($i, $attrs);
     }
 
     /**

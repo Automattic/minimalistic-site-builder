@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
 
 const COVER_WHITE = [255, 255, 255];
@@ -142,6 +145,118 @@ test('gradient overlays: stop selection respects the gradient direction', functi
     assert_eq($overlay, CoverContrastStep::overlayForPosition($overlay, 'bottom left', $angled));
     $horizontal = 'linear-gradient(to right, rgba(0,0,0,0.1), rgba(0,0,0,0.8))';
     assert_eq($overlay, CoverContrastStep::overlayForPosition($overlay, 'top left', $horizontal));
+});
+
+/** Scaffold a temp project with theme.json, one template and a flat cover image. */
+function cover_step_project(string $markup, string $imageColor): array
+{
+    $tmp = sys_get_temp_dir() . '/builder_cover_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version'  => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#1D4ED8', 'name' => 'Primary'],
+        ]]],
+        'styles'   => ['elements' => ['link' => ['color' => ['text' => 'var(--wp--preset--color--primary)']]]],
+    ]);
+    $project->writeText('theme/templates/front-page.html', $markup);
+    $im = new Imagick();
+    $im->newImage(64, 64, new ImagickPixel($imageColor));
+    $im->setImageFormat('png');
+    $project->writeText('theme/assets/hero.png', $im->getImageBlob());
+    return [$project, $tmp];
+}
+
+function cover_step_run(Project $project, bool $failFixer = false): void
+{
+    $fixer = $failFixer
+        ? new class implements BlockFixer {
+            public function fix(string $themeDir): string
+            {
+                throw new \RuntimeException('node exploded');
+            }
+        }
+        : new class implements BlockFixer {
+            public function fix(string $themeDir): string
+            {
+                return 'block-fixer: ok';
+            }
+        };
+    ob_start();
+    (new CoverContrastStep($fixer))->run($project);
+    ob_end_clean();
+}
+
+test('cover links are checked against the real image and pinned on the cover', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    // White text passes on the black photo, but the anchor renders the
+    // theme's primary link default — unreadable on black. Phase one deferred
+    // it (unknown background); this step must catch and pin it.
+    $markup = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":50} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph {"textColor":"base"} --><p><a href="/menu">See the menu</a></p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    [$project, $tmp] = cover_step_project($markup, 'black');
+    cover_step_run($project);
+    $out = $project->readText('theme/templates/front-page.html');
+    assert_contains('"link":{"color":{"text":"var:preset|color|base"}', $out, 'cover must pin a readable link color');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('cover text inside an opaque descendant background is left alone', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    // The group paints base; its contrast text is correct (phase one's call).
+    // Judging it against the black photo would wrongly flip it to base.
+    $markup = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":50} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:group {"backgroundColor":"base"} --><div class="wp-block-group has-base-background-color has-background">'
+        . '<!-- wp:paragraph {"textColor":"contrast"} --><p>Dark on light, correct</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    [$project, $tmp] = cover_step_project($markup, 'black');
+    cover_step_run($project);
+    $out = $project->readText('theme/templates/front-page.html');
+    assert_contains('{"textColor":"contrast"}', $out, 'text on its own background must not be swapped');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('unstyled cover text is modeled as core white, not theme contrast', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    // On a bright photo the old contrast-default model passed at dim 40;
+    // WordPress actually renders white, which fails — the dim must rise.
+    $markup = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":40} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    [$project, $tmp] = cover_step_project($markup, 'white');
+    cover_step_run($project);
+    $out = $project->readText('theme/templates/front-page.html');
+    assert_true(!str_contains($out, '"dimRatio":40'), 'a bright image under white text cannot stay at dim 40');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a fixer failure rolls the persisted cover repairs back', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    $markup = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":40} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    [$project, $tmp] = cover_step_project($markup, 'white');
+    cover_step_run($project, failFixer: true);
+    assert_eq($markup, $project->readText('theme/templates/front-page.html'),
+        'attribute edits must not ship without the fixer re-sync');
+    assert_contains('rolled back', $project->readText('logs/contrast-report.txt'));
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('regionStats measures the sampled half and spreads low/high on a split image', function () {

@@ -146,6 +146,13 @@ final class ContrastFix
 
         // Does this block paint a new background for its subtree?
         if ($name === 'cover') {
+            // Core renders unstyled cover text white (black with is-light);
+            // inherited and theme-default colors don't reach inside a cover.
+            if ($own === null) {
+                $textCtx = ($attrs['isDark'] ?? true) === false
+                    ? ['rgb' => [0, 0, 0], 'label' => 'cover default (black)', 'node' => null]
+                    : ['rgb' => [255, 255, 255], 'label' => 'cover default (white)', 'node' => null];
+            }
             $hasImage = is_string($attrs['url'] ?? null) && trim((string) $attrs['url']) !== ''
                 || ($attrs['useFeaturedImage'] ?? false) === true;
             $dim = (int) ($attrs['dimRatio'] ?? 100); // block.json default

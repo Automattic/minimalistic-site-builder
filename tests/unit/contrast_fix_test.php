@@ -241,14 +241,39 @@ test('cover with image, text and a healthy dim is untouched; text inside deferre
 });
 
 test('imageless cover composites its overlay over the parent background', function () {
-    // contrast overlay at dimRatio 100 over base = solid dark band; default
-    // text (contrast) inside is invisible → flipped to base.
+    // base overlay at dimRatio 100 over base = solid light band; core's
+    // default cover text (white) is invisible on it → flipped to contrast.
+    $src = '<!-- wp:cover {"overlayColor":"base","dimRatio":100} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Light band copy</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('cover default (white)', $res['findings'][0]['detail']);
+    assert_contains('<!-- wp:paragraph {"textColor":"contrast"} -->', $res['markup']);
+});
+
+test('imageless dark cover: core white default already reads, nothing to fix', function () {
+    // The old model assumed unstyled cover text renders `contrast` and
+    // "repaired" it to base; core actually renders white, which passes.
     $src = '<!-- wp:cover {"overlayColor":"contrast","dimRatio":100} -->' . "\n"
         . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
         . '<!-- wp:paragraph --><p>Dark band copy</p><!-- /wp:paragraph -->'
         . '</div></div>' . "\n" . '<!-- /wp:cover -->';
     $res = contrast_fix()->process($src);
+    assert_eq(false, $res['changed']);
+    assert_eq([], $res['findings']);
+});
+
+test('is-light covers model the black default', function () {
+    // isDark:false renders black inner text; on a dark band it must flip.
+    $src = '<!-- wp:cover {"overlayColor":"contrast","dimRatio":100,"isDark":false} -->' . "\n"
+        . '<div class="wp-block-cover is-light"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Dark band copy</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    $res = contrast_fix()->process($src);
     assert_eq(true, $res['changed']);
+    assert_contains('cover default (black)', $res['findings'][0]['detail']);
     assert_contains('<!-- wp:paragraph {"textColor":"base"} -->', $res['markup']);
 });
 
