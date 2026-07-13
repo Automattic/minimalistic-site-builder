@@ -26,50 +26,69 @@
 
 @media (prefers-reduced-motion: no-preference) {
 
-    /* ── Scroll reveals (motion.js adds .is-visible on intersection) ───── */
+    /* ── Scroll reveals (motion.js adds .is-visible on intersection) ─────
+       Revealed by an ANIMATION with `backwards` fill (not a transition, and
+       not `both`): the resting state after the entrance is the element's own
+       plain styles, so its transition/transform stay free for hover effects
+       (hover-lift on a revealed card keeps its own timing and travel). */
 
     html.js .reveal,
     html.js .reveal-up,
     html.js .reveal-fade,
-    html.js .reveal-scale {
+    html.js .reveal-scale,
+    html.js .stagger-children > * {
         opacity: 0;
-        transition:
-            opacity var(--motion-duration) var(--motion-ease),
-            transform var(--motion-duration) var(--motion-ease);
     }
-    html.js .reveal { transform: translateY(calc(var(--motion-distance) * 0.5)); }
-    html.js .reveal-up { transform: translateY(var(--motion-distance)); }
-    html.js .reveal-scale { transform: scale(0.94); }
 
-    html.js .reveal.is-visible,
-    html.js .reveal-up.is-visible,
-    html.js .reveal-fade.is-visible,
+    html.js .reveal.is-visible {
+        opacity: 1;
+        animation: motion-reveal var(--motion-duration) var(--motion-ease) backwards;
+    }
+    html.js .reveal-up.is-visible {
+        opacity: 1;
+        animation: motion-reveal-up var(--motion-duration) var(--motion-ease) backwards;
+    }
+    html.js .reveal-fade.is-visible {
+        opacity: 1;
+        animation: motion-reveal-fade var(--motion-duration) var(--motion-ease) backwards;
+    }
     html.js .reveal-scale.is-visible {
         opacity: 1;
-        transform: none;
+        animation: motion-reveal-scale var(--motion-duration) var(--motion-ease) backwards;
     }
 
     /* Staggered card/column reveals: the CONTAINER carries the class and is
-       observed; only its direct children hide and cascade in. */
-    html.js .stagger-children > * {
-        opacity: 0;
-        transform: translateY(var(--motion-distance));
-        transition:
-            opacity var(--motion-duration) var(--motion-ease),
-            transform var(--motion-duration) var(--motion-ease);
-    }
+       observed; only its direct children hide and cascade in (the backwards
+       fill keeps a delayed child at the keyframe start until its turn). */
     html.js .stagger-children.is-visible > * {
         opacity: 1;
-        transform: none;
+        animation: motion-reveal-up var(--motion-duration) var(--motion-ease) backwards;
     }
-    .stagger-children > *:nth-child(2) { transition-delay: var(--motion-stagger); }
-    .stagger-children > *:nth-child(3) { transition-delay: calc(var(--motion-stagger) * 2); }
-    .stagger-children > *:nth-child(4) { transition-delay: calc(var(--motion-stagger) * 3); }
-    .stagger-children > *:nth-child(5) { transition-delay: calc(var(--motion-stagger) * 4); }
-    .stagger-children > *:nth-child(6) { transition-delay: calc(var(--motion-stagger) * 5); }
-    .stagger-children > *:nth-child(7) { transition-delay: calc(var(--motion-stagger) * 6); }
-    .stagger-children > *:nth-child(8) { transition-delay: calc(var(--motion-stagger) * 7); }
-    .stagger-children > *:nth-child(n + 9) { transition-delay: calc(var(--motion-stagger) * 8); }
+    html.js .stagger-children.is-visible > *:nth-child(2) { animation-delay: var(--motion-stagger); }
+    html.js .stagger-children.is-visible > *:nth-child(3) { animation-delay: calc(var(--motion-stagger) * 2); }
+    html.js .stagger-children.is-visible > *:nth-child(4) { animation-delay: calc(var(--motion-stagger) * 3); }
+    html.js .stagger-children.is-visible > *:nth-child(5) { animation-delay: calc(var(--motion-stagger) * 4); }
+    html.js .stagger-children.is-visible > *:nth-child(6) { animation-delay: calc(var(--motion-stagger) * 5); }
+    html.js .stagger-children.is-visible > *:nth-child(7) { animation-delay: calc(var(--motion-stagger) * 6); }
+    html.js .stagger-children.is-visible > *:nth-child(8) { animation-delay: calc(var(--motion-stagger) * 7); }
+    html.js .stagger-children.is-visible > *:nth-child(n + 9) { animation-delay: calc(var(--motion-stagger) * 8); }
+
+    @keyframes motion-reveal {
+        from { opacity: 0; transform: translateY(calc(var(--motion-distance) * 0.5)); }
+        to { opacity: 1; transform: none; }
+    }
+    @keyframes motion-reveal-up {
+        from { opacity: 0; transform: translateY(var(--motion-distance)); }
+        to { opacity: 1; transform: none; }
+    }
+    @keyframes motion-reveal-fade {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    @keyframes motion-reveal-scale {
+        from { opacity: 0; transform: scale(0.94); }
+        to { opacity: 1; transform: none; }
+    }
 
     /* ── Page-load entrance (pure CSS — fires on first paint, no JS) ───── */
 
