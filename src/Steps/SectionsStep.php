@@ -128,6 +128,7 @@ final class SectionsStep implements Step
                     'design_direction' => $designDirection,
                     'outline'          => $outline,
                     'page_title'       => (string) ($page['title'] ?? ''),
+                    'page_path'        => (string) ($page['path'] ?? '/'),
                     'site_pages'       => $sitePages,
                     'section_title' => (string) ($section['title'] ?? ''),
                     'section_slug'  => (string) ($section['slug'] ?? ''),
