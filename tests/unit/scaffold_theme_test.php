@@ -30,6 +30,36 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('scaffold-theme copies the static motion kit verbatim into the theme', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    (new ScaffoldThemeStep())->run($project);
+
+    foreach (['motion.css', 'motion.js'] as $file) {
+        assert_eq(
+            file_get_contents(\Automattic\SiteBuild\Package::motionDir() . '/' . $file),
+            $project->readText('theme/assets/motion/' . $file),
+            "{$file} copied byte-for-byte"
+        );
+    }
+    foreach (['calm', 'energetic', 'dramatic', 'minimal'] as $profile) {
+        assert_true($project->exists("theme/assets/motion/profiles/{$profile}.css"), "{$profile} profile copied");
+    }
+
+    // The kit's accessibility contract: reveals hide only under the
+    // JS-set html.js scope, and everything respects reduced motion.
+    $css = $project->readText('theme/assets/motion/motion.css');
+    assert_contains('@media (prefers-reduced-motion: no-preference)', $css);
+    assert_contains('html.js .reveal', $css);
+    assert_true(!preg_match('/^\s*\.reveal[^{]*\{[^}]*opacity:\s*0/m', $css), 'no unscoped hiding');
+    $js = $project->readText('theme/assets/motion/motion.js');
+    assert_contains("classList.add('js')", $js);
+    assert_contains('prefers-reduced-motion: reduce', $js);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('scaffold-theme has stable id and label', function () {
     $s = new ScaffoldThemeStep();
     assert_eq('scaffold-theme', $s->id());

@@ -1,0 +1,7 @@
+/* Motion profile: calm — slow, gentle, gallery-like reveals. */
+:root {
+    --motion-duration: 800ms;
+    --motion-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+    --motion-distance: 16px;
+    --motion-stagger: 120ms;
+}

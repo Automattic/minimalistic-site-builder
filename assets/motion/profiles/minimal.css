@@ -1,0 +1,9 @@
+/* Motion profile: minimal — hover micro-interactions only; the motion-sanity
+   step strips every scroll/ambient class, so only the hover timing variables
+   matter here. */
+:root {
+    --motion-duration: 250ms;
+    --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-distance: 8px;
+    --motion-stagger: 40ms;
+}

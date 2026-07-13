@@ -1,0 +1,7 @@
+/* Motion profile: dramatic — long, sweeping, cinematic reveals. */
+:root {
+    --motion-duration: 950ms;
+    --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --motion-distance: 40px;
+    --motion-stagger: 140ms;
+}

@@ -1,0 +1,122 @@
+/*
+ * Motion kit — hand-written once here, shipped verbatim into every generated
+ * theme (never LLM-generated). All effects are driven by four custom
+ * properties (--motion-duration, --motion-ease, --motion-distance,
+ * --motion-stagger); a profile stylesheet (assets/motion/profiles/*.css)
+ * overrides them per site, and the page-styles step may tune them further
+ * within validated bounds via a :root block in style.css.
+ *
+ * Accessibility / progressive-enhancement contract:
+ * - EVERYTHING lives inside @media (prefers-reduced-motion: no-preference):
+ *   reduced-motion users get a fully static, fully visible page.
+ * - Scroll-reveal targets are hidden ONLY under `html.js` — a class that
+ *   motion.js itself sets. If the script never loads or IntersectionObserver
+ *   is missing, nothing is ever hidden. This preserves the intent of the
+ *   build's "never opacity:0 on generated content" validator rule.
+ * - hero-entrance and the ambient effects are pure CSS (no JS dependency)
+ *   and never end in a hidden state.
+ */
+
+:root {
+    --motion-duration: 600ms;
+    --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --motion-distance: 24px;
+    --motion-stagger: 90ms;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+
+    /* ── Scroll reveals (motion.js adds .is-visible on intersection) ───── */
+
+    html.js .reveal,
+    html.js .reveal-up,
+    html.js .reveal-fade,
+    html.js .reveal-scale {
+        opacity: 0;
+        transition:
+            opacity var(--motion-duration) var(--motion-ease),
+            transform var(--motion-duration) var(--motion-ease);
+    }
+    html.js .reveal { transform: translateY(calc(var(--motion-distance) * 0.5)); }
+    html.js .reveal-up { transform: translateY(var(--motion-distance)); }
+    html.js .reveal-scale { transform: scale(0.94); }
+
+    html.js .reveal.is-visible,
+    html.js .reveal-up.is-visible,
+    html.js .reveal-fade.is-visible,
+    html.js .reveal-scale.is-visible {
+        opacity: 1;
+        transform: none;
+    }
+
+    /* Staggered card/column reveals: the CONTAINER carries the class and is
+       observed; only its direct children hide and cascade in. */
+    html.js .stagger-children > * {
+        opacity: 0;
+        transform: translateY(var(--motion-distance));
+        transition:
+            opacity var(--motion-duration) var(--motion-ease),
+            transform var(--motion-duration) var(--motion-ease);
+    }
+    html.js .stagger-children.is-visible > * {
+        opacity: 1;
+        transform: none;
+    }
+    .stagger-children > *:nth-child(2) { transition-delay: var(--motion-stagger); }
+    .stagger-children > *:nth-child(3) { transition-delay: calc(var(--motion-stagger) * 2); }
+    .stagger-children > *:nth-child(4) { transition-delay: calc(var(--motion-stagger) * 3); }
+    .stagger-children > *:nth-child(5) { transition-delay: calc(var(--motion-stagger) * 4); }
+    .stagger-children > *:nth-child(6) { transition-delay: calc(var(--motion-stagger) * 5); }
+    .stagger-children > *:nth-child(7) { transition-delay: calc(var(--motion-stagger) * 6); }
+    .stagger-children > *:nth-child(8) { transition-delay: calc(var(--motion-stagger) * 7); }
+    .stagger-children > *:nth-child(n + 9) { transition-delay: calc(var(--motion-stagger) * 8); }
+
+    /* ── Page-load entrance (pure CSS — fires on first paint, no JS) ───── */
+
+    .hero-entrance {
+        animation: motion-hero-entrance calc(var(--motion-duration) * 1.5) var(--motion-ease) both;
+    }
+    @keyframes motion-hero-entrance {
+        from {
+            opacity: 0;
+            transform: translateY(calc(var(--motion-distance) * 0.5));
+        }
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    /* ── Ambient effects (pure CSS, never hide anything) ──────────────── */
+
+    /* Slow vertical drift for a decorative element or image. */
+    .ambient-drift {
+        animation: motion-ambient-drift calc(var(--motion-duration) * 14) ease-in-out infinite alternate;
+    }
+    @keyframes motion-ambient-drift {
+        from { transform: translate3d(0, 0, 0); }
+        to { transform: translate3d(0, calc(var(--motion-distance) * -0.75), 0); }
+    }
+
+    /* One very slow zoom of the image inside a cover/figure, then rest. */
+    .ken-burns { overflow: hidden; }
+    .ken-burns img {
+        animation: motion-ken-burns calc(var(--motion-duration) * 30) var(--motion-ease) both;
+    }
+    @keyframes motion-ken-burns {
+        from { transform: scale(1); }
+        to { transform: scale(1.08); }
+    }
+
+    /* Slow-breathing gradient background. The doubled class selector outranks
+       core's `.has-*-gradient-background { background: … }` shorthand (which
+       would otherwise reset background-size) regardless of stylesheet order. */
+    .gradient-shift.gradient-shift {
+        background-size: 180% 180%;
+        animation: motion-gradient-shift calc(var(--motion-duration) * 20) ease-in-out infinite alternate;
+    }
+    @keyframes motion-gradient-shift {
+        from { background-position: 0% 50%; }
+        to { background-position: 100% 50%; }
+    }
+}
