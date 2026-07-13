@@ -40,17 +40,20 @@ test('playground artifact bundles runnable blueprint and full project archive on
     assert_true(in_array('project/demo-site/siteSpec.json', $projectEntries, true), 'project JSON copied into archive');
 
     $blueprint = json_decode(zip_file($bundle, 'blueprint.json'), true);
-    assert_eq('Demo Site Name', $blueprint['steps'][0]['options']['blogname']);
-    assert_eq('A test tagline', $blueprint['steps'][0]['options']['blogdescription']);
-    assert_eq('mkdir', $blueprint['steps'][1]['step']);
-    assert_eq('unzip', $blueprint['steps'][2]['step']);
-    assert_eq('bundled', $blueprint['steps'][2]['zipFile']['resource']);
-    assert_eq('/project.zip', $blueprint['steps'][2]['zipFile']['path']);
-    assert_eq('mv', $blueprint['steps'][3]['step']);
-    assert_eq('/wordpress/wp-content/builder-project-archive/project/demo-site/theme', $blueprint['steps'][3]['fromPath']);
-    assert_eq('/wordpress/wp-content/themes/demo-site', $blueprint['steps'][3]['toPath']);
-    assert_eq('activateTheme', $blueprint['steps'][4]['step']);
-    assert_eq('demo-site', $blueprint['steps'][4]['themeFolderName']);
+    assert_eq('writeFile', $blueprint['steps'][0]['step']);
+    assert_eq('/wordpress/wp-content/mu-plugins/0-preview-offline.php', $blueprint['steps'][0]['path']);
+    assert_true(str_contains($blueprint['steps'][0]['data'], 'pre_oembed_result'), 'offline guard neutralizes oEmbed');
+    assert_eq('Demo Site Name', $blueprint['steps'][1]['options']['blogname']);
+    assert_eq('A test tagline', $blueprint['steps'][1]['options']['blogdescription']);
+    assert_eq('mkdir', $blueprint['steps'][2]['step']);
+    assert_eq('unzip', $blueprint['steps'][3]['step']);
+    assert_eq('bundled', $blueprint['steps'][3]['zipFile']['resource']);
+    assert_eq('/project.zip', $blueprint['steps'][3]['zipFile']['path']);
+    assert_eq('mv', $blueprint['steps'][4]['step']);
+    assert_eq('/wordpress/wp-content/builder-project-archive/project/demo-site/theme', $blueprint['steps'][4]['fromPath']);
+    assert_eq('/wordpress/wp-content/themes/demo-site', $blueprint['steps'][4]['toPath']);
+    assert_eq('activateTheme', $blueprint['steps'][5]['step']);
+    assert_eq('demo-site', $blueprint['steps'][5]['themeFolderName']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

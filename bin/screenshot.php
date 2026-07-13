@@ -207,12 +207,13 @@ function command_exists(string $bin): bool
 function chrome_binary(): ?string
 {
     // Env::get, not getenv: CHROME_BIN set in .env never reaches the real
-    // environment, only the Env map.
+    // environment, only the Env map. Absolute paths come before the bare
+    // names: each name costs a `command -v` subprocess, a path just a stat.
     $candidates = array_filter([
         Env::get('CHROME_BIN'),
-        'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
         '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
         '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
     ]);
     foreach ($candidates as $bin) {
         $path = str_contains($bin, '/')

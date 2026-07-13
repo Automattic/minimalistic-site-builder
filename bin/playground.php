@@ -81,30 +81,9 @@ $blueprint = [
     'landingPage'  => '/',
     'login'        => true,
     'steps'        => [
-        // The CLI's wasm PHP has no outbound networking, and a block whose
-        // render fetches remote content (wp:embed → server-side oEmbed
-        // discovery) hangs its worker forever, starving the pool. Neutralize
-        // that instead of stripping such blocks: oEmbed resolves to the same
-        // link fallback WordPress uses when a provider is unreachable, and any
-        // other outbound request fails fast instead of pinning a worker.
-        ['step' => 'writeFile',
-         'path' => '/wordpress/wp-content/mu-plugins/0-preview-offline.php',
-         'data' => <<<'PHP'
-            <?php
-            /**
-             * Playground preview runs without outbound networking. Resolve
-             * oEmbeds to WordPress's own unreachable-provider fallback (a
-             * plain link) and fail any other HTTP request fast, so a render
-             * never blocks on a fetch that cannot complete.
-             */
-            add_filter( 'pre_oembed_result', function ( $result, $url ) {
-                return '<a href="' . esc_url( $url ) . '">' . esc_html( $url ) . '</a>';
-            }, 10, 2 );
-            add_filter( 'pre_http_request', function () {
-                return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in the Playground preview.' );
-            } );
-            PHP,
-        ],
+        // Neutralize outbound HTTP — a blocked fetch (e.g. wp:embed's oEmbed
+        // discovery) would pin a wasm worker forever. See offlineGuardStep().
+        PlaygroundArtifact::offlineGuardStep(),
         ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
         ['step' => 'activateTheme', 'themeFolderName' => $slug],
     ],

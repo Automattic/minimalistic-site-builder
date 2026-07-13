@@ -103,6 +103,42 @@ final class PlaygroundArtifact
         return implode("\n", $lines) . "\n";
     }
 
+    /**
+     * Blueprint step neutralizing outbound HTTP for networkless Playground.
+     *
+     * Playground runs without outbound networking (the CLI's wasm PHP has
+     * none; the web runtime defaults to none), so a block whose render fetches
+     * remote content — wp:embed → server-side oEmbed discovery — blocks on a
+     * fetch that cannot complete, pinning its CLI worker forever. This
+     * mu-plugin makes every Playground surface degrade the way production
+     * would: oEmbed resolves to WordPress's own unreachable-provider fallback
+     * (a plain link) and any other outbound request fails fast with WP_Error.
+     *
+     * @return array<mixed>
+     */
+    public static function offlineGuardStep(): array
+    {
+        return [
+            'step' => 'writeFile',
+            'path' => '/wordpress/wp-content/mu-plugins/0-preview-offline.php',
+            'data' => <<<'PHP'
+                <?php
+                /**
+                 * Playground runs without outbound networking. Resolve oEmbeds
+                 * to WordPress's own unreachable-provider fallback (a plain
+                 * link) and fail any other HTTP request fast, so a render
+                 * never blocks on a fetch that cannot complete.
+                 */
+                add_filter( 'pre_oembed_result', function ( $result, $url ) {
+                    return '<a href="' . esc_url( $url ) . '">' . esc_html( $url ) . '</a>';
+                }, 10, 2 );
+                add_filter( 'pre_http_request', function () {
+                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in Playground.' );
+                } );
+                PHP,
+        ];
+    }
+
     /** @return array<mixed> */
     public static function blueprint(Project $project): array
     {
@@ -113,6 +149,7 @@ final class PlaygroundArtifact
             'landingPage' => '/',
             'login'       => true,
             'steps'       => [
+                self::offlineGuardStep(),
                 ['step' => 'setSiteOptions', 'options' => $options],
                 [
                     'step' => 'mkdir',
