@@ -157,11 +157,10 @@ final class SectionsStep implements Step
                 $key === 'footer' => 'parts/footer.html',
                 default           => 'parts/' . $key . '.html', // page-<page>--<section>
             };
-            $markup = self::markup($text, $key);
-            if ($key === 'header' || $key === 'footer') {
-                $markup = self::constrainedPart($markup);
-            }
-            $files[$rel] = $markup;
+            // Every part's top-level group must declare a layout — sections
+            // included: a flow-layout section band renders its children
+            // edge-to-edge at the viewport with no page gutter.
+            $files[$rel] = self::constrainedPart(self::markup($text, $key));
         }
 
         foreach ($files as $rel => $markup) {
