@@ -150,10 +150,14 @@ function detectDroppedContent(original, fixed) {
   return lines;
 }
 
-/** Collect templates/*.html and parts/*.html under a theme directory. */
+/**
+ * Collect templates/*.html and parts/*.html under a theme directory — plus
+ * pages/*.html, so the content plugin's directory (whose block markup lives
+ * in pages/) can be re-serialized through the same entry point.
+ */
 function collectFiles(themeDir) {
   const out = [];
-  for (const sub of ['templates', 'parts']) {
+  for (const sub of ['templates', 'parts', 'pages']) {
     const dir = path.join(themeDir, sub);
     if (!fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir)) {
