@@ -316,8 +316,10 @@ final class GenerateImagesStep implements Step
      * keep the visual intent but shed whatever tripped the filter, the full
      * prompt is recomposed, and the images are regenerated in one batch. One
      * round only — an image whose repaired prompt is filtered again is marked
-     * failed like any other failure — and any LLM problem falls back to
-     * recording the original failure, so the repair can never break a build.
+     * failed like any other failure. LLM problems are contained per image: a
+     * failed rewrite batch is retried one request at a time, and an image
+     * whose own rewrite still fails falls back to recording the original
+     * failure, so the repair can never break a build.
      *
      * @param array<int,array<string,mixed>> $specs   images.json rows, mutated in place
      * @param array<int,string>              $repairs original index => the filtered failure's error
@@ -348,11 +350,24 @@ final class GenerateImagesStep implements Step
             ] + ($this->repairModel !== null ? ['model' => $this->repairModel] : [])
               + ['log_label' => 'image-prompt-repair'];
         }
+        // completeBatch is all-or-nothing: one permanently-failed request
+        // aborts the whole batch, discarding sibling rewrites that may have
+        // succeeded. Fall back to one request at a time so a bad rewrite
+        // costs only its own image; the ones that fail again just keep their
+        // original filtered failure (handled below as "no usable rewrite").
         try {
             $rewrites = $this->llm->completeBatch($requests);
         } catch (\Throwable $e) {
-            fwrite(STDERR, "    prompt repair failed: {$e->getMessage()}\n");
+            fwrite(STDERR, "    batched prompt repair failed ({$e->getMessage()}); retrying rewrites one by one\n");
             $rewrites = [];
+            foreach ($requests as $i => $req) {
+                try {
+                    $rewrites[$i] = $this->llm->complete($req['prompt'], array_diff_key($req, ['prompt' => '']));
+                } catch (\Throwable $inner) {
+                    $filename = (string) ($specs[$i]['filename'] ?? '');
+                    fwrite(STDERR, "    prompt rewrite failed for {$filename}: {$inner->getMessage()}\n");
+                }
+            }
         }
 
         // Regenerate every image that got a usable rewrite, concurrently (the

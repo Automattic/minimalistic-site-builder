@@ -361,6 +361,31 @@ test('generate-images falls back to the original failure when the rewrite errors
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images repairs the sibling images when one rewrite fails permanently', function () {
+    [$project, $tmp] = batch_fixture(2); // subjects "image 0" and "image 1"
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['image 0', 'image 1']; // both filtered
+    $llm = new FakeLlm();
+    $llm->failPromptSubstrings = ['image 0'];  // img-0's rewrite fails for good,
+    $llm->queueText('a calm rooftop garden');  // img-1's succeeds
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    // The aborted batch was retried one request at a time — one complete()
+    // call per image — so img-0's permanent failure didn't sink img-1.
+    assert_eq(2, count($llm->calls), 'one fallback rewrite call per image');
+    assert_eq(2, count($images->batches), 'original batch + repair batch');
+    assert_contains('a calm rooftop garden', $images->batches[1][0]['prompt']);
+
+    $specs = $project->readJson('images.json');
+    assert_eq('failed', $specs[0]['status']);
+    assert_contains('fake rai', $specs[0]['error']); // original filter error kept
+    assert_eq('completed', $specs[1]['status']);
+    assert_true($project->exists('theme/assets/img-1.jpg'), 'sibling asset written after repair');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images is a no-op when there are no placeholders', function () {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
