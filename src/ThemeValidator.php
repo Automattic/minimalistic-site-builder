@@ -90,6 +90,74 @@ final class ThemeValidator
     }
 
     /**
+     * Deterministic vertical-rhythm checks for a completed generated site.
+     *
+     * The theme must retain the bounded canonical spacing profile installed by
+     * ThemeJsonStep, and every planned section root must still match the
+     * page-owned density/seam calculation after all serialization passes.
+     * These are build failures in the default pipeline, not aesthetic hints.
+     *
+     * @return string[] list of warnings (empty means spacing follows the contract)
+     */
+    public static function spacingWarnings(Project $project): array
+    {
+        $warnings = [];
+
+        if ($project->exists('theme/theme.json')) {
+            $theme = json_decode($project->readText('theme/theme.json'), true);
+            if (is_array($theme)) {
+                $normalized = Steps\ThemeJsonStep::normalizeSpacingSettings($theme);
+                if (($theme['settings']['spacing'] ?? null) !== ($normalized['settings']['spacing'] ?? null)) {
+                    $warnings[] = 'theme.json settings.spacing drifted from the bounded canonical profile';
+                }
+            }
+        }
+
+        if (!$project->exists('sections.json')) {
+            return $warnings;
+        }
+
+        try {
+            $plan = $project->readJson('sections.json');
+            $sections = $plan['sections'] ?? null;
+            if (!is_array($sections) || !array_is_list($sections) || $sections === []) {
+                $warnings[] = 'sections.json has no ordered sections for rhythm validation';
+                return $warnings;
+            }
+
+            $entries = [];
+            foreach ($sections as $section) {
+                if (!is_array($section)) {
+                    throw new \RuntimeException('sections.json contains a non-object section');
+                }
+                $slug = trim((string) ($section['slug'] ?? ''));
+                $rel = 'parts/' . Steps\SectionsStep::SECTION_PREFIX . $slug . '.html';
+                if ($slug === '' || !$project->exists('theme/' . $rel)) {
+                    throw new \RuntimeException("missing generated section part {$rel}");
+                }
+                $entries[] = [
+                    'slug'       => $slug,
+                    'markup'     => $project->readText('theme/' . $rel),
+                    'density'    => (string) ($section['vertical_density'] ?? ''),
+                    'background' => (string) ($section['background'] ?? ''),
+                ];
+            }
+
+            $footerSurface = $project->exists('theme/parts/footer.html')
+                ? SectionRhythm::followingSurfaceFromMarkup($project->readText('theme/parts/footer.html'))
+                : null;
+            $result = SectionRhythm::rewrite($entries, $footerSurface);
+            foreach ($result['notes'] as $note) {
+                $warnings[] = 'section root spacing drift: ' . $note;
+            }
+        } catch (\Throwable $e) {
+            $warnings[] = 'could not validate section rhythm: ' . $e->getMessage();
+        }
+
+        return $warnings;
+    }
+
+    /**
      * Soft typography checks (warnings, not build failures): font sizes
      * hardcoded in block markup instead of drawn from the theme.json
      * fontSizes scale, a "display" preset that no markup uses, and

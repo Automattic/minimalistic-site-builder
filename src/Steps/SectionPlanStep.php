@@ -17,7 +17,8 @@ use Automattic\SiteBuild\Step;
  * Input:  meta.json (user prompt) + siteSpec.json. Runs alongside theme-json
  *         (both depend only on the brief + spec) in a ConcurrentGroup.
  * Output: sections.json — { "sections": [ { slug, title, type, purpose,
- *         content_notes, layout_archetype, background, handoff } ] }, in
+ *         content_notes, layout_archetype, background, vertical_density,
+ *         handoff } ] }, in
  *         display order.
  *
  * This enriches siteSpec's flat "sections" string list into a concrete brief per
@@ -47,8 +48,17 @@ final class SectionPlanStep implements ConcurrentStep
     /** Background treatments — must match section-plan.md. */
     public const BACKGROUNDS = ['base', 'tinted', 'contrast', 'image'];
 
+    /** Page-owned outer spacing roles — must match section-plan.md. */
+    public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
+
     /** The most default-looking archetype is capped so it can't dominate the page. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
+
+    /** Whitespace-led pauses are accents, not the page's default cadence. */
+    private const MAX_SPACIOUS_SECTIONS = 2;
+
+    /** Content-dense section roles must not compound their height with the largest edge. */
+    private const DENSE_SECTION_TYPES = ['features', 'services', 'gallery', 'pricing', 'team', 'faq'];
 
     public function __construct(
         private Llm $llm,
@@ -122,7 +132,7 @@ final class SectionPlanStep implements ConcurrentStep
             . json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
             . "\n\nIT WAS REJECTED FOR THESE REASONS:\n{$errors}\n"
             . "\nReturn the corrected full JSON object. Fix EVERY rejection above. "
-            . 'If you change a section\'s layout_archetype, background, or position, also update its content_notes, '
+            . 'If you change a section\'s layout_archetype, background, vertical_density, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
 
@@ -138,10 +148,10 @@ final class SectionPlanStep implements ConcurrentStep
      * Validate the section list and force unique, file-safe slugs. Each section
      * keeps its model-provided fields; missing optional fields default benignly
      * so the sections + assemble steps can rely on the keys. The art-direction
-     * fields (layout_archetype, background, handoff) are strict: unknown values,
-     * a missing handoff, adjacent duplicate archetypes, or too many card grids
-     * are collected and thrown together in ONE message, so the single repair
-     * call sees every violation at once. Pure — unit-testable.
+     * fields (layout_archetype, background, vertical_density, handoff) are
+     * strict: unknown values, a missing handoff, adjacent duplicate archetypes,
+     * or too many card grids are collected and thrown together in ONE message,
+     * so the single repair call sees every violation at once. Pure — testable.
      *
      * @param mixed $raw
      * @return array<int,array<string,mixed>>
@@ -183,6 +193,16 @@ final class SectionPlanStep implements ConcurrentStep
                 $errors[] = "section-plan: section '{$slug}' has invalid background '{$background}' — use one of: "
                     . implode(', ', self::BACKGROUNDS);
             }
+            $verticalDensity = trim((string) ($section['vertical_density'] ?? ''));
+            if (!in_array($verticalDensity, self::VERTICAL_DENSITIES, true)) {
+                $errors[] = "section-plan: section '{$slug}' has invalid vertical_density '{$verticalDensity}' — use one of: "
+                    . implode(', ', self::VERTICAL_DENSITIES);
+            }
+            $type = trim((string) ($section['type'] ?? 'content'));
+            if ($verticalDensity === 'spacious' && in_array($type, self::DENSE_SECTION_TYPES, true)) {
+                $errors[] = "section-plan: section '{$slug}' is content-dense ({$type}, {$archetype}) — "
+                    . "use vertical_density 'compact' or 'standard', not 'spacious'";
+            }
             $handoff = trim((string) ($section['handoff'] ?? ''));
             if ($handoff === '') {
                 $errors[] = "section-plan: section '{$slug}' is missing 'handoff' — describe what sits immediately above and below it";
@@ -191,11 +211,12 @@ final class SectionPlanStep implements ConcurrentStep
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
-                'type'             => trim((string) ($section['type'] ?? 'content')),
+                'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),
                 'layout_archetype' => $archetype,
                 'background'       => $background,
+                'vertical_density' => $verticalDensity,
                 'handoff'          => $handoff,
             ];
         }
@@ -210,9 +231,10 @@ final class SectionPlanStep implements ConcurrentStep
 
     /**
      * The page-level variety violations of the rules the prompt states: no
-     * archetype on two adjacent sections, and the equal card grid at most twice
-     * per page. Adjacency is only judged between VALID archetypes so an enum
-     * error above doesn't cascade into a misleading adjacency error too.
+     * archetype on two adjacent sections, the equal card grid at most twice per
+     * page, and no adjacent / excessive spacious-density pauses. Adjacency is
+     * only judged between VALID values so an enum error above doesn't cascade
+     * into a misleading adjacency error too.
      *
      * @param array<int,array<string,mixed>> $sections
      * @return string[]
@@ -231,12 +253,22 @@ final class SectionPlanStep implements ConcurrentStep
                 $errors[] = "section-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
                     . "layout_archetype '{$section['layout_archetype']}' — adjacent sections must use different archetypes";
             }
+            if ($section['vertical_density'] === 'spacious' && $prev['vertical_density'] === 'spacious') {
+                $errors[] = "section-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
+                    . "vertical_density 'spacious' — spacious pauses must be isolated";
+            }
         }
 
         $grids = count(array_filter($sections, fn (array $s) => $s['layout_archetype'] === 'equal-card-grid'));
         if ($grids > self::MAX_EQUAL_CARD_GRIDS) {
             $errors[] = "section-plan: 'equal-card-grid' is used {$grids} times — use it at most "
                 . self::MAX_EQUAL_CARD_GRIDS . ' times per page and vary the other sections';
+        }
+
+        $spacious = count(array_filter($sections, fn (array $s) => $s['vertical_density'] === 'spacious'));
+        if ($spacious > self::MAX_SPACIOUS_SECTIONS) {
+            $errors[] = "section-plan: vertical_density 'spacious' is used {$spacious} times — use it at most "
+                . self::MAX_SPACIOUS_SECTIONS . ' times per page and use standard/compact elsewhere';
         }
         return $errors;
     }

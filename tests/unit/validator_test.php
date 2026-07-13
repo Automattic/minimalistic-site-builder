@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\SectionRhythm;
+use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\ThemeValidator;
 
 function validator_project(): array
@@ -118,5 +120,36 @@ test('validator flags bad theme.json and leftover placeholders', function () {
     $joined = implode(' ', $problems);
     assert_contains('theme.json', $joined);
     assert_contains('placeholder', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('spacing warnings detect theme-profile and section-root rhythm drift', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3])
+    );
+    $project->writeJson('sections.json', ['sections' => [
+        ['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard'],
+    ]]);
+
+    $raw = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>Story</p><!-- /wp:paragraph --></div>'
+        . '<!-- /wp:group -->';
+    $normalized = SectionRhythm::rewrite([[
+        'slug' => 'story', 'markup' => $raw, 'density' => 'standard', 'background' => 'base',
+    ]]);
+    $project->writeText('theme/parts/section-story.html', $normalized['markups'][0]);
+    assert_eq([], ThemeValidator::spacingWarnings($project));
+
+    $project->writeText('theme/parts/section-story.html', $raw);
+    $joined = implode(' ', ThemeValidator::spacingWarnings($project));
+    assert_contains('section root spacing drift', $joined);
+
+    $theme = $project->readJson('theme/theme.json');
+    $theme['settings']['spacing']['spacingSizes'][4]['size'] = '12rem';
+    $project->writeJson('theme/theme.json', $theme);
+    $joined = implode(' ', ThemeValidator::spacingWarnings($project));
+    assert_contains('bounded canonical profile', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

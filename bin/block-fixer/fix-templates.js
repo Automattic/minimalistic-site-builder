@@ -96,10 +96,20 @@ const { fixBlocksInTemplate } = require('./lib/blockFixer.js');
 /** Count each `prop:value` declaration across all style="..." attributes. */
 function styleDeclarationCounts(html) {
   const counts = new Map();
-  for (const m of html.matchAll(/style="([^"]*)"/g)) {
-    for (const raw of m[1].split(';')) {
+  for (const m of html.matchAll(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    const value = m[1] ?? m[2] ?? '';
+    for (const raw of value.split(';')) {
       const decl = raw.trim();
-      if (decl) counts.set(decl, (counts.get(decl) || 0) + 1);
+      if (!decl) continue;
+      // Gutenberg canonicalizes harmless whitespace around the declaration
+      // colon (e.g. `padding-top: var(...)` → `padding-top:var(...)`). Compare
+      // that semantic spelling so formatting-only changes are not reported as
+      // lost CSS and do not trip the PHP build gate.
+      const colon = decl.indexOf(':');
+      const normalized = colon === -1
+        ? decl
+        : decl.slice(0, colon).trim().toLowerCase() + ':' + decl.slice(colon + 1).trim();
+      counts.set(normalized, (counts.get(normalized) || 0) + 1);
     }
   }
   return counts;
@@ -108,8 +118,9 @@ function styleDeclarationCounts(html) {
 /** Count each class token across all class="..." attributes. */
 function classTokenCounts(html) {
   const counts = new Map();
-  for (const m of html.matchAll(/class="([^"]*)"/g)) {
-    for (const token of m[1].split(/\s+/)) {
+  for (const m of html.matchAll(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    const value = m[1] ?? m[2] ?? '';
+    for (const token of value.split(/\s+/)) {
       if (token) counts.set(token, (counts.get(token) || 0) + 1);
     }
   }

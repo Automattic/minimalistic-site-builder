@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
@@ -74,8 +75,8 @@ test('full pipeline produces a structurally valid theme', function () {
     ]);
     // section-plan (json) — ordered list of sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the base specials grid below.'],
-        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'handoff' => 'Between the image hero above and the footer below.'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.'],
+        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.'],
     ]]);
     // sections (raw markup) — header, footer, then one part per section, in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
@@ -85,7 +86,12 @@ test('full pipeline produces a structurally valid theme', function () {
     $llm->queueText(
         '<!-- wp:group {"style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group" style="margin-top:0">'
-        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
+        . '<!-- wp:cover {"dimRatio":50,"minHeight":500,"align":"full","backgroundColor":"contrast"} -->'
+        . '<div class="wp-block-cover alignfull has-contrast-background-color has-background" style="min-height:500px">'
+        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"level":1,"textColor":"base"} --><h1 class="wp-block-heading has-base-color has-text-color">Hero</h1><!-- /wp:heading -->'
+        . '</div></div><!-- /wp:cover -->'
         . '</div><!-- /wp:group -->'
     );
     // The specials section opts into a layout utility class (hover-lift) so the
@@ -134,6 +140,15 @@ test('full pipeline produces a structurally valid theme', function () {
         strpos($front, 'section-hero') < strpos($front, 'section-specials'),
         'sections composed in plan order'
     );
+    $heroBlocks = BlockMarkup::parse($project->readText('theme/parts/section-hero.html'));
+    $heroRoot = $heroBlocks->attrs($heroBlocks->indices()[0]);
+    $coverIndex = array_values(array_filter(
+        $heroBlocks->indices(),
+        fn (int $i): bool => $heroBlocks->name($i) === 'cover'
+    ))[0];
+    $heroCover = $heroBlocks->attrs($coverIndex);
+    assert_eq('0', $heroRoot['style']['spacing']['padding']['top'], 'image-band root has no outside padding');
+    assert_eq('var:preset|spacing|xl', $heroCover['style']['spacing']['padding']['top'], 'density lives inside cover');
 
     // The utility class survived the fix-blocks re-serialization, and the
     // page-styles step appended its CSS to style.css (after the theme header).
@@ -162,8 +177,9 @@ test('pipeline step order is correct', function () {
     $ids = make_integration_builder(new FakeLlm(), $tmp)->pipeline()->stepIds();
     assert_eq([
         'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+section-plan', 'sections', 'assemble-landing-page',
+        'theme-json+section-plan', 'sections', 'section-rhythm', 'assemble-landing-page',
         'collect-images', 'contrast-fix', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
+        'validate-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

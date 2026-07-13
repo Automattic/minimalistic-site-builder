@@ -1,6 +1,7 @@
 ASSIGNED COMPOSITION (the page plan assigned every section its composition so the whole page has a deliberate rhythm — execute YOURS; do not re-choose):
   Layout archetype: {{layout_archetype}}
   Background:       {{background}}
+  Vertical density: {{vertical_density}}
   Seams:            {{handoff}}
   Neighbors' assignments (design your top and bottom edges against these):
 {{neighbors}}
@@ -24,3 +25,10 @@ Execute the assigned background:
 
 You may refine details within the archetype (column ratios, spacing, type scale), but do NOT swap the archetype or background — your neighbors were planned around them, and the seams described above only work if every section holds its assignment.
 If SECTION Notes mention a different layout or background, treat those layout/background words as stale planning context and reinterpret the same content inside the assigned archetype and background above.
+
+The builder owns OUTER vertical rhythm after every section is generated. It
+applies the assigned density to the top-level group for solid/tinted bands, or
+inside the direct wp:cover for an image band, and collapses double padding only
+across guaranteed-continuous base/contrast surfaces. Do not add top/bottom
+padding, spacers, or compensating margins to the top-level group or image-band
+cover. Use sm/md (occasionally lg) only for spacing WITHIN the composition.

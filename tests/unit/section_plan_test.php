@@ -21,6 +21,7 @@ function plan_section(array $overrides = []): array
         'type'             => 'hero',
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
+        'vertical_density' => 'standard',
         'handoff'          => 'Sits between the site header above and the base-background about split below.',
     ], $overrides);
 }
@@ -48,6 +49,7 @@ test('SectionPlanStep::normalize keeps the art-direction fields on a valid plan'
     assert_eq(3, count($sections));
     assert_eq('full-bleed-cover', $sections[0]['layout_archetype']);
     assert_eq('image', $sections[0]['background']);
+    assert_eq('standard', $sections[0]['vertical_density']);
     assert_contains('site header', $sections[0]['handoff']);
 });
 
@@ -61,6 +63,18 @@ test('SectionPlanStep::normalize rejects an unknown background', function () {
     assert_throws(function () {
         SectionPlanStep::normalize([plan_section(['background' => 'plaid'])]);
     }, 'invalid background');
+});
+
+test('SectionPlanStep::normalize requires a known vertical density', function () {
+    assert_throws(function () {
+        SectionPlanStep::normalize([plan_section(['vertical_density' => 'enormous'])]);
+    }, 'invalid vertical_density');
+
+    assert_throws(function () {
+        $section = plan_section();
+        unset($section['vertical_density']);
+        SectionPlanStep::normalize([$section]);
+    }, 'missing vertical_density');
 });
 
 test('SectionPlanStep::normalize rejects a missing handoff', function () {
@@ -128,6 +142,54 @@ test('SectionPlanStep::normalize caps equal-card-grid at twice per page', functi
     }, 'equal-card-grid');
 });
 
+test('SectionPlanStep::normalize rations spacious density across the page', function () {
+    assert_throws(function () {
+        SectionPlanStep::normalize([
+            plan_section(['slug' => 'one', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'two', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
+        ]);
+    }, 'adjacent spacious sections must be rejected');
+
+    assert_throws(function () {
+        SectionPlanStep::normalize([
+            plan_section(['slug' => 'one', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'two', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'standard']),
+            plan_section(['slug' => 'three', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'four', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'compact']),
+            plan_section(['slug' => 'five', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        ]);
+    }, 'more than two spacious sections must be rejected');
+});
+
+test('SectionPlanStep::normalize rejects spacious density for content-dense sections', function () {
+    foreach ([
+        ['type' => 'gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'features', 'layout_archetype' => 'offset-grid'],
+        ['type' => 'services', 'layout_archetype' => 'equal-card-grid'],
+        ['type' => 'faq', 'layout_archetype' => 'centered-stack'],
+    ] as $dense) {
+        $message = '';
+        try {
+            SectionPlanStep::normalize([
+                plan_section(array_merge($dense, ['vertical_density' => 'spacious'])),
+            ]);
+        } catch (RuntimeException $e) {
+            $message = $e->getMessage();
+        }
+        assert_contains('content-dense', $message);
+        assert_contains("not 'spacious'", $message);
+    }
+
+    $shortCta = SectionPlanStep::normalize([
+        plan_section([
+            'type' => 'cta',
+            'layout_archetype' => 'mixed-width-editorial',
+            'vertical_density' => 'spacious',
+        ]),
+    ]);
+    assert_eq('spacious', $shortCta[0]['vertical_density'], 'short editorial CTA may deliberately breathe');
+});
+
 test('section-plan wires the spec language into its prompt', function () {
     $tmp = sys_get_temp_dir() . '/builder_spl_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -161,6 +223,7 @@ test('section-plan writes sections.json', function () {
     assert_eq('hero', $plan['sections'][0]['slug']);
     assert_eq('asymmetric-split', $plan['sections'][1]['layout_archetype']);
     assert_eq('base', $plan['sections'][1]['background']);
+    assert_eq('standard', $plan['sections'][1]['vertical_density']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
