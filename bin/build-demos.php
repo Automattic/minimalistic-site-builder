@@ -398,22 +398,9 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
 
     register_shutdown_function(static function () use ($servers): void {
         foreach ($servers as $s) {
-            if ($s['pid'] > 0) {
-                kill_tree($s['pid']);
-            }
-            // Catch the reparented node server, which the tree walk misses.
-            // playground.php stamps its blueprint with its own pid (= $s['pid'],
-            // thanks to `exec`), so this stops exactly the server we booted and
-            // no sibling server of the same project.
-            $blueprint = repo_path("projects/{$s['slug']}/.playground-blueprint.{$s['pid']}.json");
-            @exec('pkill -f ' . escapeshellarg(preg_quote($blueprint, '~')) . ' 2>/dev/null');
-            // playground.php's own shutdown unlink never runs when it dies by
-            // signal, so clean up its blueprint here.
-            @unlink($blueprint);
-            if (is_resource($s['proc'])) {
-                proc_terminate($s['proc']);
-                proc_close($s['proc']);
-            }
+            // Thanks to `exec` in the spawn command, $s['pid'] is
+            // playground.php's own pid — the one its blueprint is stamped with.
+            teardown_playground($s['proc'], $s['pid'], playground_blueprint_path($s['slug'], $s['pid']));
         }
     });
     if (function_exists('pcntl_async_signals')) {
@@ -468,15 +455,4 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
             unset($servers[$idx]);
         }
     }
-}
-
-/** Recursively SIGTERM a process and all its descendants (leaves first). */
-function kill_tree(int $pid): void
-{
-    $children = [];
-    @exec('pgrep -P ' . $pid . ' 2>/dev/null', $children);
-    foreach ($children as $child) {
-        kill_tree((int) $child);
-    }
-    @exec('kill -TERM ' . $pid . ' 2>/dev/null');
 }

@@ -105,12 +105,10 @@ if (!is_resource($proc)) {
 $baseUrl = null;
 $exit = 1;
 $wrapperPid = proc_get_status($proc)['pid'] ?? 0;
-// The npx-spawned node server reparents to init once npx exits, so it escapes a
-// parent-walk kill. It carries its blueprint path in its argv, so match on that
-// to stop exactly the server we booted. playground.php stamps the blueprint
-// with its own pid — which, thanks to `exec` above, is the wrapper pid — so
-// this names our instance and no sibling server of the same project.
-$blueprintPath = repo_path("projects/{$slug}/.playground-blueprint.{$wrapperPid}.json");
+// Pid-stamped, instance-unique path (see playground_blueprint_path): thanks to
+// `exec` above, the wrapper pid IS playground.php's pid, so this is the path
+// it minted — and no sibling server's.
+$blueprintPath = playground_blueprint_path($slug, $wrapperPid);
 register_shutdown_function(static function () use ($proc, $wrapperPid, $blueprintPath) {
     teardown_playground($proc, $wrapperPid, $blueprintPath);
 });
@@ -173,34 +171,6 @@ if ($keepAlive && is_resource($proc) && $baseUrl !== null) {
 }
 
 exit($exit);
-
-/** Stop the Playground process tree (the php wrapper, npx, and node server). */
-function teardown_playground($proc, int $pid, string $blueprintPath): void
-{
-    if ($pid > 0) {
-        kill_tree($pid);
-    }
-    // Catch the reparented node server, which the parent-walk above misses.
-    @exec('pkill -f ' . escapeshellarg(preg_quote($blueprintPath, '~')) . ' 2>/dev/null');
-    // playground.php's own shutdown unlink never runs when it dies by signal,
-    // so clean up its blueprint here.
-    @unlink($blueprintPath);
-    if (is_resource($proc)) {
-        proc_terminate($proc);
-        proc_close($proc);
-    }
-}
-
-/** Recursively SIGTERM a process and all its descendants (leaves first). */
-function kill_tree(int $pid): void
-{
-    $children = [];
-    @exec('pgrep -P ' . $pid . ' 2>/dev/null', $children);
-    foreach ($children as $child) {
-        kill_tree((int) $child);
-    }
-    @exec('kill -TERM ' . $pid . ' 2>/dev/null');
-}
 
 function command_exists(string $bin): bool
 {
