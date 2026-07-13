@@ -106,6 +106,18 @@ test('siteContext leads with a noun phrase and never stutters the topic', functi
     assert_eq('a website. A neighborhood bakery.', GenerateImagesStep::siteContext([
         'description' => 'A neighborhood bakery.',
     ]));
+
+    // A description without terminal punctuation is closed, so the composer's
+    // guidance sentence (which relies on this phrase ending one) never runs on.
+    assert_eq(
+        'the website “Hearth & Crumb”. Fresh bread daily.',
+        GenerateImagesStep::siteContext([
+            'name' => 'Hearth & Crumb', 'description' => 'Fresh bread daily',
+        ])
+    );
+    assert_eq('a website. Fresh bread daily!', GenerateImagesStep::siteContext([
+        'description' => 'Fresh bread daily!', // already punctuated: untouched
+    ]));
 });
 
 test('generate-images leads with the subject + style and adds the page context', function () {

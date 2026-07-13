@@ -195,6 +195,13 @@ final class GenerateImagesStep implements Step
             $lead .= ($name !== '' ? ', about ' : ' about ') . $topic;
         }
 
+        // The composer splices this phrase into its guidance sentence relying
+        // on it being terminally punctuated; the spec doesn't guarantee that
+        // for the description, so close it here.
+        if ($description !== '' && !preg_match('/[.!?…]$/u', $description)) {
+            $description .= '.';
+        }
+
         return $description === '' ? "{$lead}." : "{$lead}. {$description}";
     }
 
