@@ -35,6 +35,22 @@ final class PagePlanStep implements ConcurrentStep
 {
     use LlmOptions;
 
+    /** Section kinds — must match the enum offered in page-plan.md. */
+    public const SECTION_TYPES = [
+        'hero',
+        'features',
+        'about',
+        'services',
+        'gallery',
+        'testimonials',
+        'pricing',
+        'team',
+        'faq',
+        'cta',
+        'contact',
+        'content',
+    ];
+
     /** Composition menu — must match the archetypes offered in page-plan.md. */
     public const ARCHETYPES = [
         'full-bleed-cover',
@@ -114,6 +130,44 @@ final class PagePlanStep implements ConcurrentStep
         );
     }
 
+    /**
+     * Provider-neutral output contract for one page plan. Cross-section rules
+     * (non-empty plan, adjacency and grid caps) remain in normalize(), where
+     * they can report useful page-specific validation errors.
+     *
+     * @return array<string,mixed>
+     */
+    public static function jsonSchema(): array
+    {
+        $fields = [
+            'slug'             => ['type' => 'string'],
+            'title'            => ['type' => 'string'],
+            'type'             => ['type' => 'string', 'enum' => self::SECTION_TYPES],
+            'purpose'          => ['type' => 'string'],
+            'content_notes'    => ['type' => 'string'],
+            'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
+            'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
+            'handoff'          => ['type' => 'string'],
+        ];
+
+        return [
+            'type'       => 'object',
+            'properties' => [
+                'sections' => [
+                    'type'  => 'array',
+                    'items' => [
+                        'type'                 => 'object',
+                        'properties'           => $fields,
+                        'required'             => array_keys($fields),
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required'             => ['sections'],
+            'additionalProperties' => false,
+        ];
+    }
+
     public function requests(Project $project): array
     {
         $meta = $project->readJson('meta.json');
@@ -128,13 +182,17 @@ final class PagePlanStep implements ConcurrentStep
         ];
 
         $requests = [];
+        $jsonSchema = ['name' => 'page_plan', 'schema' => self::jsonSchema()];
         foreach ($pages as $page) {
-            $requests[$page['slug']] = $this->withOptions(['prompt' => $this->renderer->render('page-plan.md', $shared + [
-                'page_title'    => (string) $page['title'],
-                'page_slug'     => (string) $page['slug'],
-                'page_purpose'  => (string) $page['purpose'],
-                'page_emphasis' => $page['front'] ? self::FRONT_EMPHASIS : self::INTERIOR_EMPHASIS,
-            ])]);
+            $requests[$page['slug']] = $this->withOptions([
+                'prompt' => $this->renderer->render('page-plan.md', $shared + [
+                    'page_title'    => (string) $page['title'],
+                    'page_slug'     => (string) $page['slug'],
+                    'page_purpose'  => (string) $page['purpose'],
+                    'page_emphasis' => $page['front'] ? self::FRONT_EMPHASIS : self::INTERIOR_EMPHASIS,
+                ]),
+                'json_schema' => $jsonSchema,
+            ]);
         }
         return $requests;
     }
@@ -205,7 +263,10 @@ final class PagePlanStep implements ConcurrentStep
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
 
-        return $this->llm->completeJson($prompt, $this->withOptions(['log_label' => $this->id() . "-{$pageSlug}-repair"]));
+        return $this->llm->completeJson($prompt, $this->withOptions([
+            'log_label'   => $this->id() . "-{$pageSlug}-repair",
+            'json_schema' => ['name' => 'page_plan', 'schema' => self::jsonSchema()],
+        ]));
     }
 
     public function run(Project $project): void

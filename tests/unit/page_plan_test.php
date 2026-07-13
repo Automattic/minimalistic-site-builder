@@ -43,6 +43,39 @@ function plan_spec(array $overrides = []): array
     ], $overrides);
 }
 
+test('PagePlanStep::jsonSchema constrains the complete section shape', function () {
+    $schema = PagePlanStep::jsonSchema();
+
+    assert_eq('object', $schema['type']);
+    assert_eq(['sections'], $schema['required']);
+    assert_eq(false, $schema['additionalProperties']);
+
+    $sections = $schema['properties']['sections'];
+    assert_eq('array', $sections['type']);
+
+    $item = $sections['items'];
+    $fields = [
+        'slug',
+        'title',
+        'type',
+        'purpose',
+        'content_notes',
+        'layout_archetype',
+        'background',
+        'handoff',
+    ];
+    assert_eq('object', $item['type']);
+    assert_eq($fields, $item['required']);
+    assert_eq(false, $item['additionalProperties']);
+    assert_eq($fields, array_keys($item['properties']));
+    foreach ($fields as $field) {
+        assert_eq('string', $item['properties'][$field]['type'], "{$field} is constrained to a string");
+    }
+    assert_eq(PagePlanStep::SECTION_TYPES, $item['properties']['type']['enum']);
+    assert_eq(PagePlanStep::ARCHETYPES, $item['properties']['layout_archetype']['enum']);
+    assert_eq(PagePlanStep::BACKGROUNDS, $item['properties']['background']['enum']);
+});
+
 test('PagePlanStep::normalize forces unique, file-safe slugs and fills defaults', function () {
     $sections = PagePlanStep::normalize([
         plan_section(['slug' => null]),                  // slug derived from title
@@ -398,6 +431,11 @@ test('page-plan fans out one request per page with per-page context', function (
     assert_contains('What we bake', $reqs['menu']['prompt']);        // its own purpose
     assert_contains('/menu/breads/', $reqs['menu']['prompt']);       // site pages list
 
+    $expectedSchema = ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()];
+    foreach ($reqs as $req) {
+        assert_eq($expectedSchema, $req['json_schema'] ?? null, 'every page request carries the same output schema');
+    }
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -476,6 +514,11 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     assert_contains('change only ONE of the two sections', $repairPrompt);
     assert_contains('also update its content_notes', $repairPrompt);
     assert_eq('page-plan-menu-repair', $llm->calls[2]['opts']['log_label'] ?? null);
+    assert_eq(
+        ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()],
+        $llm->calls[2]['opts']['json_schema'] ?? null,
+        'the semantic repair call remains schema-constrained',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
