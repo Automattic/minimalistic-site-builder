@@ -172,6 +172,38 @@ final class ThemeValidator
     }
 
     /**
+     * Page-plan warnings: interior pages that open at homepage-hero scale.
+     * The page-plan prompt asks every non-front page for a COMPACT opening
+     * hero; a 'full-bleed-cover' first section is sometimes a deliberate
+     * choice, so this stays a warning (visibility in eval), never a repair —
+     * but a site where every interior page opens with a full-viewport cover
+     * has five homepages, not one.
+     *
+     * @return string[] list of warnings (empty means interior openings are compact)
+     */
+    public static function planWarnings(Project $project): array
+    {
+        if (!$project->exists('pages.json')) {
+            return [];
+        }
+        $warnings = [];
+        foreach (($project->readJson('pages.json')['pages'] ?? []) as $page) {
+            if (!is_array($page) || !empty($page['front'])) {
+                continue;
+            }
+            $first = $page['sections'][0] ?? null;
+            if (is_array($first) && ($first['layout_archetype'] ?? '') === 'full-bleed-cover') {
+                $warnings[] = sprintf(
+                    "interior page '%s' opens with a full-bleed-cover section ('%s') — interior pages plan a compact hero, not a second homepage hero",
+                    (string) ($page['slug'] ?? ''),
+                    (string) ($first['slug'] ?? '')
+                );
+            }
+        }
+        return $warnings;
+    }
+
+    /**
      * Count paragraphs whose fontSize preset falls outside body scale —
      * heading-size ($minPx set) or caption-size ($maxPx set) — while carrying
      * more than a short lead line of text. Running copy belongs at body size;

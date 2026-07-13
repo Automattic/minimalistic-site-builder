@@ -146,3 +146,32 @@ test('validator flags raw form markup in generated markup', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('plan warnings flag interior pages opening with a full-bleed cover', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'hero', 'layout_archetype' => 'full-bleed-cover'],
+        ]],
+        ['slug' => 'menu', 'front' => false, 'sections' => [
+            ['slug' => 'menu-hero', 'layout_archetype' => 'full-bleed-cover'],
+            ['slug' => 'menu-grid', 'layout_archetype' => 'equal-card-grid'],
+        ]],
+        ['slug' => 'about', 'front' => false, 'sections' => [
+            ['slug' => 'about-hero', 'layout_archetype' => 'asymmetric-split'],
+        ]],
+    ]]);
+
+    $warnings = ThemeValidator::planWarnings($project);
+    assert_eq(1, count($warnings));
+    assert_contains("interior page 'menu'", $warnings[0]);
+    assert_contains('full-bleed-cover', $warnings[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('plan warnings are empty without pages.json', function () {
+    [$project, $tmp] = validator_project();
+    assert_eq([], ThemeValidator::planWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
