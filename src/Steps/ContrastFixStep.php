@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Project;
@@ -95,6 +96,8 @@ final class ContrastFixStep implements Step
             }
         }
 
+        $this->lintOverlayHeader($project, $fix, is_string($defaultText) ? $defaultText : null, $report, $warnings);
+
         if ($report === []) {
             $report[] = 'All text/background and link/background pairs pass WCAG thresholds.';
         }
@@ -104,6 +107,119 @@ final class ContrastFixStep implements Step
             "  contrast: %d repaired, %d warning(s) (details: logs/%s)\n",
             $repaired, $warnings, self::REPORT_FILE
         );
+    }
+
+    /**
+     * Overlay-header lint. A `header-overlay` header renders transparently on
+     * EVERY page, floating over each page's FIRST section — but the header
+     * and the sections are generated concurrently, blind to each other, so
+     * nothing upstream guarantees the one text color the header committed to
+     * reads against every page's opening background. This is the
+     * deterministic backstop: the header's effective text color is checked
+     * against each page's first-section background. Warnings only — the right
+     * fix (recolor the header, darken the section, or drop the overlay) is a
+     * design decision this step must not make — and image-backed covers are
+     * skipped like everywhere else in phase one (their pixels are unknowable
+     * until images exist).
+     *
+     * @param list<string> $report
+     */
+    private function lintOverlayHeader(Project $project, ContrastFix $fix, ?string $defaultText, array &$report, int &$warnings): void
+    {
+        if (!$project->exists('pages.json') || !$project->exists('theme/parts/header.html')) {
+            return;
+        }
+        $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
+        $top = self::topLevelIndex($header);
+        if ($top === null) {
+            return;
+        }
+        $attrs = $header->attrs($top) ?? [];
+        if (!str_contains((string) ($attrs['className'] ?? ''), 'header-overlay')) {
+            return;
+        }
+
+        // The header's effective text color: its own, else the theme default.
+        $fg = null;
+        $slug = $attrs['textColor'] ?? null;
+        if (is_string($slug) && ($rgb = $fix->rgbFor($slug)) !== null) {
+            $fg = ['rgb' => $rgb, 'label' => $slug];
+        } elseif (is_string($attrs['style']['color']['text'] ?? null)) {
+            $fg = $fix->resolveColorValue($attrs['style']['color']['text']);
+        }
+        if ($fg === null && $defaultText !== null) {
+            $fg = $fix->resolveColorValue($defaultText);
+        }
+        if ($fg === null && ($rgb = $fix->rgbFor('contrast')) !== null) {
+            $fg = ['rgb' => $rgb, 'label' => 'contrast (fallback)'];
+        }
+        if ($fg === null) {
+            return;
+        }
+
+        $base = $fix->rgbFor('base') ?? [255, 255, 255];
+        foreach (($project->readJson('pages.json')['pages'] ?? []) as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $pageSlug = (string) ($page['slug'] ?? '');
+            $first = $page['sections'][0] ?? null;
+            if (!is_array($first)) {
+                continue;
+            }
+            $sectionSlug = (string) ($first['slug'] ?? '');
+            $rel = 'parts/' . SectionsStep::partSlug($pageSlug, $sectionSlug) . '.html';
+            if (!$project->exists('theme/' . $rel)) {
+                continue;
+            }
+            $section = BlockMarkup::parse($project->readText('theme/' . $rel));
+            $secTop = self::topLevelIndex($section);
+            if ($secTop === null) {
+                continue;
+            }
+            $secAttrs = $section->attrs($secTop) ?? [];
+
+            if ($section->name($secTop) === 'cover') {
+                $hasImage = (is_string($secAttrs['url'] ?? null) && trim((string) $secAttrs['url']) !== '')
+                    || ($secAttrs['useFeaturedImage'] ?? false) === true;
+                if ($hasImage) {
+                    continue; // unknowable until images exist
+                }
+                $dim = (int) ($secAttrs['dimRatio'] ?? 100);
+                $bg = [];
+                foreach ($fix->coverOverlayColors($secAttrs) as $stop) {
+                    $bg[] = ContrastMath::compositeOver($stop['rgb'], $stop['alpha'] * $dim / 100, $base);
+                }
+                $bgLabel = 'cover-overlay over base';
+            } else {
+                $ownBg = $fix->ownBackground($secAttrs, [$base]);
+                [$bg, $bgLabel] = $ownBg !== null ? [$ownBg['colors'], $ownBg['label']] : [[$base], 'base'];
+            }
+
+            $min = PHP_FLOAT_MAX;
+            foreach ($bg as $color) {
+                $min = min($min, ContrastMath::ratio($fg['rgb'], $color));
+            }
+            if ($min >= ContrastMath::NORMAL_TEXT) {
+                continue;
+            }
+            $report[] = sprintf(
+                "[parts/header.html] overlay header text %s floats over page '%s' opening section '%s' on %s: %.2f < %.1f — the transparent header renders on EVERY page; keep opening backgrounds consistent with it or pick another archetype (warning)",
+                $fg['label'], $pageSlug, $sectionSlug, $bgLabel, $min, ContrastMath::NORMAL_TEXT
+            );
+            $warnings++;
+        }
+    }
+
+    /** The first root node of a parsed part (its top-level block). */
+    private static function topLevelIndex(BlockMarkup $doc): ?int
+    {
+        foreach ($doc->indices() as $i) {
+            if ($doc->parent($i) === null) {
+                return $i;
+            }
+        }
+        return null;
     }
 
     /**
