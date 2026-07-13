@@ -22,10 +22,12 @@ final class AnthropicClient implements Llm
      * English because the surrounding instructions are English. Structural
      * output and machine-readable directives (e.g. the AI_IMAGE alt specs the
      * image pipeline parses) are exempt, so the JSON/markup/CSS/PHP steps and
-     * image generation are unaffected. The text lives in
-     * prompts/system-preamble.md with the rest of the prompts (it has no
-     * placeholders, so no PromptRenderer); read once per process and cached.
-     * Public so tests can assert it rides on every body.
+     * image generation are unaffected. The preamble also carries today's date
+     * so time-anchored copy (footer copyright years, "as of" mentions) doesn't
+     * fall back to the model's stale training-data sense of "now". The text
+     * lives in prompts/system-preamble.md with the rest of the prompts; read
+     * once per process and cached. Public so tests can assert it rides on
+     * every body.
      */
     public static function systemPreamble(): string
     {
@@ -36,7 +38,7 @@ final class AnthropicClient implements Llm
             if (trim($text) === '') {
                 throw new RuntimeException("Missing prompt template: {$file}");
             }
-            $preamble = trim($text);
+            $preamble = PromptRenderer::fill(trim($text), ['current_date' => gmdate('j F Y')]);
         }
         return $preamble;
     }
