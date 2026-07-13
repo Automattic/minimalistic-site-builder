@@ -131,7 +131,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     );
 
     $builder = make_integration_builder($llm, $tmp);
-    $project = $builder->createProject('A cozy neighborhood bakery', 'demo');
+    $project = $builder->createProject('A cozy neighborhood bakery', 'demo', multiPage: true);
     $builder->pipeline()->runThrough($project);
 
     $problems = ThemeValidator::validate($project);
