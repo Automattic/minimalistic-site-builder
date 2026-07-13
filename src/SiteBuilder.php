@@ -11,6 +11,7 @@ use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
+use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
@@ -95,6 +96,11 @@ final class SiteBuilder
             // fix-blocks re-serialization below regenerates the saved HTML
             // from those attributes, keeping markup and attributes in sync.
             new ContrastFixStep(),
+            // Deterministic backstop for the motion-class budget the section
+            // prompts are asked to respect (independent concurrent calls can't
+            // coordinate it). Also BEFORE fix-blocks: it edits block-comment
+            // JSON attributes and the re-serialization syncs the HTML.
+            new MotionSanityStep(),
             new FixBlocksStep($this->blockFixer),
             // AFTER fix-blocks: reads the final (re-serialized) markup for which
             // layout utility classes survived, and appends their CSS to style.css —

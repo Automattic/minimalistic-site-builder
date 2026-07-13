@@ -97,6 +97,23 @@ Layout utility classes (optional, powerful) — a later build step generates the
 - `sticky-side` — on ONE `wp:column` of a two-column layout: that column stays pinned while the other scrolls (desktop only). Good for a sticky title/intro beside a long list.
 Combine them with the recipes (e.g. a staggered-grid of hover-lift cards, or a masonry-3 gallery of hover-reveal tiles) when the direction calls for that energy.
 
+Motion classes (optional) — scroll/ambient presets whose CSS ships statically with the theme; NEVER write animation CSS or `@keyframes` yourself. Add them via `"className"` exactly like the layout utilities. The DESIGN DIRECTION's **Motion** line is the contract: `none` → use NO motion class; `minimal` → `hover-lift`/`hover-reveal` only; otherwise pick from:
+- `reveal` — on a group/image/heading: fades in with a small rise when scrolled into view. The default entrance.
+- `reveal-up` — like `reveal` but with a longer rise, for a band that should arrive with presence.
+- `reveal-fade` — pure fade, no movement; for quiet, editorial content.
+- `reveal-scale` — fades in while settling down from a slight zoom; suits imagery and framed cards.
+- `stagger-children` — ONLY on a container (`wp:columns`, `wp:gallery`, or a card-grid group) whose direct children are cards/columns: the children cascade in one by one. Never combine with a `reveal-*` class on the same block.
+- `hero-entrance` — a once-on-page-load entrance for the hero's inner headline group ONLY; at most one per page, and only in the first section.
+- `ken-burns` — AMBIENT: on a `wp:cover` or image figure — its image zooms very slowly.
+- `gradient-shift` — AMBIENT: on a group whose background is a gradient — the gradient drifts slowly.
+- `ambient-drift` — AMBIENT: on ONE small decorative element (never a text band) — a slow vertical float.
+
+Motion budget (hard rules — a deterministic build step strips violations, so overspending just wastes your choices):
+- At most ONE motion class per block (`hover-lift`/`hover-reveal` don't count toward this limit).
+- Motion is seasoning, not sauce: at most one or two entrances per section — the section's key content group, or its one card grid via `stagger-children`. Never put a reveal on every block, and let text-heavy sections stay still.
+- The three AMBIENT classes are signature effects: at most ONE ambient effect on the WHOLE page, and only if this section is the page's focal moment (usually the hero). Look at the COMPOSITION block's neighbors — mid-page support sections get no ambient motion.
+- NEVER write `is-visible` (the theme's script owns that state class) and NEVER invent motion class names beyond this list.
+
 - Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS below. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
 - Every block comment must be correctly closed and the HTML class names must match the block (standard WordPress block classes).
 
