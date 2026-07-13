@@ -38,8 +38,8 @@ validated numeric bounds. The LLM never writes keyframes.
   is acceptable in generated themes. It is written once here, never by the
   LLM.
 - **Who decides:** the design-direction step picks a motion profile from a
-  fixed list; downstream application is deterministic (with a possible later
-  hybrid where section prompts place ambient effects).
+  fixed list; the per-section LLM calls place the classes themselves
+  (Option B in §3), backstopped by a deterministic sanity pass.
 - **CSS source:** static presets, with light LLM tuning of timing variables
   inside validated bounds, riding the existing page-styles call.
 
@@ -88,24 +88,44 @@ seeds diverge on it too.
 
 ### 3. Applying classes to sections
 
-**Option A — deterministic post-processor (MVP default).** A new
-`ApplyMotionStep` runs before `fix-blocks` (so re-serialization syncs HTML
-with the edited block JSON, same ordering rationale as contrast-fix). It
-walks sections and assigns classes by rule: hero → `hero-entrance`,
+**DECIDED: Option B — the per-section LLM places the classes itself.**
+(Options A and C below are kept for the record; neither is built.)
+
+The documented utility-class vocabulary in `prompts/section.md` now includes
+the motion classes (one-line contract + usage guidance each); each section's
+concurrent call may attach them via `"className"` in block JSON — exactly the
+mechanism `hover-lift` uses today, so they survive the `fix-blocks`
+re-serialization. Placement is intentional (the model knows which block is
+the section's focal grid, which cover is the hero) at a cost of ~250 prompt
+tokens per section call.
+
+Option B's known weakness — independent concurrent calls can't coordinate
+site-level coherence — is mitigated on two fronts:
+
+1. **Prompt-side budget rules** in `section.md`: at most one motion class per
+   block; one or two entrances per section; `stagger-children` only on
+   containers whose direct children are cards/columns; the ambient classes
+   are signature effects (at most ONE per page, focal moment only — each
+   section sees its neighbors' assignments for that rhythm call);
+   `hero-entrance` once, first section only; never `is-visible`, never
+   invented names.
+2. **A deterministic sanity pass** (`MotionSanityStep`) runs BEFORE
+   `fix-blocks` (so re-serialization syncs HTML with the edited block JSON —
+   same ordering rationale as contrast-fix). It only ever REMOVES classes:
+   unknown motion variants and `is-visible`, classes the committed profile
+   disallows (`minimal` → hover effects only, `none` → strip all), ambient
+   effects and `hero-entrance` beyond the first on the page (sections visited
+   in plan order, so the hero wins), extra motion classes beyond one per
+   block, and `stagger-children` on containers with fewer than two children.
+
+**Option A — deterministic post-processor (not built).** An
+`ApplyMotionStep` assigning classes by rule: hero → `hero-entrance`,
 card/column grids → `reveal-up stagger-children`, other sections →
-`reveal-fade` — profile permitting (e.g. `minimal` gets hover-only). Zero
-tokens, fully predictable, testable with fixtures.
+`reveal-fade`. Zero tokens and fully predictable, but placement is blind to
+content.
 
-**Option B — section LLM places them.** Extend the documented class
-vocabulary in `prompts/section.md`. More intentional placement, but costs
-~80–150 prompt tokens × every section call and risks inconsistent usage.
-
-**Option C — hybrid (likely end state).** Deterministic defaults from A; the
-section prompt only mentions the *ambient* classes (`ken-burns`,
-`gradient-shift`), since those are genuinely creative placement decisions
-rules can't make well.
-
-Ship A first; C is a follow-up.
+**Option C — hybrid (not built).** Deterministic defaults from A; the
+section prompt only mentions the *ambient* classes.
 
 ### 4. Bounded LLM tuning (rides the existing page-styles call)
 
@@ -133,7 +153,7 @@ are spent only when the user actually asked for animation.
 
 | Path | Extra inference |
 | --- | --- |
-| Default site | ~10 tokens (motion field) + ~140 tokens (page-styles tuning); **zero new LLM calls** |
+| Default site | ~10 tokens (motion field) + ~140 tokens (page-styles tuning) + ~250 prompt tokens × each section call (Option B vocabulary); **zero new LLM calls** |
 | Site with explicit animation request | + one scoped CSS-generation call |
 
 ---
@@ -146,13 +166,14 @@ are spent only when the user actually asked for animation.
    see it immediately.
 2. **Profile selection.** Add the `motion` field to the design-direction
    step (normalize, format, seeds).
-3. **Deterministic application.** Add `ApplyMotionStep` (Option A) before
-   `fix-blocks`, with fixture tests per archetype × profile.
+3. **Application (Option B, decided).** Motion vocabulary + budget rules in
+   `prompts/section.md`; `MotionSanityStep` before `fix-blocks` with fixture
+   tests (over-use trimmed, profile gating, unknown classes stripped).
 4. **Bounded tuning.** Extend the page-styles prompt and validator for
    `--motion-*` overrides.
 5. **Escape hatch.** Add the flag to refine-prompt/site-spec and the
    optional `CustomMotionStep`. Independent of everything else — last.
 
-Open fork: step 3's end state (pure A vs hybrid C — whether section prompts
-get to place ambient effects). Decide after seeing A's output on a few
-rebuilt projects.
+The step-3 fork is resolved: Option B (section LLM placement, budget rules in
+the prompt, deterministic sanity pass as backstop) shipped; A/C were not
+built.
