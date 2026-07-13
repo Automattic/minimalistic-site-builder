@@ -113,6 +113,7 @@ Motion budget (hard rules — a deterministic build step strips violations, so o
 - Motion is seasoning, not sauce: at most one or two entrances per section — the section's key content group, or its one card grid via `stagger-children`. Never put a reveal on every block, and let text-heavy sections stay still.
 - The three AMBIENT classes are signature effects: at most ONE ambient effect on the WHOLE page, and only if this section is the page's focal moment (usually the hero). Look at the COMPOSITION block's neighbors — mid-page support sections get no ambient motion.
 - NEVER write `is-visible` (the theme's script owns that state class) and NEVER invent motion class names beyond this list.
+- If the SITE SPEC carries a non-empty `animation_request` AND the element it describes lives in THIS section, add `"className":"custom-motion"` to that ONE block (a later build step generates the CSS implementing the request for exactly that class). Do not write the animation yourself and do not use the class anywhere else.
 
 - Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS below. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
 - Every block comment must be correctly closed and the HTML class names must match the block (standard WordPress block classes).

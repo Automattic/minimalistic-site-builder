@@ -7,6 +7,7 @@ use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
+use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
@@ -106,6 +107,11 @@ final class SiteBuilder
             // layout utility classes survived, and appends their CSS to style.css —
             // a file the fixer never touches, so nothing here can be stripped.
             new PageStylesStep($this->llm, $renderer, $models['page-styles'], $temps['page-styles']),
+            // Escape hatch: one scoped CSS-generation call, made ONLY when the
+            // user explicitly requested a specific animation (site-spec captured
+            // it verbatim) AND a section tagged its target. Default path: no-op,
+            // zero LLM calls.
+            new CustomMotionStep($this->llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
             // Also after fix-blocks: writes fonts.php from the design direction,
             // validated against a deterministic scan of the final theme.json +
             // markup (every family/weight/italic the build uses MUST be requested;

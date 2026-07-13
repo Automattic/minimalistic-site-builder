@@ -163,7 +163,7 @@ test('pipeline step order is correct', function () {
     assert_eq([
         'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+section-plan', 'sections', 'assemble-landing-page',
-        'collect-images', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
+        'collect-images', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
