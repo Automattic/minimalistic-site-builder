@@ -168,3 +168,99 @@ test('run rejects invalid CSS, leaves style.css untouched, and logs the problems
     assert_contains('not scoped', $project->readText('logs/page-styles.log'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('splitRootBlocks separates :root overrides from the class appendix', function () {
+    [$blocks, $rest] = PageStylesStep::splitRootBlocks(
+        ":root {\n    --motion-duration: 700ms;\n}\n.hover-lift { transition: transform 0.2s; }"
+    );
+    assert_eq(1, count($blocks));
+    assert_contains('--motion-duration: 700ms', $blocks[0]);
+    assert_eq('.hover-lift { transition: transform 0.2s; }', $rest);
+
+    [$blocks, $rest] = PageStylesStep::splitRootBlocks('.hover-lift { color: var(--wp--preset--color--base); }');
+    assert_eq([], $blocks);
+});
+
+test('validateMotionOverride accepts in-bounds values and allowlisted easings', function () {
+    $block = ":root {\n    --motion-duration: 900ms;\n    --motion-distance: 32px;\n    --motion-stagger: 0.1s;\n    --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);\n}";
+    assert_eq([], PageStylesStep::validateMotionOverride([$block], 'dramatic'));
+});
+
+test('validateMotionOverride rejects out-of-bounds values, foreign properties, and unknown easings', function () {
+    $cases = [
+        'duration below range' => ':root { --motion-duration: 100ms; }',
+        'duration above range' => ':root { --motion-duration: 2s; }',
+        'distance above range' => ':root { --motion-distance: 120px; }',
+        'stagger below range'  => ':root { --motion-stagger: 10ms; }',
+        'unknown easing'       => ':root { --motion-ease: cubic-bezier(1, -2, 3, 4); }',
+        'not a length'         => ':root { --motion-distance: 3rem; }',
+        'foreign property'     => ':root { --motion-duration: 500ms; color: red; }',
+        'foreign motion var'   => ':root { --motion-wobble: 3; }',
+        'empty block'          => ':root { }',
+    ];
+    foreach ($cases as $label => $block) {
+        assert_true(PageStylesStep::validateMotionOverride([$block], 'calm') !== [], $label);
+    }
+    assert_true(
+        PageStylesStep::validateMotionOverride([':root { --motion-duration: 500ms; }', ':root { --motion-duration: 600ms; }'], 'calm') !== [],
+        'more than one :root block'
+    );
+    assert_true(
+        PageStylesStep::validateMotionOverride([':root { --motion-duration: 500ms; }'], 'none') !== [],
+        'profile none ships no kit to tune'
+    );
+});
+
+test('run keeps a valid motion override and drops an out-of-bounds one silently', function () {
+    [$project, $tmp] = ps_project('builder_ps_motion_');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'calm']);
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"hover-lift"} --><div class="wp-block-group hover-lift"></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(":root {\n    --motion-duration: 750ms;\n}\n.hover-lift { transition: transform 0.2s ease; }");
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains('--motion-duration: 750ms', $style, 'in-bounds override appended');
+    assert_contains('.hover-lift', $style);
+    assert_contains('MOTION TUNING', $llm->calls[0]['prompt'], 'tuning offer reaches the prompt');
+    assert_contains("'calm' motion profile", $llm->calls[0]['prompt']);
+
+    // Out-of-bounds override: dropped, but the class appendix still lands.
+    [$project2, $tmp2] = ps_project('builder_ps_motion2_');
+    $project2->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'calm']);
+    $project2->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"hover-lift"} --><div class="wp-block-group hover-lift"></div><!-- /wp:group -->'
+    );
+    $llm2 = new FakeLlm();
+    $llm2->queueText(":root {\n    --motion-duration: 5000ms;\n}\n.hover-lift { transition: transform 0.2s ease; }");
+
+    (new PageStylesStep($llm2, new PromptRenderer(repo_path('prompts'))))->run($project2);
+
+    $style2 = $project2->readText('theme/style.css');
+    assert_true(!str_contains($style2, '--motion-duration'), 'out-of-bounds override dropped');
+    assert_contains('.hover-lift', $style2, 'class appendix survives the drop');
+    assert_contains('DROPPED MOTION OVERRIDE', $project2->readText('logs/page-styles.log'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+    exec('rm -rf ' . escapeshellarg($tmp2));
+});
+
+test('run with motion profile none offers no tuning block in the prompt', function () {
+    [$project, $tmp] = ps_project('builder_ps_notune_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"hover-lift"} --><div class="wp-block-group hover-lift"></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText('.hover-lift { transition: transform 0.2s ease; }');
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_true(!str_contains($llm->calls[0]['prompt'], 'MOTION TUNING'), 'no tuning offer without a kit');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

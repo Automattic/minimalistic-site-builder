@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
@@ -47,8 +48,8 @@ final class PageStylesStep implements Step
     public const CLASSES = [
         'overlap-up'   => 'pulls the block upward over the preceding content: a negative margin-top (typically -3rem to -6rem) plus position:relative and a z-index so it layers above',
         'masonry-3'    => 'CSS-columns masonry on the container: columns:3 with a comfortable gap; direct children get break-inside:avoid, display:block and a bottom margin; drop to 2 columns below 1024px and 1 column below 600px via @media',
-        'hover-lift'   => 'a transition, then on :hover a small translateY lift and a shadow',
-        'hover-reveal' => 'the container crops (overflow:hidden; position:relative); its img scales slightly and dims on hover; captions/text remain visible at rest — do not set opacity:0, visibility:hidden, or display:none on children because Gutenberg wraps images in figure elements',
+        'hover-lift'   => 'a transition — duration calc(var(--motion-duration, 500ms) / 2), easing var(--motion-ease, ease), so hover timing follows the motion profile — then on :hover a small translateY lift and a shadow',
+        'hover-reveal' => 'the container crops (overflow:hidden; position:relative); its img scales slightly and dims on hover, with the same calc(var(--motion-duration, 500ms) / 2) / var(--motion-ease, ease) transition timing; captions/text remain visible at rest — do not set opacity:0, visibility:hidden, or display:none on children because Gutenberg wraps images in figure elements',
         'sticky-side'  => 'position:sticky with a top offset, applied only at desktop widths (@media (min-width: 782px)); align-self:flex-start so the column can stick',
     ];
 
@@ -114,31 +115,184 @@ final class PageStylesStep implements Step
             return;
         }
 
+        $profile = DesignDirectionStep::motionProfileFor($project);
         $rendered = $this->renderer->render('page-styles.md', [
             'design_direction' => DesignDirectionStep::readFor($project),
             'theme_json'       => $project->readText('theme/theme.json'),
             'used_classes'     => self::classList($used),
+            'motion_tuning'    => $profile === 'none' ? '' : "\n" . self::motionTuningBrief($profile) . "\n",
         ]);
         $css = self::stripFences(trim(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
         ));
 
-        $problems = self::validate($css);
-        if ($problems !== []) {
-            file_put_contents(
-                $project->logPath(self::LOG_FILE),
-                "REJECTED CSS:\n{$css}\n\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
-            );
-            echo '  page-styles: CSS rejected (' . count($problems)
-                . ' problem(s)); appendix skipped — see logs/' . self::LOG_FILE . "\n";
-            return;
+        // The optional :root --motion-* override rides the same response but
+        // lives under its own contract: numeric bounds instead of selector
+        // scoping. Validate the two pieces independently — a rejected tuning
+        // block silently falls back to the profile defaults, and a rejected
+        // class appendix doesn't take a valid tuning down with it.
+        [$rootBlocks, $css] = self::splitRootBlocks($css);
+        $log = [];
+        $override = null;
+        if ($rootBlocks !== []) {
+            $overrideProblems = self::validateMotionOverride($rootBlocks, $profile);
+            if ($overrideProblems === []) {
+                $override = implode("\n", $rootBlocks);
+            } else {
+                $log[] = "DROPPED MOTION OVERRIDE (profile defaults apply):\n"
+                    . implode("\n", $rootBlocks)
+                    . "\n\nPROBLEMS:\n- " . implode("\n- ", $overrideProblems);
+            }
         }
 
+        $problems = $css === '' ? [] : self::validate($css);
+        if ($problems !== []) {
+            $log[] = "REJECTED CSS:\n{$css}\n\nPROBLEMS:\n- " . implode("\n- ", $problems);
+            echo '  page-styles: CSS rejected (' . count($problems)
+                . ' problem(s)); appendix skipped — see logs/' . self::LOG_FILE . "\n";
+            $css = '';
+        }
+        if ($log !== []) {
+            file_put_contents($project->logPath(self::LOG_FILE), implode("\n\n", $log) . "\n");
+        }
+
+        $appendix = trim(($override ?? '') . "\n\n" . $css);
+        if ($appendix === '') {
+            return;
+        }
         $project->writeText(
             'theme/style.css',
-            rtrim($project->readText('theme/style.css')) . "\n\n" . self::MARKER . "\n" . $css . "\n"
+            rtrim($project->readText('theme/style.css')) . "\n\n" . self::MARKER . "\n" . $appendix . "\n"
         );
-        echo '  styled: ' . implode(', ', $used) . "\n";
+        if ($css !== '') {
+            echo '  styled: ' . implode(', ', $used) . "\n";
+        }
+        if ($override !== null) {
+            echo "  motion tuning: --motion-* override accepted\n";
+        }
+    }
+
+    /**
+     * The MOTION TUNING prompt block offered when the site ships the motion
+     * kit: one optional :root override of the profile variables, bounded by
+     * the exact ranges validateMotionOverride() enforces.
+     */
+    public static function motionTuningBrief(string $profile): string
+    {
+        [$durMin, $durMax] = Motion::DURATION_MS;
+        [$distMin, $distMax] = Motion::DISTANCE_PX;
+        [$stagMin, $stagMax] = Motion::STAGGER_MS;
+        return "MOTION TUNING (optional): the theme ships a static motion kit driven by CSS custom properties, "
+            . "currently set by the '{$profile}' motion profile. You MAY additionally emit ONE `:root { … }` block "
+            . "tuning some of these variables to the design direction's mood — or omit it to keep the profile defaults:\n"
+            . "- `--motion-duration`: {$durMin}ms–{$durMax}ms\n"
+            . "- `--motion-distance`: {$distMin}px–{$distMax}px\n"
+            . "- `--motion-stagger`: {$stagMin}ms–{$stagMax}ms\n"
+            . '- `--motion-ease`: one of ' . implode(', ', Motion::EASING_ALLOWLIST) . "\n"
+            . 'Only `--motion-*` declarations may appear in that block; an out-of-range value drops the whole block.';
+    }
+
+    /**
+     * Pull every top-level `:root { … }` block out of the CSS, returning the
+     * blocks and the remaining stylesheet. Pure — unit-testable.
+     *
+     * @return array{0: list<string>, 1: string}
+     */
+    public static function splitRootBlocks(string $css): array
+    {
+        $blocks = [];
+        $rest = (string) preg_replace_callback(
+            '/:root\s*\{[^{}]*\}/',
+            static function (array $m) use (&$blocks): string {
+                $blocks[] = trim($m[0]);
+                return '';
+            },
+            $css
+        );
+        return [$blocks, trim($rest)];
+    }
+
+    /**
+     * Validate the :root motion-override block(s) the model may emit alongside
+     * the class appendix: exactly one block, only --motion-* declarations,
+     * every value inside the Motion bounds, easing from the allowlist — and
+     * none at all when the profile is `none` (no kit ships to tune). Returns
+     * problem strings; empty = valid. Pure — unit-testable.
+     *
+     * @param list<string> $blocks
+     * @return string[]
+     */
+    public static function validateMotionOverride(array $blocks, string $profile = 'calm'): array
+    {
+        if ($blocks === []) {
+            return ['no :root block'];
+        }
+        if ($profile === 'none') {
+            return ['motion profile is none — no motion kit ships to tune'];
+        }
+        if (count($blocks) > 1) {
+            return ['more than one :root block'];
+        }
+
+        if (preg_match('/\{([^{}]*)\}/', $blocks[0], $m) !== 1) {
+            return ['unparseable :root block'];
+        }
+        $body = (string) preg_replace('~/\*.*?\*/~s', '', $m[1]);
+
+        $problems = [];
+        $declarations = 0;
+        foreach (array_filter(array_map('trim', explode(';', $body))) as $declaration) {
+            if (preg_match('/^--motion-(duration|distance|stagger|ease)\s*:\s*(.+)$/s', $declaration, $d) !== 1) {
+                $problems[] = "only --motion-duration/-distance/-stagger/-ease may be overridden: {$declaration}";
+                continue;
+            }
+            $declarations++;
+            $value = trim($d[2]);
+            $problem = match ($d[1]) {
+                'duration' => self::rangeProblem($value, 'ms', Motion::DURATION_MS),
+                'distance' => self::rangeProblem($value, 'px', Motion::DISTANCE_PX),
+                'stagger'  => self::rangeProblem($value, 'ms', Motion::STAGGER_MS),
+                'ease'     => self::easingProblem($value),
+            };
+            if ($problem !== null) {
+                $problems[] = "--motion-{$d[1]}: {$problem}";
+            }
+        }
+        if ($declarations === 0 && $problems === []) {
+            $problems[] = 'empty :root block';
+        }
+        return $problems;
+    }
+
+    /** Bounds-check one length/time value ("600ms", "0.6s", "24px"). */
+    private static function rangeProblem(string $value, string $unit, array $range): ?string
+    {
+        if (preg_match('/^(\d+(?:\.\d+)?)\s*(ms|s|px)$/i', $value, $m) !== 1) {
+            return "'{$value}' is not a plain {$unit} value";
+        }
+        $number = (float) $m[1];
+        $valueUnit = strtolower($m[2]);
+        if ($unit === 'ms' && $valueUnit === 's') {
+            $number *= 1000;
+        } elseif ($valueUnit !== $unit) {
+            return "'{$value}' is not a plain {$unit} value";
+        }
+        [$min, $max] = $range;
+        return $number < $min || $number > $max
+            ? "'{$value}' is outside {$min}{$unit}–{$max}{$unit}"
+            : null;
+    }
+
+    /** Easing must come from the fixed allowlist (whitespace-insensitive). */
+    private static function easingProblem(string $value): ?string
+    {
+        $normalized = strtolower((string) preg_replace('/\s+/', '', $value));
+        foreach (Motion::EASING_ALLOWLIST as $easing) {
+            if ($normalized === strtolower(str_replace(' ', '', $easing))) {
+                return null;
+            }
+        }
+        return "'{$value}' is not on the easing allowlist";
     }
 
     /**
