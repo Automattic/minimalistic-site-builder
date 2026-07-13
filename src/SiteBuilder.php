@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
@@ -92,6 +93,11 @@ final class SiteBuilder
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.
             new CollectImagesStep(),
+            // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
+            // repairs rewrite only the block-comment JSON attributes, and the
+            // fix-blocks re-serialization below regenerates the saved HTML
+            // from those attributes, keeping markup and attributes in sync.
+            new ContrastFixStep(),
             new FixBlocksStep($this->blockFixer),
             // AFTER fix-blocks, so the markup inlined into the content plugin is
             // the final re-serialized form: writes plugin/pages/* + the manifest,

@@ -82,6 +82,31 @@ final class ThemeValidator
     }
 
     /**
+     * Width/rhythm warnings: whatever LayoutFixer would still change. After a
+     * normal build these are empty — FixBlocksStep applies the same pass — so
+     * anything reported here means generated markup drifted past the
+     * deterministic normalization (or an old project predates it).
+     *
+     * @return string[] list of warnings (empty means widths follow the contract)
+     */
+    public static function layoutWarnings(Project $project): array
+    {
+        $warnings = [];
+        $contentSize = Steps\FixBlocksStep::themeContentSize($project);
+        foreach (Steps\FixBlocksStep::themeFiles($project) as $rel) {
+            $result = LayoutFixer::fix(
+                $project->readText('theme/' . $rel),
+                LayoutFixer::roleFor($rel),
+                $contentSize
+            );
+            foreach ($result['notes'] as $note) {
+                $warnings[] = "{$rel}: {$note}";
+            }
+        }
+        return $warnings;
+    }
+
+    /**
      * Soft typography checks (warnings, not build failures): font sizes
      * hardcoded in block markup instead of drawn from the theme.json
      * fontSizes scale, a "display" preset that no markup uses, and

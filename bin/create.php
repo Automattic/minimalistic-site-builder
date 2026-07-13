@@ -5,6 +5,7 @@ use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
@@ -105,6 +106,17 @@ if ($withImages) {
     $secs = microtime(true) - $start;
     $steps[] = record_step('generate-images', $secs, 0, 0);
     printf("  %-18s %7.1fs %10s %10s  %s\n", 'generate-images', $secs, fmt(0), fmt(0), '—');
+
+    // Now that the real pixels exist, re-check cover text against the actual
+    // (dimmed) images and raise dimRatio / flip text colors where needed —
+    // the same follow-up build.php and images.php run after generation.
+    $coverStep = new CoverContrastStep(NodeBlockFixer::default());
+    announce_step($coverStep);
+    $start = microtime(true);
+    $coverStep->run($project);
+    $secs = microtime(true) - $start;
+    $steps[] = record_step($coverStep->id(), $secs, 0, 0);
+    printf("  %-18s %7.1fs %10s %10s  %s\n", $coverStep->id(), $secs, fmt(0), fmt(0), '—');
 }
 
 $wall = microtime(true) - $wallStart;

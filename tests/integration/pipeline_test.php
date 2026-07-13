@@ -92,13 +92,19 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     $ftr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>(c) Hearth</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
     $llm->queueText($hdr);
     $llm->queueText($ftr);
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText(
+        '<!-- wp:group {"style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="margin-top:0">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+    );
     // The specials section opts into a layout utility class (hover-lift) so the
     // page-styles step downstream has something to style — and we can assert the
     // class survives the block-fixer AND is still seen after the markup moves
     // into the content plugin.
     $llm->queueText(
-        '<!-- wp:group {"className":"hover-lift"} --><div class="wp-block-group hover-lift">'
+        '<!-- wp:group {"className":"hover-lift","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hover-lift" style="margin-top:0">'
         . '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
     );
@@ -130,6 +136,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     $problems = ThemeValidator::validate($project);
     assert_eq([], $problems, 'theme should validate; problems: ' . implode('; ', $problems));
+    $layoutWarnings = ThemeValidator::layoutWarnings($project);
+    assert_eq([], $layoutWarnings, 'theme should have no layout warnings: ' . implode('; ', $layoutWarnings));
 
     // Identity propagated end to end — theme AND content plugin.
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
@@ -185,7 +193,7 @@ test('pipeline step order is correct', function () {
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'sections',
-        'collect-images', 'fix-blocks', 'assemble-pages', 'page-styles', 'fonts-php', 'finalize-theme',
+        'collect-images', 'contrast-fix', 'fix-blocks', 'assemble-pages', 'page-styles', 'fonts-php', 'finalize-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
