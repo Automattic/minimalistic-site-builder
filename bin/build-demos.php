@@ -401,11 +401,15 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
             if ($s['pid'] > 0) {
                 kill_tree($s['pid']);
             }
-            // Catch the reparented node server, which the tree walk misses. The
-            // blueprint path is unique per project, so this stops exactly this
-            // project's server and nothing else's.
-            $blueprint = repo_path("projects/{$s['slug']}/.playground-blueprint.json");
+            // Catch the reparented node server, which the tree walk misses.
+            // playground.php stamps its blueprint with its own pid (= $s['pid'],
+            // thanks to `exec`), so this stops exactly the server we booted and
+            // no sibling server of the same project.
+            $blueprint = repo_path("projects/{$s['slug']}/.playground-blueprint.{$s['pid']}.json");
             @exec('pkill -f ' . escapeshellarg(preg_quote($blueprint, '~')) . ' 2>/dev/null');
+            // playground.php's own shutdown unlink never runs when it dies by
+            // signal, so clean up its blueprint here.
+            @unlink($blueprint);
             if (is_resource($s['proc'])) {
                 proc_terminate($s['proc']);
                 proc_close($s['proc']);

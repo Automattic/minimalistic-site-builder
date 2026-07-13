@@ -85,8 +85,27 @@ $blueprint = [
         ['step' => 'activateTheme', 'themeFolderName' => $slug],
     ],
 ];
-$blueprintPath = repo_path("projects/{$slug}/.playground-blueprint.json");
+// The path is unique per boot (this process's pid), not per project: the
+// teardowns in bin/screenshot.php and bin/build-demos.php stop the reparented
+// node server by pkill-matching this path in its argv, and with a fixed
+// per-project name that match takes down every running server of the project —
+// a sibling preview included — instead of just the one being stopped. Unique
+// names also stop concurrent boots of one project overwriting each other's
+// blueprint mid-boot.
+$blueprintPath = repo_path("projects/{$slug}/.playground-blueprint." . getmypid() . '.json');
 file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+register_shutdown_function(static fn () => @unlink($blueprintPath));
+
+// Sweep blueprints left by earlier boots that died by signal (a signal skips
+// the shutdown unlink above). A stamped file whose pid is gone is stale; the
+// unstamped name is the pre-pid-stamp legacy leftover.
+foreach (glob(repo_path("projects/{$slug}/.playground-blueprint.*.json")) ?: [] as $stale) {
+    $pid = (int) explode('.', basename($stale))[2];
+    if ($pid > 0 && $pid !== getmypid() && !process_alive($pid)) {
+        @unlink($stale);
+    }
+}
+@unlink(repo_path("projects/{$slug}/.playground-blueprint.json"));
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 
@@ -126,6 +145,16 @@ exit($exit);
 function command_exists(string $bin): bool
 {
     return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
+}
+
+/** True if a process with this pid exists (signal 0 probes without killing). */
+function process_alive(int $pid): bool
+{
+    if (function_exists('posix_kill')) {
+        return @posix_kill($pid, 0);
+    }
+    @exec('kill -0 ' . $pid . ' 2>/dev/null', $ignored, $code);
+    return $code === 0;
 }
 
 /** Return the first free TCP port at or after $start (gives up after 50 tries). */
