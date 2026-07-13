@@ -199,8 +199,8 @@ final class AnthropicClient implements Llm
      * concurrently retrying only transient failures, accrues token usage, and
      * returns each request's raw assistant text keyed as the input.
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
-     * @return array<string,string> raw text keyed as the input
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<array-key,string> raw text keyed as the input
      */
     private function textBatch(array $requests, bool $json): array
     {
@@ -221,8 +221,9 @@ final class AnthropicClient implements Llm
         }
 
         // Label a call after its step's explicit log_label, else the request key
-        // (already a clean name like "header" or "section-hero").
-        $labelFor = fn (string $key): string => (string) ($requests[$key]['log_label'] ?? $key);
+        // (already a clean name like "header" or "section-hero"). Keys may be
+        // ints too (PHP coerces numeric keys), so the type must admit both.
+        $labelFor = fn (string|int $key): string => (string) ($requests[$key]['log_label'] ?? $key);
 
         // Run them all concurrently, retrying only the transient failures. A
         // request that fails for good is logged before the batch aborts, so the
@@ -231,7 +232,7 @@ final class AnthropicClient implements Llm
             $bodies,
             fn (array $subset): array => $this->streamMulti($subset),
             [2, 5, 12],
-            function (string $key, string $error, float $time) use ($labelFor, &$bodies): void {
+            function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
                 LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
             },
         );
@@ -328,11 +329,11 @@ final class AnthropicClient implements Llm
      * so it doesn't consume a transient-retry attempt. $bodies is by-reference
      * so the caller's post-batch logging reflects what was actually sent.
      *
-     * @param array<string,array<string,mixed>> $bodies request bodies keyed by id
-     * @param callable(array<string,array<string,mixed>>):array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string}> $transport
+     * @param array<array-key,array<string,mixed>> $bodies request bodies keyed by id
+     * @param callable(array<array-key,array<string,mixed>>):array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
-     * @param null|callable(string,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
-     * @return array<string,array{text:string,input:int,output:int,time:float}>
+     * @param null|callable(string|int,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
+     * @return array<array-key,array{text:string,input:int,output:int,time:float}>
      */
     public static function retryTextBatch(array &$bodies, callable $transport, array $delays, ?callable $onFailure = null): array
     {
