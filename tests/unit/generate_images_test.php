@@ -5,8 +5,10 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\Tests\FakeImageClient;
+use Automattic\SiteBuild\Tests\FakeLlm;
 
 require_once __DIR__ . '/../FakeImageClient.php';
+require_once __DIR__ . '/../FakeLlm.php';
 
 function generate_fixture(): array
 {
@@ -48,7 +50,7 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('generate-images prepends site name/topic/description context to each prompt', function () {
+test('generate-images weaves the site context into each prompt as one sentence', function () {
     [$project, $tmp] = generate_fixture();
     $project->writeJson('siteSpec.json', [
         'name'        => 'Hearth & Crumb',
@@ -60,12 +62,50 @@ test('generate-images prepends site name/topic/description context to each promp
     (new GenerateImagesStep($images))->run($project);
 
     $sent = $images->calls[0]['prompt'];
-    assert_contains('Hearth & Crumb', $sent);                 // site name
-    assert_contains('artisan sourdough', $sent);              // topic
-    assert_contains('A neighborhood bakery', $sent);          // description
+    // Page context and site name read as one grammatical sentence, with the
+    // description following — and the topic NOT repeated beside it.
+    assert_contains(
+        'This image is used as full-bleed hero with text overlay on the website “Hearth & Crumb”.',
+        $sent
+    );
+    assert_contains('A neighborhood bakery selling sourdough and pastries.', $sent);
+    assert_true(!str_contains($sent, 'artisan sourdough'), 'topic not repeated when the description covers it');
     assert_contains('A bakery at dawn', $sent);               // the image subject is still there
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('siteContext leads with a noun phrase and never stutters the topic', function () {
+    // Empty spec → no context at all.
+    assert_eq('', GenerateImagesStep::siteContext([]));
+
+    // Name only.
+    assert_eq('the website “Hearth & Crumb”.', GenerateImagesStep::siteContext([
+        'name' => 'Hearth & Crumb',
+    ]));
+
+    // The topic is included only while there is no description to cover it…
+    assert_eq('the website “Hearth & Crumb”, about artisan sourdough.', GenerateImagesStep::siteContext([
+        'name' => 'Hearth & Crumb', 'topic' => 'artisan sourdough',
+    ]));
+
+    // …and folds away once a description exists (it restates the topic).
+    assert_eq(
+        'the website “Hearth & Crumb”. A neighborhood bakery selling sourdough and pastries.',
+        GenerateImagesStep::siteContext([
+            'name'        => 'Hearth & Crumb',
+            'topic'       => 'artisan sourdough',
+            'description' => 'A neighborhood bakery selling sourdough and pastries.',
+        ])
+    );
+
+    // Specs without a name still read after "on".
+    assert_eq('a website about artisan sourdough.', GenerateImagesStep::siteContext([
+        'topic' => 'artisan sourdough',
+    ]));
+    assert_eq('a website. A neighborhood bakery.', GenerateImagesStep::siteContext([
+        'description' => 'A neighborhood bakery.',
+    ]));
 });
 
 test('generate-images leads with the subject + style and adds the page context', function () {
@@ -240,6 +280,83 @@ test('generate-images tolerates a partial failure within a batch', function () {
     assert_true($project->exists('theme/assets/img-0.jpg'));
     assert_true(!$project->exists('theme/assets/img-1.jpg'), 'no asset for failed image');
     assert_true($project->exists('theme/assets/img-2.jpg'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images repairs a safety-filtered prompt with the small model and retries', function () {
+    [$project, $tmp] = generate_fixture(); // subject: "A bakery at dawn"
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['A bakery at dawn']; // original subject is "filtered"
+    $llm = new FakeLlm();
+    $llm->queueText('a warm bread display at sunrise');
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    // The rewrite went to the configured small model, with the original
+    // subject and the filter's reason in the repair prompt.
+    assert_eq(1, count($llm->calls), 'one rewrite request');
+    assert_eq('small-model', $llm->calls[0]['opts']['model']);
+    assert_contains('A bakery at dawn', $llm->calls[0]['prompt']);
+    assert_contains('fake rai', $llm->calls[0]['prompt']);
+
+    // A second generation batch was issued with the recomposed prompt.
+    assert_eq(2, count($images->batches), 'original batch + repair batch');
+    assert_contains('a warm bread display at sunrise', $images->batches[1][0]['prompt']);
+
+    // The image completed like any other.
+    $specs = $project->readJson('images.json');
+    assert_eq('completed', $specs[0]['status']);
+    assert_true($project->exists('theme/assets/hero.jpg'), 'asset written after repair');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images marks failed when the repaired prompt is filtered too', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['A bakery at dawn', 'still blocked'];
+    $llm = new FakeLlm();
+    $llm->queueText('still blocked subject'); // the rewrite trips the filter again
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    // One repair round only: rewritten once, regenerated once, then failed.
+    assert_eq(1, count($llm->calls), 'no second rewrite round');
+    assert_eq(2, count($images->batches));
+    $specs = $project->readJson('images.json');
+    assert_eq('failed', $specs[0]['status']);
+    assert_contains('safety filter', $specs[0]['error']);
+    assert_true(!$project->exists('theme/assets/hero.jpg'), 'no asset for failed image');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images without an llm marks a filtered image failed', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['A bakery at dawn'];
+
+    (new GenerateImagesStep($images))->run($project); // no Llm: no repair pass
+
+    assert_eq(1, count($images->batches), 'no repair batch without an llm');
+    $specs = $project->readJson('images.json');
+    assert_eq('failed', $specs[0]['status']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images falls back to the original failure when the rewrite errors', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['A bakery at dawn'];
+    $llm = new FakeLlm(); // nothing queued: completeBatch throws
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project); // must not throw
+
+    $specs = $project->readJson('images.json');
+    assert_eq('failed', $specs[0]['status']);
+    assert_contains('fake rai', $specs[0]['error']); // the original filter error is kept
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

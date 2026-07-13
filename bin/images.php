@@ -48,8 +48,17 @@ $specs = $project->readJson('images.json');
 $pending = array_filter($specs, static fn ($img) => ($img['status'] ?? 'pending') !== 'completed');
 printf("  %d placeholder(s), %d to generate\n", count($specs), count($pending));
 
+// The Llm is only used to rewrite prompts the image safety filter rejects;
+// without LLM credentials the step still runs, minus that repair.
+try {
+    $llm = make_llm();
+} catch (\Throwable $e) {
+    fwrite(STDERR, "  (no LLM available — safety-filtered prompts won't be repaired: {$e->getMessage()})\n");
+    $llm = null;
+}
+
 $start = microtime(true);
-(new GenerateImagesStep(make_image_client()))->run($project);
+(new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null))->run($project);
 printf("  done in %.1fs\n", microtime(true) - $start);
 
 // With the real pixels on disk, verify cover text against the dimmed images.
