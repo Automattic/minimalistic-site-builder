@@ -7,6 +7,7 @@ use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
@@ -145,6 +146,15 @@ if ($withImages && $until === null) {
     $secs = microtime(true) - $start;
     // Image generation uses the Vertex proxy, not Claude, so it spends no LLM
     // tokens; the row records its wall time, and the tally comes from images.json.
+    $report->addStep($step->id(), $secs, 0, 0);
+    echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+
+    // Now that the real pixels exist, re-check cover text against the actual
+    // (dimmed) images and raise dimRatio / flip text colors where needed.
+    $step = new CoverContrastStep(NodeBlockFixer::default());
+    $start = microtime(true);
+    $step->run($project);
+    $secs = microtime(true) - $start;
     $report->addStep($step->id(), $secs, 0, 0);
     echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
 
