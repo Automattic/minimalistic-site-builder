@@ -19,6 +19,7 @@ function plan_section(array $overrides = []): array
     return array_merge([
         'slug'             => 'hero',
         'title'            => 'Hero',
+        'role'             => 'hero',
         'type'             => 'hero',
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
@@ -57,6 +58,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     $fields = [
         'slug',
         'title',
+        'role',
         'type',
         'purpose',
         'content_notes',
@@ -71,7 +73,8 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     foreach ($fields as $field) {
         assert_eq('string', $item['properties'][$field]['type'], "{$field} is constrained to a string");
     }
-    assert_eq(PagePlanStep::SECTION_TYPES, $item['properties']['type']['enum']);
+    assert_true(!array_key_exists('enum', $item['properties']['type']), 'type remains a free-form semantic label');
+    assert_eq(PagePlanStep::SECTION_ROLES, $item['properties']['role']['enum']);
     assert_eq(PagePlanStep::ARCHETYPES, $item['properties']['layout_archetype']['enum']);
     assert_eq(PagePlanStep::BACKGROUNDS, $item['properties']['background']['enum']);
 });
@@ -79,21 +82,67 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
 test('PagePlanStep::normalize forces unique, file-safe slugs and fills defaults', function () {
     $sections = PagePlanStep::normalize([
         plan_section(['slug' => null]),                  // slug derived from title
-        plan_section(['slug' => 'Our Story!', 'title' => 'About', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
-        plan_section(['title' => 'Another Hero', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']), // duplicate slug -> hero-2
+        plan_section(['slug' => 'Our Story!', 'title' => 'About', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['title' => 'Another Hero', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']), // duplicate slug -> hero-2
         'not-an-array',                                  // skipped
     ]);
 
     $slugs = array_column($sections, 'slug');
     assert_eq(['hero', 'our-story', 'hero-2'], $slugs);
     assert_eq('hero', $sections[0]['type'], 'type preserved');
+    assert_eq('hero', $sections[0]['role'], 'role preserved');
+});
+
+test('PagePlanStep::normalize preserves a novel free-form type', function () {
+    $sections = PagePlanStep::normalize([
+        plan_section(['type' => 'seasonal-tasting-menu']),
+    ]);
+
+    assert_eq('seasonal-tasting-menu', $sections[0]['type']);
+    assert_eq('hero', $sections[0]['role']);
+});
+
+test('PagePlanStep::normalize rejects an unknown role', function () {
+    assert_throws(function () {
+        PagePlanStep::normalize([plan_section(['role' => 'sidebar'])]);
+    }, 'invalid role');
+});
+
+test('PagePlanStep::normalize rejects a missing role', function () {
+    $section = plan_section();
+    unset($section['role']);
+
+    assert_throws(function () use ($section) {
+        PagePlanStep::normalize([$section]);
+    }, 'invalid role');
+});
+
+test('PagePlanStep::normalize reports every positional role violation', function () {
+    try {
+        PagePlanStep::normalize([
+            plan_section(['role' => 'closing']),
+            plan_section(['slug' => 'middle', 'role' => 'hero', 'layout_archetype' => 'asymmetric-split']),
+            plan_section(['slug' => 'end', 'role' => 'content', 'layout_archetype' => 'centered-stack']),
+        ]);
+        assert_true(false, 'expected the plan to be rejected');
+    } catch (RuntimeException $e) {
+        assert_contains("first section 'hero' must have role 'hero', got 'closing'", $e->getMessage());
+        assert_contains("an interior section 'middle' must have role 'content', got 'hero'", $e->getMessage());
+        assert_contains("last section 'end' must have role 'closing', got 'content'", $e->getMessage());
+    }
+});
+
+test('PagePlanStep::normalize rejects an empty type', function () {
+    assert_throws(function () {
+        PagePlanStep::normalize([plan_section(['type' => '  '])]);
+    }, 'missing type');
 });
 
 test('PagePlanStep::normalize keeps the art-direction fields on a valid plan', function () {
     $sections = PagePlanStep::normalize([
         plan_section(),
-        plan_section(['slug' => 'work', 'title' => 'Work', 'type' => 'gallery', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'handoff' => 'Between the image hero above and the contrast CTA below.']),
-        plan_section(['slug' => 'cta', 'title' => 'CTA', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'handoff' => 'Between the base offset grid above and the footer below.']),
+        plan_section(['slug' => 'work', 'title' => 'Work', 'role' => 'content', 'type' => 'case-study-mosaic', 'layout_archetype' => 'offset-grid', 'background' => 'base', 'handoff' => 'Between the image hero above and the contrast CTA below.']),
+        plan_section(['slug' => 'cta', 'title' => 'CTA', 'role' => 'closing', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'handoff' => 'Between the base offset grid above and the footer below.']),
     ]);
 
     assert_eq(3, count($sections));
@@ -189,8 +238,8 @@ test('PagePlanStep::normalize rejects adjacent duplicate archetypes', function (
     assert_throws(function () {
         PagePlanStep::normalize([
             plan_section(),
-            plan_section(['slug' => 'work', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
-            plan_section(['slug' => 'team', 'layout_archetype' => 'equal-card-grid', 'background' => 'tinted']),
+            plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+            plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid', 'background' => 'tinted']),
         ]);
     }, 'adjacent');
 });
@@ -198,8 +247,8 @@ test('PagePlanStep::normalize rejects adjacent duplicate archetypes', function (
 test('PagePlanStep::normalize allows a repeated archetype when not adjacent', function () {
     $sections = PagePlanStep::normalize([
         plan_section(['layout_archetype' => 'equal-card-grid', 'background' => 'base']),
-        plan_section(['slug' => 'story', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
-        plan_section(['slug' => 'team', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
+        plan_section(['slug' => 'story', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid', 'background' => 'base']),
     ]);
     assert_eq(3, count($sections));
 });
@@ -208,8 +257,8 @@ test('PagePlanStep::normalize reports every violation in one rejection', functio
     try {
         PagePlanStep::normalize([
             plan_section(['background' => 'plaid']),
-            plan_section(['slug' => 'work', 'layout_archetype' => 'centered-stack', 'handoff' => '']),
-            plan_section(['slug' => 'team', 'layout_archetype' => 'centered-stack']),
+            plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'handoff' => '']),
+            plan_section(['slug' => 'team', 'role' => 'closing', 'layout_archetype' => 'centered-stack']),
         ]);
         assert_true(false, 'expected the plan to be rejected');
     } catch (RuntimeException $e) {
@@ -223,7 +272,7 @@ test('PagePlanStep::normalize does not report adjacency between invalid archetyp
     try {
         PagePlanStep::normalize([
             plan_section(['layout_archetype' => 'fancy-mosaic']),
-            plan_section(['slug' => 'work', 'layout_archetype' => 'fancy-mosaic']),
+            plan_section(['slug' => 'work', 'role' => 'closing', 'layout_archetype' => 'fancy-mosaic']),
         ]);
         assert_true(false, 'expected the plan to be rejected');
     } catch (RuntimeException $e) {
@@ -276,10 +325,10 @@ test('PagePlanStep::normalize caps equal-card-grid at twice per page', function 
     assert_throws(function () {
         PagePlanStep::normalize([
             plan_section(['layout_archetype' => 'equal-card-grid']),
-            plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack']),
-            plan_section(['slug' => 'b', 'layout_archetype' => 'equal-card-grid']),
-            plan_section(['slug' => 'c', 'layout_archetype' => 'offset-grid']),
-            plan_section(['slug' => 'd', 'layout_archetype' => 'equal-card-grid']),
+            plan_section(['slug' => 'a', 'role' => 'content', 'layout_archetype' => 'centered-stack']),
+            plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'equal-card-grid']),
+            plan_section(['slug' => 'c', 'role' => 'content', 'layout_archetype' => 'offset-grid']),
+            plan_section(['slug' => 'd', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid']),
         ]);
     }, 'equal-card-grid');
 });
@@ -287,8 +336,8 @@ test('PagePlanStep::normalize caps equal-card-grid at twice per page', function 
 test('PagePlanStep::repairVariety reassigns the later section of each adjacent duplicate pair', function () {
     $sections = PagePlanStep::repairVariety([
         plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'asymmetric-split']),
-        plan_section(['slug' => 'c', 'layout_archetype' => 'asymmetric-split']),
+        plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'asymmetric-split']),
+        plan_section(['slug' => 'c', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split']),
     ]);
 
     assert_eq('centered-stack', $sections[0]['layout_archetype'], 'untouched');
@@ -300,8 +349,8 @@ test('PagePlanStep::repairVariety reassigns the later section of each adjacent d
 test('PagePlanStep::repairVariety fixes a run of three duplicates without creating new ones', function () {
     $sections = PagePlanStep::repairVariety([
         plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack']),
-        plan_section(['slug' => 'c', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'c', 'role' => 'closing', 'layout_archetype' => 'centered-stack']),
     ]);
 
     PagePlanStep::normalize($sections);
@@ -312,8 +361,8 @@ test('PagePlanStep::repairVariety fixes a run of three duplicates without creati
 test('PagePlanStep::repairVariety leaves a valid plan unchanged', function () {
     $raw = [
         plan_section(),
-        plan_section(['slug' => 'work', 'layout_archetype' => 'offset-grid']),
-        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'work', 'role' => 'content', 'layout_archetype' => 'offset-grid']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack']),
     ];
     assert_eq(
         array_column($raw, 'layout_archetype'),
@@ -324,10 +373,10 @@ test('PagePlanStep::repairVariety leaves a valid plan unchanged', function () {
 test('PagePlanStep::repairVariety reassigns equal-card-grids beyond the cap to non-grids', function () {
     $sections = PagePlanStep::repairVariety([
         plan_section(['slug' => 'a', 'layout_archetype' => 'equal-card-grid']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack']),
-        plan_section(['slug' => 'c', 'layout_archetype' => 'equal-card-grid']),
-        plan_section(['slug' => 'd', 'layout_archetype' => 'offset-grid']),
-        plan_section(['slug' => 'e', 'layout_archetype' => 'equal-card-grid']),
+        plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'c', 'role' => 'content', 'layout_archetype' => 'equal-card-grid']),
+        plan_section(['slug' => 'd', 'role' => 'content', 'layout_archetype' => 'offset-grid']),
+        plan_section(['slug' => 'e', 'role' => 'closing', 'layout_archetype' => 'equal-card-grid']),
     ]);
 
     PagePlanStep::normalize($sections);
@@ -340,7 +389,7 @@ test('PagePlanStep::repairVariety reassigns equal-card-grids beyond the cap to n
 test('PagePlanStep::repairVariety leaves invalid archetypes for normalize to reject', function () {
     $sections = PagePlanStep::repairVariety([
         plan_section(['slug' => 'a', 'layout_archetype' => 'fancy-mosaic']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'fancy-mosaic']),
+        plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'fancy-mosaic']),
     ]);
     assert_eq(['fancy-mosaic', 'fancy-mosaic'], array_column($sections, 'layout_archetype'));
 });
@@ -430,6 +479,9 @@ test('page-plan fans out one request per page with per-page context', function (
     assert_contains('"Menu"', $reqs['menu']['prompt']);              // its own title
     assert_contains('What we bake', $reqs['menu']['prompt']);        // its own purpose
     assert_contains('/menu/breads/', $reqs['menu']['prompt']);       // site pages list
+    assert_contains('`type` is an open-ended semantic label', $reqs['home']['prompt']);
+    assert_contains('examples:', $reqs['home']['prompt']);
+    assert_true(!str_contains($reqs['home']['prompt'], '"type": "one of:'), 'semantic types are examples, not a closed list');
 
     $expectedSchema = ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()];
     foreach ($reqs as $req) {
@@ -449,14 +501,14 @@ test('page-plan writes pages.json with sections per page', function () {
     // One response per page, in flattened order: home, menu, breads.
     $llm->queueJson(['sections' => [
         plan_section(),
-        plan_section(['slug' => 'cta', 'title' => 'CTA', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'handoff' => 'Between the image hero above and the footer below.']),
+        plan_section(['slug' => 'cta', 'title' => 'CTA', 'role' => 'closing', 'type' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'handoff' => 'Between the image hero above and the footer below.']),
     ]]);
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'menu-hero', 'title' => 'Menu Hero', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'handoff' => 'Between the site header above and the bread list below.']),
-        plan_section(['slug' => 'breads', 'title' => 'Breads', 'type' => 'features', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'handoff' => 'Between the tinted menu hero above and the footer below.']),
+        plan_section(['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'handoff' => 'Between the tinted menu hero above and the footer below.']),
     ]]);
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'bread-list', 'title' => 'Bread List', 'type' => 'features', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'handoff' => 'Between the site header above and the footer below.']),
+        plan_section(['slug' => 'bread-list', 'title' => 'Bread List', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'handoff' => 'Between the site header above and the footer below.']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -467,9 +519,11 @@ test('page-plan writes pages.json with sections per page', function () {
     assert_eq('home', $plan['pages'][0]['slug']);
     assert_eq(true, $plan['pages'][0]['front']);
     assert_eq('hero', $plan['pages'][0]['sections'][0]['slug']);
+    assert_eq('closing', $plan['pages'][0]['sections'][1]['role']);
     assert_eq('menu', $plan['pages'][1]['slug']);
     assert_eq('/menu/', $plan['pages'][1]['path']);
     assert_eq('menu-hero', $plan['pages'][1]['sections'][0]['slug']);
+    assert_eq('bread-catalog', $plan['pages'][1]['sections'][1]['type']);
     assert_eq('menu', $plan['pages'][2]['parent']);
     assert_eq(20, $plan['pages'][2]['menu_order']);
 
@@ -491,13 +545,13 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     // …menu plan violates the adjacency rule…
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
     // …and the repair call returns a fixed menu plan (compact opening — menu
     // is an interior page, so a full-bleed cover would be re-rejected).
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a', 'layout_archetype' => 'offset-grid', 'background' => 'image']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'a', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
+        plan_section(['slug' => 'b', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
@@ -535,12 +589,12 @@ test('page-plan falls back to a mechanical fix when the repair still breaks a va
     // The plan has adjacent duplicates…
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
-        plan_section(['slug' => 'closing-cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'closing-cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
     // …and the repair fumbles it by moving BOTH sections to the same new archetype.
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
-        plan_section(['slug' => 'closing-cta', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
+        plan_section(['slug' => 'closing-cta', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 

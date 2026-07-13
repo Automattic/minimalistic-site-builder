@@ -35,7 +35,8 @@ Return a single JSON object with this exact shape:
     {
       "slug": "hero",
       "title": "Short human title for the section",
-      "type": "one of: hero, features, about, services, gallery, testimonials, pricing, team, faq, cta, contact, content",
+      "role": "one of: hero, content, closing",
+      "type": "a short, specific semantic label; examples: menu, timeline, case-studies, process, services, gallery, testimonials, pricing, team, faq, contact, story",
       "purpose": "1 sentence: what this section is for and what the visitor should take away",
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
       "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, mixed-width-editorial, equal-card-grid, list-with-thumbnails",
@@ -54,6 +55,10 @@ Layout archetypes (pick the one that best serves each section's content):
 - mixed-width-editorial — a magazine-like row mixing wide and narrow items
 - equal-card-grid — the classic equal-height card row
 - list-with-thumbnails — stacked rows, each a small image beside text
+
+Section roles and types:
+- `role` is structural, not a content category: use `hero` for the page-opening lead, `closing` for the final next-step section, and `content` for everything between them.
+- `type` is an open-ended semantic label. Choose or invent the most specific short label for what the section actually contains; do not collapse a menu, timeline, case-study index, process, event calendar, or location guide into a generic bucket.
 
 Background treatments:
 - base — the default page background
@@ -75,7 +80,7 @@ Rules:
 - LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" stays lowercase a-z ASCII regardless (transliterate).
 - IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly, and any planned email uses the spec's `email_domain` — never invent alternates.
 - THIS PAGE ONLY: plan only content that belongs here per this page's purpose and the SITE PAGES list. Content that lives on a sibling page gets, at most, a teaser that links onward — "content_notes" may reference another page by its path (e.g. "closes with a link to /menu/").
-- The FIRST section must be a "hero" and the LAST should be a strong call-to-action ("cta" or "contact").
+- The FIRST section must have `role: "hero"`. In a plan with two or more sections, the LAST must have `role: "closing"` and provide a strong next step, while every section between them has `role: "content"`. A one-section plan uses `role: "hero"` because one section cannot hold two roles.
 - "slug" is lowercase a-z, 0-9 and hyphens only, unique across the list, and descriptive (e.g. "hero", "menu-highlights", "meet-the-team").
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.
 - "content_notes" must never include site chrome — no wordmark, site title lockup, navigation, or menu links, even if the design direction's hero composition mentions them. The site header is a separate template part that renders above (or overlaid on) the hero; planning nav into a section produces a doubled header.

@@ -19,7 +19,7 @@ use Automattic\SiteBuild\StepDeclaration;
  *
  * Input:  meta.json (user prompt) + siteSpec.json (with its `pages` tree).
  * Output: pages.json — { "pages": [ { slug, title, path, front, parent,
- *         menu_order, purpose, sections: [ { slug, title, type, purpose,
+ *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
  *         content_notes, layout_archetype, background, vertical_density,
  *         handoff } ] } ] }, a FLAT list in display order, parents before
  *         children.
@@ -35,21 +35,8 @@ final class PagePlanStep implements ConcurrentStep
 {
     use LlmOptions;
 
-    /** Section kinds — must match the enum offered in page-plan.md. */
-    public const SECTION_TYPES = [
-        'hero',
-        'features',
-        'about',
-        'services',
-        'gallery',
-        'testimonials',
-        'pricing',
-        'team',
-        'faq',
-        'cta',
-        'contact',
-        'content',
-    ];
+    /** Structural positions — semantic section types remain deliberately open-ended. */
+    public const SECTION_ROLES = ['hero', 'content', 'closing'];
 
     /** Composition menu — must match the archetypes offered in page-plan.md. */
     public const ARCHETYPES = [
@@ -142,11 +129,13 @@ final class PagePlanStep implements ConcurrentStep
         $fields = [
             'slug'             => ['type' => 'string'],
             'title'            => ['type' => 'string'],
-            'type'             => ['type' => 'string', 'enum' => self::SECTION_TYPES],
+            'role'             => ['type' => 'string', 'enum' => self::SECTION_ROLES],
+            'type'             => ['type' => 'string'],
             'purpose'          => ['type' => 'string'],
             'content_notes'    => ['type' => 'string'],
             'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
             'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
+            'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
             'handoff'          => ['type' => 'string'],
         ];
 
@@ -369,12 +358,13 @@ final class PagePlanStep implements ConcurrentStep
      * Validate one page's section list and force unique, file-safe slugs.
      * Each section keeps its model-provided fields; missing optional fields
      * default benignly so the sections + assemble steps can rely on the keys.
-     * The art-direction fields (layout_archetype, background,
-     * vertical_density, handoff) are strict: unknown values, a missing
-     * handoff, adjacent duplicate archetypes, too many card grids, or an
-     * interior page opening at homepage-cover scale are collected and thrown
-     * together in ONE message, so the single repair call sees every violation
-     * at once. Pure — unit-testable.
+     * The structural role and art-direction fields (layout_archetype,
+     * background, vertical_density, handoff) are strict: unknown values, a
+     * missing handoff, adjacent duplicate archetypes, too many card grids, or
+     * an interior page opening at homepage-cover scale are collected and
+     * thrown together in ONE message, so the single repair call sees every
+     * violation at once. The semantic type is intentionally open-ended.
+     * Pure — unit-testable.
      *
      * @param mixed $raw
      * @param bool $front whether the page is the front page (interior pages
@@ -408,6 +398,15 @@ final class PagePlanStep implements ConcurrentStep
             }
             $seen[$slug] = true;
 
+            $role = trim((string) ($section['role'] ?? ''));
+            if (!in_array($role, self::SECTION_ROLES, true)) {
+                $errors[] = "page-plan: section '{$slug}' has invalid role '{$role}' — use one of: "
+                    . implode(', ', self::SECTION_ROLES);
+            }
+            $type = trim((string) ($section['type'] ?? ''));
+            if ($type === '') {
+                $errors[] = "page-plan: section '{$slug}' is missing 'type' — provide a short semantic label";
+            }
             $archetype = trim((string) ($section['layout_archetype'] ?? ''));
             if (!in_array($archetype, self::ARCHETYPES, true)) {
                 $errors[] = "page-plan: section '{$slug}' has invalid layout_archetype '{$archetype}' — use one of: "
@@ -436,6 +435,7 @@ final class PagePlanStep implements ConcurrentStep
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
+                'role'             => $role,
                 'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),
@@ -458,11 +458,49 @@ final class PagePlanStep implements ConcurrentStep
         }
 
         // Report every violation at once so the single repair call can fix them all.
-        $errors = array_merge($errors, self::varietyErrors($out));
+        $errors = array_merge($errors, self::roleErrors($out), self::varietyErrors($out));
         if ($errors !== []) {
             throw new \RuntimeException(implode("\n", $errors));
         }
         return $out;
+    }
+
+    /**
+     * Structural roles are deliberately tiny and position-based: the first
+     * section is the page hero, the last is its closing next step, and the
+     * sections between them are content. A singleton can only be the hero.
+     * Invalid enum values are already reported above and skipped here so one
+     * bad value does not produce two errors for the repair prompt.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @return string[]
+     */
+    private static function roleErrors(array $sections): array
+    {
+        $errors = [];
+        $count = count($sections);
+        foreach ($sections as $i => $section) {
+            $role = (string) ($section['role'] ?? '');
+            if (!in_array($role, self::SECTION_ROLES, true)) {
+                continue;
+            }
+            $expected = self::roleForPosition($i, $count);
+            if ($role !== $expected) {
+                $slug = (string) ($section['slug'] ?? "section-{$i}");
+                $where = $i === 0 ? 'first' : ($i === $count - 1 ? 'last' : 'an interior');
+                $errors[] = "page-plan: {$where} section '{$slug}' must have role '{$expected}', got '{$role}'";
+            }
+        }
+        return $errors;
+    }
+
+    /** The required structural role at one position in an ordered page plan. */
+    public static function roleForPosition(int $index, int $count): string
+    {
+        if ($count < 1 || $index < 0 || $index >= $count) {
+            throw new \InvalidArgumentException('section position is outside the page plan');
+        }
+        return $index === 0 ? 'hero' : ($index === $count - 1 ? 'closing' : 'content');
     }
 
     /**
