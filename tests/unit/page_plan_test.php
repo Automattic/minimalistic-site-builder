@@ -145,6 +145,67 @@ test('PagePlanStep::normalize caps equal-card-grid at twice per page', function 
     }, 'equal-card-grid');
 });
 
+test('PagePlanStep::repairVariety reassigns the later section of each adjacent duplicate pair', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'asymmetric-split']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'asymmetric-split']),
+    ]);
+
+    assert_eq('centered-stack', $sections[0]['layout_archetype'], 'untouched');
+    assert_eq('asymmetric-split', $sections[1]['layout_archetype'], 'first of the pair kept');
+    assert_true($sections[2]['layout_archetype'] !== 'asymmetric-split', 'later section reassigned');
+    PagePlanStep::normalize($sections); // the result passes validation
+});
+
+test('PagePlanStep::repairVariety fixes a run of three duplicates without creating new ones', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'centered-stack']),
+    ]);
+
+    PagePlanStep::normalize($sections);
+    assert_eq('centered-stack', $sections[0]['layout_archetype']);
+    assert_eq('centered-stack', $sections[2]['layout_archetype'], 'non-adjacent repeat is allowed and kept');
+});
+
+test('PagePlanStep::repairVariety leaves a valid plan unchanged', function () {
+    $raw = [
+        plan_section(),
+        plan_section(['slug' => 'work', 'layout_archetype' => 'offset-grid']),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack']),
+    ];
+    assert_eq(
+        array_column($raw, 'layout_archetype'),
+        array_column(PagePlanStep::repairVariety($raw), 'layout_archetype')
+    );
+});
+
+test('PagePlanStep::repairVariety reassigns equal-card-grids beyond the cap to non-grids', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'equal-card-grid']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'equal-card-grid']),
+        plan_section(['slug' => 'd', 'layout_archetype' => 'offset-grid']),
+        plan_section(['slug' => 'e', 'layout_archetype' => 'equal-card-grid']),
+    ]);
+
+    PagePlanStep::normalize($sections);
+    $grids = array_filter(array_column($sections, 'layout_archetype'), fn ($a) => $a === 'equal-card-grid');
+    assert_eq(2, count($grids), 'first two grids kept, the third reassigned');
+    assert_eq('equal-card-grid', $sections[0]['layout_archetype']);
+    assert_eq('equal-card-grid', $sections[2]['layout_archetype']);
+});
+
+test('PagePlanStep::repairVariety leaves invalid archetypes for normalize to reject', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'fancy-mosaic']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'fancy-mosaic']),
+    ]);
+    assert_eq(['fancy-mosaic', 'fancy-mosaic'], array_column($sections, 'layout_archetype'));
+});
+
 test('PagePlanStep::flattenPages walks the tree depth-first with paths and menu order', function () {
     $flat = PagePlanStep::flattenPages(plan_spec());
 
@@ -265,13 +326,44 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     $repairPrompt = $llm->calls[2]['prompt'];
     assert_contains('IT WAS REJECTED', $repairPrompt);
     assert_contains('adjacent sections', $repairPrompt);
+    assert_contains('change only ONE of the two sections', $repairPrompt);
     assert_contains('also update its content_notes', $repairPrompt);
     assert_eq('page-plan-menu-repair', $llm->calls[2]['opts']['log_label'] ?? null);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan throws when the repair is still invalid', function () {
+test('page-plan falls back to a mechanical fix when the repair still breaks a variety rule', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ppv_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A portfolio']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    // The plan has adjacent duplicates…
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'closing-cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ]]);
+    // …and the repair fumbles it by moving BOTH sections to the same new archetype.
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['slug' => 'closing-cta', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
+    ]]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new PagePlanStep($llm, $renderer))->run($project);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(2, count($llm->calls), 'no second LLM repair — the fallback is mechanical');
+    assert_eq('asymmetric-split', $sections[0]['layout_archetype'], 'first of the pair kept');
+    assert_true($sections[1]['layout_archetype'] !== 'asymmetric-split', 'later section reassigned');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan throws when the repair is still invalid beyond the variety rules', function () {
     $tmp = sys_get_temp_dir() . '/builder_ppr2_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A bakery']);

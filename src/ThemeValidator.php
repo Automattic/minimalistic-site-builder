@@ -70,6 +70,14 @@ final class ThemeValidator
             }
         }
 
+        // Raw form controls are dead UI: nothing generated serves a submission,
+        // so a section that emits them silently discards whatever visitors type.
+        foreach ($checked as $rel) {
+            if ($project->exists($rel) && preg_match('/<(form|input|textarea|select)\b/i', $project->readText($rel), $m)) {
+                $problems[] = "{$rel}: contains form markup (<" . strtolower($m[1]) . '>) — the site has no form backend';
+            }
+        }
+
         return $problems;
     }
 

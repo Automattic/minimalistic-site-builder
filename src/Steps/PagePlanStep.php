@@ -54,12 +54,15 @@ final class PagePlanStep implements ConcurrentStep
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
         . ' energy: a strong hero, at least 3 unique, image-rich content sections, and a compelling closing CTA.'
         . " Use the spec's \"sections\" list as a starting point, but improve it: add, reorder, split, or rename"
-        . ' sections so the page is richer and flows well. Aim for 5 to 8 sections.';
+        . " sections so the page is richer and flows well. Let the design direction's signature device and mood"
+        . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
 
     private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections.'
         . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero),'
         . " cover only THIS page's purpose (don't rebuild content that lives on other pages — see SITE PAGES),"
-        . ' and close with a next step that points onward.';
+        . " and close with a next step that points onward. Let the design direction's signature device and mood"
+        . ' inform the section choices here too, and remember the site header renders above — sometimes floating'
+        . " over — this page's FIRST section: open with a background the site chrome can sit on.";
 
     public function __construct(
         private Llm $llm,
@@ -125,10 +128,15 @@ final class PagePlanStep implements ConcurrentStep
             } catch (\RuntimeException $e) {
                 // The art-direction rules (adjacency, enums, card-grid cap) are
                 // creative constraints the model occasionally violates. Re-ask
-                // ONCE per page with the specific rejections; a still-invalid
-                // repair aborts the build.
+                // ONCE per page with the specific rejections; if the repair
+                // still breaks the variety rules, reassign the offending
+                // archetypes mechanically instead of aborting the build.
                 $repaired = $this->repair($project, $slug, $plan, $e->getMessage());
-                $sections = self::normalize($repaired['sections'] ?? null);
+                try {
+                    $sections = self::normalize($repaired['sections'] ?? null);
+                } catch (\RuntimeException $stillInvalid) {
+                    $sections = self::normalize(self::repairVariety($repaired['sections'] ?? null));
+                }
                 if ($sections === []) {
                     throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
                 }
@@ -155,6 +163,9 @@ final class PagePlanStep implements ConcurrentStep
             . json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
             . "\n\nIT WAS REJECTED FOR THESE REASONS:\n{$errors}\n"
             . "\nReturn the corrected full JSON object. Fix EVERY rejection above. "
+            . 'For an adjacent-duplicate rejection, change only ONE of the two sections, and re-check the whole '
+            . 'corrected list top-to-bottom against every rule before returning — a repair that introduces a NEW '
+            . 'violation is rejected too. '
             . 'If you change a section\'s layout_archetype, background, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
@@ -325,6 +336,67 @@ final class PagePlanStep implements ConcurrentStep
             throw new \RuntimeException(implode("\n", $errors));
         }
         return $out;
+    }
+
+    /**
+     * Last-resort mechanical fix for the variety rules on a raw section list:
+     * excess equal-card-grids and the later section of each adjacent duplicate
+     * pair are reassigned to the first archetype that differs from both
+     * neighbors (never a card grid, so the cap holds and no new grids appear).
+     * The reassigned section's prose (content_notes, handoff) may then lag its
+     * archetype slightly — an accepted trade against aborting the whole build.
+     * Only touches VALID archetypes; enum and handoff errors still reject the
+     * plan in normalize(). Pure — unit-testable.
+     *
+     * @param mixed $raw
+     * @return array<int,array<string,mixed>>
+     */
+    public static function repairVariety($raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $sections = array_values(array_filter($raw, 'is_array'));
+        $archetypes = array_map(
+            fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
+            $sections
+        );
+
+        $pick = function (int $i) use (&$archetypes): string {
+            foreach (self::ARCHETYPES as $candidate) {
+                if ($candidate !== 'equal-card-grid'
+                    && $candidate !== ($archetypes[$i - 1] ?? null)
+                    && $candidate !== ($archetypes[$i + 1] ?? null)
+                ) {
+                    return $candidate;
+                }
+            }
+            return $archetypes[$i]; // unreachable: 6 non-grid archetypes vs 2 neighbors
+        };
+
+        // Cap pass first: keep the first MAX card grids, reassign the rest.
+        $grids = 0;
+        foreach ($archetypes as $i => $archetype) {
+            if ($archetype === 'equal-card-grid' && ++$grids > self::MAX_EQUAL_CARD_GRIDS) {
+                $archetypes[$i] = $pick($i);
+            }
+        }
+
+        // Adjacency pass, left to right, judging only valid archetypes (like
+        // varietyErrors). $pick avoids both neighbors, so a fix never breaks
+        // the pair behind it or pre-duplicates the one ahead.
+        foreach ($archetypes as $i => $archetype) {
+            if ($i > 0 && $archetype === $archetypes[$i - 1]
+                && in_array($archetype, self::ARCHETYPES, true)
+            ) {
+                $archetypes[$i] = $pick($i);
+            }
+        }
+
+        foreach ($archetypes as $i => $archetype) {
+            $sections[$i]['layout_archetype'] = $archetype;
+        }
+        return $sections;
     }
 
     /**

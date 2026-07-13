@@ -134,3 +134,15 @@ test('validator checks the content plugin pages for balance and placeholders', f
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('validator flags raw form markup in generated markup', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText('plugin/pages/contact.html', '<!-- wp:group --><div class="wp-block-group"><form><input type="text"></form></div><!-- /wp:group -->');
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('plugin/pages/contact.html', $joined);
+    assert_contains('form markup', $joined);
+    assert_contains('no form backend', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

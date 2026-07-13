@@ -156,7 +156,7 @@ test('outline and neighbors tolerate a plan without art-direction fields', funct
         ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
         ['slug' => 'about', 'title' => 'About', 'type' => 'about'],
     ];
-    assert_eq("1. Hero (hero)\n2. About (about)", SectionsStep::outline($sections));
+    assert_eq("1. Hero (hero) [#hero]\n2. About (about) [#about]", SectionsStep::outline($sections));
     assert_eq("Above: \"Hero\"\nBelow: the site footer (this is the last section)", SectionsStep::neighbors($sections, 1));
 });
 
@@ -321,5 +321,41 @@ test('sections writes nothing when any part is invalid (no partial output)', fun
     // The valid header/footer must NOT have been written before the bad part threw.
     assert_true(!$project->exists('theme/parts/header.html'), 'no part written when a sibling is invalid');
     assert_true(!$project->exists('theme/parts/footer.html'), 'no part written when a sibling is invalid');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('header nav rule follows the page count: anchors for one page, page-list for several', function () {
+    [$project, $tmp] = sections_fixture(); // homepage only
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    assert_contains('do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
+    assert_contains('href="#menu-highlights"', $reqs['header']['prompt']);
+
+    $project->writeJson('pages.json', ['pages' => [
+        sections_page('home', [
+            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the footer below.'],
+        ]),
+        sections_page('menu', [
+            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'handoff' => 'Between the site header above and the footer below.'],
+        ]),
+    ]]);
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    assert_contains('should contain `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
+    assert_true(!str_contains($reqs['header']['prompt'], 'do NOT use `<!-- wp:page-list /-->`'), 'multi-page header keeps the page-list default');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('section prompts carry the slug as the anchor and the outline exposes it', function () {
+    [$project, $tmp] = sections_fixture();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    $about = $reqs['page-home--about']['prompt'];
+    assert_contains('"anchor":"about"', $about);
+    assert_contains('id="about"', $about);
+    assert_contains('[#about]', $about); // its own outline line ends with the anchor
+    assert_contains('[#hero]', $reqs['header']['prompt']); // the header sees the anchors too
     exec('rm -rf ' . escapeshellarg($tmp));
 });

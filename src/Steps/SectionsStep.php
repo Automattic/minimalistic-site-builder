@@ -43,6 +43,18 @@ final class SectionsStep implements Step
         return self::PART_PREFIX . $pageSlug . '--' . $sectionSlug;
     }
 
+    /** {{nav_rule}} for header.md when the site has inner pages to list. */
+    private const NAV_RULE_MULTI = '- Navigation default: the `wp:navigation` should contain `<!-- wp:page-list /-->`'
+        . ' so it auto-reflects the site\'s pages — do NOT hand-author `wp:navigation-link` entries unless a curated'
+        . ' menu is clearly wanted.';
+
+    /** {{nav_rule}} when the site is the homepage alone — a page-list would render one self-referential "Home" link. */
+    private const NAV_RULE_SINGLE = '- Navigation: this site is ONE page, so a page-list would render a single'
+        . ' self-referential "Home" link — do NOT use `<!-- wp:page-list /-->`, and do NOT link to the page itself.'
+        . ' Either omit navigation entirely (the wordmark carries the header) or hand-author a small `wp:navigation`'
+        . ' of `wp:navigation-link` items targeting section anchors from the HOMEPAGE OUTLINE (each outline line ends'
+        . ' with its [#anchor]; a link\'s "url" is that anchor, e.g. href="#menu-highlights").';
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -91,6 +103,7 @@ final class SectionsStep implements Step
                 'hero_brief'       => self::heroBrief($frontSections),
                 'outline'          => self::outline($frontSections),
                 'site_pages'       => $sitePages,
+                'nav_rule'         => count($pages) > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE,
             ])]),
             'footer' => $this->withOptions(['prompt' => $this->renderer->render('footer.md', [
                 'site_spec'        => $siteSpec,
@@ -117,6 +130,7 @@ final class SectionsStep implements Step
                     'page_title'       => (string) ($page['title'] ?? ''),
                     'site_pages'       => $sitePages,
                     'section_title' => (string) ($section['title'] ?? ''),
+                    'section_slug'  => (string) ($section['slug'] ?? ''),
                     'section_type'  => (string) ($section['type'] ?? 'content'),
                     'section_purpose' => (string) ($section['purpose'] ?? ''),
                     'content_notes' => (string) ($section['content_notes'] ?? ''),
@@ -190,7 +204,10 @@ final class SectionsStep implements Step
     /**
      * A one-line-per-section outline string used to give every part the same
      * view of the page, including each section's planned archetype and
-     * background so the page rhythm is visible everywhere. Pure — unit-testable.
+     * background so the page rhythm is visible everywhere. Each line ends
+     * with the section's [#anchor] (its slug — the section prompt makes the
+     * top-level group carry it as an anchor), so navs and links can target
+     * sections in-page. Pure — unit-testable.
      *
      * @param array<int,array<string,mixed>> $sections
      */
@@ -203,6 +220,9 @@ final class SectionsStep implements Step
             $line = ($n + 1) . ". {$title} ({$type})";
             if (($plan = self::assignment($s)) !== '') {
                 $line .= " — {$plan}";
+            }
+            if (($slug = trim((string) ($s['slug'] ?? ''))) !== '') {
+                $line .= " [#{$slug}]";
             }
             $lines[] = $line;
         }
