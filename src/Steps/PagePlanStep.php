@@ -60,9 +60,13 @@ final class PagePlanStep implements ConcurrentStep
     private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections.'
         . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero),'
         . " cover only THIS page's purpose (don't rebuild content that lives on other pages — see SITE PAGES),"
-        . " and close with a next step that points onward. Let the design direction's signature device and mood"
-        . ' inform the section choices here too, and remember the site header renders above — sometimes floating'
-        . " over — this page's FIRST section: open with a background the site chrome can sit on.";
+        . " and close with a next step that points onward. The homepage already teases the site's topics (the"
+        . " spec's \"sections\" list): where this page's subject matter overlaps one of those teasers, plan the"
+        . ' DEEPER destination the teaser links to — different framing, more specific copy points, and imagery'
+        . ' subjects the homepage band would not have used — never a re-plan of the teaser itself. Let the'
+        . " design direction's signature device and mood inform the section choices here too, and remember the"
+        . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
+        . ' background the site chrome can sit on.';
 
     public function __construct(
         private Llm $llm,
