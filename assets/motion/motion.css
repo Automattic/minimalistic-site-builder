@@ -7,8 +7,11 @@
  * within validated bounds via a :root block in style.css.
  *
  * Accessibility / progressive-enhancement contract:
- * - EVERYTHING lives inside @media (prefers-reduced-motion: no-preference):
- *   reduced-motion users get a fully static, fully visible page.
+ * - EVERYTHING lives inside @media screen and (prefers-reduced-motion:
+ *   no-preference): reduced-motion users get a fully static, fully visible
+ *   page, and so does PRINT — without the screen guard the html.js reveal
+ *   rules would apply to print media too, so printing before scrolling
+ *   would emit blank (opacity: 0) sections.
  * - Scroll-reveal targets are hidden ONLY under `html.js` — a class that
  *   motion.js itself sets. If the script never loads or IntersectionObserver
  *   is missing, nothing is ever hidden. This preserves the intent of the
@@ -24,7 +27,7 @@
     --motion-stagger: 90ms;
 }
 
-@media (prefers-reduced-motion: no-preference) {
+@media screen and (prefers-reduced-motion: no-preference) {
 
     /* ── Scroll reveals (motion.js adds .is-visible on intersection) ─────
        Revealed by an ANIMATION with `backwards` fill (not a transition, and

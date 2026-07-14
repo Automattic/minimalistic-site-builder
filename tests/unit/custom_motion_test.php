@@ -150,7 +150,7 @@ test('custom-motion appends validated CSS wrapped in the reduced-motion media qu
     ob_end_clean();
 
     $style = $project->readText('theme/style.css');
-    assert_contains('@media (prefers-reduced-motion: no-preference) {', $style, 'deterministic wrapper added');
+    assert_contains('@media screen and (prefers-reduced-motion: no-preference) {', $style, 'deterministic wrapper added (screen: print must not render a paused entrance)');
     assert_contains('custom-motion-spin', $style);
     // The prompt carried the verbatim request and the tagged element context.
     assert_contains('the logo should spin on hover', $llm->calls[0]['prompt']);

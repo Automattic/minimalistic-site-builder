@@ -17,7 +17,8 @@ use Automattic\SiteBuild\Step;
  *         + the final markup (AFTER fix-blocks, where the section, header, or
  *         footer prompt tagged the target with the `custom-motion` class).
  * Output: a small CSS block appended to theme/style.css, wrapped in
- *         @media (prefers-reduced-motion: no-preference).
+ *         @media screen and (prefers-reduced-motion: no-preference) —
+ *         `screen` so print never renders a paused entrance frame.
  *
  * This is the escape hatch to the motion system's core rule ("the LLM never
  * writes animation CSS"): only when the user literally asked for a specific
@@ -105,7 +106,7 @@ final class CustomMotionStep implements Step
             'theme/style.css',
             rtrim($project->readText('theme/style.css'))
             . "\n\n" . self::MARKER
-            . "\n@media (prefers-reduced-motion: no-preference) {\n" . $css . "\n}\n"
+            . "\n@media screen and (prefers-reduced-motion: no-preference) {\n" . $css . "\n}\n"
         );
         echo "  custom-motion: implemented \"{$request}\"\n";
     }

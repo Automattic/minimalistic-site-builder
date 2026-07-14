@@ -48,9 +48,10 @@ test('scaffold-theme copies the static motion kit verbatim into the theme', func
     }
 
     // The kit's accessibility contract: reveals hide only under the
-    // JS-set html.js scope, and everything respects reduced motion.
+    // JS-set html.js scope, and everything respects reduced motion AND
+    // stays out of print media (unvisited reveals would print blank).
     $css = $project->readText('theme/assets/motion/motion.css');
-    assert_contains('@media (prefers-reduced-motion: no-preference)', $css);
+    assert_contains('@media screen and (prefers-reduced-motion: no-preference)', $css);
     assert_contains('html.js .reveal', $css);
     assert_true(!preg_match('/^\s*\.reveal[^{]*\{[^}]*opacity:\s*0/m', $css), 'no unscoped hiding');
     $js = $project->readText('theme/assets/motion/motion.js');
