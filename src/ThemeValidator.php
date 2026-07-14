@@ -78,7 +78,166 @@ final class ThemeValidator
             }
         }
 
-        return $problems;
+        // Generated links must resolve. The section prompt promises real
+        // destinations, but only a scan of what the model actually emitted
+        // enforces it.
+        return array_merge($problems, self::linkProblems($project));
+    }
+
+    /**
+     * Broken-link problems across the generated site: every root-relative
+     * href must be the path of a page in pages.json, a fragment must be an
+     * anchor that exists on the page it targets (the chrome's anchors count
+     * everywhere — it renders on every page), a bare "#fragment" in the
+     * chrome must resolve on EVERY page, and a button link must carry an
+     * href at all. External URLs, mailto:/tel:, and the bare "#" placeholder
+     * the prompts allow for social links are not judged. Fragment checks are
+     * skipped for pages whose markup is not on disk (theme-only builds).
+     *
+     * @return string[]
+     */
+    private static function linkProblems(Project $project): array
+    {
+        if (!$project->exists('pages.json')) {
+            return [];
+        }
+        $pages = array_filter(
+            (array) ($project->readJson('pages.json')['pages'] ?? []),
+            static fn ($p) => is_array($p) && (string) ($p['slug'] ?? '') !== ''
+        );
+        if ($pages === []) {
+            return [];
+        }
+
+        // Route → page slug, and per-page anchor sets (null = markup not on
+        // disk, so fragments against that page can't be judged).
+        $routes = [];
+        $anchors = [];
+        foreach ($pages as $page) {
+            $slug = (string) $page['slug'];
+            $routes[self::normalizePath((string) ($page['path'] ?? ''))] = $slug;
+            $rel = "plugin/pages/{$slug}.html";
+            $anchors[$slug] = $project->exists($rel) ? self::anchorsIn($project->readText($rel)) : null;
+        }
+
+        $chrome = [];
+        foreach (['theme/parts/header.html', 'theme/parts/footer.html'] as $rel) {
+            if ($project->exists($rel)) {
+                $chrome += self::anchorsIn($project->readText($rel));
+            }
+        }
+
+        // Anchors present on EVERY page — what a bare chrome fragment needs;
+        // null (unknown) when any page's markup is missing.
+        $everywhere = null;
+        if (!in_array(null, $anchors, true)) {
+            $sets = array_values($anchors);
+            $everywhere = array_shift($sets) ?? [];
+            foreach ($sets as $set) {
+                $everywhere = array_intersect_key($everywhere, $set);
+            }
+            $everywhere += $chrome;
+        }
+
+        // The files whose links get judged: the chrome (rendered on every
+        // page, so its bare fragments are held to the every-page set) and
+        // each page's markup.
+        $scan = [];
+        foreach (['theme/parts/header.html', 'theme/parts/footer.html'] as $rel) {
+            if ($project->exists($rel)) {
+                $scan[$rel] = null;
+            }
+        }
+        foreach ($anchors as $slug => $set) {
+            if ($set !== null) {
+                $scan["plugin/pages/{$slug}.html"] = (string) $slug;
+            }
+        }
+
+        $problems = [];
+        foreach ($scan as $rel => $pageSlug) {
+            $markup = $project->readText($rel);
+
+            // Buttons must lead somewhere; a button anchor with no href is
+            // a dead CTA.
+            foreach (preg_match_all('/<a\b[^>]*>/i', $markup, $m) ? $m[0] : [] as $tag) {
+                if (str_contains($tag, 'wp-block-button__link') && !preg_match('/\shref\s*=/i', $tag)) {
+                    $problems[] = "{$rel}: a button link has no href — every button needs a destination";
+                }
+            }
+
+            // Destinations live both in the rendered href and in block-JSON
+            // "url" attributes (wp:navigation-link has no rendered HTML).
+            $links = preg_match_all('/\bhref="([^"]*)"/i', $markup, $m) ? $m[1] : [];
+            foreach (preg_match_all('/"url"\s*:\s*"([^"]*)"/', $markup, $m) ? $m[1] : [] as $url) {
+                $links[] = str_replace('\/', '/', $url);
+            }
+
+            foreach ($links as $href) {
+                if ($href === '#') {
+                    continue; // the placeholder the prompts allow for external/social links
+                }
+                if ($href === '') {
+                    $problems[] = "{$rel}: a link has an empty href";
+                    continue;
+                }
+                if ($href[0] === '#') {
+                    $fragment = substr($href, 1);
+                    $set = $pageSlug === null ? $everywhere : $anchors[$pageSlug] + $chrome;
+                    if ($set !== null && !isset($set[$fragment])) {
+                        $problems[] = $pageSlug === null
+                            ? "{$rel}: chrome link href=\"{$href}\" must resolve on every page, but not every page has id=\"{$fragment}\""
+                            : "{$rel}: link href=\"{$href}\" targets no id=\"{$fragment}\" on this page";
+                    }
+                    continue;
+                }
+                if ($href[0] !== '/') {
+                    continue; // external schemes, mailto:, tel:, theme assets
+                }
+                $parts = parse_url($href) ?: [];
+                $path = self::normalizePath((string) ($parts['path'] ?? ''));
+                if (!isset($routes[$path])) {
+                    $problems[] = "{$rel}: link href=\"{$href}\" targets no generated page (no page has path {$path})";
+                    continue;
+                }
+                $fragment = (string) ($parts['fragment'] ?? '');
+                $target = $routes[$path];
+                if ($fragment !== '' && $anchors[$target] !== null
+                    && !isset($anchors[$target][$fragment]) && !isset($chrome[$fragment])
+                ) {
+                    $problems[] = "{$rel}: link href=\"{$href}\" targets page '{$target}', which has no id=\"{$fragment}\"";
+                }
+            }
+        }
+        // href and block-JSON "url" mirror each other, so the same broken
+        // destination would otherwise be reported twice.
+        return array_values(array_unique($problems));
+    }
+
+    /**
+     * Anchor names the markup exposes: HTML id attributes plus block-JSON
+     * "anchor" attributes (they mirror each other in serialized markup, but
+     * either alone still resolves).
+     *
+     * @return array<string,true>
+     */
+    private static function anchorsIn(string $markup): array
+    {
+        $set = [];
+        foreach (preg_match_all('/\bid="([^"]+)"/', $markup, $m) ? $m[1] : [] as $id) {
+            $set[$id] = true;
+        }
+        foreach (preg_match_all('/"anchor"\s*:\s*"([^"]+)"/', $markup, $m) ? $m[1] : [] as $id) {
+            $set[$id] = true;
+        }
+        return $set;
+    }
+
+    /** Page paths compared in one canonical form: leading + trailing slash. */
+    private static function normalizePath(string $path): string
+    {
+        $trimmed = trim($path, '/');
+        return $trimmed === '' ? '/' : "/{$trimmed}/";
     }
 
     /**
@@ -173,11 +332,13 @@ final class ThemeValidator
 
     /**
      * Page-plan warnings: interior pages that open at homepage-hero scale.
-     * The page-plan prompt asks every non-front page for a COMPACT opening
-     * hero; a 'full-bleed-cover' first section is sometimes a deliberate
-     * choice, so this stays a warning (visibility in eval), never a repair —
-     * but a site where every interior page opens with a full-viewport cover
-     * has five homepages, not one.
+     * The normal build now enforces this at plan time (PagePlanStep rejects
+     * an interior plan whose first section is 'full-bleed-cover', repairs it
+     * once via the model, and demotes it mechanically as a last resort), so
+     * after a fresh build this is empty; anything reported here means the
+     * plan predates the enforcement or was edited by hand — visibility for
+     * eval, because a site where every interior page opens with a
+     * full-viewport cover has five homepages, not one.
      *
      * @return string[] list of warnings (empty means interior openings are compact)
      */

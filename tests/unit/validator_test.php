@@ -147,6 +147,99 @@ test('validator flags raw form markup in generated markup', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+/** A two-page site (home + visit) with markup on disk, for the link checks. */
+function validator_linked_project(): array
+{
+    [$project, $tmp] = validator_project();
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'path' => '/', 'front' => true],
+        ['slug' => 'visit', 'path' => '/visit/', 'front' => false],
+    ]]);
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:group {"anchor":"hero"} --><div class="wp-block-group" id="hero">'
+        . '<!-- wp:paragraph --><p><a href="/visit/#directions">Find us</a></p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->');
+    $project->writeText('plugin/pages/visit.html',
+        '<!-- wp:group {"anchor":"directions"} --><div class="wp-block-group" id="directions">'
+        . '<!-- wp:paragraph --><p><a href="/">Home</a> · <a href="#directions">Top</a> · '
+        . '<a href="https://example.com">Ext</a> · <a href="mailto:a@b.c">Mail</a> · <a href="#">Social</a></p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->');
+    return [$project, $tmp];
+}
+
+test('validator passes links that resolve to real pages and anchors', function () {
+    [$project, $tmp] = validator_linked_project();
+    assert_eq([], ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags links to routes no generated page has', function () {
+    [$project, $tmp] = validator_linked_project();
+    // Trailing-slash-less form of a real page is fine; /work/ does not exist.
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:paragraph --><p><a href="/visit">ok</a> <a href="/work/?strand=a">nope</a></p><!-- /wp:paragraph -->');
+
+    $problems = ThemeValidator::validate($project);
+    assert_eq(1, count($problems), implode('; ', $problems));
+    assert_contains('href="/work/?strand=a"', $problems[0]);
+    assert_contains('no page has path /work/', $problems[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags fragments missing on the page they target', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:paragraph --><p><a href="/visit/#reservations">Book</a> <a href="#missing-here">In-page</a></p><!-- /wp:paragraph -->');
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('href="/visit/#reservations"', $joined);
+    assert_contains("page 'visit', which has no id=\"reservations\"", $joined);
+    assert_contains('href="#missing-here"', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator judges block-JSON url destinations (navigation links)', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText('theme/parts/header.html',
+        '<!-- wp:navigation-link {"label":"Menu","url":"\/menu\/"} /-->');
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('theme/parts/header.html', $joined);
+    assert_contains('no page has path /menu/', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator holds chrome fragments to anchors that exist on every page', function () {
+    [$project, $tmp] = validator_linked_project();
+    // "hero" exists only on the home page; a header link to it 404s (well,
+    // scrolls nowhere) on /visit/.
+    $project->writeText('theme/parts/header.html',
+        '<!-- wp:navigation-link {"label":"Hero","url":"#hero"} /-->');
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('chrome link href="#hero"', $joined);
+    assert_contains('not every page', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator flags button links without an href', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link wp-element-button">Reserve</a></div><!-- /wp:button -->');
+
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('button link has no href', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('link checks stay quiet without pages.json', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText('theme/parts/header.html', '<!-- wp:navigation-link {"label":"X","url":"/nowhere/"} /-->');
+    assert_eq([], ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('plan warnings flag interior pages opening with a full-bleed cover', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson('pages.json', ['pages' => [
