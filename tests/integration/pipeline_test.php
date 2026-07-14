@@ -53,6 +53,8 @@ test('full pipeline produces a structurally valid theme', function () {
         'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],
         'type' => ['heading' => 'Fraunces 700/900', 'body' => 'Source Sans 3 400/600'],
         'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
+        'motion' => 'calm',
+        'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
         'signature_device' => 'hairline rules with small caps folios',
         'hero_composition' => 'full-bleed bakery photo, headline pinned lower-left',
     ]]);
@@ -84,24 +86,29 @@ test('full pipeline produces a structurally valid theme', function () {
     $llm->queueText($hdr);
     $llm->queueText($ftr);
     $llm->queueText(
-        '<!-- wp:group {"style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group" style="margin-top:0">'
+        '<!-- wp:group {"className":"ken-burns","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group ken-burns" style="margin-top:0">'
         . '<!-- wp:cover {"dimRatio":50,"minHeight":500,"align":"full","backgroundColor":"contrast"} -->'
         . '<div class="wp-block-cover alignfull has-contrast-background-color has-background" style="min-height:500px">'
         . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
         . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:group {"className":"hero-entrance","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-entrance">'
         . '<!-- wp:heading {"level":1,"textColor":"base"} --><h1 class="wp-block-heading has-base-color has-text-color">Hero</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
         . '</div></div><!-- /wp:cover -->'
         . '</div><!-- /wp:group -->'
     );
-    // The specials section opts into layout utilities so the page-styles step
-    // downstream has something to style. It incorrectly puts overlap-up on the
-    // root as well as correctly on an inner group, letting us verify that only
-    // the root occurrence is stripped. It also disobeys the
-    // "no root padding" instruction with mirrored inline CSS, the case the
-    // rhythm pass must repair without the fix-blocks rhythm gate rejecting the
-    // replaced declarations as dropped. Its shorthand also carries horizontal
-    // padding/auto margins that must survive the vertical-only repair.
+    // The specials section opts into one generated layout utility (overlap-up)
+    // and one static motion-kit utility (hover-lift, which must survive
+    // serialization without asking the model to implement it). It incorrectly
+    // puts overlap-up on the root as well as correctly on an inner group,
+    // letting us verify that only the root occurrence is stripped. It also
+    // disobeys the "no root padding" instruction with mirrored inline CSS, the
+    // case the rhythm pass must repair without the fix-blocks rhythm gate
+    // rejecting the replaced declarations as dropped. Its shorthand also
+    // carries horizontal padding/auto margins that must survive the
+    // vertical-only repair.
     $llm->queueText(
         '<!-- wp:group {"className":"overlap-up hover-lift","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group overlap-up hover-lift" style="padding:12rem 2rem;margin:0 auto">'
@@ -111,12 +118,11 @@ test('full pipeline produces a structurally valid theme', function () {
         . '</div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->'
     );
-    // page-styles (text) — runs after fix-blocks, sees both utilities in their
-    // final valid locations, and returns their CSS appendix.
+    // page-styles (text) — runs after fix-blocks and sees only overlap-up as a
+    // generated layout utility. Motion variables and hover CSS never ride this
+    // model response.
     $llm->queueText(
-        ".overlap-up {\n    margin-top: -3rem !important;\n    position: relative;\n    z-index: 1;\n}\n"
-        . ".hover-lift {\n    transition: transform 0.25s ease;\n}\n"
-        . ".hover-lift:hover {\n    transform: translateY(-6px);\n    box-shadow: var(--wp--preset--shadow--natural);\n}"
+        ".overlap-up {\n    margin-top: -4rem;\n    position: relative;\n    z-index: 2;\n}"
     );
     // fonts-php (text) — the generated fonts module; must cover the scanned
     // 400/700 floor for both theme.json families or the step falls back.
@@ -143,6 +149,9 @@ test('full pipeline produces a structurally valid theme', function () {
     // Sections were generated as parts and composed in order into front-page.
     assert_true($project->exists('theme/parts/section-hero.html'), 'hero part written');
     assert_true($project->exists('theme/parts/section-specials.html'), 'specials part written');
+    $hero = $project->readText('theme/parts/section-hero.html');
+    assert_contains('hero-entrance', $hero, 'first section keeps its page-load entrance');
+    assert_contains('ken-burns', $hero, 'first section keeps the page ambient effect');
     $front = $project->readText('theme/templates/front-page.html');
     assert_contains('wp:template-part', $front);
     assert_true(
@@ -169,14 +178,28 @@ test('full pipeline produces a structurally valid theme', function () {
     assert_contains('wp-block-group overlap-up', $specialsHtml, 'the nested overlap utility remains available');
     assert_true(!str_contains($specialsHtml, '12rem'), 'no orphaned model spacing survives the pipeline');
 
-    // The utility class survived the fix-blocks re-serialization, and the
-    // page-styles step appended its CSS to style.css (after the theme header).
+    // Both classes survived fix-blocks. Only the layout utility lands in the
+    // generated appendix; hover behavior comes from the static motion kit.
+    assert_contains('overlap-up', $project->readText('theme/parts/section-specials.html'));
     assert_contains('hover-lift', $project->readText('theme/parts/section-specials.html'));
     $style = $project->readText('theme/style.css');
     assert_contains('.overlap-up', $style);
-    assert_contains('.hover-lift:hover', $style);
+    assert_true(!str_contains($style, '.hover-lift'), 'page-styles does not generate static hover CSS');
+    assert_true(!str_contains($style, '--motion-'), 'page-styles cannot override profile-owned motion tokens');
+    $motionCss = $project->readText('theme/assets/motion/motion.css');
+    $profileCss = $project->readText('theme/assets/motion/profiles/calm.css');
+    assert_contains('.hover-lift', $motionCss, 'static kit implements hover-lift');
+    assert_contains('.hover-reveal', $motionCss, 'static kit implements hover-reveal');
+    assert_contains('@keyframes motion-calm-hero', $motionCss, 'kit contains the selected hero family');
+    assert_contains('@keyframes motion-calm-ken-burns', $motionCss, 'kit contains the selected ambient family');
+    assert_contains('--motion-hero-keyframe: motion-calm-hero', $profileCss, 'profile selects its hero identity');
+    assert_contains(
+        '--motion-ken-burns-keyframe: motion-calm-ken-burns',
+        $profileCss,
+        'profile selects its ambient identity'
+    );
     assert_true(
-        strpos($style, 'Theme Name:') < strpos($style, '.hover-lift'),
+        strpos($style, 'Theme Name:') < strpos($style, '.overlap-up'),
         'appendix appended after the theme header'
     );
 
@@ -198,7 +221,7 @@ test('pipeline step order is correct', function () {
     assert_eq([
         'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+section-plan', 'sections', 'section-rhythm', 'assemble-landing-page',
-        'collect-images', 'contrast-fix', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
+        'collect-images', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme',
         'validate-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
