@@ -35,12 +35,12 @@ final class ApplyIdentityStep implements Step
     {
         $spec = $project->readJson('siteSpec.json');
 
-        $vars = [
+        $vars = array_map([self::class, 'headerSafe'], [
             'THEME_NAME'  => (string) $spec['name'],
             'THEME_SLUG'  => (string) $spec['slug'],
             'DESCRIPTION' => self::description($spec),
             'AUTHOR'      => (string) ($spec['author'] ?? 'Builder'),
-        ];
+        ]);
 
         // The content plugin's header carries the same identity; it may be
         // absent in compositions that build a theme only.
@@ -53,6 +53,24 @@ final class ApplyIdentityStep implements Step
             $filled = PromptRenderer::fill($project->readText($file), $vars);
             $project->writeText($file, $filled);
         }
+    }
+
+    /**
+     * Make a model-derived value inert inside the comment headers it fills:
+     * every target is a line-oriented header block, and the plugin's is a PHP
+     * docblock, where a value carrying a star-slash comment terminator would
+     * close the header and whatever follows would execute BEFORE the ABSPATH
+     * guard. Newlines and control characters collapse to spaces (they would
+     * also forge extra header lines), then comment terminators are removed
+     * until none can reassemble.
+     */
+    private static function headerSafe(string $value): string
+    {
+        $value = trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $value));
+        while (str_contains($value, '*/')) {
+            $value = str_replace('*/', '', $value);
+        }
+        return $value;
     }
 
     /**
