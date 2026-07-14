@@ -61,21 +61,13 @@ final class SectionsStep implements Step
 
     public function requests(Project $project): array
     {
-        $requests = [];
-        foreach ($this->jobs($project) as $key => $job) {
-            $requests[$key] = $job['unit']->request($job['input']);
-        }
-        return $requests;
+        return self::requestsFor($this->jobs($project));
     }
 
     public function run(Project $project): void
     {
         $jobs = $this->jobs($project);
-        $requests = [];
-        foreach ($jobs as $key => $job) {
-            $requests[$key] = $job['unit']->request($job['input']);
-        }
-        $parts = $this->llm->completeBatch($requests);
+        $parts = $this->llm->completeBatch(self::requestsFor($jobs));
 
         // Validate EVERY part before writing any, so one bad part doesn't leave
         // a half-written set of files on disk (the build aborts either way).
@@ -90,6 +82,21 @@ final class SectionsStep implements Step
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
+    }
+
+    /**
+     * Ask each job's unit to render its self-contained LLM request.
+     *
+     * @param array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}> $jobs
+     * @return array<string,array{prompt:string,model?:string,temperature?:float}>
+     */
+    private static function requestsFor(array $jobs): array
+    {
+        $requests = [];
+        foreach ($jobs as $key => $job) {
+            $requests[$key] = $job['unit']->request($job['input']);
+        }
+        return $requests;
     }
 
     /**

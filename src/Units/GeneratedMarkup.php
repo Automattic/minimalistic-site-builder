@@ -14,7 +14,7 @@ final class GeneratedMarkup
     {
         $markup = self::stripFences(trim($text));
         if ($markup === '' || !str_contains($markup, 'wp:')) {
-            throw new \RuntimeException("sections: part '{$key}' is not block markup");
+            throw new \RuntimeException("part '{$key}' is not block markup");
         }
         return self::normalizePresetRefs(rtrim($markup));
     }
