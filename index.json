@@ -1,5 +1,14 @@
 [
     {
+        "project": "portfolio25",
+        "slug": "portfolio25",
+        "asset": "portfolio25-playground-20260714T164709Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/portfolio25-playground-20260714T164709Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fportfolio25-playground-20260714T164709Z.zip",
+        "size_bytes": 27816843,
+        "created_at": "2026-07-14T16:47:17+00:00"
+    },
+    {
         "project": "naturaleza7",
         "slug": "naturaleza7",
         "asset": "naturaleza7-playground-20260710T211613Z.zip",
