@@ -104,6 +104,10 @@ test('validate rejects empty, oversized, and unbalanced CSS', function () {
     $long = str_repeat(".hover-lift {\n    opacity: 1;\n}\n", 40); // 120 lines
     assert_true([] !== PageStylesStep::validate($long), 'over the line ceiling');
     assert_true([] !== PageStylesStep::validate(".hover-lift {\n    opacity: 1;\n"), 'unbalanced braces');
+    assert_true(
+        in_array('unbalanced braces', PageStylesStep::validate("}\n.hover-lift {\n    opacity: 1;\n}\n@media (min-width: 600px) {"), true),
+        'stray closing brace balanced by a trailing open brace'
+    );
 });
 
 test('classesIn finds documented classes on word boundaries only', function () {

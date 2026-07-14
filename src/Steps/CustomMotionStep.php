@@ -147,7 +147,19 @@ final class CustomMotionStep implements Step
         }
 
         $stripped = (string) preg_replace('~/\*.*?\*/~s', '', $css);
-        if (substr_count($stripped, '{') !== substr_count($stripped, '}')) {
+        // Walk the depth instead of comparing totals: a leading stray `}`
+        // (balanced by a trailing open brace) would close the deterministic
+        // reduced-motion wrapper this CSS gets concatenated into, letting the
+        // rest of the block escape it.
+        $depth = 0;
+        foreach (str_split($stripped) as $char) {
+            if ($char === '{') {
+                $depth++;
+            } elseif ($char === '}' && --$depth < 0) {
+                break;
+            }
+        }
+        if ($depth !== 0) {
             $problems[] = 'unbalanced braces';
             return $problems; // the structural walks below need balanced braces
         }

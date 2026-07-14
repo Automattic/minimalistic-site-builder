@@ -48,6 +48,7 @@ test('custom-motion validate keeps the hidden-content and scoping rules', functi
         '@import'                   => "@import 'x.css';\n.custom-motion { color: inherit; }",
         'empty'                     => '',
         'unbalanced'                => ".custom-motion { transform: none;",
+        'wrapper escape'            => "}\n.custom-motion { animation: custom-motion-x 2s linear infinite; }\n@media (prefers-reduced-motion: no-preference) {",
     ];
     foreach ($cases as $label => $css) {
         assert_true(CustomMotionStep::validate($css) !== [], $label);

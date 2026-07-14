@@ -352,7 +352,19 @@ final class PageStylesStep implements Step
 
         $stripped = (string) preg_replace('~/\*.*?\*/~s', '', $css);
 
-        if (substr_count($stripped, '{') !== substr_count($stripped, '}')) {
+        // Walk the depth instead of comparing totals: a leading stray `}`
+        // balanced by a trailing open brace would leave the appendix with a
+        // dangling open rule that swallows whatever is appended to style.css
+        // after it (the custom-motion block ships later in the pipeline).
+        $depth = 0;
+        foreach (str_split($stripped) as $char) {
+            if ($char === '{') {
+                $depth++;
+            } elseif ($char === '}' && --$depth < 0) {
+                break;
+            }
+        }
+        if ($depth !== 0) {
             $problems[] = 'unbalanced braces';
         }
         if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $stripped) === 1) {
