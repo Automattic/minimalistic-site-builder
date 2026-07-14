@@ -403,9 +403,34 @@ test('section rhythm promotes standalone physical side declarations', function (
     assert_contains('padding-left:var(--custom-space)', $result['markups'][0], 'canonical longhands stay idempotent');
 });
 
+test('section rhythm keeps overlap utilities off owned wrappers but preserves nested use', function () {
+    $nested = '<!-- wp:group {"className":"overlap-up"} -->'
+        . '<div class="wp-block-group overlap-up">Nested overlap</div><!-- /wp:group -->';
+    $markup = '<!-- wp:group {"className":"overlap-up overlap-upper hover-lift","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group overlap-up overlap-upper hover-lift">' . $nested . '</div><!-- /wp:group -->';
+
+    $result = SectionRhythm::rewrite([[
+        'markup' => $markup, 'density' => 'compact', 'background' => 'base',
+    ]]);
+    $attrs = sr_root_attrs($result['markups'][0]);
+    assert_eq('overlap-upper hover-lift', $attrs['className'], 'only the exact forbidden root token is removed');
+    assert_contains(
+        '<div class="wp-block-group overlap-upper hover-lift">',
+        $result['markups'][0],
+        'the saved root wrapper class is stripped too'
+    );
+    assert_contains($nested, $result['markups'][0], 'an inner group remains allowed to overlap');
+
+    $again = SectionRhythm::rewrite([[
+        'markup' => $result['markups'][0], 'density' => 'compact', 'background' => 'base',
+    ]]);
+    assert_eq($result['markups'][0], $again['markups'][0]);
+    assert_eq([], $again['notes']);
+});
+
 test('section rhythm patches the image cover wrapper style, not just its attributes', function () {
-    $cover = '<!-- wp:cover {"align":"full","dimRatio":50,"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"}}}} -->'
-        . '<div class="wp-block-cover alignfull" style="padding:12rem 2rem;margin:0 auto">'
+    $cover = '<!-- wp:cover {"align":"full","dimRatio":50,"className":"overlap-up","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"}}}} -->'
+        . '<div class="wp-block-cover alignfull overlap-up" style="padding:12rem 2rem;margin:0 auto">'
         . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
         . '<div class="wp-block-cover__inner-container"><p>Image band</p></div></div><!-- /wp:cover -->';
     $markup = sr_section(['align' => 'full', 'layout' => ['type' => 'constrained']], $cover);
@@ -419,5 +444,7 @@ test('section rhythm patches the image cover wrapper style, not just its attribu
     assert_eq('2rem', $coverAttrs['style']['spacing']['padding']['left']);
     assert_eq('auto', $coverAttrs['style']['spacing']['margin']['right']);
     assert_eq('auto', $coverAttrs['style']['spacing']['margin']['left']);
+    assert_true(!array_key_exists('className', $coverAttrs), 'the rhythm-owned cover cannot overlap upward');
+    assert_true(!str_contains($result['markups'][0], 'overlap-up'));
     assert_true(!str_contains($result['markups'][0], '12rem'));
 });

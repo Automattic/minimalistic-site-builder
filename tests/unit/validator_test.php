@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
@@ -141,6 +142,20 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     ]]);
     $project->writeText('theme/parts/section-story.html', $normalized['markups'][0]);
     assert_eq([], ThemeValidator::spacingWarnings($project));
+
+    $classDrift = BlockMarkup::parse($normalized['markups'][0]);
+    $root = $classDrift->indices()[0];
+    $attrs = $classDrift->attrs($root) ?? [];
+    $attrs['className'] = 'overlap-up';
+    $classDrift->setAttrs($root, $attrs);
+    $classDrift->replaceInOwnHtml($root, 'wp-block-group', 'wp-block-group overlap-up');
+    $project->writeText('theme/parts/section-story.html', $classDrift->render());
+    $project->writeText(
+        'theme/style.css',
+        $project->readText('theme/style.css') . ".overlap-up{margin-top:-6rem!important}\n"
+    );
+    $joined = implode(' ', ThemeValidator::spacingWarnings($project));
+    assert_contains('section root spacing drift', $joined, 'a root utility can override the owned margin reset');
 
     $project->writeText('theme/parts/section-story.html', $raw);
     $joined = implode(' ', ThemeValidator::spacingWarnings($project));

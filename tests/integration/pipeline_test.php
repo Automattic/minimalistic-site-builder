@@ -94,23 +94,28 @@ test('full pipeline produces a structurally valid theme', function () {
         . '</div></div><!-- /wp:cover -->'
         . '</div><!-- /wp:group -->'
     );
-    // The specials section opts into a layout utility class (hover-lift) so the
-    // page-styles step downstream has something to style — and we can assert the
-    // class survives the block-fixer's re-serialization. It also disobeys the
+    // The specials section opts into layout utilities so the page-styles step
+    // downstream has something to style. It incorrectly puts overlap-up on the
+    // root as well as correctly on an inner group, letting us verify that only
+    // the root occurrence is stripped. It also disobeys the
     // "no root padding" instruction with mirrored inline CSS, the case the
     // rhythm pass must repair without the fix-blocks rhythm gate rejecting the
     // replaced declarations as dropped. Its shorthand also carries horizontal
     // padding/auto margins that must survive the vertical-only repair.
     $llm->queueText(
-        '<!-- wp:group {"className":"hover-lift","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group hover-lift" style="padding:12rem 2rem;margin:0 auto">'
+        '<!-- wp:group {"className":"overlap-up hover-lift","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group overlap-up hover-lift" style="padding:12rem 2rem;margin:0 auto">'
         . '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->'
+        . '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">'
+        . '<!-- wp:paragraph --><p>Featured today</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->'
     );
-    // page-styles (text) — runs after fix-blocks, sees hover-lift in the final
-    // markup, and returns the CSS appendix for it.
+    // page-styles (text) — runs after fix-blocks, sees both utilities in their
+    // final valid locations, and returns their CSS appendix.
     $llm->queueText(
-        ".hover-lift {\n    transition: transform 0.25s ease;\n}\n"
+        ".overlap-up {\n    margin-top: -3rem !important;\n    position: relative;\n    z-index: 1;\n}\n"
+        . ".hover-lift {\n    transition: transform 0.25s ease;\n}\n"
         . ".hover-lift:hover {\n    transform: translateY(-6px);\n    box-shadow: var(--wp--preset--shadow--natural);\n}"
     );
     // fonts-php (text) — the generated fonts module; must cover the scanned
@@ -159,12 +164,16 @@ test('full pipeline produces a structurally valid theme', function () {
     assert_eq('var:preset|spacing|lg', $specialsRoot['style']['spacing']['padding']['top'], 'model root padding replaced by plan density');
     assert_eq('2rem', $specialsRoot['style']['spacing']['padding']['right'], 'horizontal shorthand padding survives');
     assert_eq('auto', $specialsRoot['style']['spacing']['margin']['left'], 'horizontal shorthand margin survives');
+    assert_eq('hover-lift', $specialsRoot['className'], 'the root overlap utility is stripped');
+    assert_contains('<div class="wp-block-group hover-lift"', $specialsHtml, 'the root wrapper loses overlap-up too');
+    assert_contains('wp-block-group overlap-up', $specialsHtml, 'the nested overlap utility remains available');
     assert_true(!str_contains($specialsHtml, '12rem'), 'no orphaned model spacing survives the pipeline');
 
     // The utility class survived the fix-blocks re-serialization, and the
     // page-styles step appended its CSS to style.css (after the theme header).
     assert_contains('hover-lift', $project->readText('theme/parts/section-specials.html'));
     $style = $project->readText('theme/style.css');
+    assert_contains('.overlap-up', $style);
     assert_contains('.hover-lift:hover', $style);
     assert_true(
         strpos($style, 'Theme Name:') < strpos($style, '.hover-lift'),

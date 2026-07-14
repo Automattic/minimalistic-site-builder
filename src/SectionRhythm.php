@@ -35,6 +35,9 @@ final class SectionRhythm
     /** Only these plan labels guarantee one identical continuous surface. */
     private const COLLAPSIBLE_SURFACES = ['base', 'contrast'];
 
+    /** Utilities whose vertical effect conflicts with page-owned wrapper margins. */
+    private const FORBIDDEN_OWNED_WRAPPER_CLASSES = ['overlap-up'];
+
     /** Inline spacing spellings always superseded by the owned declarations. */
     private const SUPERSEDED_WRAPPER_PROPERTIES = [
         'padding',
@@ -168,8 +171,15 @@ final class SectionRhythm
         string $background,
         string $label,
     ): array {
+        $originalMarkup = $markup;
         [$attrs, $openingOffset, $openingLength] = self::rootGroup($markup, $label);
         $before = self::encodeAttrs($attrs);
+        $markup = self::stripOwnedWrapperClasses(
+            $attrs,
+            $markup,
+            $openingOffset + $openingLength,
+            $label,
+        );
 
         $style = self::objectProperty($attrs, 'style', $label, 'style');
         $spacing = self::objectProperty($style, 'spacing', $label, 'style.spacing');
@@ -205,7 +215,7 @@ final class SectionRhythm
             $rewritten = self::rewriteImageCover($rewritten, $preset, $label);
         }
 
-        return [$rewritten, $rewritten !== $markup];
+        return [$rewritten, $rewritten !== $originalMarkup];
     }
 
     /** Put image-band breathing room inside its one direct cover, never outside it. */
@@ -247,6 +257,12 @@ final class SectionRhythm
             }
         }
         $before = self::encodeAttrs($attrs);
+        $markup = self::stripOwnedWrapperClasses(
+            $attrs,
+            $markup,
+            $offset + $length,
+            $label . ' direct cover',
+        );
         $style = self::objectProperty($attrs, 'style', $label, 'cover style');
         $spacing = self::objectProperty($style, 'spacing', $label, 'cover style.spacing');
         $padding = self::boxProperty($spacing, 'padding', $label, 'cover style.spacing.padding');
@@ -388,6 +404,65 @@ final class SectionRhythm
             return null;
         }
         return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
+    }
+
+    /**
+     * Remove utilities that can override the vertical margin owned by this
+     * wrapper. Both comment attrs and saved HTML are patched so the block fixer
+     * cannot recover a stale class from either representation.
+     */
+    private static function stripOwnedWrapperClasses(
+        \stdClass $attrs,
+        string $markup,
+        int $searchOffset,
+        string $label,
+    ): string {
+        if (property_exists($attrs, 'className')) {
+            if (!is_string($attrs->className)) {
+                throw new \RuntimeException("section-rhythm: {$label} has a non-string className attribute");
+            }
+            $originalClassName = $attrs->className;
+            $newClassName = $originalClassName;
+            foreach (self::FORBIDDEN_OWNED_WRAPPER_CLASSES as $class) {
+                $newClassName = self::withoutClassToken($newClassName, $class);
+            }
+            if ($newClassName !== $originalClassName) {
+                if ($newClassName === '') {
+                    unset($attrs->className);
+                } else {
+                    $attrs->className = $newClassName;
+                }
+            }
+        }
+
+        $tagHtml = self::wrapperTag($markup, $searchOffset);
+        $classAttr = $tagHtml === null ? null : self::tagAttribute($tagHtml, 'class');
+        if ($classAttr === null) {
+            return $markup;
+        }
+        [$value, $valueOffset] = $classAttr;
+        $newValue = $value;
+        foreach (self::FORBIDDEN_OWNED_WRAPPER_CLASSES as $class) {
+            $newValue = self::withoutClassToken($newValue, $class);
+        }
+        if ($newValue === $value) {
+            return $markup;
+        }
+        $newTag = substr_replace($tagHtml, $newValue, $valueOffset, strlen($value));
+        return substr_replace($markup, $newTag, $searchOffset, strlen($tagHtml));
+    }
+
+    /** Remove every exact occurrence while preserving a no-op byte-for-byte. */
+    private static function withoutClassToken(string $classes, string $remove): string
+    {
+        $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($classes), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (!in_array($remove, $tokens, true)) {
+            return $classes;
+        }
+        return implode(' ', array_values(array_filter(
+            $tokens,
+            static fn (string $class): bool => $class !== $remove,
+        )));
     }
 
     /**
