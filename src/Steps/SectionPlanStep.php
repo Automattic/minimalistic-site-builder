@@ -57,7 +57,12 @@ final class SectionPlanStep implements ConcurrentStep
     /** Whitespace-led pauses are accents, not the page's default cadence. */
     private const MAX_SPACIOUS_SECTIONS = 2;
 
-    /** Content-dense section roles must not compound their height with the largest edge. */
+    /**
+     * Content-dense section roles must not compound their height with the
+     * largest edge. "type" is free-form model output, so these are matched as
+     * lowercase word tokens ("Gallery" and "image-gallery" both count), not
+     * as exact strings.
+     */
     private const DENSE_SECTION_TYPES = ['features', 'services', 'gallery', 'pricing', 'team', 'faq'];
 
     public function __construct(
@@ -199,7 +204,7 @@ final class SectionPlanStep implements ConcurrentStep
                     . implode(', ', self::VERTICAL_DENSITIES);
             }
             $type = trim((string) ($section['type'] ?? 'content'));
-            if ($verticalDensity === 'spacious' && in_array($type, self::DENSE_SECTION_TYPES, true)) {
+            if ($verticalDensity === 'spacious' && self::isDenseType($type)) {
                 $errors[] = "section-plan: section '{$slug}' is content-dense ({$type}, {$archetype}) — "
                     . "use vertical_density 'compact' or 'standard', not 'spacious'";
             }
@@ -239,6 +244,13 @@ final class SectionPlanStep implements ConcurrentStep
      * @param array<int,array<string,mixed>> $sections
      * @return string[]
      */
+    /** Word-token match against DENSE_SECTION_TYPES for free-form model types. */
+    private static function isDenseType(string $type): bool
+    {
+        $tokens = preg_split('/[^a-z]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return array_intersect($tokens, self::DENSE_SECTION_TYPES) !== [];
+    }
+
     private static function varietyErrors(array $sections): array
     {
         $errors = [];

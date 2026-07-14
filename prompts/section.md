@@ -91,7 +91,7 @@ Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick 
    - Optionally a `wp:separator` between rows for an index/menu feel.
 
 Layout utility classes (optional, powerful) — a later build step generates the CSS for EXACTLY these class names, tuned to this design direction. You MAY add them via `"className"` on the blocks noted; NEVER invent other utility classes and NEVER add `<style>` tags:
-- `overlap-up` — ONLY on an INNER group/columns block: pulls it upward with a negative top margin so it overlaps the element above (e.g. a card row breaking into the hero). NEVER put it on the section's top-level root; SectionRhythm owns that root's margin-top, which must retain its margin reset.
+- `overlap-up` — ONLY on an INNER group/columns block: pulls it upward with a negative top margin so it overlaps the element above (e.g. a card row breaking into the hero). NEVER put it on the section's top-level root; the builder's page-level rhythm pass owns that root's margin-top, which must retain its margin reset.
 - `masonry-3` — on a group whose direct children are cards/images of varying height: flows them into a 3-column masonry (fewer columns on small screens). Use instead of forcing unequal content into equal columns.
 - `hover-lift` — on a card `wp:group` or an image: lifts with a soft shadow on hover.
 - `hover-reveal` — on a card `wp:group` with an image: the image dims/zooms on hover while captions and details remain visible at rest. Do not depend on hidden overlay text.

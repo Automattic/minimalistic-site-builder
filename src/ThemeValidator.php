@@ -118,35 +118,10 @@ final class ThemeValidator
         }
 
         try {
-            $plan = $project->readJson('sections.json');
-            $sections = $plan['sections'] ?? null;
-            if (!is_array($sections) || !array_is_list($sections) || $sections === []) {
-                $warnings[] = 'sections.json has no ordered sections for rhythm validation';
-                return $warnings;
-            }
-
-            $entries = [];
-            foreach ($sections as $section) {
-                if (!is_array($section)) {
-                    throw new \RuntimeException('sections.json contains a non-object section');
-                }
-                $slug = trim((string) ($section['slug'] ?? ''));
-                $rel = 'parts/' . Steps\SectionsStep::SECTION_PREFIX . $slug . '.html';
-                if ($slug === '' || !$project->exists('theme/' . $rel)) {
-                    throw new \RuntimeException("missing generated section part {$rel}");
-                }
-                $entries[] = [
-                    'slug'       => $slug,
-                    'markup'     => $project->readText('theme/' . $rel),
-                    'density'    => (string) ($section['vertical_density'] ?? ''),
-                    'background' => (string) ($section['background'] ?? ''),
-                ];
-            }
-
-            $footerSurface = $project->exists('theme/parts/footer.html')
-                ? SectionRhythm::followingSurfaceFromMarkup($project->readText('theme/parts/footer.html'))
-                : null;
-            $result = SectionRhythm::rewrite($entries, $footerSurface);
+            // The same entry builder the build pass uses, so this gate can
+            // never disagree with SectionRhythmStep about the plan's demands.
+            [$entries] = Steps\SectionRhythmStep::planEntries($project);
+            $result = SectionRhythm::rewrite($entries, Steps\SectionRhythmStep::footerSurface($project));
             foreach ($result['notes'] as $note) {
                 $warnings[] = 'section root spacing drift: ' . $note;
             }

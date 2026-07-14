@@ -319,43 +319,19 @@ final class SectionsStep implements Step
      */
     public static function normalizePresetRefs(string $markup): string
     {
-        $types = [
-            'color',
-            'gradient',
-            'shadow',
-            'spacing',
-            'font-size',
-            'font-family',
-            'aspect-ratio',
-            'duotone',
-        ];
+        $types = 'color|gradient|shadow|spacing|font-size|font-family|aspect-ratio|duotone';
 
-        // JSON permits either hex case. `\u007c` is uncommon but is the valid
-        // serializer-escaped spelling of a pipe, so accepting it is harmless.
-        $delimiters = [
-            '|',
-            '--',
-            ':',
-            '\u002d\u002d',
-            '\u002d\u002D',
-            '\u002D\u002d',
-            '\u002D\u002D',
-            '\u007c',
-            '\u007C',
-        ];
+        // Each delimiter position independently accepts the pipe, the two
+        // model typos (`--` and `:`), and the serializer-escaped spellings
+        // `\u002d\u002d` (dash-dash) and `\u007c` (pipe) in either hex case,
+        // since JSON permits both. Type names stay case-sensitive.
+        $delimiter = '(?:\||:|--|(?:\\\\u002[dD]){2}|\\\\u007[cC])';
 
-        $search = [];
-        $replace = [];
-        foreach ($types as $type) {
-            foreach ($delimiters as $beforeType) {
-                foreach ($delimiters as $afterType) {
-                    $search[] = 'var:preset' . $beforeType . $type . $afterType;
-                    $replace[] = 'var:preset|' . $type . '|';
-                }
-            }
-        }
-
-        return str_replace($search, $replace, $markup);
+        return (string) preg_replace(
+            "/var:preset{$delimiter}({$types}){$delimiter}/",
+            'var:preset|$1|',
+            $markup
+        );
     }
 
     /** Strip a leading/trailing markdown code fence if the model added one. */

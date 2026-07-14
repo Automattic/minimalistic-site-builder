@@ -30,6 +30,28 @@ final class SectionRhythmStep implements Step
 
     public function run(Project $project): void
     {
+        [$entries, $rels] = self::planEntries($project);
+
+        // Rewrite the complete ordered set before writing any file, so invalid
+        // plan data or one malformed root cannot leave a half-normalized page.
+        $result = SectionRhythm::rewrite($entries, self::footerSurface($project));
+        foreach ($rels as $i => $rel) {
+            $project->writeText('theme/' . $rel, $result['markups'][$i]);
+        }
+
+        echo '  section rhythm: ' . count($result['notes']) . " root spacing adjustment(s)\n";
+    }
+
+    /**
+     * Build the ordered SectionRhythm entries and their theme-relative part
+     * paths from sections.json. Shared with ThemeValidator's final drift gate
+     * so the build pass and the gate can never disagree about what the plan
+     * demands of each section part.
+     *
+     * @return array{list<array{slug:string,markup:string,density:string,background:string}>,list<string>}
+     */
+    public static function planEntries(Project $project): array
+    {
         $plan = $project->readJson('sections.json');
         $sections = $plan['sections'] ?? null;
         if (!is_array($sections) || !array_is_list($sections) || $sections === []) {
@@ -55,17 +77,14 @@ final class SectionRhythmStep implements Step
                 'background' => (string) ($section['background'] ?? ''),
             ];
         }
+        return [$entries, $rels];
+    }
 
-        // Rewrite the complete ordered set before writing any file, so invalid
-        // plan data or one malformed root cannot leave a half-normalized page.
-        $footerSurface = $project->exists('theme/parts/footer.html')
+    /** The footer's seam-owning surface, when a footer part exists and supplies one. */
+    public static function footerSurface(Project $project): ?string
+    {
+        return $project->exists('theme/parts/footer.html')
             ? SectionRhythm::followingSurfaceFromMarkup($project->readText('theme/parts/footer.html'))
             : null;
-        $result = SectionRhythm::rewrite($entries, $footerSurface);
-        foreach ($rels as $i => $rel) {
-            $project->writeText('theme/' . $rel, $result['markups'][$i]);
-        }
-
-        echo '  section rhythm: ' . count($result['notes']) . " root spacing adjustment(s)\n";
     }
 }

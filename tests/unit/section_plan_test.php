@@ -167,6 +167,11 @@ test('SectionPlanStep::normalize rejects spacious density for content-dense sect
         ['type' => 'features', 'layout_archetype' => 'offset-grid'],
         ['type' => 'services', 'layout_archetype' => 'equal-card-grid'],
         ['type' => 'faq', 'layout_archetype' => 'centered-stack'],
+        // "type" is free-form model output: capitalization and compound
+        // spellings still name the dense role.
+        ['type' => 'Gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'image-gallery', 'layout_archetype' => 'offset-grid'],
+        ['type' => 'Pricing Table', 'layout_archetype' => 'centered-stack'],
     ] as $dense) {
         $message = '';
         try {
