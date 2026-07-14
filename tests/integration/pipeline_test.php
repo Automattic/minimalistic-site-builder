@@ -99,10 +99,11 @@ test('full pipeline produces a structurally valid theme', function () {
     // class survives the block-fixer's re-serialization. It also disobeys the
     // "no root padding" instruction with mirrored inline CSS, the case the
     // rhythm pass must repair without the fix-blocks rhythm gate rejecting the
-    // replaced declarations as dropped.
+    // replaced declarations as dropped. Its shorthand also carries horizontal
+    // padding/auto margins that must survive the vertical-only repair.
     $llm->queueText(
-        '<!-- wp:group {"className":"hover-lift","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group hover-lift" style="margin-top:0;padding-top:12rem;padding-bottom:12rem">'
+        '<!-- wp:group {"className":"hover-lift","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hover-lift" style="padding:12rem 2rem;margin:0 auto">'
         . '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
     );
@@ -156,6 +157,8 @@ test('full pipeline produces a structurally valid theme', function () {
     $specialsBlocks = BlockMarkup::parse($specialsHtml);
     $specialsRoot = $specialsBlocks->attrs($specialsBlocks->indices()[0]);
     assert_eq('var:preset|spacing|lg', $specialsRoot['style']['spacing']['padding']['top'], 'model root padding replaced by plan density');
+    assert_eq('2rem', $specialsRoot['style']['spacing']['padding']['right'], 'horizontal shorthand padding survives');
+    assert_eq('auto', $specialsRoot['style']['spacing']['margin']['left'], 'horizontal shorthand margin survives');
     assert_true(!str_contains($specialsHtml, '12rem'), 'no orphaned model spacing survives the pipeline');
 
     // The utility class survived the fix-blocks re-serialization, and the

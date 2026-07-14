@@ -35,14 +35,7 @@ final class SectionRhythm
     /** Only these plan labels guarantee one identical continuous surface. */
     private const COLLAPSIBLE_SURFACES = ['base', 'contrast'];
 
-    /**
-     * Vertical-only inline spellings superseded by the owned longhands. The
-     * plain shorthands are included because Gutenberg never re-emits them:
-     * once the pass owns the vertical component, an orphaned shorthand would
-     * survive in HTML only to be dropped (fatally) by the block fixer. Any
-     * horizontal component still declared in the attributes is re-serialized
-     * as longhands by the fixer.
-     */
+    /** Inline spacing spellings always superseded by the owned declarations. */
     private const SUPERSEDED_WRAPPER_PROPERTIES = [
         'padding',
         'margin',
@@ -180,11 +173,18 @@ final class SectionRhythm
 
         $style = self::objectProperty($attrs, 'style', $label, 'style');
         $spacing = self::objectProperty($style, 'spacing', $label, 'style.spacing');
-        $padding = self::objectProperty($spacing, 'padding', $label, 'style.spacing.padding');
+        $padding = self::boxProperty($spacing, 'padding', $label, 'style.spacing.padding');
+        $margin = self::boxProperty($spacing, 'margin', $label, 'style.spacing.margin');
+        $shorthandProperties = self::preserveWrapperHorizontalSpacing(
+            $markup,
+            $openingOffset + $openingLength,
+            $padding,
+            $margin,
+            $label,
+        );
         $padding->top = $background === 'image' ? '0' : self::presetRef($preset);
         $padding->bottom = $background === 'image' || $sharedSeam ? '0' : self::presetRef($preset);
 
-        $margin = self::objectProperty($spacing, 'margin', $label, 'style.spacing.margin');
         $margin->top = '0';
         $margin->bottom = '0';
 
@@ -195,7 +195,7 @@ final class SectionRhythm
             'margin-bottom'  => '0',
             'padding-top'    => self::cssSpacingValue($padding->top),
             'padding-bottom' => self::cssSpacingValue($padding->bottom),
-        ]);
+        ], $shorthandProperties);
         if (self::encodeAttrs($attrs) !== $before) {
             $opening = '<!-- wp:group ' . self::encodeAttrs($attrs) . ' -->';
             $rewritten = substr_replace($rewritten, $opening, $openingOffset, $openingLength);
@@ -249,10 +249,17 @@ final class SectionRhythm
         $before = self::encodeAttrs($attrs);
         $style = self::objectProperty($attrs, 'style', $label, 'cover style');
         $spacing = self::objectProperty($style, 'spacing', $label, 'cover style.spacing');
-        $padding = self::objectProperty($spacing, 'padding', $label, 'cover style.spacing.padding');
+        $padding = self::boxProperty($spacing, 'padding', $label, 'cover style.spacing.padding');
+        $margin = self::boxProperty($spacing, 'margin', $label, 'cover style.spacing.margin');
+        $shorthandProperties = self::preserveWrapperHorizontalSpacing(
+            $markup,
+            $offset + $length,
+            $padding,
+            $margin,
+            $label . ' direct cover',
+        );
         $padding->top = self::presetRef($preset);
         $padding->bottom = self::presetRef($preset);
-        $margin = self::objectProperty($spacing, 'margin', $label, 'cover style.spacing.margin');
         $margin->top = '0';
         $margin->bottom = '0';
 
@@ -261,7 +268,7 @@ final class SectionRhythm
             'margin-bottom'  => '0',
             'padding-top'    => self::cssSpacingValue($padding->top),
             'padding-bottom' => self::cssSpacingValue($padding->bottom),
-        ]);
+        ], $shorthandProperties);
         if (self::encodeAttrs($attrs) !== $before) {
             $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
             $patched = substr_replace($patched, $newOpening, $offset, $length);
@@ -280,27 +287,37 @@ final class SectionRhythm
      * existing owned declarations are rewritten in place, superseded
      * vertical-only spellings are removed, and everything else — including
      * declaration order and the spelling of untouched declarations — is
-     * preserved byte-for-byte. Owned declarations absent from the HTML are
-     * NOT appended: the fixer adding CSS is never reported as a loss, and
-     * appending in a different order than Gutenberg's serializer would make
-     * this pass non-idempotent across fix-blocks.
+     * preserved byte-for-byte. Plain padding/margin shorthands are removed only
+     * after their effective horizontal values have been mirrored into the block
+     * attributes; an unparseable or conflicting shorthand fails this atomic
+     * pass rather than silently choosing a horizontal layout. Owned declarations
+     * absent from the HTML are NOT appended: the fixer adding CSS is never
+     * reported as a loss, and appending in a different order than Gutenberg's
+     * serializer would break idempotency across fix-blocks.
      *
      * Markup whose first node after the opener is not an element, or whose
      * wrapper has no style attribute, is returned unchanged.
      *
      * @param array<string,string> $owned CSS property => owned CSS value
+     * @param list<string> $shorthandProperties padding/margin shorthands whose
+     *        physical side declarations must also be collapsed into attrs
      */
-    private static function patchWrapperStyle(string $markup, int $searchOffset, array $owned): string
+    private static function patchWrapperStyle(
+        string $markup,
+        int $searchOffset,
+        array $owned,
+        array $shorthandProperties,
+    ): string
     {
-        $rest = substr($markup, $searchOffset);
-        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?:\s[^>]*)?>/', $rest, $tag) !== 1) {
+        $tagHtml = self::wrapperTag($markup, $searchOffset);
+        if ($tagHtml === null) {
             return $markup;
         }
-        $tagHtml = $tag[0];
-        if (preg_match('/\bstyle\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $tagHtml, $style, PREG_OFFSET_CAPTURE) !== 1) {
+        $style = self::tagAttribute($tagHtml, 'style');
+        if ($style === null) {
             return $markup;
         }
-        [$value, $valueOffset] = ($style[1][1] ?? -1) !== -1 ? $style[1] : $style[2];
+        [$value, $valueOffset] = $style;
 
         $seen = [];
         $out = [];
@@ -312,6 +329,11 @@ final class SectionRhythm
                     $seen[$property] = true;
                     $out[] = $property . ':' . $owned[$property];
                 }
+                continue;
+            }
+            if (preg_match('/\A(padding|margin)-(?:right|left)\z/', $property, $side) === 1
+                && in_array($side[1], $shorthandProperties, true)
+            ) {
                 continue;
             }
             if (in_array($property, self::SUPERSEDED_WRAPPER_PROPERTIES, true)) {
@@ -326,6 +348,357 @@ final class SectionRhythm
         }
         $newTag = substr_replace($tagHtml, $newValue, $valueOffset, strlen($value));
         return substr_replace($markup, $newTag, $searchOffset, strlen($tagHtml));
+    }
+
+    /** The first HTML element immediately following a block opener. */
+    private static function wrapperTag(string $markup, int $searchOffset): ?string
+    {
+        $rest = substr($markup, $searchOffset);
+        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?=[\x20\t\r\n\f\/>])/', $rest, $start) !== 1) {
+            return null;
+        }
+
+        $quote = null;
+        $length = strlen($rest);
+        for ($i = strlen($start[0]); $i < $length; $i++) {
+            $char = $rest[$i];
+            if ($quote !== null) {
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                continue;
+            }
+            if ($char === '>') {
+                return substr($rest, 0, $i + 1);
+            }
+        }
+        return null;
+    }
+
+    /** @return array{string,int}|null attribute value and its byte offset inside the tag */
+    private static function tagAttribute(string $tagHtml, string $name): ?array
+    {
+        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
+            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
+        if (preg_match($pattern, $tagHtml, $match, PREG_OFFSET_CAPTURE) !== 1) {
+            return null;
+        }
+        return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
+    }
+
+    /**
+     * Promote the effective horizontal components of wrapper padding/margin
+     * declarations into block attributes. Plain shorthands are removed; their
+     * accompanying physical longhands are collapsed at the same time so the
+     * cascade result, rather than a now-unmasked declaration, is serialized.
+     *
+     * The inline declaration block is evaluated in source order for the two
+     * physical horizontal sides, including !important precedence and explicit
+     * right/left longhands. Existing attribute values remain authoritative, but
+     * a conflict fails the atomic pass instead of silently choosing a side.
+     *
+     * @return list<string> padding/margin properties that had a plain shorthand
+     */
+    private static function preserveWrapperHorizontalSpacing(
+        string $markup,
+        int $searchOffset,
+        \stdClass $padding,
+        \stdClass $margin,
+        string $label,
+    ): array {
+        $tagHtml = self::wrapperTag($markup, $searchOffset);
+        $style = $tagHtml === null ? null : self::tagAttribute($tagHtml, 'style');
+        if ($style === null) {
+            return [];
+        }
+
+        $states = [
+            'padding' => ['right' => null, 'left' => null],
+            'margin'  => ['right' => null, 'left' => null],
+        ];
+        $shorthandProperties = [];
+        foreach (explode(';', $style[0]) as $segment) {
+            $colon = strpos($segment, ':');
+            if ($colon === false) {
+                continue;
+            }
+            $property = strtolower(trim(substr($segment, 0, $colon)));
+            $rawValue = substr($segment, $colon + 1);
+
+            if ($property === 'padding' || $property === 'margin') {
+                $shorthandProperties[$property] = true;
+                $expanded = self::expandBoxShorthand($rawValue, $property);
+                if ($expanded === null) {
+                    throw new \RuntimeException(
+                        "section-rhythm: {$label} has an unparseable inline {$property} shorthand"
+                    );
+                }
+                self::applyCascadeValue($states[$property]['right'], $expanded['right']);
+                self::applyCascadeValue($states[$property]['left'], $expanded['left']);
+                continue;
+            }
+
+            if (preg_match('/\A(padding|margin)-(right|left)\z/', $property, $side) !== 1) {
+                continue;
+            }
+            $value = self::cssDeclarationValue($rawValue);
+            $components = $value === null ? null : self::splitCssValues($value['value']);
+            if ($value === null
+                || $components === null
+                || count($components) !== 1
+                || !self::validSpacingComponent($value['value'], $side[1], true)
+            ) {
+                throw new \RuntimeException(
+                    "section-rhythm: {$label} has an unparseable inline {$property} declaration"
+                );
+            }
+            self::applyCascadeValue($states[$side[1]][$side[2]], $value);
+        }
+
+        $boxes = ['padding' => $padding, 'margin' => $margin];
+        foreach ($states as $property => $state) {
+            foreach (['right', 'left'] as $side) {
+                $candidate = $state[$side];
+                if (!is_array($candidate)) {
+                    continue;
+                }
+                $value = self::formatSpacingAttributeValue($candidate);
+                if (!property_exists($boxes[$property], $side)) {
+                    $boxes[$property]->{$side} = $value;
+                    continue;
+                }
+                $existing = self::cssDeclarationValue((string) $boxes[$property]->{$side});
+                if ($existing === null
+                    || self::formatComparableSpacingValue($existing)
+                        !== self::formatComparableSpacingValue($candidate)
+                ) {
+                    throw new \RuntimeException(
+                        "section-rhythm: {$label} has conflicting inline and attribute {$property}-{$side}"
+                    );
+                }
+            }
+        }
+        return array_keys($shorthandProperties);
+    }
+
+    /** @param array{value:string,important:bool}|null $current @param array{value:string,important:bool} $next */
+    private static function applyCascadeValue(?array &$current, array $next): void
+    {
+        if ($current === null || $next['important'] || !$current['important']) {
+            $current = $next;
+        }
+    }
+
+    /** @return array{value:string,important:bool}|null */
+    private static function cssDeclarationValue(string $raw): ?array
+    {
+        $value = trim($raw);
+        if ($value === '') {
+            return null;
+        }
+        $important = preg_match('/\s*!\s*important\s*\z/i', $value) === 1;
+        if ($important) {
+            $value = trim((string) preg_replace('/\s*!\s*important\s*\z/i', '', $value));
+        }
+        return $value === '' ? null : ['value' => $value, 'important' => $important];
+    }
+
+    /** @param array{value:string,important:bool} $value */
+    private static function formatSpacingAttributeValue(array $value): string
+    {
+        $raw = $value['important']
+            ? self::cssSpacingValue($value['value'])
+            : self::blockSpacingValue($value['value']);
+        return $raw . ($value['important'] ? ' !important' : '');
+    }
+
+    /** @param array{value:string,important:bool} $value */
+    private static function formatComparableSpacingValue(array $value): string
+    {
+        $raw = self::cssSpacingValue($value['value']);
+        return $raw . ($value['important'] ? ' !important' : '');
+    }
+
+    /** Convert a rendered preset variable back to block-attribute syntax. */
+    private static function blockSpacingValue(string $value): string
+    {
+        return preg_match('/^var\(--wp--preset--spacing--([a-z0-9_-]+)\)$/', $value, $match) === 1
+            ? "var:preset|spacing|{$match[1]}"
+            : $value;
+    }
+
+    /**
+     * @return array{top:array{value:string,important:bool},right:array{value:string,important:bool},bottom:array{value:string,important:bool},left:array{value:string,important:bool}}|null
+     */
+    private static function expandBoxShorthand(
+        string $raw,
+        string $property,
+        bool $attributeSyntax = false,
+    ): ?array
+    {
+        $declaration = self::cssDeclarationValue($raw);
+        if ($declaration === null) {
+            return null;
+        }
+        $values = self::splitCssValues($declaration['value']);
+        if ($values === null) {
+            return null;
+        }
+        $cssWide = ['inherit', 'initial', 'revert', 'revert-layer', 'unset'];
+        if ((count($values) !== 1 && array_intersect($cssWide, array_map('strtolower', $values)) !== [])
+            || array_filter(
+                $values,
+                static fn (string $value): bool => !self::validSpacingComponent(
+                    $value,
+                    $property,
+                    false,
+                    $attributeSyntax,
+                ),
+            ) !== []
+        ) {
+            return null;
+        }
+        $expanded = match (count($values)) {
+            1       => [$values[0], $values[0], $values[0], $values[0]],
+            2       => [$values[0], $values[1], $values[0], $values[1]],
+            3       => [$values[0], $values[1], $values[2], $values[1]],
+            4       => $values,
+            default => null,
+        };
+        if ($expanded === null) {
+            return null;
+        }
+        [$top, $right, $bottom, $left] = $expanded;
+        $wrap = static fn (string $value): array => [
+            'value' => $value,
+            'important' => $declaration['important'],
+        ];
+        return [
+            'top' => $wrap($top), 'right' => $wrap($right),
+            'bottom' => $wrap($bottom), 'left' => $wrap($left),
+        ];
+    }
+
+    /**
+     * Conservatively recognize a single padding/margin component that can be
+     * moved from a shorthand to a physical longhand without changing meaning.
+     * Unknown custom properties are deliberately rejected: `var(--space)` may
+     * expand to multiple shorthand components and cannot safely become one
+     * right/left value. Project-owned spacing preset variables are scalar.
+     */
+    private static function validSpacingComponent(
+        string $value,
+        string $property,
+        bool $allowCustomProperty = false,
+        bool $attributeSyntax = false,
+    ): bool
+    {
+        $lower = strtolower($value);
+        if (in_array($lower, ['inherit', 'initial', 'revert', 'revert-layer', 'unset'], true)) {
+            return true;
+        }
+        if ($lower === 'auto') {
+            return $property === 'margin';
+        }
+        if (($attributeSyntax && preg_match('/\Avar:preset\|spacing\|[a-z0-9_-]+\z/', $value) === 1)
+            || preg_match('/\Avar\(--wp--preset--spacing--[a-z0-9_-]+\)\z/', $value) === 1
+        ) {
+            return true;
+        }
+        if (preg_match('/\Avar\(/i', $value) === 1) {
+            return $allowCustomProperty && self::validCustomPropertyReference($value);
+        }
+        if (preg_match('/\A[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\z/', $value) === 1) {
+            return (float) $value === 0.0;
+        }
+        if (preg_match(
+            '/\A(?<sign>[+-]?)(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?'
+            . '(?:%|cap|ch|cm|cqb|cqh|cqi|cqmax|cqmin|cqw|dvb|dvh|dvi|dvmax|dvmin|dvw|em|ex|ic|in|lh|lvb|lvh|lvi|lvmax|lvmin|lvw|mm|pc|pt|px|q|rem|rlh|svb|svh|svi|svmax|svmin|svw|vb|vh|vi|vmax|vmin|vw)\z/i',
+            $value,
+            $unit,
+        ) !== 1) {
+            return false;
+        }
+        return $property === 'margin' || $unit['sign'] !== '-';
+    }
+
+    /** A balanced scalar custom-property reference safe to copy between longhands. */
+    private static function validCustomPropertyReference(string $value): bool
+    {
+        return preg_match(
+            '/\Avar\(\s*--[a-zA-Z_][a-zA-Z0-9_-]*\s*(?:,[\s\S]*)?\)\z/',
+            $value,
+        ) === 1;
+    }
+
+    /** @return list<string>|null one to four top-level CSS component values */
+    private static function splitCssValues(string $value): ?array
+    {
+        if (str_contains($value, '/*')) {
+            return null;
+        }
+        $values = [];
+        $token = '';
+        $closers = [];
+        $quote = null;
+        $escaped = false;
+        $length = strlen($value);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $value[$i];
+            if ($escaped) {
+                $token .= $char;
+                $escaped = false;
+                continue;
+            }
+            if ($char === '\\') {
+                $token .= $char;
+                $escaped = true;
+                continue;
+            }
+            if ($quote !== null) {
+                $token .= $char;
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $token .= $char;
+                $quote = $char;
+                continue;
+            }
+            if ($char === '(' || $char === '[') {
+                $token .= $char;
+                $closers[] = $char === '(' ? ')' : ']';
+                continue;
+            }
+            if ($char === ')' || $char === ']') {
+                if ($closers === [] || array_pop($closers) !== $char) {
+                    return null;
+                }
+                $token .= $char;
+                continue;
+            }
+            if (ctype_space($char) && $closers === []) {
+                if ($token !== '') {
+                    $values[] = $token;
+                    $token = '';
+                }
+                continue;
+            }
+            $token .= $char;
+        }
+        if ($escaped || $quote !== null || $closers !== []) {
+            return null;
+        }
+        if ($token !== '') {
+            $values[] = $token;
+        }
+        return count($values) >= 1 && count($values) <= 4 ? $values : null;
     }
 
     /** The rendered-CSS spelling of an owned attribute value ('0' or a preset ref). */
@@ -398,6 +771,32 @@ final class SectionRhythm
     private static function presetRef(string $slug): string
     {
         return "var:preset|spacing|{$slug}";
+    }
+
+    /**
+     * Return a four-side spacing object, expanding Gutenberg's valid string
+     * shorthand form so this pass can replace only the vertical components.
+     */
+    private static function boxProperty(
+        \stdClass $parent,
+        string $property,
+        string $label,
+        string $path,
+    ): \stdClass {
+        if (property_exists($parent, $property) && is_string($parent->{$property})) {
+            $expanded = self::expandBoxShorthand($parent->{$property}, $property, true);
+            if ($expanded === null) {
+                throw new \RuntimeException(
+                    "section-rhythm: {$label} has an unparseable {$path} shorthand"
+                );
+            }
+            $box = new \stdClass();
+            foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                $box->{$side} = self::formatSpacingAttributeValue($expanded[$side]);
+            }
+            $parent->{$property} = $box;
+        }
+        return self::objectProperty($parent, $property, $label, $path);
     }
 
     private static function objectProperty(

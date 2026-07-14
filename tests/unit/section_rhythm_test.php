@@ -298,25 +298,114 @@ test('section rhythm mirrors owned spacing into the wrapper style attribute', fu
     assert_contains('style="margin-top:6rem"', $html, 'inner block styles are not the wrapper\'s');
 });
 
-test('section rhythm removes superseded vertical shorthands from the wrapper style', function () {
-    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"6rem","right":"2rem","bottom":"6rem","left":"2rem"}}}} -->'
-        . '<div class="wp-block-group" style="padding:6rem 2rem;margin-block:3rem;color:red">Content</div><!-- /wp:group -->';
+test('section rhythm preserves horizontal shorthand components in block attributes', function () {
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"6rem","bottom":"6rem"},"margin":{"top":"0","bottom":"0"}}}} -->'
+        . '<div class="wp-block-group" data-label="A > B" style="padding:6rem 2rem;margin:0 auto;margin-block:3rem;color:red">Content</div><!-- /wp:group -->';
 
     $result = SectionRhythm::rewrite([[
         'markup' => $markup, 'density' => 'compact', 'background' => 'base',
     ]]);
 
-    // The shorthand spellings are gone (Gutenberg never re-emits them, so an
-    // orphan would read as dropped CSS); the fixer restores the attribute-owned
-    // longhands, which is an unreported addition.
+    // The shorthand spellings are gone only after their horizontal components
+    // have moved into the durable attrs that Gutenberg re-serializes.
     assert_contains('style="color:red"', $result['markups'][0]);
+    assert_contains('data-label="A > B"', $result['markups'][0], 'a quoted > does not truncate the wrapper tag');
     $attrs = sr_root_attrs($result['markups'][0]);
-    assert_eq('2rem', $attrs['style']['spacing']['padding']['left'], 'horizontal attrs preserved');
+    assert_eq('2rem', $attrs['style']['spacing']['padding']['right']);
+    assert_eq('2rem', $attrs['style']['spacing']['padding']['left']);
+    assert_eq('auto', $attrs['style']['spacing']['margin']['right']);
+    assert_eq('auto', $attrs['style']['spacing']['margin']['left']);
+
+    $again = SectionRhythm::rewrite([[
+        'markup' => $result['markups'][0], 'density' => 'compact', 'background' => 'base',
+    ]]);
+    assert_eq($result['markups'][0], $again['markups'][0], 'promotion is idempotent before fix-blocks');
+    assert_eq([], $again['notes']);
+});
+
+test('section rhythm expands box values and honors horizontal CSS cascade priority', function () {
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"6rem","bottom":"6rem"}}}} -->'
+        . '<div class="wp-block-group" style="padding:3rem 2rem;'
+        . 'padding-right:3rem ! important;padding-right:4rem;'
+        . 'margin:1rem 2rem 3rem 4rem;color:red">Content</div><!-- /wp:group -->';
+
+    $result = SectionRhythm::rewrite([[
+        'markup' => $markup, 'density' => 'standard', 'background' => 'base',
+    ]]);
+    $spacing = sr_root_attrs($result['markups'][0])['style']['spacing'];
+    assert_eq('3rem !important', $spacing['padding']['right'], 'important longhand beats later normal value');
+    assert_eq('2rem', $spacing['padding']['left']);
+    assert_eq('2rem', $spacing['margin']['right'], 'four-value shorthand right maps from position two');
+    assert_eq('4rem', $spacing['margin']['left'], 'four-value shorthand left maps from position four');
+    assert_contains('style="color:red"', $result['markups'][0], 'superseded horizontal longhands are removed');
+});
+
+test('section rhythm expands valid attribute shorthands and rejects ambiguous inline sides', function () {
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":"6rem 2rem","margin":"0 auto"}}} -->'
+        . '<div class="wp-block-group" style="padding:6rem 2rem;margin:0 auto">Content</div><!-- /wp:group -->';
+    $result = SectionRhythm::rewrite([[
+        'markup' => $markup, 'density' => 'compact', 'background' => 'base',
+    ]]);
+    $spacing = sr_root_attrs($result['markups'][0])['style']['spacing'];
+    assert_eq('2rem', $spacing['padding']['right']);
+    assert_eq('auto', $spacing['margin']['left']);
+
+    $preset = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"6rem","right":"var:preset|spacing|md","bottom":"6rem"}}}} -->'
+        . '<div class="wp-block-group" style="padding:6rem var(--wp--preset--spacing--md)">Content</div><!-- /wp:group -->';
+    $presetResult = SectionRhythm::rewrite([[
+        'markup' => $preset, 'density' => 'compact', 'background' => 'base',
+    ]]);
+    $presetPadding = sr_root_attrs($presetResult['markups'][0])['style']['spacing']['padding'];
+    assert_eq('var:preset|spacing|md', $presetPadding['right'], 'rendered and attribute preset forms compare equally');
+    assert_eq('var:preset|spacing|md', $presetPadding['left'], 'promoted preset values use attribute syntax');
+
+    $conflict = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"6rem","right":"3rem","bottom":"6rem","left":"2rem"}}}} -->'
+        . '<div class="wp-block-group" style="padding:6rem 2rem">Content</div><!-- /wp:group -->';
+    assert_throws(static fn () => SectionRhythm::rewrite([[
+        'markup' => $conflict, 'density' => 'compact', 'background' => 'base',
+    ]]), 'conflicting inline and attribute padding-right');
+
+    $malformed = '<!-- wp:group --><div class="wp-block-group" style="padding:calc(2rem + 1vw">Content</div><!-- /wp:group -->';
+    assert_throws(static fn () => SectionRhythm::rewrite([[
+        'markup' => $malformed, 'density' => 'compact', 'background' => 'base',
+    ]]), 'unparseable inline padding shorthand');
+
+    $invalidLonghand = '<!-- wp:group --><div class="wp-block-group" style="padding:6rem 2rem;padding-right:bogus">Content</div><!-- /wp:group -->';
+    assert_throws(static fn () => SectionRhythm::rewrite([[
+        'markup' => $invalidLonghand, 'density' => 'compact', 'background' => 'base',
+    ]]), 'invalid later longhand must not replace the effective shorthand side');
+
+    $malformedVarLonghand = '<!-- wp:group --><div class="wp-block-group" style="padding:6rem 2rem;padding-right:var(--space">Content</div><!-- /wp:group -->';
+    assert_throws(static fn () => SectionRhythm::rewrite([[
+        'markup' => $malformedVarLonghand, 'density' => 'compact', 'background' => 'base',
+    ]]), 'a malformed custom-property longhand must not replace the effective shorthand side');
+
+    $ambiguousVar = '<!-- wp:group --><div class="wp-block-group" style="--pad:6rem 2rem;padding:var(--pad)">Content</div><!-- /wp:group -->';
+    assert_throws(static fn () => SectionRhythm::rewrite([[
+        'markup' => $ambiguousVar, 'density' => 'compact', 'background' => 'base',
+    ]]), 'a custom property may expand to more than one shorthand component');
+
+    $unverifiedFunction = '<!-- wp:group --><div class="wp-block-group" style="padding:calc(2rem + 1vw)">Content</div><!-- /wp:group -->';
+    assert_throws(static fn () => SectionRhythm::rewrite([[
+        'markup' => $unverifiedFunction, 'density' => 'compact', 'background' => 'base',
+    ]]), 'freeform functions fail closed without a full CSS value parser');
+});
+
+test('section rhythm promotes standalone physical side declarations', function () {
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"6rem","bottom":"6rem"}}}} -->'
+        . '<div class="wp-block-group" style="padding-left:var(--custom-space);padding-top:6rem">Content</div><!-- /wp:group -->';
+    $result = SectionRhythm::rewrite([[
+        'markup' => $markup, 'density' => 'standard', 'background' => 'base',
+    ]]);
+
+    $padding = sr_root_attrs($result['markups'][0])['style']['spacing']['padding'];
+    assert_eq('var(--custom-space)', $padding['left']);
+    assert_contains('padding-left:var(--custom-space)', $result['markups'][0], 'canonical longhands stay idempotent');
 });
 
 test('section rhythm patches the image cover wrapper style, not just its attributes', function () {
     $cover = '<!-- wp:cover {"align":"full","dimRatio":50,"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"}}}} -->'
-        . '<div class="wp-block-cover alignfull" style="padding-top:12rem;padding-bottom:12rem">'
+        . '<div class="wp-block-cover alignfull" style="padding:12rem 2rem;margin:0 auto">'
         . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
         . '<div class="wp-block-cover__inner-container"><p>Image band</p></div></div><!-- /wp:cover -->';
     $markup = sr_section(['align' => 'full', 'layout' => ['type' => 'constrained']], $cover);
@@ -325,9 +414,10 @@ test('section rhythm patches the image cover wrapper style, not just its attribu
         'slug' => 'hero', 'markup' => $markup, 'density' => 'standard', 'background' => 'image',
     ]]);
 
-    assert_contains(
-        'style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)"',
-        $result['markups'][0]
-    );
+    $coverAttrs = sr_first_attrs($result['markups'][0], 'cover');
+    assert_eq('2rem', $coverAttrs['style']['spacing']['padding']['right']);
+    assert_eq('2rem', $coverAttrs['style']['spacing']['padding']['left']);
+    assert_eq('auto', $coverAttrs['style']['spacing']['margin']['right']);
+    assert_eq('auto', $coverAttrs['style']['spacing']['margin']['left']);
     assert_true(!str_contains($result['markups'][0], '12rem'));
 });

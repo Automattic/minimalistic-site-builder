@@ -302,8 +302,8 @@ test('block fixer drops nothing after the rhythm pass replaces mirrored root spa
     $theme = $tmp . '/theme';
     mkdir($theme . '/parts', 0777, true);
 
-    $authored = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group" style="margin-top:0;padding-top:12rem;padding-bottom:12rem">'
+    $authored = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="padding:12rem 2rem;margin:0 auto">'
         . '<!-- wp:heading --><h2 class="wp-block-heading">Hi</h2><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->';
     $result = SectionRhythm::rewrite([[
@@ -314,11 +314,22 @@ test('block fixer drops nothing after the rhythm pass replaces mirrored root spa
     $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
     exec($cmd, $out, $exit);
     $stdout = implode("\n", $out);
+    $fixed = (string) file_get_contents($theme . '/parts/section-story.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
     assert_eq(0, $exit, $stdout);
     assert_true(!str_contains($stdout, 'DROPPED style'), $stdout);
     assert_eq([], FixBlocksStep::droppedVerticalRhythmStyles($stdout), 'the rhythm gate must not fire');
+    assert_contains('padding-right:2rem', $fixed, 'Gutenberg restores promoted side padding');
+    assert_contains('padding-left:2rem', $fixed, 'Gutenberg restores promoted side padding');
+    assert_contains('margin-right:auto', $fixed, 'Gutenberg restores promoted auto centering');
+    assert_contains('margin-left:auto', $fixed, 'Gutenberg restores promoted auto centering');
+
+    $again = SectionRhythm::rewrite([[
+        'slug' => 'story', 'markup' => $fixed, 'density' => 'standard', 'background' => 'base',
+    ]]);
+    assert_eq($fixed, $again['markups'][0], 'canonical fixer output is rhythm-idempotent');
+    assert_eq([], $again['notes']);
 });
 
 test('block fixer preserves media-text images when mediaType is missing', function () {
