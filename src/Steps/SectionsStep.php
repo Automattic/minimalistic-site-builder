@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
@@ -352,7 +353,10 @@ final class SectionsStep implements Step
     /**
      * Validate one part's raw block-markup response. The model returns the
      * markup verbatim; we defensively strip a stray ```…``` code fence if one
-     * slipped in, then require it to actually be block markup. Pure — testable.
+     * slipped in, then require it to actually be block markup. The part is
+     * untrusted model output headed for templates and stored post content, so
+     * script-capable markup is stripped here — the one intake every generated
+     * part passes through. Pure — testable.
      */
     public static function markup(string $text, string $key): string
     {
@@ -360,7 +364,7 @@ final class SectionsStep implements Step
         if ($markup === '' || !str_contains($markup, 'wp:')) {
             throw new \RuntimeException("sections: part '{$key}' is not block markup");
         }
-        return self::normalizePresetRefs(rtrim($markup));
+        return MarkupSanitizer::sanitize(self::normalizePresetRefs(rtrim($markup)));
     }
 
     /**
