@@ -191,6 +191,30 @@ test('splitRootBlocks separates :root overrides from the class appendix', functi
     assert_eq([], $blocks);
 });
 
+test('splitRootBlocks ignores :root inside comments and nested rules', function () {
+    // A commented-out example must stay inert, not become an active override.
+    [$blocks, $rest] = PageStylesStep::splitRootBlocks(
+        "/* example: :root { --motion-duration: 2000ms; } */\n.hover-lift { transition: transform 0.2s; }"
+    );
+    assert_eq([], $blocks);
+    assert_contains(':root { --motion-duration: 2000ms; }', $rest, 'comment left intact');
+
+    // A :root nested in @media must not be hoisted into unconditional CSS.
+    [$blocks, $rest] = PageStylesStep::splitRootBlocks(
+        "@media (min-width: 600px) {\n:root { --motion-duration: 600ms; }\n}"
+    );
+    assert_eq([], $blocks);
+    assert_contains('--motion-duration: 600ms', $rest, 'nested rule stays conditional');
+
+    // Both together with a real top-level block: only the real one is pulled.
+    [$blocks, $rest] = PageStylesStep::splitRootBlocks(
+        "/* :root { --motion-distance: 999px; } */\n:root {\n    --motion-duration: 700ms;\n}\n"
+        . "@media (min-width: 600px) { :root { --motion-stagger: 50ms; } }"
+    );
+    assert_eq(1, count($blocks));
+    assert_contains('--motion-duration: 700ms', $blocks[0]);
+});
+
 test('validateMotionOverride accepts in-bounds values and allowlisted easings', function () {
     $block = ":root {\n    --motion-duration: 900ms;\n    --motion-distance: 32px;\n    --motion-stagger: 0.1s;\n    --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);\n}";
     assert_eq([], PageStylesStep::validateMotionOverride([$block], 'dramatic'));

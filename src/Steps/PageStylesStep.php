@@ -194,21 +194,66 @@ final class PageStylesStep implements Step
 
     /**
      * Pull every top-level `:root { … }` block out of the CSS, returning the
-     * blocks and the remaining stylesheet. Pure — unit-testable.
+     * blocks and the remaining stylesheet. Walks comments and brace depth
+     * rather than regex-matching, so a `:root` example inside a comment stays
+     * inert and a `:root` nested in an @media rule stays where it is (the
+     * class-appendix validator then rejects it as an unscoped selector)
+     * instead of being hoisted into unconditional global CSS. Pure —
+     * unit-testable.
      *
      * @return array{0: list<string>, 1: string}
      */
     public static function splitRootBlocks(string $css): array
     {
         $blocks = [];
-        $rest = (string) preg_replace_callback(
-            '/:root\s*\{[^{}]*\}/',
-            static function (array $m) use (&$blocks): string {
-                $blocks[] = trim($m[0]);
-                return '';
-            },
-            $css
-        );
+        $rest = '';
+        $depth = 0;
+        $length = strlen($css);
+        for ($i = 0; $i < $length; ) {
+            if ($css[$i] === '/' && substr($css, $i, 2) === '/*') {
+                $end = strpos($css, '*/', $i + 2);
+                $end = $end === false ? $length : $end + 2;
+                $rest .= substr($css, $i, $end - $i);
+                $i = $end;
+                continue;
+            }
+            if ($depth === 0
+                && substr($css, $i, 5) === ':root'
+                && ($i === 0 || preg_match('/[\w-]/', $css[$i - 1]) !== 1)
+            ) {
+                $j = $i + 5;
+                while ($j < $length && ctype_space($css[$j])) {
+                    $j++;
+                }
+                if ($j < $length && $css[$j] === '{') {
+                    $k = $j + 1;
+                    $braces = 1;
+                    while ($k < $length && $braces > 0) {
+                        if ($css[$k] === '/' && substr($css, $k, 2) === '/*') {
+                            $end = strpos($css, '*/', $k + 2);
+                            $k = $end === false ? $length : $end + 2;
+                            continue;
+                        }
+                        if ($css[$k] === '{') {
+                            $braces++;
+                        } elseif ($css[$k] === '}') {
+                            $braces--;
+                        }
+                        $k++;
+                    }
+                    $blocks[] = trim(substr($css, $i, $k - $i));
+                    $i = $k;
+                    continue;
+                }
+            }
+            if ($css[$i] === '{') {
+                $depth++;
+            } elseif ($css[$i] === '}') {
+                $depth = max(0, $depth - 1);
+            }
+            $rest .= $css[$i];
+            $i++;
+        }
         return [$blocks, trim($rest)];
     }
 
