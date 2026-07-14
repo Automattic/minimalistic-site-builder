@@ -159,12 +159,19 @@ final class MotionSanityStep implements Step
                 continue;
             }
 
+            // A block tagged for the custom-motion step is the user's ONE
+            // explicit animation request; the kit's higher-specificity rules
+            // (html.js .reveal-*.is-visible) would override the generated
+            // .custom-motion animation, so preset motion is evicted here.
+            $customTarget = in_array(CustomMotionStep::CLASS_NAME, $jsonTokens, true)
+                || in_array(CustomMotionStep::CLASS_NAME, $htmlTokens, true);
+
             $kept = [];
             $droppedJson = [];
             $droppedHtml = [];
             $kitOnBlock = 0;
             foreach ($jsonTokens as $token) {
-                $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i);
+                $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i, $customTarget);
                 if ($verdict === null) {
                     $kept[] = $token;
                     continue;
@@ -173,7 +180,7 @@ final class MotionSanityStep implements Step
                 $notes[] = "{$doc->name($i)}: dropped '{$token}' ({$verdict})";
             }
             foreach ($htmlOnly as $token) {
-                $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i);
+                $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i, $customTarget);
                 if ($verdict === null) {
                     continue;
                 }
@@ -236,6 +243,7 @@ final class MotionSanityStep implements Step
         array &$budget,
         BlockMarkup $doc,
         int $i,
+        bool $customTarget = false,
     ): ?string {
         if (!Motion::looksLikeMotionClass($token)) {
             return null; // not a motion class — none of our business
@@ -248,6 +256,9 @@ final class MotionSanityStep implements Step
         $isHover = in_array($token, Motion::HOVER_CLASSES, true);
         if (!$isKit && !$isHover) {
             return 'unknown motion class — no CSS ships for it';
+        }
+        if ($customTarget) {
+            return 'the block is the custom-motion target — preset motion would override the explicit request';
         }
         if (!in_array($token, $allowed, true)) {
             return "disallowed by the motion profile";

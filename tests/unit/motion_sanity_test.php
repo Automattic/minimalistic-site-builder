@@ -41,6 +41,24 @@ test('motion-sanity strips unknown motion variants and is-visible but leaves oth
     assert_eq(3, count($result['notes']));
 });
 
+test('motion-sanity evicts preset motion from the custom-motion target block', function () {
+    // html.js .reveal-up.is-visible outranks .custom-motion, so a preset
+    // class on the tagged block would override the user's explicit request.
+    $budget = MotionSanityStep::newBudget();
+    $result = MotionSanityStep::sanitize(motion_group('custom-motion reveal-up hover-lift'), 'calm', $budget);
+    assert_contains('"className":"custom-motion"', $result['markup']);
+    assert_true(!str_contains($result['markup'], 'reveal-up'), 'preset entrance evicted');
+    assert_true(!str_contains($result['markup'], 'hover-lift'), 'preset hover evicted');
+    assert_eq(2, count($result['notes']));
+
+    // The eviction doesn't consume the page budgets: another section's
+    // ambient class still gets the one signature slot.
+    $result = MotionSanityStep::sanitize(motion_group('custom-motion ken-burns'), 'dramatic', $budget);
+    assert_true(!str_contains($result['markup'], 'ken-burns'), 'ambient evicted from the custom target');
+    $other = MotionSanityStep::sanitize(motion_group('gradient-shift'), 'dramatic', $budget);
+    assert_contains('gradient-shift', $other['markup'], 'ambient budget still free for the page');
+});
+
 test('motion-sanity gates by profile: minimal keeps hover only, none strips everything', function () {
     $budget = MotionSanityStep::newBudget();
     $result = MotionSanityStep::sanitize(motion_group('hover-lift reveal-up'), 'minimal', $budget);
