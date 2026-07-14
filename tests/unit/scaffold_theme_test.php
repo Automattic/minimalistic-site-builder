@@ -24,6 +24,12 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.card-media-tall img { height: 320px; }', $css);
     assert_contains('.card-media-thumb img { height: 110px; }', $css);
 
+    // Core's font-relative pullquote spacing must not compound unpredictably
+    // with the deterministic section rhythm.
+    assert_contains('.wp-site-blocks .wp-block-pullquote {', $css);
+    assert_contains('margin-block: 0;', $css);
+    assert_contains('padding-block: var(--wp--preset--spacing--lg);', $css);
+
     $readme = $project->readText('theme/readme.txt');
     assert_contains('=== {{THEME_NAME}} ===', $readme);
 

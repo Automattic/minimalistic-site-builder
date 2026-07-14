@@ -15,9 +15,11 @@ use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
 /**
  * Consumer-facing entry point for the default site-creation pipeline.
@@ -83,8 +85,10 @@ final class SiteBuilder
                 new SectionPlanStep($this->llm, $renderer, $models['section-plan'], $temps['section-plan']),
             ]),
             // Generate the header, footer, and every section part in one concurrent
-            // batch, then stitch them into the page deterministically.
+            // batch. Resolve page-level vertical seams while the parts are still
+            // ordered by the plan, then stitch them into the page deterministically.
             new SectionsStep($this->llm, $renderer, $models['sections'], $temps['sections']),
+            new SectionRhythmStep(),
             new AssembleLandingPageStep(),
             // Collect image placeholders BEFORE fix-blocks: the block re-serializer
             // strips the alt from wp:cover background images (core cover save()
@@ -108,6 +112,9 @@ final class SiteBuilder
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
+            // Last chance to catch contract drift introduced by serialization or
+            // later append-only steps before the project is reported as complete.
+            new ValidateThemeStep(),
         ]);
     }
 
