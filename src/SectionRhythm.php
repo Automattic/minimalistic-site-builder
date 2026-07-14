@@ -9,9 +9,12 @@ namespace Automattic\SiteBuild;
  * Section markup is authored independently, so allowing every section model to
  * choose its own outer padding produces both oversized seams (two generous
  * edges on the same surface) and missing edges. This class makes that decision
- * once, with the ordered page plan in hand. It edits only block-comment
+ * once, with the ordered page plan in hand. It edits the block-comment
  * attributes on each section's single top-level wp:group (and its direct cover
- * for an image band); the block fixer then re-serializes matching HTML.
+ * for an image band) and mirrors the owned vertical declarations into that
+ * element's inline style attribute, so the block fixer's re-serialization only
+ * ever ADDS spacing CSS — a model-authored padding left orphaned in the HTML
+ * would otherwise be reported as fatally dropped vertical-rhythm CSS.
  *
  * A section always owns its top edge. Consecutive exact solid surfaces (base or
  * contrast) share one seam: the current section's bottom edge is zero and the
@@ -31,6 +34,25 @@ final class SectionRhythm
 
     /** Only these plan labels guarantee one identical continuous surface. */
     private const COLLAPSIBLE_SURFACES = ['base', 'contrast'];
+
+    /**
+     * Vertical-only inline spellings superseded by the owned longhands. The
+     * plain shorthands are included because Gutenberg never re-emits them:
+     * once the pass owns the vertical component, an orphaned shorthand would
+     * survive in HTML only to be dropped (fatally) by the block fixer. Any
+     * horizontal component still declared in the attributes is re-serialized
+     * as longhands by the fixer.
+     */
+    private const SUPERSEDED_WRAPPER_PROPERTIES = [
+        'padding',
+        'margin',
+        'padding-block',
+        'padding-block-start',
+        'padding-block-end',
+        'margin-block',
+        'margin-block-start',
+        'margin-block-end',
+    ];
 
     private const BACKGROUNDS = ['base', 'tinted', 'contrast', 'image'];
 
@@ -166,10 +188,17 @@ final class SectionRhythm
         $margin->top = '0';
         $margin->bottom = '0';
 
-        $rewritten = $markup;
+        // Patch the wrapper HTML first: it sits after the opener, so the
+        // opener's offsets stay valid for the substr_replace below.
+        $rewritten = self::patchWrapperStyle($markup, $openingOffset + $openingLength, [
+            'margin-top'     => '0',
+            'margin-bottom'  => '0',
+            'padding-top'    => self::cssSpacingValue($padding->top),
+            'padding-bottom' => self::cssSpacingValue($padding->bottom),
+        ]);
         if (self::encodeAttrs($attrs) !== $before) {
             $opening = '<!-- wp:group ' . self::encodeAttrs($attrs) . ' -->';
-            $rewritten = substr_replace($markup, $opening, $openingOffset, $openingLength);
+            $rewritten = substr_replace($rewritten, $opening, $openingOffset, $openingLength);
         }
 
         if ($background === 'image') {
@@ -227,11 +256,84 @@ final class SectionRhythm
         $margin->top = '0';
         $margin->bottom = '0';
 
-        if (self::encodeAttrs($attrs) === $before) {
+        $patched = self::patchWrapperStyle($markup, $offset + $length, [
+            'margin-top'     => '0',
+            'margin-bottom'  => '0',
+            'padding-top'    => self::cssSpacingValue($padding->top),
+            'padding-bottom' => self::cssSpacingValue($padding->bottom),
+        ]);
+        if (self::encodeAttrs($attrs) !== $before) {
+            $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
+            $patched = substr_replace($patched, $newOpening, $offset, $length);
+        }
+        return $patched;
+    }
+
+    /**
+     * Mirror the owned vertical declarations into the wrapper element's
+     * inline style attribute.
+     *
+     * The block fixer regenerates each block's HTML from its comment
+     * attributes and reports every inline declaration that disappears in the
+     * process; a value this pass replaced in the attributes but left in the
+     * HTML would surface there as fatally dropped vertical-rhythm CSS. So:
+     * existing owned declarations are rewritten in place, superseded
+     * vertical-only spellings are removed, and everything else — including
+     * declaration order and the spelling of untouched declarations — is
+     * preserved byte-for-byte. Owned declarations absent from the HTML are
+     * NOT appended: the fixer adding CSS is never reported as a loss, and
+     * appending in a different order than Gutenberg's serializer would make
+     * this pass non-idempotent across fix-blocks.
+     *
+     * Markup whose first node after the opener is not an element, or whose
+     * wrapper has no style attribute, is returned unchanged.
+     *
+     * @param array<string,string> $owned CSS property => owned CSS value
+     */
+    private static function patchWrapperStyle(string $markup, int $searchOffset, array $owned): string
+    {
+        $rest = substr($markup, $searchOffset);
+        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?:\s[^>]*)?>/', $rest, $tag) !== 1) {
             return $markup;
         }
-        $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
-        return substr_replace($markup, $newOpening, $offset, $length);
+        $tagHtml = $tag[0];
+        if (preg_match('/\bstyle\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $tagHtml, $style, PREG_OFFSET_CAPTURE) !== 1) {
+            return $markup;
+        }
+        [$value, $valueOffset] = ($style[1][1] ?? -1) !== -1 ? $style[1] : $style[2];
+
+        $seen = [];
+        $out = [];
+        foreach (explode(';', $value) as $segment) {
+            $colon = strpos($segment, ':');
+            $property = strtolower(trim($colon === false ? $segment : substr($segment, 0, $colon)));
+            if (isset($owned[$property])) {
+                if (!isset($seen[$property])) {
+                    $seen[$property] = true;
+                    $out[] = $property . ':' . $owned[$property];
+                }
+                continue;
+            }
+            if (in_array($property, self::SUPERSEDED_WRAPPER_PROPERTIES, true)) {
+                continue;
+            }
+            $out[] = $segment;
+        }
+
+        $newValue = implode(';', $out);
+        if ($newValue === $value) {
+            return $markup;
+        }
+        $newTag = substr_replace($tagHtml, $newValue, $valueOffset, strlen($value));
+        return substr_replace($markup, $newTag, $searchOffset, strlen($tagHtml));
+    }
+
+    /** The rendered-CSS spelling of an owned attribute value ('0' or a preset ref). */
+    private static function cssSpacingValue(string $attrValue): string
+    {
+        return preg_match('/^var:preset\|spacing\|([a-z0-9_-]+)$/', $attrValue, $match) === 1
+            ? "var(--wp--preset--spacing--{$match[1]})"
+            : $attrValue;
     }
 
     /**

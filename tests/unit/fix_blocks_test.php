@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\ThemeValidator;
 
@@ -290,6 +291,34 @@ HTML;
 
     assert_eq(0, $exit, $stdout);
     assert_contains('DROPPED style `padding-top:8rem`', $stdout);
+});
+
+test('block fixer drops nothing after the rhythm pass replaces mirrored root spacing', function () {
+    // A model that ignores the "no root padding" instruction mirrors its
+    // padding into inline CSS. The rhythm pass replaces both spellings, so the
+    // fixer's re-serialization must not report the old values as dropped —
+    // otherwise the deterministic repair itself would fail the build.
+    $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
+    $theme = $tmp . '/theme';
+    mkdir($theme . '/parts', 0777, true);
+
+    $authored = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="margin-top:0;padding-top:12rem;padding-bottom:12rem">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Hi</h2><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $result = SectionRhythm::rewrite([[
+        'slug' => 'story', 'markup' => $authored, 'density' => 'standard', 'background' => 'base',
+    ]]);
+    file_put_contents($theme . '/parts/section-story.html', $result['markups'][0]);
+
+    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
+    exec($cmd, $out, $exit);
+    $stdout = implode("\n", $out);
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    assert_eq(0, $exit, $stdout);
+    assert_true(!str_contains($stdout, 'DROPPED style'), $stdout);
+    assert_eq([], FixBlocksStep::droppedVerticalRhythmStyles($stdout), 'the rhythm gate must not fire');
 });
 
 test('block fixer preserves media-text images when mediaType is missing', function () {

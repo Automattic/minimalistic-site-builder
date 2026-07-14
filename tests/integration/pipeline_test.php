@@ -96,10 +96,13 @@ test('full pipeline produces a structurally valid theme', function () {
     );
     // The specials section opts into a layout utility class (hover-lift) so the
     // page-styles step downstream has something to style — and we can assert the
-    // class survives the block-fixer's re-serialization.
+    // class survives the block-fixer's re-serialization. It also disobeys the
+    // "no root padding" instruction with mirrored inline CSS, the case the
+    // rhythm pass must repair without the fix-blocks rhythm gate rejecting the
+    // replaced declarations as dropped.
     $llm->queueText(
-        '<!-- wp:group {"className":"hover-lift","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group hover-lift" style="margin-top:0">'
+        '<!-- wp:group {"className":"hover-lift","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hover-lift" style="margin-top:0;padding-top:12rem;padding-bottom:12rem">'
         . '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
     );
@@ -149,6 +152,11 @@ test('full pipeline produces a structurally valid theme', function () {
     $heroCover = $heroBlocks->attrs($coverIndex);
     assert_eq('0', $heroRoot['style']['spacing']['padding']['top'], 'image-band root has no outside padding');
     assert_eq('var:preset|spacing|xl', $heroCover['style']['spacing']['padding']['top'], 'density lives inside cover');
+    $specialsHtml = $project->readText('theme/parts/section-specials.html');
+    $specialsBlocks = BlockMarkup::parse($specialsHtml);
+    $specialsRoot = $specialsBlocks->attrs($specialsBlocks->indices()[0]);
+    assert_eq('var:preset|spacing|lg', $specialsRoot['style']['spacing']['padding']['top'], 'model root padding replaced by plan density');
+    assert_true(!str_contains($specialsHtml, '12rem'), 'no orphaned model spacing survives the pipeline');
 
     // The utility class survived the fix-blocks re-serialization, and the
     // page-styles step appended its CSS to style.css (after the theme header).

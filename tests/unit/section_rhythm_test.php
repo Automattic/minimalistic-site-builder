@@ -274,3 +274,60 @@ test('section rhythm accepts a structurally valid attr-less root group', functio
     assert_eq('var:preset|spacing|xxl', $attrs['style']['spacing']['padding']['bottom']);
     assert_eq('0', $attrs['style']['spacing']['margin']['top']);
 });
+
+test('section rhythm mirrors owned spacing into the wrapper style attribute', function () {
+    // Valid Gutenberg markup mirrors the attrs into inline CSS. If the pass
+    // rewrote only the attrs, the block fixer would later report the stale
+    // inline values as dropped vertical-rhythm CSS and fail the build.
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="margin-top:0;padding-top:12rem;padding-bottom:12rem;min-height: 40vh">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading" style="margin-top:6rem">Hi</h2><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = SectionRhythm::rewrite([[
+        'slug' => 'story', 'markup' => $markup, 'density' => 'standard', 'background' => 'base',
+    ]]);
+
+    $html = $result['markups'][0];
+    assert_contains(
+        'style="margin-top:0;padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl);min-height: 40vh"',
+        $html,
+        'owned declarations rewritten in place; untouched CSS byte-identical'
+    );
+    assert_true(!str_contains($html, '12rem'), 'no orphaned model spacing anywhere');
+    assert_contains('style="margin-top:6rem"', $html, 'inner block styles are not the wrapper\'s');
+});
+
+test('section rhythm removes superseded vertical shorthands from the wrapper style', function () {
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"6rem","right":"2rem","bottom":"6rem","left":"2rem"}}}} -->'
+        . '<div class="wp-block-group" style="padding:6rem 2rem;margin-block:3rem;color:red">Content</div><!-- /wp:group -->';
+
+    $result = SectionRhythm::rewrite([[
+        'markup' => $markup, 'density' => 'compact', 'background' => 'base',
+    ]]);
+
+    // The shorthand spellings are gone (Gutenberg never re-emits them, so an
+    // orphan would read as dropped CSS); the fixer restores the attribute-owned
+    // longhands, which is an unreported addition.
+    assert_contains('style="color:red"', $result['markups'][0]);
+    $attrs = sr_root_attrs($result['markups'][0]);
+    assert_eq('2rem', $attrs['style']['spacing']['padding']['left'], 'horizontal attrs preserved');
+});
+
+test('section rhythm patches the image cover wrapper style, not just its attributes', function () {
+    $cover = '<!-- wp:cover {"align":"full","dimRatio":50,"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"}}}} -->'
+        . '<div class="wp-block-cover alignfull" style="padding-top:12rem;padding-bottom:12rem">'
+        . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"><p>Image band</p></div></div><!-- /wp:cover -->';
+    $markup = sr_section(['align' => 'full', 'layout' => ['type' => 'constrained']], $cover);
+
+    $result = SectionRhythm::rewrite([[
+        'slug' => 'hero', 'markup' => $markup, 'density' => 'standard', 'background' => 'image',
+    ]]);
+
+    assert_contains(
+        'style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)"',
+        $result['markups'][0]
+    );
+    assert_true(!str_contains($result['markups'][0], '12rem'));
+});
