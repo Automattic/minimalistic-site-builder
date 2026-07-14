@@ -185,10 +185,12 @@ final class PagePlanStep implements ConcurrentStep
     /**
      * Flatten the spec's page tree into display order: depth-first, parents
      * before children, the FIRST page marked as the front page. Paths follow
-     * WordPress page permalinks ("/", "/menu/", "/menu/breads/"); menu_order
-     * steps by 10 so seeded pages sort — and wp:page-list renders — in plan
-     * order. A spec without pages degrades to a single homepage. Pure —
-     * unit-testable.
+     * WordPress page permalinks ("/", "/menu/", "/menu/breads/") — including
+     * for children of the front page, whose hierarchical URIs WordPress still
+     * builds from the front page's post_name ("/home/visit/", never
+     * "/visit/"). menu_order steps by 10 so seeded pages sort — and
+     * wp:page-list renders — in plan order. A spec without pages degrades to
+     * a single homepage. Pure — unit-testable.
      *
      * @param array<mixed> $spec
      * @return array<int,array<string,mixed>>
@@ -225,7 +227,11 @@ final class PagePlanStep implements ConcurrentStep
                 $order++;
 
                 if (is_array($page['children'] ?? null) && $page['children'] !== []) {
-                    $walk($page['children'], $slug, $front ? '/' : $path);
+                    // The front page's path is "/" but its children still
+                    // resolve under its real slug: the seeder parents them to
+                    // the Home page, and get_page_uri() prepends every
+                    // ancestor's post_name, front-page status notwithstanding.
+                    $walk($page['children'], $slug, $front ? "/{$slug}/" : $path);
                 }
             }
         };

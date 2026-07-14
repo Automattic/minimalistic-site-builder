@@ -220,6 +220,20 @@ test('PagePlanStep::flattenPages walks the tree depth-first with paths and menu 
     assert_eq([0, 10, 20], array_column($flat, 'menu_order'));
 });
 
+test('PagePlanStep::flattenPages paths front-page children under the front slug', function () {
+    $flat = PagePlanStep::flattenPages(plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => [
+            ['title' => 'Visit', 'slug' => 'visit', 'purpose' => 'Directions', 'children' => []],
+        ]],
+    ]]));
+
+    assert_eq('/', $flat[0]['path']);
+    // WordPress resolves the child's URI from its parent's post_name even
+    // when the parent is the front page — advertising "/visit/" would 404.
+    assert_eq('/home/visit/', $flat[1]['path']);
+    assert_eq('home', $flat[1]['parent']);
+});
+
 test('PagePlanStep::flattenPages degrades a pageless spec to a single homepage', function () {
     $flat = PagePlanStep::flattenPages(['name' => 'Solo', 'description' => 'One thing.']);
     assert_eq(1, count($flat));
