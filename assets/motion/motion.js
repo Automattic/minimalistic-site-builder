@@ -21,7 +21,12 @@
                     observer.unobserve(entry.target);
                 }
             });
-        }, { rootMargin: '0px 0px -10% 0px', threshold: 0.1 });
+            // threshold 0, not a ratio: a ratio is relative to the TARGET's
+            // area, so a target taller than a few viewports could never
+            // expose enough of itself to cross it and would stay at the
+            // motion.css opacity:0 forever. The negative bottom rootMargin
+            // already keeps the trigger comfortably inside the viewport.
+        }, { rootMargin: '0px 0px -10% 0px', threshold: 0 });
         targets.forEach(function (el) { observer.observe(el); });
     }
 
