@@ -29,7 +29,8 @@ use Automattic\SiteBuild\Step;
  * @keyframes ARE allowed (names must start with `custom-motion-`), but every
  * selector must live under `.custom-motion`, nothing may hide content at rest
  * (no display:none / visibility:hidden anywhere; opacity:0 only inside
- * keyframes), no url()/@import/@font-face, and the whole block is capped.
+ * keyframes), no resource-loading value forms (url(), image-set(), …) or
+ * @import/@font-face, and the whole block is capped.
  * Rejected CSS is logged and skipped — the build never fails over decoration.
  */
 final class CustomMotionStep implements Step
@@ -164,8 +165,11 @@ final class CustomMotionStep implements Step
             return $problems; // the structural walks below need balanced braces
         }
 
-        if (preg_match('/\burl\s*\(/i', $stripped) === 1) {
-            $problems[] = 'url() is not allowed';
+        // url() is not the only resource-bearing value form: image-set("…"),
+        // image("…"), cross-fade() and friends fetch too (including with
+        // vendor prefixes, which is why the match is a bare substring).
+        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $stripped) === 1) {
+            $problems[] = 'resource-loading CSS functions (url(), image-set(), image(), cross-fade(), …) are not allowed';
         }
         if (preg_match('/(?<![-\w])display\s*:\s*none/i', $stripped) === 1) {
             $problems[] = 'display:none hides generated content';

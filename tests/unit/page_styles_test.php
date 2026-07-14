@@ -86,6 +86,10 @@ test('validate rejects disallowed at-rules and url()', function () {
     assert_true([] !== PageStylesStep::validate("@import 'x.css';\n.hover-lift {\n    color: var(--wp--preset--color--base);\n}"), '@import');
     assert_true([] !== PageStylesStep::validate("@keyframes spin {\n    to { transform: rotate(1turn); }\n}"), '@keyframes');
     assert_true([] !== PageStylesStep::validate(".hover-lift {\n    background: url(x.png);\n}"), 'url()');
+    assert_true(
+        [] !== PageStylesStep::validate(".hover-lift {\n    background-image: image-set(\"https://example.invalid/t.png\" 1x);\n}"),
+        'image-set()'
+    );
 });
 
 test('validate rejects CSS that hides generated content', function () {

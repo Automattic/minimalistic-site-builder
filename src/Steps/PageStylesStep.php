@@ -376,8 +376,11 @@ final class PageStylesStep implements Step
         foreach (self::rawNamedColorProblems($stripped) as $problem) {
             $problems[] = $problem;
         }
-        if (preg_match('/\burl\s*\(/i', $stripped) === 1) {
-            $problems[] = 'url() is not allowed';
+        // url() is not the only resource-bearing value form: image-set("…"),
+        // image("…"), cross-fade() and friends fetch too (including with
+        // vendor prefixes, which is why the match is a bare substring).
+        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $stripped) === 1) {
+            $problems[] = 'resource-loading CSS functions (url(), image-set(), image(), cross-fade(), …) are not allowed';
         }
         if (preg_match('/(?<![-\w])opacity\s*:\s*0(?:\.0+)?\s*(?:!important\s*)?(?:;|$)/i', $stripped) === 1) {
             $problems[] = 'opacity:0 hides generated content';
