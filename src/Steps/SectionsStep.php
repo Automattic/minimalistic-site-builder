@@ -181,7 +181,7 @@ final class SectionsStep implements Step
     {
         $section = $sections[$i];
         $slug = (string) ($section['slug'] ?? "section-{$i}");
-        foreach (['layout_archetype', 'background', 'handoff'] as $field) {
+        foreach (['layout_archetype', 'background', 'vertical_density', 'handoff'] as $field) {
             if (trim((string) ($section[$field] ?? '')) === '') {
                 throw new \RuntimeException("sections: section '{$slug}' is missing {$field} from section-plan");
             }
@@ -190,6 +190,7 @@ final class SectionsStep implements Step
         return $this->renderer->render('section-composition.md', [
             'layout_archetype' => (string) ($section['layout_archetype'] ?? ''),
             'background'       => (string) ($section['background'] ?? ''),
+            'vertical_density' => (string) ($section['vertical_density'] ?? ''),
             'handoff'          => (string) ($section['handoff'] ?? ''),
             'neighbors'        => self::neighbors($sections, $i),
         ]);
@@ -228,10 +229,12 @@ final class SectionsStep implements Step
     {
         $archetype = trim((string) ($section['layout_archetype'] ?? ''));
         $background = trim((string) ($section['background'] ?? ''));
-        if ($archetype === '' && $background === '') {
+        $density = trim((string) ($section['vertical_density'] ?? ''));
+        if ($archetype === '' && $background === '' && $density === '') {
             return '';
         }
-        return trim($archetype . ($background !== '' ? " on {$background} background" : ''));
+        $assignment = trim($archetype . ($background !== '' ? " on {$background} background" : ''));
+        return trim($assignment . ($density !== '' ? ", {$density} vertical density" : ''));
     }
 
     /**
@@ -304,20 +307,28 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Repair the model's recurring preset-reference typo: `var:preset--type--slug`
-     * instead of `var:preset|type|slug` in block-comment attributes. WordPress
-     * resolves only the pipe form, so the malformed ref produces NO style — and
-     * the block-fixer then deletes the (correct) inline CSS as "not mirrored in
-     * attributes", leaving e.g. a section with zero padding beside 8rem siblings.
-     * The type names are a fixed vocabulary, so the rewrite is unambiguous.
-     * Pure — unit-testable.
+     * Canonicalize preset references to `var:preset|type|slug` in block markup.
+     * Models commonly use CSS-style `--` or colon delimiters, sometimes in only
+     * one of the two positions. Gutenberg's comment serializer can additionally
+     * spell `--` as `\u002d\u002d`. WordPress resolves only the pipe form, so
+     * any of those malformed refs produces no style.
+     *
+     * Match complete prefixes for the fixed preset-type vocabulary instead of
+     * replacing dashes globally. This keeps CSS custom properties such as
+     * `var(--wp--preset--spacing--xl)` byte-for-byte intact. Pure — testable.
      */
     public static function normalizePresetRefs(string $markup): string
     {
-        // `--` may also appear as the serializer's `--` escape.
-        $dashes = '(?:--|(?:\\\u002d){2})';
+        $types = 'color|gradient|shadow|spacing|font-size|font-family|aspect-ratio|duotone';
+
+        // Each delimiter position independently accepts the pipe, the two
+        // model typos (`--` and `:`), and the serializer-escaped spellings
+        // `\u002d\u002d` (dash-dash) and `\u007c` (pipe) in either hex case,
+        // since JSON permits both. Type names stay case-sensitive.
+        $delimiter = '(?:\||:|--|(?:\\\\u002[dD]){2}|\\\\u007[cC])';
+
         return (string) preg_replace(
-            "/var:preset{$dashes}(color|gradient|shadow|spacing|font-size|font-family|aspect-ratio|duotone){$dashes}/",
+            "/var:preset{$delimiter}({$types}){$delimiter}/",
             'var:preset|$1|',
             $markup
         );

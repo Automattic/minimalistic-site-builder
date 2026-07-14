@@ -99,6 +99,15 @@ final class ScaffoldThemeStep implements Step
             justify-content: center;
         }
 
+        /* Core gives pullquotes a font-relative 4em vertical pad and a trailing
+           margin, which silently multiplies the whitespace around fluid display
+           quotes. Keep the editorial emphasis on the shared spacing scale so it
+           composes predictably with the section rhythm. */
+        .wp-site-blocks .wp-block-pullquote {
+            margin-block: 0;
+            padding-block: var(--wp--preset--spacing--lg);
+        }
+
         /* Chrome-less overlay header (the header part opts in via className="header-overlay"):
            floats transparently over the full-bleed hero instead of stacking above it. The
            absolute positioning resolves against the viewport, not the padded body, so the

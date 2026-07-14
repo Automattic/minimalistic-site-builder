@@ -149,6 +149,17 @@ final class BlockMarkup
         return substr($this->source, $n['offset'], $n['length']);
     }
 
+    /** Byte offset and length of this block's opening delimiter in the source. */
+    public function openingOffset(int $i): int
+    {
+        return $this->nodes[$i]['offset'];
+    }
+
+    public function openingLength(int $i): int
+    {
+        return $this->nodes[$i]['length'];
+    }
+
     /** Raw source between this block's delimiters (includes child blocks). */
     public function innerHtml(int $i): string
     {
