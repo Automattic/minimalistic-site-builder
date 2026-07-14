@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -13,8 +14,8 @@ use Automattic\SiteBuild\Step;
  * Step (LLM, optional): implement an EXPLICIT user animation request.
  *
  * Input:  siteSpec.json (`animation_request`, captured verbatim by site-spec)
- *         + the final markup (AFTER fix-blocks, where the section step tagged
- *         the target element with the `custom-motion` class).
+ *         + the final markup (AFTER fix-blocks, where the section, header, or
+ *         footer prompt tagged the target with the `custom-motion` class).
  * Output: a small CSS block appended to theme/style.css, wrapped in
  *         @media (prefers-reduced-motion: no-preference).
  *
@@ -38,7 +39,7 @@ final class CustomMotionStep implements Step
 {
     use LlmOptions;
 
-    /** The markup class the section step tags request targets with. */
+    /** The markup class the section/header/footer prompts tag request targets with. */
     public const CLASS_NAME = 'custom-motion';
 
     private const MAX_LINES = 60;
@@ -110,24 +111,41 @@ final class CustomMotionStep implements Step
     }
 
     /**
-     * The tagged elements' opening tags as they appear in the final markup —
-     * enough context (tag name, classes) for the model to know what it is
-     * animating. Empty when the section step never placed the class.
+     * The tagged elements as they appear in the final markup — enough context
+     * (tag name, classes) for the model to know what it is animating. For
+     * blocks with saved HTML that is the opening tag carrying the class; for
+     * dynamic blocks (wp:site-logo, wp:site-title — no saved HTML at all) it
+     * is the opening block comment whose "className" carries it. Empty when
+     * no step ever placed the class.
      *
      * @return string[]
      */
     public static function taggedElements(Project $project): array
     {
         $found = [];
+        $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
         foreach (FixBlocksStep::themeFiles($project) as $rel) {
-            $markup = $project->readText('theme/' . $rel);
-            if (preg_match_all('/<[a-z][^>]*class="[^"]*(?<![\w-])' . self::CLASS_NAME . '(?![\w-])[^"]*"[^>]*>/i', $markup, $m) > 0) {
-                foreach ($m[0] as $tag) {
-                    $found[] = strlen($tag) > 300 ? substr($tag, 0, 300) . '…' : $tag;
+            $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
+            foreach ($doc->indices() as $i) {
+                if (preg_match_all('/<[a-z][^>]*class="[^"]*' . $token . '[^"]*"[^>]*>/i', $doc->ownHtml($i), $m) > 0) {
+                    foreach ($m[0] as $tag) {
+                        $found[] = self::clip($tag);
+                    }
+                    continue;
+                }
+                $attrs = $doc->attrs($i);
+                $className = is_array($attrs) && is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+                if (preg_match('/' . $token . '/', $className) === 1) {
+                    $found[] = self::clip($doc->openingComment($i));
                 }
             }
         }
         return array_slice($found, 0, 10);
+    }
+
+    private static function clip(string $element): string
+    {
+        return strlen($element) > 300 ? substr($element, 0, 300) . '…' : $element;
     }
 
     /**

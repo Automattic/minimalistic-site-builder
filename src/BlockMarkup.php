@@ -142,6 +142,13 @@ final class BlockMarkup
         return $this->nodes[$i]['children'];
     }
 
+    /** The block's raw opening comment as it appears in the source. */
+    public function openingComment(int $i): string
+    {
+        $n = $this->nodes[$i];
+        return substr($this->source, $n['offset'], $n['length']);
+    }
+
     /** Raw source between this block's delimiters (includes child blocks). */
     public function innerHtml(int $i): string
     {

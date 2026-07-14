@@ -112,6 +112,30 @@ test('custom-motion skips without an LLM call when the markup carries no tag', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('custom-motion acquires dynamic-block targets tagged only in comment attributes', function () {
+    [$project, $tmp] = cm_project('builder_cm_dyn_');
+    // wp:site-logo is dynamic: void comment, no saved HTML tag to scan.
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:site-logo {"width":120,"className":"custom-motion"} /--></div>' . "\n"
+        . '<!-- /wp:group -->'
+    );
+    $tagged = CustomMotionStep::taggedElements($project);
+    assert_eq(1, count($tagged));
+    assert_contains('wp:site-logo', $tagged[0]);
+    assert_contains('custom-motion', $tagged[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the header and footer prompts teach the custom-motion tag (sections must skip chrome)', function () {
+    foreach (['prompts/header.md', 'prompts/footer.md'] as $prompt) {
+        $text = file_get_contents(repo_path($prompt));
+        assert_contains('animation_request', $text, "{$prompt} reads the request");
+        assert_contains('custom-motion', $text, "{$prompt} places the tag");
+    }
+});
+
 test('custom-motion appends validated CSS wrapped in the reduced-motion media query', function () {
     [$project, $tmp] = cm_project('builder_cm_ok_');
     $project->writeText(
