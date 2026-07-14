@@ -58,7 +58,9 @@ final class PagePlanStep implements ConcurrentStep
         . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
 
     private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections.'
-        . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero),'
+        . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero —'
+        . ' never "full-bleed-cover" as the FIRST section; an image-led opening uses background "image" on a'
+        . ' compact archetype instead),'
         . " cover only THIS page's purpose (don't rebuild content that lives on other pages — see SITE PAGES),"
         . " and close with a next step that points onward. The homepage already teases the site's topics (the"
         . " spec's \"sections\" list): where this page's subject matter overlaps one of those teasers, plan the"
@@ -117,29 +119,31 @@ final class PagePlanStep implements ConcurrentStep
         $out = [];
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
+            $front = (bool) $page['front'];
             $plan = $results[$slug] ?? null;
             if (!is_array($plan)) {
                 throw new \RuntimeException("page-plan: missing model output for page '{$slug}'");
             }
 
             try {
-                $sections = self::normalize($plan['sections'] ?? null);
+                $sections = self::normalize($plan['sections'] ?? null, $front);
                 if ($sections === []) {
                     throw new \RuntimeException(
                         "page-plan: page '{$slug}' has no sections — return the full JSON object with a non-empty \"sections\" array"
                     );
                 }
             } catch (\RuntimeException $e) {
-                // The art-direction rules (adjacency, enums, card-grid cap) are
-                // creative constraints the model occasionally violates. Re-ask
-                // ONCE per page with the specific rejections; if the repair
-                // still breaks the variety rules, reassign the offending
-                // archetypes mechanically instead of aborting the build.
+                // The art-direction rules (adjacency, enums, card-grid cap,
+                // interior opening) are creative constraints the model
+                // occasionally violates. Re-ask ONCE per page with the
+                // specific rejections; if the repair still breaks the variety
+                // rules, reassign the offending archetypes mechanically
+                // instead of aborting the build.
                 $repaired = $this->repair($project, $slug, $plan, $e->getMessage());
                 try {
-                    $sections = self::normalize($repaired['sections'] ?? null);
+                    $sections = self::normalize($repaired['sections'] ?? null, $front);
                 } catch (\RuntimeException $stillInvalid) {
-                    $sections = self::normalize(self::repairVariety($repaired['sections'] ?? null));
+                    $sections = self::normalize(self::repairVariety($repaired['sections'] ?? null, $front), $front);
                 }
                 if ($sections === []) {
                     throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
@@ -279,14 +283,17 @@ final class PagePlanStep implements ConcurrentStep
      * default benignly so the sections + assemble steps can rely on the keys.
      * The art-direction fields (layout_archetype, background, handoff) are
      * strict: unknown values, a missing handoff, adjacent duplicate
-     * archetypes, or too many card grids are collected and thrown together in
-     * ONE message, so the single repair call sees every violation at once.
+     * archetypes, too many card grids, or an interior page opening at
+     * homepage-cover scale are collected and thrown together in ONE message,
+     * so the single repair call sees every violation at once.
      * Pure — unit-testable.
      *
      * @param mixed $raw
+     * @param bool $front whether the page is the front page (interior pages
+     *                    must not OPEN with a full-bleed cover)
      * @return array<int,array<string,mixed>>
      */
-    public static function normalize($raw): array
+    public static function normalize($raw, bool $front = true): array
     {
         if (!is_array($raw)) {
             return [];
@@ -340,6 +347,17 @@ final class PagePlanStep implements ConcurrentStep
             ];
         }
 
+        // An interior page that opens with a full-viewport cover is a second
+        // homepage, not an inner page (the prompt demands a COMPACT opening).
+        // The escape hatch for a deliberately image-led opening is explicit:
+        // background "image" on any compact archetype renders a full-bleed
+        // image band without homepage-hero scale.
+        if (!$front && ($out[0]['layout_archetype'] ?? '') === 'full-bleed-cover') {
+            $errors[] = "page-plan: the FIRST section '{$out[0]['slug']}' of this INTERIOR page uses "
+                . "layout_archetype 'full-bleed-cover' — interior pages open with a COMPACT hero, not a second "
+                . 'homepage hero; pick a compact archetype (use background "image" if the opening should be image-led)';
+        }
+
         // Report every violation at once so the single repair call can fix them all.
         $errors = array_merge($errors, self::varietyErrors($out));
         if ($errors !== []) {
@@ -350,18 +368,20 @@ final class PagePlanStep implements ConcurrentStep
 
     /**
      * Last-resort mechanical fix for the variety rules on a raw section list:
-     * excess equal-card-grids and the later section of each adjacent duplicate
-     * pair are reassigned to the first archetype that differs from both
-     * neighbors (never a card grid, so the cap holds and no new grids appear).
-     * The reassigned section's prose (content_notes, handoff) may then lag its
-     * archetype slightly — an accepted trade against aborting the whole build.
-     * Only touches VALID archetypes; enum and handoff errors still reject the
-     * plan in normalize(). Pure — unit-testable.
+     * an interior page's leading full-bleed cover, excess equal-card-grids,
+     * and the later section of each adjacent duplicate pair are reassigned to
+     * the first archetype that differs from both neighbors (never a card
+     * grid, so the cap holds and no new grids appear). The reassigned
+     * section's prose (content_notes, handoff) may then lag its archetype
+     * slightly — an accepted trade against aborting the whole build. Only
+     * touches VALID archetypes; enum and handoff errors still reject the plan
+     * in normalize(). Pure — unit-testable.
      *
      * @param mixed $raw
+     * @param bool $front whether the page is the front page
      * @return array<int,array<string,mixed>>
      */
-    public static function repairVariety($raw): array
+    public static function repairVariety($raw, bool $front = true): array
     {
         if (!is_array($raw)) {
             return [];
@@ -372,19 +392,27 @@ final class PagePlanStep implements ConcurrentStep
             $sections
         );
 
-        $pick = function (int $i) use (&$archetypes): string {
+        $pick = function (int $i, string ...$exclude) use (&$archetypes): string {
             foreach (self::ARCHETYPES as $candidate) {
                 if ($candidate !== 'equal-card-grid'
+                    && !in_array($candidate, $exclude, true)
                     && $candidate !== ($archetypes[$i - 1] ?? null)
                     && $candidate !== ($archetypes[$i + 1] ?? null)
                 ) {
                     return $candidate;
                 }
             }
-            return $archetypes[$i]; // unreachable: 6 non-grid archetypes vs 2 neighbors
+            return $archetypes[$i]; // unreachable: 6 non-grid archetypes vs 2 neighbors + 1 exclusion
         };
 
-        // Cap pass first: keep the first MAX card grids, reassign the rest.
+        // Interior-opening pass: normalize() rejects an interior page whose
+        // first section is a full-bleed cover, so demote it to a compact
+        // archetype before the variety passes run.
+        if (!$front && ($archetypes[0] ?? '') === 'full-bleed-cover') {
+            $archetypes[0] = $pick(0, 'full-bleed-cover');
+        }
+
+        // Cap pass: keep the first MAX card grids, reassign the rest.
         $grids = 0;
         foreach ($archetypes as $i => $archetype) {
             if ($archetype === 'equal-card-grid' && ++$grids > self::MAX_EQUAL_CARD_GRIDS) {

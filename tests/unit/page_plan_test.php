@@ -133,6 +133,46 @@ test('PagePlanStep::normalize does not report adjacency between invalid archetyp
     }
 });
 
+test('PagePlanStep::normalize rejects an interior page opening with a full-bleed cover', function () {
+    try {
+        PagePlanStep::normalize([
+            plan_section(), // full-bleed-cover first
+            plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        ], front: false);
+        assert_true(false, 'expected the interior plan to be rejected');
+    } catch (RuntimeException $e) {
+        assert_contains('INTERIOR page', $e->getMessage());
+        assert_contains('full-bleed-cover', $e->getMessage());
+        assert_contains('COMPACT', $e->getMessage());
+    }
+});
+
+test('PagePlanStep::normalize allows a full-bleed cover opening on the front page and deeper in interior pages', function () {
+    // Front page: cover opening is the point of a homepage hero.
+    assert_eq(2, count(PagePlanStep::normalize([
+        plan_section(),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ], front: true)));
+    // Interior page: a cover is only banned as the OPENING section.
+    assert_eq(2, count(PagePlanStep::normalize([
+        plan_section(['slug' => 'intro', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'gallery-band']),
+    ], front: false)));
+});
+
+test('PagePlanStep::repairVariety demotes an interior page\'s leading full-bleed cover', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ], front: false);
+
+    assert_true($sections[0]['layout_archetype'] !== 'full-bleed-cover', 'leading cover reassigned');
+    PagePlanStep::normalize($sections, front: false); // the result passes interior validation
+    // The same plan on the FRONT page is left alone.
+    $front = PagePlanStep::repairVariety([plan_section()], front: true);
+    assert_eq('full-bleed-cover', $front[0]['layout_archetype']);
+});
+
 test('PagePlanStep::normalize caps equal-card-grid at twice per page', function () {
     assert_throws(function () {
         PagePlanStep::normalize([
@@ -323,9 +363,10 @@ test('page-plan repairs only the invalid page with one follow-up call', function
         plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
         plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
-    // …and the repair call returns a fixed menu plan.
+    // …and the repair call returns a fixed menu plan (compact opening — menu
+    // is an interior page, so a full-bleed cover would be re-rejected).
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
+        plan_section(['slug' => 'a', 'layout_archetype' => 'offset-grid', 'background' => 'image']),
         plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -333,7 +374,7 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     (new PagePlanStep($llm, $renderer))->run($project);
 
     $plan = $project->readJson('pages.json');
-    assert_eq('full-bleed-cover', $plan['pages'][1]['sections'][0]['layout_archetype']);
+    assert_eq('offset-grid', $plan['pages'][1]['sections'][0]['layout_archetype']);
     // Batch (2 calls) + one repair; the repair prompt carries the rejected
     // plan and the specific error, labeled per page in the LLM logs.
     assert_eq(3, count($llm->calls));
@@ -374,6 +415,44 @@ test('page-plan falls back to a mechanical fix when the repair still breaks a va
     assert_eq(2, count($llm->calls), 'no second LLM repair — the fallback is mechanical');
     assert_eq('asymmetric-split', $sections[0]['layout_archetype'], 'first of the pair kept');
     assert_true($sections[1]['layout_archetype'] !== 'asymmetric-split', 'later section reassigned');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan enforces the compact interior opening through repair and mechanical fallback', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ppi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A tavern']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+        ['title' => 'Visit', 'slug' => 'visit', 'purpose' => 'Find us', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    // Home may open with a cover…
+    $llm->queueJson(['sections' => [plan_section()]]);
+    // …the interior page may not…
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'visit-hero']),
+        plan_section(['slug' => 'directions', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+    ]]);
+    // …and the repair insists on the cover, so the mechanical fallback demotes it.
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'visit-hero']),
+        plan_section(['slug' => 'directions', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+    ]]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new PagePlanStep($llm, $renderer))->run($project);
+
+    $plan = $project->readJson('pages.json');
+    assert_eq('full-bleed-cover', $plan['pages'][0]['sections'][0]['layout_archetype'], 'front page keeps its cover');
+    assert_true(
+        $plan['pages'][1]['sections'][0]['layout_archetype'] !== 'full-bleed-cover',
+        'interior opening demoted to a compact archetype'
+    );
+    assert_eq(3, count($llm->calls));
+    assert_contains('INTERIOR page', $llm->calls[2]['prompt']);
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
