@@ -18,6 +18,16 @@ final class FakeLlm implements Llm
     /** @var array<int,array{prompt:string,opts:array<mixed>}> */
     public array $calls = [];
 
+    /**
+     * Prompt substrings that fail permanently. complete() throws for a matching
+     * prompt; completeBatch() throws for the WHOLE batch when any request
+     * matches — mirroring the real clients, whose retryTextBatch aborts the
+     * batch on the first permanently-failed request.
+     *
+     * @var string[]
+     */
+    public array $failPromptSubstrings = [];
+
     public function queueText(string $text): void
     {
         $this->textQueue[] = $text;
@@ -32,6 +42,9 @@ final class FakeLlm implements Llm
     public function complete(string $prompt, array $opts = []): string
     {
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
+        if ($this->shouldFail($prompt)) {
+            throw new \RuntimeException('FakeLlm: permanent failure');
+        }
         if ($this->textQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued text response');
         }
@@ -52,8 +65,8 @@ final class FakeLlm implements Llm
      * given, keyed back as the input. Each request's meta (model/max_tokens/…)
      * is recorded as that call's opts so model-wiring assertions still work.
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
-     * @return array<string,array<mixed>>
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<array-key,array<mixed>>
      */
     public function completeJsonBatch(array $requests): array
     {
@@ -74,11 +87,18 @@ final class FakeLlm implements Llm
      * Pull one queued TEXT response per request, in order, keyed back as the
      * input. Records each call's meta as opts so model-wiring assertions work.
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
-     * @return array<string,string>
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @return array<array-key,string>
      */
     public function completeBatch(array $requests): array
     {
+        // All-or-nothing like the real clients: one failing request aborts
+        // the batch before any result is returned.
+        foreach ($requests as $key => $req) {
+            if ($this->shouldFail((string) $req['prompt'])) {
+                throw new \RuntimeException("FakeLlm: batch request '{$key}' failed");
+            }
+        }
         $out = [];
         foreach ($requests as $key => $req) {
             $opts = $req;
@@ -90,5 +110,15 @@ final class FakeLlm implements Llm
             $out[$key] = array_shift($this->textQueue);
         }
         return $out;
+    }
+
+    private function shouldFail(string $prompt): bool
+    {
+        foreach ($this->failPromptSubstrings as $needle) {
+            if (str_contains($prompt, $needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

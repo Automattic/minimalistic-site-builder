@@ -26,7 +26,9 @@ final class WpcomImageClient implements ImageClient
 
     /**
      * @param array<int,int> $retryDelays seconds to wait before retries 1..N of
-     *        a transient failure (its length is the max retry count)
+     *        a retryable failure — transient transport errors AND
+     *        safety-filtered prompts, which the non-deterministic filter can
+     *        pass on a later attempt (its length is the max retry count)
      */
     public function __construct(
         private string $apiToken,
@@ -142,8 +144,9 @@ final class WpcomImageClient implements ImageClient
      * blocks the others and a partial failure never aborts the rest.
      *
      * @param array<int,array{prompt:string,aspect_ratio?:string}> $specs
-     * @return array<int,array{ok:bool,bytes?:string,error?:string}> keyed by the
-     *         same index as $specs (order preserved)
+     * @return array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>
+     *         keyed by the same index as $specs (order preserved); `filtered`
+     *         marks a prompt the safety filter rejected on every attempt
      */
     public function generateBatch(array $specs): array
     {
@@ -167,15 +170,16 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * Drive a batch transport to completion, retrying ONLY the transient
-     * failures with backoff. Pure orchestration (the transport does the I/O, and
-     * sleep() paces the rounds) so the retry accounting is unit-testable with a
-     * fake transport and zero delays.
+     * Drive a batch transport to completion, retrying ONLY the retryable
+     * failures (transient transport errors and safety-filtered prompts) with
+     * backoff. Pure orchestration (the transport does the I/O, and sleep()
+     * paces the rounds) so the retry accounting is unit-testable with a fake
+     * transport and zero delays.
      *
      * @param array<int,array<string,mixed>> $bodies request bodies keyed by index
-     * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool}> $transport
+     * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,filtered?:bool}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
-     * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string}>,succeeded:int}
+     * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>,succeeded:int}
      */
     public static function retryBatch(array $bodies, callable $transport, array $delays): array
     {
@@ -195,7 +199,11 @@ final class WpcomImageClient implements ImageClient
                 } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
                     $retry[] = $i; // try this one again next round
                 } else {
-                    $results[$i] = ['ok' => false, 'error' => $outcome['error']];
+                    // Keep the filtered flag on the final failure so the caller
+                    // can tell a safety-filtered prompt (repairable by
+                    // rewriting it) from a transport failure.
+                    $results[$i] = ['ok' => false, 'error' => $outcome['error']]
+                        + (($outcome['filtered'] ?? false) ? ['filtered' => true] : []);
                 }
             }
 
@@ -203,7 +211,7 @@ final class WpcomImageClient implements ImageClient
             if ($pending !== []) {
                 $wait = $delays[$attempt];
                 $attempt++;
-                fwrite(STDERR, "    (transient image API error on " . count($pending)
+                fwrite(STDERR, "    (retryable image API failure on " . count($pending)
                     . " image(s); retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
             }
@@ -218,7 +226,7 @@ final class WpcomImageClient implements ImageClient
      * each transfer. Pure transport — no retry, no request counting.
      *
      * @param array<int,array<string,mixed>> $bodies request body keyed by index
-     * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool}>
+     * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,filtered?:bool}>
      */
     private function multiRequest(array $bodies): array
     {
@@ -251,6 +259,11 @@ final class WpcomImageClient implements ImageClient
 
             try {
                 $out[$i] = ['ok' => true, 'bytes' => self::interpret($raw, $errno, $error, (int) $httpStatus)];
+            } catch (ImageFilteredException $e) {
+                // The safety filter is non-deterministic: retry like a
+                // transient failure, but keep the filtered flag so the caller
+                // can repair the prompt once the retries run out.
+                $out[$i] = ['ok' => false, 'transient' => true, 'filtered' => true, 'error' => $e->getMessage()];
             } catch (TransientApiException $e) {
                 $out[$i] = ['ok' => false, 'transient' => true, 'error' => $e->getMessage()];
             } catch (\Throwable $e) {
@@ -292,7 +305,10 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * POST the request, retrying transient failures (429/5xx, stalls) with backoff.
+     * POST the request, retrying retryable failures — transient transport
+     * errors (429/5xx, stalls) and safety-filtered prompts — with backoff. A
+     * prompt still filtered after the retries rethrows ImageFilteredException
+     * so the caller can repair the prompt.
      *
      * @param array<string,mixed> $body
      */
@@ -303,8 +319,11 @@ final class WpcomImageClient implements ImageClient
         while (true) {
             try {
                 return $this->request($body);
-            } catch (TransientApiException $e) {
+            } catch (TransientApiException|ImageFilteredException $e) {
                 if ($attempt >= count($delays)) {
+                    if ($e instanceof ImageFilteredException) {
+                        throw $e; // callers tell a filtered prompt from a transport failure
+                    }
                     throw new \RuntimeException('Image proxy failed after retries: ' . $e->getMessage(), 0, $e);
                 }
                 $wait = $delays[$attempt];
@@ -363,10 +382,13 @@ final class WpcomImageClient implements ImageClient
 
     /**
      * Interpret a completed transfer: return decoded image bytes, or throw a
-     * TransientApiException (retryable: 429/5xx/stall) or RuntimeException
-     * (permanent). Pure — no I/O — so the single and batched paths share it.
+     * TransientApiException (retryable: 429/5xx/stall), an
+     * ImageFilteredException (safety-filtered prompt — retryable AND
+     * repairable), or a RuntimeException (permanent). Pure — no I/O — so the
+     * single and batched paths share it.
      *
-     * @throws TransientApiException on a retryable failure
+     * @throws TransientApiException on a retryable transport failure
+     * @throws ImageFilteredException when the safety filter rejected the prompt
      */
     private static function interpret(string $raw, int $errno, string $error, int $status): string
     {
@@ -386,6 +408,11 @@ final class WpcomImageClient implements ImageClient
         }
 
         $data = json_decode($raw, true);
+        $reason = self::filteredReason(is_array($data) ? $data : null);
+        if ($reason !== null) {
+            throw new ImageFilteredException('Image safety filter rejected the prompt: ' . $reason);
+        }
+
         $b64 = $data['predictions'][0]['bytesBase64Encoded'] ?? null;
         if (!is_string($b64) || $b64 === '') {
             throw new \RuntimeException('Image proxy response had no image data: ' . substr($raw, 0, 300));
@@ -396,5 +423,24 @@ final class WpcomImageClient implements ImageClient
             throw new \RuntimeException('Image proxy returned undecodable base64');
         }
         return $bytes;
+    }
+
+    /**
+     * The safety-filter reason in a decoded predict response, or null when the
+     * response was not filtered. Imagen signals a Responsible-AI rejection as
+     * an HTTP 200 whose prediction carries raiFilteredReason instead of image
+     * bytes. Public and pure so the classification is unit-testable.
+     *
+     * @param ?array<mixed> $data decoded JSON response body
+     */
+    public static function filteredReason(?array $data): ?string
+    {
+        foreach ((array) ($data['predictions'] ?? []) as $prediction) {
+            $reason = is_array($prediction) ? ($prediction['raiFilteredReason'] ?? null) : null;
+            if (is_string($reason) && trim($reason) !== '') {
+                return trim($reason);
+            }
+        }
+        return null;
     }
 }

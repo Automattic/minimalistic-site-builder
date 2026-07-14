@@ -140,7 +140,8 @@ try {
 // Image generation is opt-in: slow and networked, so it runs only on request
 // and only for a full build (skipped when --until stops the pipeline early).
 if ($withImages && $until === null) {
-    $step = new GenerateImagesStep(make_image_client());
+    // The Llm rewrites safety-filtered prompts (small tier) and regenerates.
+    $step = new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
     $start = microtime(true);
     $step->run($project);
     $secs = microtime(true) - $start;
