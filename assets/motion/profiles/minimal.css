@@ -1,9 +1,33 @@
-/* Motion profile: minimal — hover micro-interactions only; the motion-sanity
-   step strips every scroll/ambient class, so only the hover timing variables
-   matter here. */
+/* Motion profile: minimal — restrained hover micro-interactions only. The
+   sanity step strips every scroll and ambient class; the complete token set
+   keeps the profile contract explicit even though only hover values execute. */
 :root {
-    --motion-duration: 250ms;
-    --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-enter-duration: 900ms;
+    --motion-hero-duration: 1300ms;
+    --motion-hero-delay: 0ms;
+    --motion-hover-duration: 320ms;
+    --motion-ambient-duration: 16s;
+    --motion-enter-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-hero-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-hover-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-ambient-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-reveal-keyframe: motion-calm-reveal;
+    --motion-rise-keyframe: motion-calm-rise;
+    --motion-fade-keyframe: motion-calm-fade;
+    --motion-scale-keyframe: motion-calm-scale;
+    --motion-hero-keyframe: motion-calm-hero;
+    --motion-stagger-keyframe: motion-calm-rise;
+    --motion-drift-keyframe: motion-calm-drift;
+    --motion-ken-burns-keyframe: motion-calm-ken-burns;
+    --motion-gradient-keyframe: motion-calm-gradient;
     --motion-distance: 8px;
-    --motion-stagger: 40ms;
+    --motion-stagger: 140ms;
+    --motion-scale-from: 0.99;
+    --motion-hero-scale-from: 0.99;
+    --motion-ken-burns-scale: 1.03;
+    --motion-ambient-distance: 6px;
+    --motion-hover-lift: -2px;
+    --motion-hover-scale: 1.02;
+    --motion-hover-brightness: 0.96;
+    --motion-hover-shadow-opacity: 0.14;
 }

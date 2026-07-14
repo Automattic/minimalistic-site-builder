@@ -1,30 +1,59 @@
 /*
  * Motion kit — hand-written once here, shipped verbatim into every generated
- * theme (never LLM-generated). All effects are driven by four custom
- * properties (--motion-duration, --motion-ease, --motion-distance,
- * --motion-stagger); a profile stylesheet (assets/motion/profiles/*.css)
- * overrides them per site, and the page-styles step may tune them further
- * within validated bounds via a :root block in style.css.
+ * theme (never LLM-generated). All effects are driven by custom properties
+ * owned by a profile stylesheet
+ * (assets/motion/profiles/*.css). Entrances, heroes, hovers, and ambient
+ * effects deliberately have independent clocks: coupling all four to one
+ * duration made quick profiles frantic and slow profiles feel deceptively
+ * fast. Generated CSS never overrides these values, so the committed profile
+ * remains the authority for the site's motion character.
  *
  * Accessibility / progressive-enhancement contract:
  * - EVERYTHING lives inside @media screen and (prefers-reduced-motion:
  *   no-preference): reduced-motion users get a fully static, fully visible
- *   page, and so does PRINT — without the screen guard the html.js reveal
+ *   page, and so does PRINT — without the screen guard the motion-js reveal
  *   rules would apply to print media too, so printing before scrolling
  *   would emit blank (opacity: 0) sections.
- * - Scroll-reveal targets are hidden ONLY under `html.js` — a class that
- *   motion.js itself sets. If the script never loads or IntersectionObserver
- *   is missing, nothing is ever hidden. This preserves the intent of the
- *   build's "never opacity:0 on generated content" validator rule.
+ * - Scroll-reveal targets are hidden ONLY under the driver-owned
+ *   `html.motion-js` scope. After DOM setup, only explicitly registered
+ *   `.motion-target` elements stay hidden; dynamically inserted blocks fail
+ *   open. If the script never loads or observer setup fails, nothing remains
+ *   hidden. This preserves the build's progressive-enhancement contract.
+ * - A focus escape persistently skips the owning entrance, so keyboard
+ *   navigation can never land on content that hides again on focus-out.
  * - hero-entrance and the ambient effects are pure CSS (no JS dependency)
  *   and never end in a hidden state.
  */
 
 :root {
-    --motion-duration: 600ms;
-    --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
-    --motion-distance: 24px;
-    --motion-stagger: 90ms;
+    --motion-enter-duration: 900ms;
+    --motion-hero-duration: 1300ms;
+    --motion-hero-delay: 60ms;
+    --motion-hover-duration: 360ms;
+    --motion-ambient-duration: 16s;
+    --motion-enter-ease: cubic-bezier(0.37, 0, 0.63, 1);
+    --motion-hero-ease: cubic-bezier(0.37, 0, 0.63, 1);
+    --motion-hover-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+    --motion-ambient-ease: cubic-bezier(0.37, 0, 0.63, 1);
+    --motion-reveal-keyframe: motion-calm-reveal;
+    --motion-rise-keyframe: motion-calm-rise;
+    --motion-fade-keyframe: motion-calm-fade;
+    --motion-scale-keyframe: motion-calm-scale;
+    --motion-hero-keyframe: motion-calm-hero;
+    --motion-stagger-keyframe: motion-calm-rise;
+    --motion-drift-keyframe: motion-calm-drift;
+    --motion-ken-burns-keyframe: motion-calm-ken-burns;
+    --motion-gradient-keyframe: motion-calm-gradient;
+    --motion-distance: 20px;
+    --motion-stagger: 160ms;
+    --motion-scale-from: 0.97;
+    --motion-hero-scale-from: 0.98;
+    --motion-ken-burns-scale: 1.06;
+    --motion-ambient-distance: 12px;
+    --motion-hover-lift: -4px;
+    --motion-hover-scale: 1.035;
+    --motion-hover-brightness: 0.9;
+    --motion-hover-shadow-opacity: 0.22;
 }
 
 @media screen and (prefers-reduced-motion: no-preference) {
@@ -35,99 +64,300 @@
        plain styles, so its transition/transform stay free for hover effects
        (hover-lift on a revealed card keeps its own timing and travel). */
 
-    html.js .reveal,
-    html.js .reveal-up,
-    html.js .reveal-fade,
-    html.js .reveal-scale,
-    html.js .stagger-children > * {
+    html.motion-js:not(.motion-ready) .reveal,
+    html.motion-js:not(.motion-ready) .reveal-up,
+    html.motion-js:not(.motion-ready) .reveal-fade,
+    html.motion-js:not(.motion-ready) .reveal-scale,
+    html.motion-js:not(.motion-ready) .stagger-children > *,
+    html.motion-js.motion-ready .reveal.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-up.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-fade.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .reveal-scale.motion-target:not(.is-visible),
+    html.motion-js.motion-ready .stagger-children > *.motion-target:not(.is-visible) {
         opacity: 0;
     }
 
-    html.js .reveal.is-visible {
+    html.motion-js .reveal.motion-target.is-visible {
         opacity: 1;
-        animation: motion-reveal var(--motion-duration) var(--motion-ease) backwards;
+        animation-name: var(--motion-reveal-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
     }
-    html.js .reveal-up.is-visible {
+    html.motion-js .reveal-up.motion-target.is-visible {
         opacity: 1;
-        animation: motion-reveal-up var(--motion-duration) var(--motion-ease) backwards;
+        animation-name: var(--motion-rise-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
     }
-    html.js .reveal-fade.is-visible {
+    html.motion-js .reveal-fade.motion-target.is-visible {
         opacity: 1;
-        animation: motion-reveal-fade var(--motion-duration) var(--motion-ease) backwards;
+        animation-name: var(--motion-fade-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
     }
-    html.js .reveal-scale.is-visible {
+    html.motion-js .reveal-scale.motion-target.is-visible {
         opacity: 1;
-        animation: motion-reveal-scale var(--motion-duration) var(--motion-ease) backwards;
+        animation-name: var(--motion-scale-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
     }
 
-    /* Staggered card/column reveals: the CONTAINER carries the class and is
-       observed; only its direct children hide and cascade in (the backwards
-       fill keeps a delayed child at the keyframe start until its turn). */
-    html.js .stagger-children.is-visible > * {
+    /* Staggered card/column reveals: the CONTAINER carries the authored class,
+       while motion.js observes each direct child. Cards that share a row enter
+       together and use these delays as a cascade; cards stacked on narrow
+       screens wait until their own viewport entry instead of finishing
+       offscreen. The backwards fill holds a delayed child at its keyframe
+       start until its turn. */
+    html.motion-js .stagger-children > *.motion-target.is-visible {
         opacity: 1;
-        animation: motion-reveal-up var(--motion-duration) var(--motion-ease) backwards;
+        animation-name: var(--motion-stagger-keyframe);
+        animation-duration: var(--motion-enter-duration);
+        animation-timing-function: var(--motion-enter-ease);
+        animation-fill-mode: backwards;
+        animation-delay: calc(var(--motion-stagger) * var(--motion-stagger-order, 0));
     }
-    html.js .stagger-children.is-visible > *:nth-child(2) { animation-delay: var(--motion-stagger); }
-    html.js .stagger-children.is-visible > *:nth-child(3) { animation-delay: calc(var(--motion-stagger) * 2); }
-    html.js .stagger-children.is-visible > *:nth-child(4) { animation-delay: calc(var(--motion-stagger) * 3); }
-    html.js .stagger-children.is-visible > *:nth-child(5) { animation-delay: calc(var(--motion-stagger) * 4); }
-    html.js .stagger-children.is-visible > *:nth-child(6) { animation-delay: calc(var(--motion-stagger) * 5); }
-    html.js .stagger-children.is-visible > *:nth-child(7) { animation-delay: calc(var(--motion-stagger) * 6); }
-    html.js .stagger-children.is-visible > *:nth-child(8) { animation-delay: calc(var(--motion-stagger) * 7); }
-    html.js .stagger-children.is-visible > *:nth-child(n + 9) { animation-delay: calc(var(--motion-stagger) * 8); }
 
-    @keyframes motion-reveal {
-        from { opacity: 0; transform: translateY(calc(var(--motion-distance) * 0.5)); }
+    /* Calm: soft fades and measured settling. */
+    @keyframes motion-calm-reveal {
+        from {
+            opacity: 0;
+            transform: translateY(calc(var(--motion-distance) * 0.5));
+        }
+        40% { opacity: 1; }
         to { opacity: 1; transform: none; }
     }
-    @keyframes motion-reveal-up {
-        from { opacity: 0; transform: translateY(var(--motion-distance)); }
+    @keyframes motion-calm-rise {
+        from {
+            opacity: 0;
+            transform: translateY(var(--motion-distance));
+        }
+        40% { opacity: 1; }
         to { opacity: 1; transform: none; }
     }
-    @keyframes motion-reveal-fade {
+    @keyframes motion-calm-fade {
         from { opacity: 0; }
+        40% { opacity: 1; }
         to { opacity: 1; }
     }
-    @keyframes motion-reveal-scale {
-        from { opacity: 0; transform: scale(0.94); }
+    @keyframes motion-calm-scale {
+        from {
+            opacity: 0;
+            transform: scale(var(--motion-scale-from));
+        }
+        40% { opacity: 1; }
+        to { opacity: 1; transform: none; }
+    }
+
+    /* Energetic: diagonal arrivals with a brief spring past the rest point. */
+    @keyframes motion-energetic-reveal {
+        from {
+            opacity: 0;
+            transform: translate3d(
+                calc(var(--motion-distance) * -0.6),
+                calc(var(--motion-distance) * 0.35),
+                0
+            ) scale(var(--motion-scale-from));
+        }
+        40% { opacity: 1; }
+        68% {
+            opacity: 1;
+            transform: translate3d(
+                calc(var(--motion-distance) * 0.08),
+                calc(var(--motion-distance) * -0.08),
+                0
+            ) scale(1.015);
+        }
+        to { opacity: 1; transform: none; }
+    }
+    @keyframes motion-energetic-rise {
+        from {
+            opacity: 0;
+            transform: translateY(var(--motion-distance)) scale(var(--motion-scale-from));
+        }
+        40% { opacity: 1; }
+        68% {
+            opacity: 1;
+            transform: translateY(calc(var(--motion-distance) * -0.12)) scale(1.012);
+        }
+        to { opacity: 1; transform: none; }
+    }
+    @keyframes motion-energetic-fade {
+        from { opacity: 0; }
+        40% { opacity: 1; }
+        to { opacity: 1; }
+    }
+    @keyframes motion-energetic-scale {
+        from { opacity: 0; transform: scale(var(--motion-scale-from)); }
+        40% { opacity: 1; }
+        68% { opacity: 1; transform: scale(1.025); }
+        to { opacity: 1; transform: none; }
+    }
+
+    /* Dramatic: directional masks and focus pulls, not a slower calm rise. */
+    @keyframes motion-dramatic-reveal {
+        from {
+            opacity: 0;
+            clip-path: inset(0 100% 0 0);
+            transform: translateX(calc(var(--motion-distance) * -0.75));
+        }
+        40% { opacity: 1; clip-path: inset(0); }
+        to { opacity: 1; clip-path: inset(0); transform: none; }
+    }
+    @keyframes motion-dramatic-rise {
+        from {
+            opacity: 0;
+            clip-path: inset(100% 0 0 0);
+            transform: translateY(var(--motion-distance));
+        }
+        40% { opacity: 1; clip-path: inset(0); }
+        to { opacity: 1; clip-path: inset(0); transform: none; }
+    }
+    @keyframes motion-dramatic-fade {
+        from { opacity: 0; }
+        40% { opacity: 1; }
+        to { opacity: 1; }
+    }
+    @keyframes motion-dramatic-scale {
+        from {
+            opacity: 0;
+            transform: scale(var(--motion-scale-from));
+        }
+        40% { opacity: 1; }
         to { opacity: 1; transform: none; }
     }
 
     /* ── Page-load entrance (pure CSS — fires on first paint, no JS) ───── */
 
     .hero-entrance {
-        animation: motion-hero-entrance calc(var(--motion-duration) * 1.5) var(--motion-ease) both;
+        animation-name: var(--motion-hero-keyframe);
+        animation-duration: var(--motion-hero-duration);
+        animation-timing-function: var(--motion-hero-ease);
+        animation-delay: var(--motion-hero-delay);
+        /* Preserve the authored resting transform/filter after the entrance. */
+        animation-fill-mode: backwards;
     }
-    @keyframes motion-hero-entrance {
+    @keyframes motion-calm-hero {
         from {
             opacity: 0;
-            transform: translateY(calc(var(--motion-distance) * 0.5));
+            filter: blur(3px);
+            transform: translateY(calc(var(--motion-distance) * 0.5)) scale(var(--motion-hero-scale-from));
         }
-        to {
+        40% { opacity: 1; filter: blur(0); }
+        to { opacity: 1; filter: blur(0); transform: none; }
+    }
+    @keyframes motion-energetic-hero {
+        from {
+            opacity: 0;
+            transform: translateY(var(--motion-distance)) scale(var(--motion-hero-scale-from));
+        }
+        40% { opacity: 1; }
+        68% {
             opacity: 1;
-            transform: none;
+            transform: translateY(calc(var(--motion-distance) * -0.1)) scale(1.015);
         }
+        to { opacity: 1; transform: none; }
+    }
+    @keyframes motion-dramatic-hero {
+        from {
+            opacity: 0;
+            clip-path: inset(0 100% 0 0);
+            filter: blur(10px);
+            transform: translateX(calc(var(--motion-distance) * -1)) scale(var(--motion-hero-scale-from));
+        }
+        40% { opacity: 1; clip-path: inset(0); filter: blur(0); }
+        to { opacity: 1; clip-path: inset(0); filter: blur(0); transform: none; }
+    }
+
+    /* Initial/restored content and a keyboard-focused entrance are marked
+       persistently by motion.js. Removing the animation (rather than forcing
+       transform:none forever) leaves authored hover transforms available. */
+    .reveal.motion-skip,
+    .reveal-up.motion-skip,
+    .reveal-fade.motion-skip,
+    .reveal-scale.motion-skip,
+    .stagger-children > *.motion-skip,
+    .hero-entrance.motion-skip {
+        opacity: 1 !important;
+        animation: none !important;
+    }
+
+    /* Immediate CSS bridge for the focus event; motion.js then adds the
+       persistent motion-skip state before focus can leave. */
+    html.motion-js .reveal:focus-within,
+    html.motion-js .reveal-up:focus-within,
+    html.motion-js .reveal-fade:focus-within,
+    html.motion-js .reveal-scale:focus-within,
+    html.motion-js .stagger-children > *:focus-within,
+    .hero-entrance:focus-within {
+        opacity: 1 !important;
+        transform: none !important;
+        filter: none !important;
+        clip-path: none !important;
     }
 
     /* ── Ambient effects (pure CSS, never hide anything) ──────────────── */
 
     /* Slow vertical drift for a decorative element or image. */
     .ambient-drift {
-        animation: motion-ambient-drift calc(var(--motion-duration) * 14) ease-in-out infinite alternate;
+        animation-name: var(--motion-drift-keyframe);
+        animation-duration: var(--motion-ambient-duration);
+        animation-timing-function: var(--motion-ambient-ease);
+        animation-iteration-count: infinite;
+        animation-direction: alternate;
     }
-    @keyframes motion-ambient-drift {
+    @keyframes motion-calm-drift {
         from { transform: translate3d(0, 0, 0); }
-        to { transform: translate3d(0, calc(var(--motion-distance) * -0.75), 0); }
+        to { transform: translate3d(0, calc(var(--motion-ambient-distance) * -1), 0); }
+    }
+    @keyframes motion-energetic-drift {
+        from { transform: translate3d(0, 0, 0) rotate(0); }
+        45% {
+            transform: translate3d(0, calc(var(--motion-ambient-distance) * -1), 0) rotate(-1.25deg);
+        }
+        to {
+            transform: translate3d(
+                calc(var(--motion-ambient-distance) * 0.6),
+                calc(var(--motion-ambient-distance) * -0.2),
+                0
+            ) rotate(1deg);
+        }
+    }
+    @keyframes motion-dramatic-drift {
+        from {
+            transform: translate3d(calc(var(--motion-ambient-distance) * -0.5), 0, 0);
+        }
+        to {
+            transform: translate3d(
+                calc(var(--motion-ambient-distance) * 0.5),
+                calc(var(--motion-ambient-distance) * -0.25),
+                0
+            );
+        }
     }
 
     /* One very slow zoom of the image inside a cover/figure, then rest. */
     .ken-burns { overflow: hidden; }
     .ken-burns img {
-        animation: motion-ken-burns calc(var(--motion-duration) * 30) var(--motion-ease) both;
+        animation-name: var(--motion-ken-burns-keyframe);
+        animation-duration: calc(var(--motion-ambient-duration) * 2.5);
+        animation-timing-function: var(--motion-ambient-ease);
+        animation-fill-mode: both;
     }
-    @keyframes motion-ken-burns {
+    @keyframes motion-calm-ken-burns {
         from { transform: scale(1); }
-        to { transform: scale(1.08); }
+        to { transform: scale(var(--motion-ken-burns-scale)); }
+    }
+    @keyframes motion-energetic-ken-burns {
+        from { transform: translate3d(-1%, 0, 0) scale(1.02); }
+        to { transform: translate3d(1%, 0, 0) scale(var(--motion-ken-burns-scale)); }
+    }
+    @keyframes motion-dramatic-ken-burns {
+        from { transform: translate3d(-1.5%, 0, 0) scale(var(--motion-ken-burns-scale)); }
+        to { transform: translate3d(0, 0, 0) scale(1); }
     }
 
     /* Slow-breathing gradient background. The doubled class selector outranks
@@ -135,10 +365,52 @@
        would otherwise reset background-size) regardless of stylesheet order. */
     .gradient-shift.gradient-shift {
         background-size: 180% 180%;
-        animation: motion-gradient-shift calc(var(--motion-duration) * 20) ease-in-out infinite alternate;
+        animation-name: var(--motion-gradient-keyframe);
+        animation-duration: calc(var(--motion-ambient-duration) * 1.5);
+        animation-timing-function: var(--motion-ambient-ease);
+        animation-iteration-count: infinite;
+        animation-direction: alternate;
     }
-    @keyframes motion-gradient-shift {
+    @keyframes motion-calm-gradient {
         from { background-position: 0% 50%; }
         to { background-position: 100% 50%; }
+    }
+    @keyframes motion-energetic-gradient {
+        from { background-position: 0% 0%; }
+        to { background-position: 100% 100%; }
+    }
+    @keyframes motion-dramatic-gradient {
+        from { background-position: 100% 50%; }
+        to { background-position: 0% 50%; }
+    }
+
+    /* ── Hover micro-interactions ──────────────────────────────────
+       These live in the deterministic kit rather than generated page CSS.
+       That keeps profile timing and reduced-motion behavior reliable even
+       when a site needs no other layout utilities or generated CSS is
+       rejected. Profile variables still give each site a distinct feel. */
+
+    .hover-lift {
+        transition:
+            transform var(--motion-hover-duration) var(--motion-hover-ease),
+            box-shadow var(--motion-hover-duration) var(--motion-hover-ease);
+    }
+    .hover-lift:hover {
+        transform: translateY(var(--motion-hover-lift));
+        box-shadow: 0 16px 40px rgb(0 0 0 / var(--motion-hover-shadow-opacity));
+    }
+
+    .hover-reveal {
+        position: relative;
+        overflow: hidden;
+    }
+    .hover-reveal img {
+        transition:
+            transform var(--motion-hover-duration) var(--motion-hover-ease),
+            filter var(--motion-hover-duration) var(--motion-hover-ease);
+    }
+    .hover-reveal:hover img {
+        transform: scale(var(--motion-hover-scale));
+        filter: brightness(var(--motion-hover-brightness));
     }
 }

@@ -26,9 +26,11 @@ use Automattic\SiteBuild\Step;
  *    JS-owned `is-visible` state class) — they have no CSS, or fight the kit;
  *  - classes the committed motion profile disallows (`minimal` keeps hover
  *    effects only; `none` strips every motion class);
- *  - ambient classes and `hero-entrance` beyond the FIRST one on the page
- *    (sections are visited in page order, so the earliest — usually the
- *    hero — keeps its effect);
+ *  - `hero-entrance` outside the first planned section or beyond the FIRST
+ *    one on the page;
+ *  - scroll/page-load entrances beyond two in a section, so a long repeated
+ *    list cannot animate every row with the same recipe;
+ *  - same-block ambient/hover pairs whose animations compete for transform;
  *  - extra kit classes beyond the first on a single block, and
  *    `stagger-children` on containers without at least two child blocks.
  *
@@ -60,10 +62,12 @@ final class MotionSanityStep implements Step
         $profile = DesignDirectionStep::motionProfileFor($project);
         $budget = self::newBudget();
         $report = [];
+        $files = self::filesInPageOrder($project);
+        $heroFile = self::firstSectionFile($project, $files);
 
-        foreach (self::filesInPageOrder($project) as $rel) {
+        foreach ($files as $rel) {
             $markup = $project->readText('theme/' . $rel);
-            $result = self::sanitize($markup, $profile, $budget);
+            $result = self::sanitize($markup, $profile, $budget, $rel === $heroFile);
             if ($result['markup'] !== $markup) {
                 $project->writeText('theme/' . $rel, $result['markup']);
             }
@@ -126,6 +130,37 @@ final class MotionSanityStep implements Step
     }
 
     /**
+     * The only file allowed to carry hero-entrance. Prefer the committed plan
+     * because a hero section's slug need not literally be "hero"; fall back
+     * to the conventional filename only for plan-less callers.
+     *
+     * @param string[] $ordered
+     */
+    private static function firstSectionFile(Project $project, array $ordered): ?string
+    {
+        if ($project->exists('sections.json')) {
+            $sections = $project->readJson('sections.json')['sections'] ?? [];
+            if (is_array($sections) && isset($sections[0]) && is_array($sections[0])) {
+                $slug = trim((string) ($sections[0]['slug'] ?? ''));
+                $planned = 'parts/' . SectionsStep::SECTION_PREFIX . $slug . '.html';
+                return $slug !== '' && in_array($planned, $ordered, true) ? $planned : null;
+            }
+            return null;
+        }
+
+        $conventional = 'parts/' . SectionsStep::SECTION_PREFIX . 'hero.html';
+        if (in_array($conventional, $ordered, true)) {
+            return $conventional;
+        }
+        foreach ($ordered as $rel) {
+            if (str_starts_with($rel, 'parts/' . SectionsStep::SECTION_PREFIX)) {
+                return $rel;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Strip over-budget motion classes from one document. Removal-only: the
      * kept class list is always a subset of the authored one. $budget carries
      * the page-level counters across files. Pure — unit-testable.
@@ -133,11 +168,17 @@ final class MotionSanityStep implements Step
      * @param array{ambient:int, hero:int} $budget
      * @return array{markup:string, notes:string[]}
      */
-    public static function sanitize(string $markup, string $profile, array &$budget): array
+    public static function sanitize(
+        string $markup,
+        string $profile,
+        array &$budget,
+        bool $heroAllowed = true,
+    ): array
     {
         $doc = BlockMarkup::parse($markup);
         $allowed = Motion::allowedClasses($profile);
         $notes = [];
+        $sectionEntrances = 0;
 
         foreach ($doc->indices() as $i) {
             $attrs = $doc->attrs($i) ?? [];
@@ -161,34 +202,77 @@ final class MotionSanityStep implements Step
 
             // A block tagged for the custom-motion step is the user's ONE
             // explicit animation request; the kit's higher-specificity rules
-            // (html.js .reveal-*.is-visible) would override the generated
+            // The static motion selector (html.motion-js
+            // .reveal-*.motion-target.is-visible) would override the generated
             // .custom-motion animation, so preset motion is evicted here.
             $customTarget = in_array(CustomMotionStep::CLASS_NAME, $jsonTokens, true)
                 || in_array(CustomMotionStep::CLASS_NAME, $htmlTokens, true);
 
-            $kept = [];
             $droppedJson = [];
             $droppedHtml = [];
             $kitOnBlock = 0;
+            $keptKitClass = null;
+
+            // Evaluate transform-owning entrance/ambient classes before hover
+            // regardless of authored token order. That lets the hover verdict
+            // reject a conflict only when the other class actually survived
+            // profile/page/block budgets; if it was stripped, hover still works.
+            $entries = [];
+            $seenTokens = [];
             foreach ($jsonTokens as $token) {
-                $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i, $customTarget);
-                if ($verdict === null) {
-                    $kept[] = $token;
+                // Duplicate class tokens are behaviorally identical. Judge
+                // the token once so a redundant second copy cannot cause the
+                // valid first copy to be marked as an over-budget drop.
+                if (isset($seenTokens[$token])) {
                     continue;
                 }
-                $droppedJson[] = $token;
-                $notes[] = "{$doc->name($i)}: dropped '{$token}' ({$verdict})";
+                $seenTokens[$token] = true;
+                $entries[] = ['source' => 'json', 'token' => $token];
             }
             foreach ($htmlOnly as $token) {
-                $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i, $customTarget);
+                if (isset($seenTokens[$token])) {
+                    continue;
+                }
+                $seenTokens[$token] = true;
+                $entries[] = ['source' => 'html', 'token' => $token];
+            }
+            $nonHover = array_values(array_filter(
+                $entries,
+                static fn (array $entry): bool => !in_array($entry['token'], Motion::HOVER_CLASSES, true)
+            ));
+            $hover = array_values(array_filter(
+                $entries,
+                static fn (array $entry): bool => in_array($entry['token'], Motion::HOVER_CLASSES, true)
+            ));
+
+            foreach (array_merge($nonHover, $hover) as $entry) {
+                $token = $entry['token'];
+                $verdict = self::verdict(
+                    $token,
+                    $allowed,
+                    $kitOnBlock,
+                    $keptKitClass,
+                    $sectionEntrances,
+                    $budget,
+                    $doc,
+                    $i,
+                    $heroAllowed,
+                    $customTarget
+                );
                 if ($verdict === null) {
                     continue;
                 }
-                $droppedHtml[] = $token;
-                $notes[] = "{$doc->name($i)}: dropped '{$token}' (saved HTML only; {$verdict})";
+                if ($entry['source'] === 'json') {
+                    $droppedJson[] = $token;
+                    $notes[] = "{$doc->name($i)}: dropped '{$token}' ({$verdict})";
+                } else {
+                    $droppedHtml[] = $token;
+                    $notes[] = "{$doc->name($i)}: dropped '{$token}' (saved HTML only; {$verdict})";
+                }
             }
 
             if ($droppedJson !== []) {
+                $kept = array_values(array_diff($jsonTokens, $droppedJson));
                 if ($kept === []) {
                     unset($attrs['className']);
                 } else {
@@ -240,9 +324,12 @@ final class MotionSanityStep implements Step
         string $token,
         array $allowed,
         int &$kitOnBlock,
+        ?string &$keptKitClass,
+        int &$sectionEntrances,
         array &$budget,
         BlockMarkup $doc,
         int $i,
+        bool $heroAllowed = true,
         bool $customTarget = false,
     ): ?string {
         if (!Motion::looksLikeMotionClass($token)) {
@@ -264,6 +351,15 @@ final class MotionSanityStep implements Step
             return "disallowed by the motion profile";
         }
         if ($isHover) {
+            $conflict = match ($token) {
+                'hover-lift'   => 'ambient-drift',
+                'hover-reveal' => 'ken-burns',
+                default        => null,
+            };
+            if ($conflict !== null
+                && $keptKitClass === $conflict) {
+                return "incompatible with '{$conflict}' on the same block — both animate the same transform";
+            }
             return null; // hover effects don't count toward any budget
         }
 
@@ -273,19 +369,36 @@ final class MotionSanityStep implements Step
         if ($token === 'stagger-children' && count($doc->children($i)) < 2) {
             return 'stagger-children needs a container with at least two children';
         }
-        if (in_array($token, Motion::AMBIENT_CLASSES, true)) {
-            if ($budget['ambient'] >= 1) {
-                return 'ambient budget: one signature effect per page';
-            }
+        $isEntrance = in_array($token, Motion::SCROLL_CLASSES, true);
+        $isAmbient = in_array($token, Motion::AMBIENT_CLASSES, true);
+        $isHero = $token === 'hero-entrance';
+
+        // Check every budget before consuming any of them: a class rejected
+        // by a page-level limit must not steal this section's entrance slot.
+        if ($isHero && !$heroAllowed) {
+            return 'hero-entrance is allowed only in the first section';
+        }
+        if ($isEntrance && $sectionEntrances >= Motion::MAX_ENTRANCES_PER_SECTION) {
+            return 'section entrance budget: at most two entrances per section';
+        }
+        if ($isAmbient && $budget['ambient'] >= 1) {
+            return 'ambient budget: one signature effect per page';
+        }
+        if ($isHero && $budget['hero'] >= 1) {
+            return 'hero-entrance budget: once per page';
+        }
+
+        if ($isEntrance) {
+            $sectionEntrances++;
+        }
+        if ($isAmbient) {
             $budget['ambient']++;
         }
-        if ($token === 'hero-entrance') {
-            if ($budget['hero'] >= 1) {
-                return 'hero-entrance budget: once per page';
-            }
+        if ($isHero) {
             $budget['hero']++;
         }
 
+        $keptKitClass = $token;
         $kitOnBlock++;
         return null;
     }

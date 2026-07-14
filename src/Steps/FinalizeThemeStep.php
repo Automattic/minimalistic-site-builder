@@ -23,10 +23,10 @@ use Automattic\SiteBuild\Step;
  *           the editor previews match the front end.
  *         - when the motion profile isn't `none`, enqueues the static motion
  *           kit: motion.css, the ONE committed profile stylesheet, and
- *           motion.js (in <head>, so its html.js scope exists before first
- *           paint — no flash of content that then hides to reveal). style.css
- *           depends on the profile so the page-styles :root --motion-* tuning
- *           it may carry wins the cascade over the profile defaults.
+ *           motion.js (in <head>, so its motion-js scope exists before first
+ *           paint — no flash of content that then hides to reveal). The
+ *           hand-authored profile remains authoritative; generated style.css
+ *           cannot replace its choreography or timings.
  *         - prunes the motion kit to what the theme ships: unused profile
  *           files always; the whole kit when the profile is `none`.
  *         - require_once's the generated fonts.php (written by the fonts-php
@@ -99,9 +99,8 @@ final class FinalizeThemeStep implements Step
             $styleDeps = "array('{$slug}-motion-profile')";
             $motionEnqueues = <<<PHP
 
-                // Static motion kit + the committed '{$motion}' profile. style.css depends
-                // on the profile so its :root --motion-* tuning (page-styles) wins the
-                // cascade. motion.js goes in <head>: it sets the html.js scope that
+                // Static motion kit + the committed '{$motion}' profile. motion.js goes
+                // in <head>: it sets the motion-js scope that
                 // motion.css hides reveal targets under, and doing that before first
                 // paint avoids a visible flash; if it never runs, nothing is hidden.
                 wp_enqueue_style('{$slug}-motion', get_theme_file_uri('assets/motion/motion.css'), array(), \$ver);

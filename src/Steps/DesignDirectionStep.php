@@ -305,9 +305,9 @@ final class DesignDirectionStep implements Step
                 'none'    => 'the site is completely static; use NO motion classes',
                 'minimal' => 'hover micro-interactions only; `hover-lift`/`hover-reveal` are the ONLY motion classes allowed',
                 default   => [
-                    'calm'      => 'slow, gentle scroll reveals',
-                    'energetic' => 'quick, springy entrances',
-                    'dramatic'  => 'long, cinematic reveals',
+                    'calm'      => 'soft fades and gentle settling',
+                    'energetic' => 'quick diagonal arrivals with spring overshoot',
+                    'dramatic'  => 'long directional masks and a cinematic hero focus pull',
                 ][$motion] . ' — place motion classes sparingly, per their budget rules',
             };
             $note = trim((string) ($direction['motion_note'] ?? ''));

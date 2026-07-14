@@ -45,9 +45,9 @@ test('finalize-theme enqueues the motion kit and prunes to the committed profile
     $php = $project->readText('theme/functions.php');
     assert_contains("wp_enqueue_style('forno-vero-motion', get_theme_file_uri('assets/motion/motion.css')", $php);
     assert_contains("assets/motion/profiles/dramatic.css", $php);
-    // style.css depends on the profile so its :root --motion-* tuning wins.
+    // style.css loads after the complete static kit/profile dependency chain.
     assert_contains("wp_enqueue_style('forno-vero-style', get_stylesheet_uri(), array('forno-vero-motion-profile')", $php);
-    // The script rides in <head> (last arg false) so html.js exists pre-paint.
+    // The script rides in <head> (last arg false) so motion-js exists pre-paint.
     assert_contains("wp_enqueue_script('forno-vero-motion', get_theme_file_uri('assets/motion/motion.js'), array(), \$ver, false)", $php);
 
     // Unused profiles are pruned; the committed one ships.

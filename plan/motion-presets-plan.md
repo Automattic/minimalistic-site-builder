@@ -11,10 +11,10 @@ explicitly animation-specific user requests.
 
 ## Why
 
-**The problem.** Generated sites are static. The only motion today is the
-`hover-lift` / `hover-reveal` transitions the page-styles step emits, and the
-generated-CSS validator explicitly forbids `@keyframes` — so richer motion
-can't emerge from the current contracts even by accident.
+**The problem.** Before this work, generated sites were static. Their only
+motion came from `hover-lift` / `hover-reveal` transitions emitted by the
+page-styles step, and the generated-CSS validator explicitly forbade
+`@keyframes` — so richer motion could not emerge from the old contracts.
 
 **The constraint.** Motion code is a bad fit for per-site LLM generation:
 it's expensive to produce, hard to validate, easy to get subtly wrong
@@ -23,10 +23,10 @@ handful of well-crafted effects anyway.
 
 **The approach.** Treat motion like the design system treats color and type:
 a fixed, hand-authored vocabulary that per-site decisions merely *select
-from*. Variation between sites comes from two cheap knobs — a **motion
-profile** chosen by the design direction, and a small set of **`--motion-*`
-CSS custom properties** the existing page-styles call may tune within
-validated numeric bounds. The LLM never writes keyframes.
+from*. Variation between sites comes from a **motion profile** chosen by the
+design direction plus the motion classes selected for each composition. Each
+profile owns its CSS custom properties and choreography; generated page CSS
+cannot override them. The LLM never writes keyframes.
 
 ---
 
@@ -34,14 +34,14 @@ validated numeric bounds. The LLM never writes keyframes.
 
 - **Motion scope:** all four kinds — scroll-entrance reveals, hover
   micro-interactions, ambient/hero motion, page-load entrances.
-- **JS policy:** a small static, hand-written JS file (IntersectionObserver)
+- **JS policy:** a static, hand-written JS file (IntersectionObserver)
   is acceptable in generated themes. It is written once here, never by the
   LLM.
 - **Who decides:** the design-direction step picks a motion profile from a
   fixed list; the per-section LLM calls place the classes themselves
   (Option B in §3), backstopped by a deterministic sanity pass.
-- **CSS source:** static presets, with light LLM tuning of timing variables
-  inside validated bounds, riding the existing page-styles call.
+- **CSS source:** static presets with profile-owned entrance, hero, hover, and
+  ambient clocks. Generated page CSS cannot tune motion.
 
 ---
 
@@ -60,18 +60,37 @@ entirely by custom properties:
 - **Hover:** fold the existing `hover-lift` / `hover-reveal` contracts in so
   their timing also derives from the profile variables.
 - Everything wrapped in `@media (prefers-reduced-motion: no-preference)`.
+- A `:focus-within` escape immediately reveals any delayed target that receives
+  keyboard focus, so stagger timing can never create an invisible focus stop.
 
 `assets/motion/profiles/{calm,energetic,dramatic,minimal}.css` — each is a
-single `:root` block setting `--motion-duration`, `--motion-ease`,
-`--motion-distance`, `--motion-stagger`. Tiny, and all four are testable
-once, here, not per-site.
+single `:root` block selecting a profile-specific keyframe family and setting
+separate entrance, hero, hover, and ambient durations plus easing, distance,
+stagger, scale, and hover-character tokens. Calm uses soft settling, energetic
+uses diagonal spring/overshoot, and dramatic uses directional masks plus a
+focused hero reveal, so the profiles are not one animation at different speeds.
+Keeping those clocks separate prevents an energetic entrance from making an
+ambient zoom frantic, or a dramatic reveal from making a hover feel sluggish.
+All four are testable once, here, not per-site.
 
-`assets/motion/motion.js` — ~20 hand-written lines: IntersectionObserver
-adds `.is-visible`; checks `prefers-reduced-motion`. Elements are only
-initially hidden under an `html.js` scope that the script itself sets, so if
-JS never loads everything stays visible. This preserves the spirit of the
-existing "never `opacity:0`" validator rule while allowing real entrance
-reveals (progressive enhancement).
+`assets/motion/motion.js` — a hand-written IntersectionObserver driver
+adds `.is-visible` after a target reaches the main 75% of the viewport and
+checks `prefers-reduced-motion`. The vertical inset is calculated in pixels
+from viewport height because IntersectionObserver percentage margins are
+width-relative; an effectively-zero positive threshold rejects zero-area edge
+contact while remaining reachable by extremely tall targets. Cards entering
+in the same visual row cascade together, while each
+direct child of a responsive `stagger-children` grid is observed independently
+so stacked rows do not finish offscreen or inherit an absolute child-index
+delay. Initial/restored-scroll targets are made immediately static (the hero
+owns load motion), short final-page targets are rechecked after scroll/load/
+layout changes, keyboard focus persistently skips its owning entrance, and
+observer errors fail open. Elements are only initially hidden
+under a driver-owned `html.motion-js` bootstrap scope. After DOM setup, only
+the snapshotted `.motion-target` elements remain eligible to hide, so blocks
+inserted later fail open. If JS never loads or observer setup fails, everything
+stays visible. This preserves the spirit of the existing "never `opacity:0`"
+validator rule while allowing real entrance reveals (progressive enhancement).
 
 Wiring: `ScaffoldThemeStep` copies the kit into the theme;
 `FinalizeThemeStep` enqueues the script and the chosen profile only when the
@@ -115,8 +134,10 @@ site-level coherence — is mitigated on two fronts:
    unknown motion variants and `is-visible`, classes the committed profile
    disallows (`minimal` → hover effects only, `none` → strip all), ambient
    effects and `hero-entrance` beyond the first on the page (sections visited
-   in plan order, so the hero wins), extra motion classes beyond one per
-   block, and `stagger-children` on containers with fewer than two children.
+   in plan order, so the hero wins), entrances beyond two per section, extra
+   motion classes beyond one per block, transform-conflicting ambient/hover
+   pairs on the same block, and `stagger-children` on containers with fewer
+   than two children.
 
 **Option A — deterministic post-processor (not built).** An
 `ApplyMotionStep` assigning classes by rule: hero → `hero-entrance`,
@@ -127,14 +148,15 @@ content.
 **Option C — hybrid (not built).** Deterministic defaults from A; the
 section prompt only mentions the *ambient* classes.
 
-### 4. Bounded LLM tuning (rides the existing page-styles call)
+### 4. Profile-owned choreography
 
-Extend the page-styles contract: the model may additionally emit one
-`:root { --motion-* }` override block. `PageStylesStep::validate()` gains
-numeric range checks — duration 150–1200 ms, distance 8–48 px, stagger
-40–150 ms, easing from an allowlist of cubic-beziers. Out-of-bounds values
-fall back to the profile defaults silently. Cost: ~100 prompt tokens,
-~40 output tokens, no new call.
+The static kit implements hover as well as entrance and ambient effects. The
+profile stylesheet is the only source of `--motion-*` values, including the
+animation-name tokens that select deliberately different keyframe families as
+well as distinct pacing and magnitude for calm, energetic, dramatic, and minimal.
+`PageStylesStep` handles structural layout utilities only and rejects `:root`,
+so model output cannot collapse two profiles onto the same timing or silently
+disable hover motion when its CSS appendix is rejected.
 
 ### 5. Escape hatch for explicit animation requests
 
@@ -153,7 +175,7 @@ are spent only when the user actually asked for animation.
 
 | Path | Extra inference |
 | --- | --- |
-| Default site | ~10 tokens (motion field) + ~140 tokens (page-styles tuning) + ~250 prompt tokens × each section call (Option B vocabulary); **zero new LLM calls** |
+| Default site | ~10 tokens (motion field) + ~250 prompt tokens × each section call (Option B vocabulary); **zero new LLM calls** |
 | Site with explicit animation request | + one scoped CSS-generation call |
 
 ---
@@ -169,8 +191,8 @@ are spent only when the user actually asked for animation.
 3. **Application (Option B, decided).** Motion vocabulary + budget rules in
    `prompts/section.md`; `MotionSanityStep` before `fix-blocks` with fixture
    tests (over-use trimmed, profile gating, unknown classes stripped).
-4. **Bounded tuning.** Extend the page-styles prompt and validator for
-   `--motion-*` overrides.
+4. **Profile choreography.** Split timing by motion category, tune each static
+   profile distinctly, and keep hover behavior in the reduced-motion-safe kit.
 5. **Escape hatch.** Add the flag to refine-prompt/site-spec and the
    optional `CustomMotionStep`. Independent of everything else — last.
 
