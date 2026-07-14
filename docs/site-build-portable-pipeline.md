@@ -84,7 +84,7 @@ So the shared part is the core, and only the core: the steps, the prompts, the `
 
 The native path is built out of wpcom's own agent primitives, with the shared core doing the actual theme work. Start with the vendored core - loaded via `require_lib` - then register block-theme generation as something the WP Orchestrator can call.
 
-Two abilities do it. The first is a workflow-ability, `generate_block_theme`: you register it like any ability, but its body builds and runs a `WorkflowAgent` internally (the same `Add_Page_Workflow_Ability` pattern wpcom already uses). That workflow encodes the same step graph as the library `Pipeline` - site spec, design direction, theme.json and the section plan, scaffold, then the per-section batch, then assemble and fix blocks. The second is a unit ability, `generate_section`, and its whole body is a thin wrapper that calls the shared core's stateless `SectionUnit`:
+Four abilities do it. The first is a workflow-ability, `generate_block_theme`: you register it like any ability, but its body builds and runs a `WorkflowAgent` internally (the same `Add_Page_Workflow_Ability` pattern wpcom already uses). That workflow encodes the same step graph as the library `Pipeline` - site spec, design direction, theme.json and the section plan, scaffold, then the part batch, then assemble and fix blocks. The other three are unit abilities — `generate_section`, `generate_header`, and `generate_footer` — whose bodies are thin wrappers over the shared core's stateless `SectionUnit`, `HeaderUnit`, and `FooterUnit`. For example:
 
 ```php
 // wpcom 'generate_section' unit ability - a stateless wrapper over the shared core
@@ -96,7 +96,9 @@ Two abilities do it. The first is a workflow-ability, `generate_block_theme`: yo
 },
 ```
 
-Then two moves make it live: register the ability on `wp_abilities_api_init`, and grant it to the orchestrator by adding `generate_block_theme` to the `wp-orchestrator` route's abilities list, right next to `add_page`. Nothing in wpcom's `ai-agent.php` changes - it already authenticates, streams, and dispatches any registered ability by name. The orchestrator turns each granted ability into a tool signature from its name, description, and input schema, so a clear description is what makes the capability discoverable.
+The section input carries `site_spec` and `theme_json` (either decoded arrays or JSON text), `language`, the formatted `design_direction`, the shared `outline`, a nested `section` brief (`slug`, copy fields, and its assigned `layout_archetype` / `background` / `handoff`), and the precomputed `neighbors` summary. Header uses the common context plus `hero_brief`; footer uses only the common context. All values are ordinary JSON-serializable HTTP arguments. Each analogous ability constructs its matching unit and returns `generate( $input )`.
+
+Then two moves make it live: register all four abilities on `wp_abilities_api_init`, and grant the workflow entry point to the orchestrator by adding `generate_block_theme` to the `wp-orchestrator` route's abilities list, right next to `add_page`. Nothing in wpcom's `ai-agent.php` changes - it already authenticates, streams, and dispatches any registered ability by name. The orchestrator turns each granted ability into a tool signature from its name, description, and input schema, so a clear description is what makes the capability discoverable.
 
 ## Driving a build
 
@@ -108,17 +110,17 @@ The useful part is that it's just a registered capability. The orchestrator can 
 
 ## Two concurrency engines
 
-Both orchestrators run the same section graph; they just fan it out differently. The library orchestrator does it in-process: `ConcurrentGroup` collects the independent section calls into one `completeJsonBatch`, and the Anthropic client runs them with `curl_multi` against the direct API (or the proxy), windowed at five in flight.
+Both orchestrators run the same section graph; they just fan it out differently. The library orchestrator does it in-process: `SectionsStep` asks each Project-free section/header/footer unit to prepare its request, collects the requests into one `completeBatch`, and the Anthropic client runs them with `curl_multi` against the direct API (or the proxy), windowed at ten in flight. Once every result is back, the same units normalize and validate their own output before the step writes any project files.
 
-The wpcom workflow does it out-of-process. Inside the workflow the per-section steps are marked `promise: true` - emitted, not run inline - and a single `execute_promises` step hands the whole batch to wpcom's `promise-all`, which fires them concurrently with `curl_multi`, up to 25 at once. Each promise is a fresh, stateless HTTP call to the `generate_section` unit ability, and each result streams back over SSE (through the `ai_agent_update` hook for the feature) the moment it lands. Plan more than 25 sections and you split the batch across more than one promise group.
+The wpcom workflow does it out-of-process. Inside the workflow the header, footer, and per-section steps are marked `promise: true` - emitted, not run inline - and a single `execute_promises` step hands the whole batch to wpcom's `promise-all`, which fires them concurrently with `curl_multi`, up to 25 at once. Each promise is a fresh, stateless HTTP call to its matching unit ability, and each result streams back over SSE (through the `ai_agent_update` hook for the feature) the moment it lands. Plan more than 23 sections (plus header and footer) and you split the work across more than one promise group.
 
-So it's one section graph and two concurrency engines: in-process `curl_multi` windowed at five, or server-side promises capped at 25. The graph doesn't know which one is driving it.
+So it's one section graph and two concurrency engines: in-process `curl_multi` windowed at ten, or server-side promises capped at 25. The graph doesn't know which one is driving it.
 
 ## Why the units are stateless
 
 Both orchestrators can share one core because of one rule the fan-out units follow: they're stateless. A promise is a fresh HTTP request - a new process, no shared memory, no on-disk `Project` to read. So a section unit can't reach for state the way an in-process step can; it takes everything it needs as arguments and returns everything it produced. Inputs to output.
 
-That single constraint is what lets the two orchestrators wrap the same code. The library orchestrator calls the unit over the on-disk `Project`, where state lives in files between steps. The wpcom unit ability calls the same unit over HTTP arguments, where state rides in the request. The core logic in the middle doesn't change; only the wrapper around it does. Without it you'd write the section generator twice - once for disk, once for HTTP - and the two would drift. With it, there's one generator and two ways to feed it.
+That single constraint is what lets the two orchestrators wrap the same code. The library `SectionsStep` is the stateful adapter: it reads the on-disk `Project`, builds self-contained unit inputs, batches the unit-built requests, and writes the finished outputs. A wpcom unit ability calls `generate()` on the same unit with HTTP arguments, where state rides in the request. The core logic in the middle doesn't change; only the wrapper around it does. Header and footer use the same unit contract because they participate in the same fan-out. Without it you'd write each generator twice - once for disk, once for HTTP - and the copies would drift. With it, there's one generator and two ways to feed it.
 
 ## Why it's worth doing
 
@@ -126,7 +128,7 @@ Write the hard part once. The deterministic logic that produces a good theme - a
 
 Each host uses what it already has. wpcom has its AI proxy; Studio has a logged-in user; a coding agent has a subscription the developer is already paying for. None of them need a fresh API key provisioned, and none of them scatter a new secret around. That's cheaper - a flat subscription or an existing proxy beats per-token billing - and it's a lot less to keep secure.
 
-Concurrency comes along for free wherever the transport can carry it. When the transport is a real network endpoint - the CLI's direct API, Studio's proxy - the builder overlaps its section generation and the batch methods fan out for real, `curl_multi` windowed at five. A coding-agent harness still fans out, just heavier: `completeBatch` spawns up to five `proc_open` subprocesses - real parallelism, but a process per call rather than a socket. Only wpcom's simple in-process adapter runs the batch sequentially. The pipeline code is identical in every case; only the adapter changes.
+Concurrency comes along for free wherever the transport can carry it. When the transport is a real network endpoint - the CLI's direct API, Studio's proxy - the builder overlaps its section generation and the batch methods fan out for real, `curl_multi` windowed at ten. A coding-agent harness still fans out, just heavier: `completeBatch` spawns up to five `proc_open` subprocesses - real parallelism, but a process per call rather than a socket. Only wpcom's simple in-process adapter runs the batch sequentially. The pipeline code is identical in every case; only the adapter changes.
 
 Adding a host is small. The interface is four methods, so a new environment is a new adapter and not a rewrite. Swapping model providers is the same size of change - a transport detail, not a pipeline detail.
 

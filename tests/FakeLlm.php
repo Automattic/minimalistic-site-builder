@@ -17,6 +17,10 @@ final class FakeLlm implements Llm
     private array $jsonQueue = [];
     /** @var array<int,array{prompt:string,opts:array<mixed>}> */
     public array $calls = [];
+    public int $completeCalls = 0;
+    public int $completeJsonCalls = 0;
+    public int $completeBatchCalls = 0;
+    public int $completeJsonBatchCalls = 0;
 
     /**
      * Prompt substrings that fail permanently. complete() throws for a matching
@@ -41,6 +45,7 @@ final class FakeLlm implements Llm
 
     public function complete(string $prompt, array $opts = []): string
     {
+        $this->completeCalls++;
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->shouldFail($prompt)) {
             throw new \RuntimeException('FakeLlm: permanent failure');
@@ -53,6 +58,7 @@ final class FakeLlm implements Llm
 
     public function completeJson(string $prompt, array $opts = []): array
     {
+        $this->completeJsonCalls++;
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->jsonQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued json response');
@@ -70,6 +76,7 @@ final class FakeLlm implements Llm
      */
     public function completeJsonBatch(array $requests): array
     {
+        $this->completeJsonBatchCalls++;
         $out = [];
         foreach ($requests as $key => $req) {
             $opts = $req;
@@ -92,6 +99,7 @@ final class FakeLlm implements Llm
      */
     public function completeBatch(array $requests): array
     {
+        $this->completeBatchCalls++;
         // All-or-nothing like the real clients: one failing request aborts
         // the batch before any result is returned.
         foreach ($requests as $key => $req) {
