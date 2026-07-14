@@ -121,6 +121,76 @@ test('validate rejects empty, oversized, and unbalanced CSS', function () {
     );
 });
 
+test('dropOffendingDeclarations removes bad declarations and keeps the rest', function () {
+    // The real-world failure shape (tbilisi20): a shadow var() with a raw
+    // rgba() fallback poisoning an otherwise-valid appendix.
+    $css = "/* utilities */\n"
+        . ".overlap-up {\n"
+        . "    margin-top: -4rem;\n"
+        . "    position: relative;\n"
+        . "    box-shadow: var(--wp--preset--shadow--glow, 0 12px 30px rgba(0,0,0,0.6));\n"
+        . "    --motion-enter-duration: 150ms;\n"
+        . "    z-index: 2;\n"
+        . "}\n"
+        . "@media (max-width: 600px) {\n"
+        . "    .masonry-3 {\n"
+        . "        columns: 1;\n"
+        . "        opacity: 0;\n"
+        . "    }\n"
+        . "}";
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+
+    assert_eq(3, count($dropped), 'three offending declarations dropped');
+    assert_contains('raw color literal', implode('; ', $dropped));
+    assert_contains('profile-owned', implode('; ', $dropped));
+    assert_contains('hides content', implode('; ', $dropped));
+    assert_contains('margin-top: -4rem', $salvaged, 'clean declarations kept');
+    assert_contains('z-index: 2', $salvaged, 'declarations after a dropped one kept');
+    assert_contains('columns: 1', $salvaged, 'media-nested rule bodies salvaged too');
+    assert_contains('@media (max-width: 600px)', $salvaged, 'media prelude untouched');
+    assert_true(!str_contains($salvaged, 'rgba'), 'raw color gone');
+    assert_true(!str_contains($salvaged, '--motion-'), 'motion override gone');
+    assert_true(!str_contains($salvaged, 'opacity'), 'hidden-content declaration gone');
+    assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
+});
+
+test('dropOffendingDeclarations leaves structural problems for the re-validation', function () {
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations(
+        ":root {\n    --motion-enter-duration: 150ms;\n}\n.overlap-up {\n    margin-top: -4rem;\n}"
+    );
+    assert_eq(1, count($dropped), 'the declaration is dropped');
+    assert_contains(':root', $salvaged, 'the unscoped selector is NOT repaired away');
+    assert_true(PageStylesStep::validate($salvaged) !== [], 'still rejected on the selector');
+});
+
+test('run drops offending declarations and ships the rest of the appendix', function () {
+    [$project, $tmp] = ps_project('builder_ps_salvage_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up {\n"
+        . "    margin-top: -4rem;\n"
+        . "    position: relative;\n"
+        . "    z-index: 2;\n"
+        . "    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);\n"
+        . "}"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains('margin-top: -4rem', $style, 'appendix shipped');
+    assert_contains('page-styles step', $style, 'marker comment present');
+    assert_true(!str_contains($style, 'rgba'), 'offending declaration not shipped');
+    $log = $project->readText('logs/page-styles.log');
+    assert_contains('SALVAGED', $log);
+    assert_contains('raw color literal', $log);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('classesIn finds layout utilities only and ignores static hover classes', function () {
     $markup = '<!-- wp:group {"className":"masonry-3 hover-lift hover-reveal"} -->'
         . '<div class="wp-block-group masonry-3 hover-lift hover-reveal"></div><!-- /wp:group -->'

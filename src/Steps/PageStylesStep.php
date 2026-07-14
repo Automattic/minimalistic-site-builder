@@ -28,10 +28,15 @@ use Automattic\SiteBuild\Step;
  *
  * The model's CSS is validated (validate()) before writing: every selector must
  * be scoped under a documented class, colors must come from theme preset custom
- * properties, and only @media at-rules are allowed. Rejected CSS is logged and
- * the appendix is skipped rather than failing the build — a utility class
- * without its CSS still renders as a plain block, so degrading (loudly) beats
- * losing a finished build at its final step over decorative styling.
+ * properties, and only @media at-rules are allowed. When validation fails on
+ * declaration-level offences only (a raw-color shadow, a --motion-* override),
+ * the offending declarations are dropped (dropOffendingDeclarations()) and the
+ * rest of the appendix ships — one lost decoration beats every used utility
+ * losing its CSS. Structural problems (unbalanced braces, disallowed at-rules,
+ * unscoped selectors) still reject the whole appendix: it is logged and
+ * skipped rather than failing the build — a utility class without its CSS
+ * still renders as a plain block, so degrading (loudly) beats losing a
+ * finished build at its final step over decorative styling.
  */
 final class PageStylesStep implements Step
 {
@@ -124,13 +129,31 @@ final class PageStylesStep implements Step
 
         $problems = self::validate($css);
         if ($problems !== []) {
+            // Before giving up on the whole appendix, drop the offending
+            // declarations individually: a raw-color shadow or a --motion-*
+            // override is one bad line, while a skipped appendix costs every
+            // used utility its CSS (masonry renders as a stack, overlaps
+            // disappear). Structural problems — unbalanced braces, disallowed
+            // at-rules, unscoped selectors — survive the salvage and still
+            // reject everything below.
+            [$salvaged, $dropped] = self::dropOffendingDeclarations($css);
+            if ($dropped === [] || self::validate($salvaged) !== []) {
+                file_put_contents(
+                    $project->logPath(self::LOG_FILE),
+                    "REJECTED CSS:\n{$css}\n\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
+                );
+                echo '  page-styles: CSS rejected (' . count($problems)
+                    . ' problem(s)); appendix skipped — see logs/' . self::LOG_FILE . "\n";
+                return;
+            }
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
-                "REJECTED CSS:\n{$css}\n\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
+                "SALVAGED CSS (offending declarations dropped):\n{$salvaged}\n\nDROPPED:\n- "
+                . implode("\n- ", $dropped) . "\n"
             );
-            echo '  page-styles: CSS rejected (' . count($problems)
-                . ' problem(s)); appendix skipped — see logs/' . self::LOG_FILE . "\n";
-            return;
+            echo '  page-styles: dropped ' . count($dropped)
+                . ' offending declaration(s), kept the rest — see logs/' . self::LOG_FILE . "\n";
+            $css = $salvaged;
         }
         $project->writeText(
             'theme/style.css',
@@ -272,6 +295,82 @@ final class PageStylesStep implements Step
         }
 
         return $problems;
+    }
+
+    /**
+     * Salvage pass for CSS that failed validate(): remove each declaration
+     * that carries a declaration-level offence (raw color literal, resource-
+     * loading function, --motion-* override, content-hiding value) and keep
+     * the rest. Only rule bodies are touched — selectors, @media preludes and
+     * brace structure pass through, so structural problems deliberately
+     * survive into the re-validation and still reject the whole appendix.
+     * Comments are stripped first (they could shelter braces from the body
+     * matcher), so a salvaged appendix ships comment-free. Pure — unit-testable.
+     *
+     * @return array{0: string, 1: string[]} [salvaged CSS, dropped-declaration notes]
+     */
+    public static function dropOffendingDeclarations(string $css): array
+    {
+        $css = trim((string) preg_replace('~/\*.*?\*/~s', '', $css));
+        $dropped = [];
+        $salvaged = (string) preg_replace_callback(
+            // Innermost brace pairs only: rule bodies, never an @media block
+            // (its body contains braces and so never matches).
+            '/\{([^{}]*)\}/s',
+            static function (array $m) use (&$dropped): string {
+                $kept = [];
+                foreach (explode(';', $m[1]) as $declaration) {
+                    if (trim($declaration) === '') {
+                        continue;
+                    }
+                    $problem = self::declarationProblem($declaration);
+                    if ($problem !== null) {
+                        $dropped[] = trim((string) preg_replace('/\s+/', ' ', $declaration)) . " ({$problem})";
+                        continue;
+                    }
+                    $kept[] = trim((string) preg_replace('/\s+/', ' ', $declaration));
+                }
+                return $kept === [] ? '{}' : "{\n    " . implode(";\n    ", $kept) . ";\n}";
+            },
+            $css
+        );
+        return [$salvaged, $dropped];
+    }
+
+    /**
+     * The declaration-level offence in one `property: value` declaration, or
+     * null when it is clean. Mirrors the declaration-level checks in
+     * validate(); anything unparsable is dropped too — the salvage pass fails
+     * closed.
+     */
+    private static function declarationProblem(string $declaration): ?string
+    {
+        if (preg_match('/^\s*([-\w]+)\s*:\s*(\S[\s\S]*)$/', $declaration, $m) !== 1) {
+            return 'not a single property: value declaration';
+        }
+        $property = strtolower($m[1]);
+        $value = $m[2];
+        if (str_starts_with($property, '--motion-')) {
+            return 'motion custom properties are profile-owned';
+        }
+        if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $value) === 1
+            || preg_match('/\b(?:rgba?|hsla?)\s*\(/i', $value) === 1
+            || self::rawNamedColorProblems("{$property}: {$value}") !== []
+        ) {
+            return 'raw color literal';
+        }
+        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $value) === 1) {
+            return 'resource-loading CSS function';
+        }
+        if ($property === 'opacity' && CustomMotionStep::hidesContent($value)) {
+            return 'hides content';
+        }
+        if (($property === 'visibility' && preg_match('/^\s*hidden\b/i', $value) === 1)
+            || ($property === 'display' && preg_match('/^\s*none\b/i', $value) === 1)
+        ) {
+            return 'hides content';
+        }
+        return null;
     }
 
     /** @return string[] */
