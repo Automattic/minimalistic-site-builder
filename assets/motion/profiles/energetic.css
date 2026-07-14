@@ -1,0 +1,31 @@
+/* Motion profile: energetic — lively and springy without feeling frantic. */
+:root {
+    --motion-enter-duration: 600ms;
+    --motion-hero-duration: 850ms;
+    --motion-hero-delay: 0ms;
+    --motion-hover-duration: 260ms;
+    --motion-ambient-duration: 12s;
+    --motion-enter-ease: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --motion-hero-ease: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --motion-hover-ease: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --motion-ambient-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --motion-reveal-keyframe: motion-energetic-reveal;
+    --motion-rise-keyframe: motion-energetic-rise;
+    --motion-fade-keyframe: motion-energetic-fade;
+    --motion-scale-keyframe: motion-energetic-scale;
+    --motion-hero-keyframe: motion-energetic-hero;
+    --motion-stagger-keyframe: motion-energetic-rise;
+    --motion-drift-keyframe: motion-energetic-drift;
+    --motion-ken-burns-keyframe: motion-energetic-ken-burns;
+    --motion-gradient-keyframe: motion-energetic-gradient;
+    --motion-distance: 34px;
+    --motion-stagger: 80ms;
+    --motion-scale-from: 0.95;
+    --motion-hero-scale-from: 0.97;
+    --motion-ken-burns-scale: 1.07;
+    --motion-ambient-distance: 16px;
+    --motion-hover-lift: -7px;
+    --motion-hover-scale: 1.055;
+    --motion-hover-brightness: 0.88;
+    --motion-hover-shadow-opacity: 0.28;
+}

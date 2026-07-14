@@ -1,0 +1,31 @@
+/* Motion profile: calm — quiet, measured, gallery-like movement. */
+:root {
+    --motion-enter-duration: 1100ms;
+    --motion-hero-duration: 1600ms;
+    --motion-hero-delay: 80ms;
+    --motion-hover-duration: 420ms;
+    --motion-ambient-duration: 20s;
+    --motion-enter-ease: cubic-bezier(0.37, 0, 0.63, 1);
+    --motion-hero-ease: cubic-bezier(0.37, 0, 0.63, 1);
+    --motion-hover-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+    --motion-ambient-ease: cubic-bezier(0.37, 0, 0.63, 1);
+    --motion-reveal-keyframe: motion-calm-reveal;
+    --motion-rise-keyframe: motion-calm-rise;
+    --motion-fade-keyframe: motion-calm-fade;
+    --motion-scale-keyframe: motion-calm-scale;
+    --motion-hero-keyframe: motion-calm-hero;
+    --motion-stagger-keyframe: motion-calm-rise;
+    --motion-drift-keyframe: motion-calm-drift;
+    --motion-ken-burns-keyframe: motion-calm-ken-burns;
+    --motion-gradient-keyframe: motion-calm-gradient;
+    --motion-distance: 14px;
+    --motion-stagger: 150ms;
+    --motion-scale-from: 0.99;
+    --motion-hero-scale-from: 0.997;
+    --motion-ken-burns-scale: 1.045;
+    --motion-ambient-distance: 8px;
+    --motion-hover-lift: -3px;
+    --motion-hover-scale: 1.025;
+    --motion-hover-brightness: 0.94;
+    --motion-hover-shadow-opacity: 0.16;
+}

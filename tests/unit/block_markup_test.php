@@ -94,6 +94,27 @@ test('replaceInOwnHtml rewrites class attributes only, never text content', func
     assert_contains('Mention has-secondary-color here', $out, 'user copy must not be rewritten');
 });
 
+test('removeClassTokenInOwnHtml tokenizes: any whitespace, exact tokens, both quote styles', function () {
+    $src = '<!-- wp:group -->'
+        . "<div class=\"wp-block-group\treveal\nreveal-up\"><span class='reveal x'>Mention reveal here</span></div>"
+        . '<!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $doc->removeClassTokenInOwnHtml(0, 'reveal');
+    $out = $doc->render();
+    assert_contains('class="wp-block-group reveal-up"', $out, "longer token survives; separators normalized");
+    assert_contains("class='x'", $out, 'single-quoted attribute handled');
+    assert_contains('Mention reveal here', $out, 'text content untouched');
+});
+
+test('ownHtml covers the root tag only, not descendants', function () {
+    $src = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p class="inner">Hi</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    assert_contains('wp-block-group', $doc->ownHtml(0));
+    assert_true(!str_contains($doc->ownHtml(0), 'inner'), "children's HTML excluded");
+});
+
 test('serializeComment escapes like WP serialize_block_attributes', function () {
     $expected = '<!-- wp:paragraph {"content":"a ' . '\\u002d\\u002d b \\u003C i \\u003E"} -->';
     assert_eq($expected, BlockMarkup::serializeComment('paragraph', ['content' => 'a -- b < i >'], false));

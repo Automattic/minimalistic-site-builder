@@ -410,3 +410,42 @@ test('theme-json injects the design direction into its prompt', function () {
     assert_contains('Fraunces 900', $llm->calls[0]['prompt'], 'structured type reaches the theme prompt');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('normalize commits a motion profile: valid values pass, anything else defaults', function () {
+    assert_eq('dramatic', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ' Dramatic '])['motion']);
+    assert_eq('none', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'none'])['motion']);
+    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x'])['motion'], 'missing → default');
+    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'bouncy'])['motion'], 'unknown → default');
+    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ['calm']])['motion'], 'non-string → default');
+    assert_eq('a note', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '])['motion_note']);
+});
+
+test('format renders the motion commitment with its executable meaning', function () {
+    $calm = DesignDirectionStep::format(['description' => 'x', 'motion' => 'calm', 'motion_note' => 'let the hero breathe']);
+    assert_contains('**Motion**: calm', $calm);
+    assert_contains('let the hero breathe', $calm);
+
+    $minimal = DesignDirectionStep::format(['description' => 'x', 'motion' => 'minimal']);
+    assert_contains('hover-lift', $minimal, 'minimal names the only classes allowed');
+
+    $none = DesignDirectionStep::format(['description' => 'x', 'motion' => 'none']);
+    assert_contains('NO motion classes', $none);
+
+    // Directions that predate the field render no Motion line.
+    assert_true(!str_contains(DesignDirectionStep::format(['description' => 'x']), '**Motion**'));
+});
+
+test('motionProfileFor fails closed to none', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddmotion_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq('none', DesignDirectionStep::motionProfileFor($project), 'no direction file');
+
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq('none', DesignDirectionStep::motionProfileFor($project), 'direction predates the field');
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'Energetic']);
+    assert_eq('energetic', DesignDirectionStep::motionProfileFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

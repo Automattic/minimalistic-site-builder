@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 
@@ -11,7 +12,11 @@ use Automattic\SiteBuild\Step;
  *
  * Input:  none
  * Output: theme/style.css and theme/readme.txt with {{placeholders}} that the
- *         ApplyIdentityStep fills once the site name/slug are known.
+ *         ApplyIdentityStep fills once the site name/slug are known, plus the
+ *         static motion kit copied verbatim into theme/assets/motion/ (all
+ *         four profiles — the design direction hasn't been chosen yet; the
+ *         finalize-theme step later prunes to the committed profile and
+ *         enqueues the kit).
  */
 final class ScaffoldThemeStep implements Step
 {
@@ -29,6 +34,22 @@ final class ScaffoldThemeStep implements Step
     {
         $project->writeText('theme/style.css', self::STYLE_CSS);
         $project->writeText('theme/readme.txt', self::README);
+        self::copyMotionKit($project);
+    }
+
+    /** Copy the hand-written motion kit into the theme, byte-for-byte. */
+    private static function copyMotionKit(Project $project): void
+    {
+        $kit = Package::motionDir();
+        foreach (['motion.css', 'motion.js'] as $file) {
+            $project->writeText('theme/assets/motion/' . $file, (string) file_get_contents("{$kit}/{$file}"));
+        }
+        foreach (glob("{$kit}/profiles/*.css") ?: [] as $profile) {
+            $project->writeText(
+                'theme/assets/motion/profiles/' . basename($profile),
+                (string) file_get_contents($profile)
+            );
+        }
     }
 
     private const STYLE_CSS = <<<CSS
