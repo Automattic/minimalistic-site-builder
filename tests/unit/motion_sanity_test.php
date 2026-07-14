@@ -52,6 +52,39 @@ test('motion-sanity gates by profile: minimal keeps hover only, none strips ever
     assert_contains('class="wp-block-group"', $result['markup']);
 });
 
+test('motion-sanity gates classes living only in the saved HTML (fixCustomClassname would rescue them)', function () {
+    // No className in the comment JSON at all — the class rides in HTML only.
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . "\n" . '<div class="wp-block-group hover-lift reveal-up"><!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph --></div>'
+        . "\n" . '<!-- /wp:group -->';
+    $budget = MotionSanityStep::newBudget();
+    $result = MotionSanityStep::sanitize($markup, 'none', $budget);
+    assert_true(!str_contains($result['markup'], 'hover-lift'), 'HTML-only hover class stripped under none');
+    assert_true(!str_contains($result['markup'], 'reveal-up'), 'HTML-only reveal class stripped under none');
+    assert_eq(2, count($result['notes']));
+
+    // Under a profile that allows it, an HTML-only ambient class still
+    // consumes the page budget — the fixer will rescue it into className.
+    $budget = MotionSanityStep::newBudget();
+    $ambient = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . "\n" . '<div class="wp-block-group ken-burns"><!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph --></div>'
+        . "\n" . '<!-- /wp:group -->';
+    $first = MotionSanityStep::sanitize($ambient, 'dramatic', $budget);
+    assert_contains('ken-burns', $first['markup'], 'allowed HTML-only class kept');
+    $second = MotionSanityStep::sanitize(motion_group('gradient-shift'), 'dramatic', $budget);
+    assert_true(!str_contains($second['markup'], 'gradient-shift'), 'HTML-only ambient consumed the budget');
+});
+
+test('motion-sanity removal survives tab/newline class separators', function () {
+    $markup = '<!-- wp:group {"className":"reveal-up reveal-fade","layout":{"type":"constrained"}} -->'
+        . "\n" . "<div class=\"wp-block-group\treveal-up\nreveal-fade\"><!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph --></div>"
+        . "\n" . '<!-- /wp:group -->';
+    $budget = MotionSanityStep::newBudget();
+    $result = MotionSanityStep::sanitize($markup, 'calm', $budget);
+    assert_contains('"className":"reveal-up"', $result['markup']);
+    assert_true(!str_contains($result['markup'], 'reveal-fade'), 'dropped token removed despite odd separators');
+});
+
 test('motion-sanity enforces the one-ambient-per-page budget across files', function () {
     $budget = MotionSanityStep::newBudget();
     $first = MotionSanityStep::sanitize(motion_group('ken-burns'), 'dramatic', $budget);

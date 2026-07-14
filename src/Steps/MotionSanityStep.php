@@ -34,10 +34,12 @@ use Automattic\SiteBuild\Step;
  *
  * Runs BEFORE fix-blocks on purpose (same rationale as contrast-fix): edits
  * rewrite only the block-comment JSON attributes, and the fix-blocks
- * re-serialization regenerates the saved HTML from those attributes. The
- * stripped tokens are ALSO removed from each block's own class="…" HTML —
- * otherwise the fixer's fixCustomClassname would rescue the stale token from
- * the saved HTML right back into className.
+ * re-serialization regenerates the saved HTML from those attributes. Because
+ * the fixer's fixCustomClassname rescues classes that live only in the saved
+ * HTML into className, the saved HTML is part of the gate: motion classes
+ * found there are judged exactly like comment-JSON ones, and every stripped
+ * token is removed from the block's own class="…" HTML (tokenized, so odd
+ * whitespace can't shelter one) so the fixer can't resurrect it.
  */
 final class MotionSanityStep implements Step
 {
@@ -138,48 +140,85 @@ final class MotionSanityStep implements Step
         $notes = [];
 
         foreach ($doc->indices() as $i) {
-            $attrs = $doc->attrs($i);
+            $attrs = $doc->attrs($i) ?? [];
             $className = $attrs['className'] ?? null;
-            if (!is_string($className) || trim($className) === '') {
+            $jsonTokens = is_string($className)
+                ? (preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [])
+                : [];
+
+            // Motion classes living only in the saved HTML count too: the
+            // block fixer that runs right after this step rescues them into
+            // className (fixCustomClassname), so skipping them here would let
+            // an HTML-only class ride around the profile gate and budgets.
+            $htmlTokens = self::classTokensInOwnHtml($doc, $i);
+            $htmlOnly = array_values(array_filter(
+                array_diff(array_unique($htmlTokens), $jsonTokens),
+                [Motion::class, 'looksLikeMotionClass']
+            ));
+            if ($jsonTokens === [] && $htmlOnly === []) {
                 continue;
             }
 
             $kept = [];
-            $dropped = [];
+            $droppedJson = [];
+            $droppedHtml = [];
             $kitOnBlock = 0;
-            foreach (preg_split('/\s+/', trim($className)) ?: [] as $token) {
+            foreach ($jsonTokens as $token) {
                 $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i);
                 if ($verdict === null) {
                     $kept[] = $token;
                     continue;
                 }
-                $dropped[] = $token;
+                $droppedJson[] = $token;
                 $notes[] = "{$doc->name($i)}: dropped '{$token}' ({$verdict})";
             }
-
-            if ($dropped === []) {
-                continue;
+            foreach ($htmlOnly as $token) {
+                $verdict = self::verdict($token, $allowed, $kitOnBlock, $budget, $doc, $i);
+                if ($verdict === null) {
+                    continue;
+                }
+                $droppedHtml[] = $token;
+                $notes[] = "{$doc->name($i)}: dropped '{$token}' (saved HTML only; {$verdict})";
             }
 
-            if ($kept === []) {
-                unset($attrs['className']);
-            } else {
-                $attrs['className'] = implode(' ', $kept);
+            if ($droppedJson !== []) {
+                if ($kept === []) {
+                    unset($attrs['className']);
+                } else {
+                    $attrs['className'] = implode(' ', $kept);
+                }
+                $doc->setAttrs($i, $attrs);
             }
-            $doc->setAttrs($i, $attrs);
 
-            // Also remove each token from the block's own class="…" HTML.
-            // Exact-token boundaries (space or quote on both sides) so
-            // 'reveal' never eats into 'reveal-up'.
-            foreach ($dropped as $token) {
-                $doc->replaceInOwnHtml($i, " {$token} ", ' ');
-                $doc->replaceInOwnHtml($i, "\"{$token} ", '"');
-                $doc->replaceInOwnHtml($i, " {$token}\"", '"');
-                $doc->replaceInOwnHtml($i, "\"{$token}\"", '""');
+            // Also remove each token from the block's own class="…" HTML —
+            // tokenized, so tab/newline separators can't shelter a token the
+            // fixer would then rescue right back into className.
+            foreach (array_merge($droppedJson, $droppedHtml) as $token) {
+                $doc->removeClassTokenInOwnHtml($i, $token);
             }
         }
 
         return ['markup' => $doc->render(), 'notes' => $notes];
+    }
+
+    /**
+     * Every class token in the block's own saved HTML (its root tag; both
+     * quote styles, any whitespace separators).
+     *
+     * @return string[]
+     */
+    private static function classTokensInOwnHtml(BlockMarkup $doc, int $i): array
+    {
+        if (preg_match_all('/\bclass\s*=\s*(["\'])(.*?)\1/is', $doc->ownHtml($i), $m) === 0) {
+            return [];
+        }
+        $tokens = [];
+        foreach ($m[2] as $value) {
+            foreach (preg_split('/\s+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                $tokens[] = $token;
+            }
+        }
+        return $tokens;
     }
 
     /**
