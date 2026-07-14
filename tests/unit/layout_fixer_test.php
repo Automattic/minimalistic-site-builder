@@ -314,3 +314,92 @@ test('validator layout warnings report what the fixer would change', function ()
     assert_eq([], ThemeValidator::layoutWarnings($project));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+// ── Spacing-attribute canonicalization & rhythm mirror-copy (BIGR-674 case 1) ──
+
+test('layout fixer moves a style.margin sibling of style.spacing into style.spacing.margin', function () {
+    // tbilisi25 signature-dishes cards: margin authored as a SIBLING of
+    // spacing — WordPress ignores that path, so re-serialization dropped
+    // margin-top:3rem and the rhythm gate rejected the build.
+    $markup = '<!-- wp:group {"className":"hover-lift","style":{"spacing":{"padding":{"top":"var:preset|spacing|sm"}},"margin":{"top":"3rem"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hover-lift" style="margin-top:3rem;padding-top:var(--wp--preset--spacing--sm)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"spacing":{"padding":{"top":"var:preset|spacing|sm"},"margin":{"top":"3rem"}}', $r['markup']);
+    assert_eq(1, substr_count($r['markup'], '"margin"'), 'the misplaced key should be gone');
+    assert_true($r['notes'] !== [], 'expected a note');
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer moves a style.padding sibling into style.spacing without spacing present', function () {
+    $markup = '<!-- wp:group {"style":{"padding":{"top":"var:preset|spacing|md"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="padding-top:var(--wp--preset--spacing--md)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"style":{"spacing":{"padding":{"top":"var:preset|spacing|md"}}}', $r['markup']);
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer merges misplaced spacing sides without overriding the canonical ones', function () {
+    // SectionRhythm owns the root's vertical margins/padding: a misplaced
+    // sibling key must not reintroduce spacing the rhythm owner set to zero.
+    $markup = '<!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0","bottom":"0"},"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}},"margin":{"top":"4rem","left":"1rem"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignfull" style="margin-top:0;margin-bottom:0;padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"margin":{"top":"0","bottom":"0","left":"1rem"}', $r['markup']);
+    assert_true(!str_contains($r['markup'], '4rem'), 'owned zero must win over the misplaced vertical value');
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer leaves correctly nested spacing attributes untouched', function () {
+    $markup = '<!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0","bottom":"0"},"padding":{"top":"var:preset|spacing|lg","bottom":"var:preset|spacing|lg"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignfull" style="margin-top:0;margin-bottom:0;padding-top:var(--wp--preset--spacing--lg);padding-bottom:var(--wp--preset--spacing--lg)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq([], $r['notes']);
+    assert_eq($markup, $r['markup']);
+});
+
+test('layout fixer repairs attribute JSON whose object closes early', function () {
+    // tbilisi24 hours-contact inner cards, verbatim shape: one stray `}` after
+    // "padding" closes the attrs object early — json_decode fails and the Node
+    // fixer erased EVERY attribute, fatally dropping padding-top.
+    $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"var:preset|spacing|sm"},"border":{"top":{"color":"var:preset|color|secondary","width":"1px"}},"padding":{"top":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="border-top-color:var(--wp--preset--color--secondary);border-top-width:1px;padding-top:var(--wp--preset--spacing--sm)"></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"spacing":{"blockGap":"var:preset|spacing|sm","padding":{"top":"var:preset|spacing|sm"}}', $r['markup']);
+    assert_contains('"border":{"top":{"color":"var:preset|color|secondary","width":"1px"}}', $r['markup']);
+    assert_eq(2, substr_count($r['markup'], '"layout":{"type":"constrained"}'));
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer leaves attribute JSON alone when no single-closer repair makes it parse', function () {
+    $markup = '<!-- wp:group {"align":} --><div class="wp-block-group"></div><!-- /wp:group -->'
+        . '<!-- wp:group {"style":{"a":1}},"b":{c}} --><div class="wp-block-group"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq([], $r['notes']);
+    assert_eq($markup, $r['markup']);
+});
+
+test('layout fixer mirror-copies HTML-only vertical spacing into style.spacing', function () {
+    $markup = '<!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0","bottom":"0"},"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignfull" style="margin-top:0;margin-bottom:0;padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)">'
+        . '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group" style="margin-top:3rem;padding-top:var(--wp--preset--spacing--sm)"></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('wp:group {"layout":{"type":"constrained"},"style":{"spacing":{"margin":{"top":"3rem"},"padding":{"top":"var:preset|spacing|sm"}}}}', $r['markup']);
+    // The root's owned declarations were already mirrored by SectionRhythm.
+    assert_contains('wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0","bottom":"0"},"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}}', $r['markup']);
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer does not mirror-copy over a declared attribute or into non-container blocks', function () {
+    // Conflicting attribute: declared value stays authoritative and the gate
+    // keeps judging the mismatch. Paragraphs are not rhythm containers here.
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|md"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="padding-top:var(--wp--preset--spacing--sm)">'
+        . '<!-- wp:paragraph --><p style="margin-top:3rem">Copy</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq([], $r['notes']);
+    assert_eq($markup, $r['markup']);
+});

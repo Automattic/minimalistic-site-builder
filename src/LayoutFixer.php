@@ -14,6 +14,13 @@ namespace Automattic\SiteBuild;
  * narrow contentSize wrapper floats in a wide band; a footer mixes 860px and
  * 1320px rows so two left edges compete on the same surface.
  *
+ * The same drift shows up in vertical rhythm: a model declares a spacing
+ * value in both the inline HTML and the comment JSON but at the wrong
+ * attribute path (style.margin instead of style.spacing.margin), or only in
+ * the HTML — WordPress ignores it either way, re-serialization drops the
+ * CSS, and the fix-blocks rhythm gate rejects the whole build (tbilisi24/25
+ * eval runs, BIGR-674 case 1). Those spellings are canonicalized here too.
+ *
  * This fixer parses the block-comment grammar, repairs those patterns by
  * editing ONLY the comment JSON attributes, and leaves the authored HTML
  * untouched — it is meant to run immediately BEFORE the Node block-fixer,
@@ -62,13 +69,16 @@ final class LayoutFixer
      */
     public static function fix(string $markup, string $role, ?float $contentSize = null): array
     {
+        $notes = [];
+        $markup = self::repairPrematurelyClosedAttributes($markup, $notes);
         $parsed = self::parse($markup);
         if ($parsed === null) {
-            return ['markup' => $markup, 'notes' => []];
+            return ['markup' => $markup, 'notes' => $notes];
         }
         [$roots, $all] = $parsed;
 
-        $notes = [];
+        self::canonicalizeSpacingAttributes($all, $notes);
+        self::mirrorHtmlOnlyVerticalSpacing($markup, $all, $notes);
         self::addMissingRootLayout($roots, $notes);
         self::promoteAlignClassNames($all, $notes);
 
@@ -88,6 +98,131 @@ final class LayoutFixer
     }
 
     // ── Rules ────────────────────────────────────────────────────────────
+
+    /**
+     * Spacing attributes at the wrong nesting path style nothing: WordPress
+     * reads padding/margin from style.spacing.*, so a "padding" or "margin"
+     * key written directly under "style" is ignored, and re-serialization
+     * drops the matching inline CSS the model duplicated into the HTML —
+     * which the fix-blocks rhythm gate turns into a failed build (tbilisi25
+     * wrote card margins as style.margin; tbilisi24 wrote style.padding).
+     * The intent is unambiguous — the value was declared, only the path is
+     * wrong — so move the key to its canonical location. Sides already
+     * declared at the canonical path win: on section roots those are owned
+     * by SectionRhythm, and this pass must never reintroduce spacing that
+     * the page-level rhythm owner deliberately set.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function canonicalizeSpacingAttributes(array $all, array &$notes): void
+    {
+        foreach ($all as $node) {
+            $style = $node->attrs->style ?? null;
+            if (!$style instanceof \stdClass) {
+                continue;
+            }
+            $spacing = $style->spacing ?? null;
+            foreach (['padding', 'margin'] as $property) {
+                if (!property_exists($style, $property)) {
+                    continue;
+                }
+                if ($spacing !== null && !$spacing instanceof \stdClass) {
+                    continue; // unrecognizable spacing shape — leave it for the gate
+                }
+                $misplaced = $style->{$property};
+                unset($style->{$property});
+                $node->dirty = true;
+
+                if ($spacing === null) {
+                    $spacing = $style->spacing = new \stdClass();
+                }
+                if (!property_exists($spacing, $property)) {
+                    $spacing->{$property} = $misplaced;
+                    $notes[] = "wp:{$node->name} declared \"{$property}\" directly under \"style\" where WordPress ignores it — moved to style.spacing.{$property}";
+                    continue;
+                }
+                $canonical = $spacing->{$property};
+                if ($canonical instanceof \stdClass && $misplaced instanceof \stdClass) {
+                    $adopted = [];
+                    foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                        if (property_exists($misplaced, $side) && !property_exists($canonical, $side)) {
+                            $canonical->{$side} = $misplaced->{$side};
+                            $adopted[] = $side;
+                        }
+                    }
+                    $notes[] = $adopted === []
+                        ? "wp:{$node->name} declared \"{$property}\" directly under \"style\" — dropped it in favor of the existing style.spacing.{$property}"
+                        : "wp:{$node->name} declared \"{$property}\" directly under \"style\" where WordPress ignores it — merged " . implode('/', $adopted) . " into style.spacing.{$property}";
+                    continue;
+                }
+                $notes[] = "wp:{$node->name} declared \"{$property}\" directly under \"style\" — dropped it in favor of the existing style.spacing.{$property}";
+            }
+        }
+    }
+
+    /**
+     * A vertical padding/margin declaration present ONLY in a container's
+     * inline HTML (no attribute anywhere, canonical or misplaced) is deleted
+     * by re-serialization and rejected by the rhythm gate. Mirror-copy the
+     * declared value into style.spacing.* — the inverse of the Node fixer's
+     * sync direction — so the authored rhythm survives (BIGR-674 case 1).
+     * Only sides absent from the attributes are copied: a declared attribute
+     * (including SectionRhythm's owned root values, which that pass also
+     * rewrites into the HTML) stays authoritative. Limited to the container
+     * blocks that carry rhythm here and whose spacing support serializes
+     * these longhands; a string spacing shorthand cannot gain sides, so it
+     * is left alone for the gate to judge.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function mirrorHtmlOnlyVerticalSpacing(string $markup, array $all, array &$notes): void
+    {
+        foreach ($all as $node) {
+            if ($node->selfClosing
+                || (!self::is($node, 'group') && !self::is($node, 'columns')
+                    && !self::is($node, 'column') && !self::is($node, 'cover'))) {
+                continue;
+            }
+            $style = $node->attrs->style ?? null;
+            if ($style !== null && !$style instanceof \stdClass) {
+                continue;
+            }
+            $tagHtml = self::wrapperTag($markup, $node->start + $node->len);
+            $styleAttr = $tagHtml === null ? null : self::tagAttribute($tagHtml, 'style');
+            if ($styleAttr === null) {
+                continue;
+            }
+
+            foreach (explode(';', $styleAttr[0]) as $segment) {
+                $colon = strpos($segment, ':');
+                if ($colon === false
+                    || preg_match('/\A(padding|margin)-(top|bottom)\z/', strtolower(trim(substr($segment, 0, $colon))), $m) !== 1) {
+                    continue;
+                }
+                $value = trim(substr($segment, $colon + 1));
+                if ($value === '') {
+                    continue;
+                }
+                [, $property, $side] = $m;
+                if ($style === null) {
+                    $style = $node->attrs->style = new \stdClass();
+                }
+                $spacing = $style->spacing ??= new \stdClass();
+                if (!$spacing instanceof \stdClass) {
+                    continue;
+                }
+                $box = $spacing->{$property} ??= new \stdClass();
+                if (!$box instanceof \stdClass || property_exists($box, $side)) {
+                    continue;
+                }
+                $box->{$side} = self::blockSpacingValue($value);
+                $node->dirty = true;
+                $notes[] = "wp:{$node->name} carried {$property}-{$side} only in its inline HTML — mirrored it into style.spacing.{$property}.{$side} so re-serialization keeps the declared rhythm";
+            }
+        }
+    }
 
     /**
      * A top-level group with no "layout" attribute is flow, not constrained:
@@ -365,6 +500,103 @@ final class LayoutFixer
 
     // ── Block-grammar parsing / rendering ────────────────────────────────
 
+    /** One block-comment delimiter: closer flag, name, attrs JSON, void flag. */
+    private const TOKEN_RE = '/<!--\s*(\/)?wp:([a-z][a-z0-9_\/-]*)\s*(\{.*?\})?\s*(\/)?-->/s';
+
+    /**
+     * Repair attribute JSON whose object closes early: a stray `}` splits the
+     * opener into a valid prefix and dangling members (tbilisi24 wrote
+     * `{"style":{...,"padding":{...}}},"layout":{...}}`), so json_decode fails,
+     * this fixer skips the whole file, and the Node fixer erases EVERY
+     * attribute of the block — the fatal rhythm drop plus silent losses.
+     * The failure is mechanical, so the repair can be too: while the payload
+     * is invalid and a closer returns the nesting depth to zero with content
+     * still remaining (or goes below zero), delete that one closer and try
+     * again. The rewrite is kept only when the result decodes to an object;
+     * anything less clear-cut stays untouched for the gate to reject.
+     *
+     * @param string[] $notes
+     */
+    private static function repairPrematurelyClosedAttributes(string $markup, array &$notes): string
+    {
+        if (preg_match_all(self::TOKEN_RE, $markup, $tokens, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
+            return $markup;
+        }
+        for ($i = count($tokens) - 1; $i >= 0; $i--) {
+            $t = $tokens[$i];
+            if (!isset($t[3]) || $t[3][1] === -1 || $t[3][0] === '') {
+                continue;
+            }
+            $json = $t[3][0];
+            if (json_decode($json) instanceof \stdClass) {
+                continue;
+            }
+            $repaired = self::withoutPrematureClosers($json);
+            if ($repaired === null) {
+                continue;
+            }
+            $markup = substr_replace($markup, $repaired, $t[3][1], strlen($json));
+            $notes[] = "wp:{$t[2][0]} attributes closed their JSON object early — removed the stray closer(s) so the declared attributes parse instead of being erased";
+        }
+        return $markup;
+    }
+
+    /** The repaired JSON payload, or null when no safe single-char fix exists. */
+    private static function withoutPrematureClosers(string $json): ?string
+    {
+        for ($deletions = 0; $deletions < 2; $deletions++) {
+            $offset = self::prematureCloserOffset($json);
+            if ($offset === null) {
+                return null;
+            }
+            $json = substr_replace($json, '', $offset, 1);
+            if (json_decode($json) instanceof \stdClass) {
+                return $json;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Byte offset of the first closer that returns brace/bracket depth to zero
+     * while non-whitespace content remains, or takes it negative. Null when
+     * the payload balances (its invalidity is not this shape).
+     */
+    private static function prematureCloserOffset(string $json): ?int
+    {
+        $depth = 0;
+        $inString = false;
+        $escaped = false;
+        $length = strlen($json);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $json[$i];
+            if ($inString) {
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ($char === '\\') {
+                    $escaped = true;
+                } elseif ($char === '"') {
+                    $inString = false;
+                }
+                continue;
+            }
+            if ($char === '"') {
+                $inString = true;
+            } elseif ($char === '{' || $char === '[') {
+                $depth++;
+            } elseif ($char === '}' || $char === ']') {
+                $depth--;
+                if ($depth < 0) {
+                    return $i;
+                }
+                if ($depth === 0 && trim(substr($json, $i + 1)) !== '') {
+                    return $i;
+                }
+            }
+        }
+        return null;
+    }
+
     /**
      * Parse markup into a tree of block nodes. Nodes carry the byte range of
      * their opening comment so edits can be spliced back without touching the
@@ -377,8 +609,7 @@ final class LayoutFixer
      */
     private static function parse(string $markup): ?array
     {
-        $re = '/<!--\s*(\/)?wp:([a-z][a-z0-9_\/-]*)\s*(\{.*?\})?\s*(\/)?-->/s';
-        if (preg_match_all($re, $markup, $tokens, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
+        if (preg_match_all(self::TOKEN_RE, $markup, $tokens, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
             return null;
         }
         $roots = [];
@@ -437,9 +668,15 @@ final class LayoutFixer
         $dirty = array_values(array_filter($all, static fn (object $n): bool => $n->dirty));
         usort($dirty, static fn (object $a, object $b): int => $b->start <=> $a->start);
         foreach ($dirty as $n) {
+            // `--` must not appear raw inside an HTML comment; escape it the
+            // way Gutenberg's serializer (and SectionRhythm::encodeAttrs) does.
             $json = get_object_vars($n->attrs) === []
                 ? ''
-                : ' ' . json_encode($n->attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                : ' ' . str_replace(
+                    '--',
+                    '\\u002d\\u002d',
+                    json_encode($n->attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                );
             $comment = '<!-- wp:' . $n->name . $json . ($n->selfClosing ? ' /-->' : ' -->');
             $markup = substr_replace($markup, $comment, $n->start, $n->len);
         }
@@ -534,6 +771,58 @@ final class LayoutFixer
             }
         }
         return false;
+    }
+
+    /** Convert a rendered preset variable back to block-attribute syntax. */
+    private static function blockSpacingValue(string $value): string
+    {
+        return preg_match('/^var\(--wp--preset--spacing--([a-z0-9_-]+)\)$/', $value, $match) === 1
+            ? "var:preset|spacing|{$match[1]}"
+            : $value;
+    }
+
+    /**
+     * The first HTML element immediately following a block opener (mirrors
+     * SectionRhythm::wrapperTag — this class must stay usable on markup that
+     * pass rejects, so it keeps its own copy of the scanner).
+     */
+    private static function wrapperTag(string $markup, int $searchOffset): ?string
+    {
+        $rest = substr($markup, $searchOffset);
+        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?=[\x20\t\r\n\f\/>])/', $rest, $start) !== 1) {
+            return null;
+        }
+
+        $quote = null;
+        $length = strlen($rest);
+        for ($i = strlen($start[0]); $i < $length; $i++) {
+            $char = $rest[$i];
+            if ($quote !== null) {
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                continue;
+            }
+            if ($char === '>') {
+                return substr($rest, 0, $i + 1);
+            }
+        }
+        return null;
+    }
+
+    /** @return array{string,int}|null attribute value and its byte offset inside the tag */
+    private static function tagAttribute(string $tagHtml, string $name): ?array
+    {
+        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
+            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
+        if (preg_match($pattern, $tagHtml, $match, PREG_OFFSET_CAPTURE) !== 1) {
+            return null;
+        }
+        return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
     }
 
     /**
