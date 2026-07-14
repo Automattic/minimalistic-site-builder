@@ -382,8 +382,14 @@ final class PageStylesStep implements Step
         if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $stripped) === 1) {
             $problems[] = 'resource-loading CSS functions (url(), image-set(), image(), cross-fade(), …) are not allowed';
         }
-        if (preg_match('/(?<![-\w])opacity\s*:\s*0(?:\.0+)?\s*(?:!important\s*)?(?:;|$)/i', $stripped) === 1) {
-            $problems[] = 'opacity:0 hides generated content';
+        // Parse opacity values instead of pattern-matching literal zeros:
+        // 0%, .0 and calc(0) hide content just as well as 0.
+        if (preg_match_all('/(?<![-\w])opacity\s*:\s*([^;{}]+)/i', $stripped, $opacities) > 0) {
+            foreach ($opacities[1] as $value) {
+                if (CustomMotionStep::hidesContent($value)) {
+                    $problems[] = 'opacity must be a plain value above zero (hidden content): ' . trim($value);
+                }
+            }
         }
         if (preg_match('/(?<![-\w])visibility\s*:\s*hidden\s*(?:!important\s*)?(?:;|$)/i', $stripped) === 1) {
             $problems[] = 'visibility:hidden hides generated content';

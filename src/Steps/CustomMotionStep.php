@@ -28,8 +28,9 @@ use Automattic\SiteBuild\Step;
  * The generated CSS gets a relaxed version of the page-styles validation:
  * @keyframes ARE allowed (names must start with `custom-motion-`), but every
  * selector must live under `.custom-motion`, nothing may hide content at rest
- * (no display:none / visibility:hidden anywhere; opacity:0 only inside
- * keyframes), no resource-loading value forms (url(), image-set(), …) or
+ * (no display:none / visibility:hidden anywhere; zero opacity only in a
+ * `from`/`0%` keyframe step, so an entrance can start invisible but nothing
+ * can END hidden), no resource-loading value forms (url(), image-set(), …) or
  * @import/@font-face, and the whole block is capped.
  * Rejected CSS is logged and skipped — the build never fails over decoration.
  */
@@ -185,16 +186,45 @@ final class CustomMotionStep implements Step
             }
         }
 
-        [$keyframeNames, $rules] = self::stripKeyframes($stripped);
+        [$keyframeNames, $rules, $keyframeBodies] = self::stripKeyframes($stripped);
         foreach ($keyframeNames as $name) {
             if (!str_starts_with($name, self::CLASS_NAME . '-')) {
                 $problems[] = "keyframe name must start with '" . self::CLASS_NAME . "-': {$name}";
             }
         }
 
-        // Outside keyframes an element must be visible at rest.
-        if (preg_match('/(?<![-\w])opacity\s*:\s*0(?:\.0+)?\s*(?:!important\s*)?(?:;|\})/i', $rules) === 1) {
-            $problems[] = 'opacity:0 outside @keyframes leaves content hidden at rest';
+        // Outside keyframes an element must be visible at rest. Parse the
+        // value instead of pattern-matching literal zeros: 0%, .0 and calc(0)
+        // all hide content just as well as 0.
+        if (preg_match_all('/(?<![-\w])opacity\s*:\s*([^;{}]+)/i', $rules, $opacities) > 0) {
+            foreach ($opacities[1] as $value) {
+                if (self::hidesContent($value)) {
+                    $problems[] = 'opacity outside @keyframes must be a plain value above zero: ' . trim($value);
+                }
+            }
+        }
+
+        // Inside keyframes, zero opacity is only ever the transient start of
+        // an entrance (`from`/`0%`). In any later step it can be the state a
+        // forwards/both fill parks the element in — invisible for good.
+        foreach ($keyframeBodies as $body) {
+            if (preg_match_all('/([^{}]+)\{([^{}]*)\}/', $body, $steps, PREG_SET_ORDER) === 0) {
+                continue;
+            }
+            foreach ($steps as $step) {
+                $selectors = array_map('trim', explode(',', strtolower($step[1])));
+                if (array_diff($selectors, ['from', '0%']) === []) {
+                    continue;
+                }
+                if (preg_match_all('/(?<![-\w])opacity\s*:\s*([^;{}]+)/i', $step[2], $opacities) > 0) {
+                    foreach ($opacities[1] as $value) {
+                        if (self::hidesContent($value)) {
+                            $problems[] = 'zero opacity in a non-start keyframe can leave content hidden: '
+                                . trim($step[1]) . ' { opacity: ' . trim($value) . ' }';
+                        }
+                    }
+                }
+            }
         }
 
         // Every remaining rule selector must live under the dedicated class.
@@ -217,20 +247,23 @@ final class CustomMotionStep implements Step
 
     /**
      * Remove @keyframes blocks (brace-aware — they nest) and collect their
-     * names, returning [names, css-without-keyframes]. Pure — unit-testable.
+     * names and bodies, returning [names, css-without-keyframes, bodies].
+     * Pure — unit-testable.
      *
-     * @return array{0: string[], 1: string}
+     * @return array{0: string[], 1: string, 2: string[]}
      */
     public static function stripKeyframes(string $css): array
     {
         $names = [];
+        $bodies = [];
         $out = '';
         $offset = 0;
         while (preg_match('/@keyframes\s+([\w-]+)\s*\{/i', $css, $m, PREG_OFFSET_CAPTURE, $offset) === 1) {
             $start = $m[0][1];
             $out .= substr($css, $offset, $start - $offset);
             $names[] = $m[1][0];
-            $i = $start + strlen($m[0][0]);
+            $bodyStart = $start + strlen($m[0][0]);
+            $i = $bodyStart;
             $depth = 1;
             $length = strlen($css);
             while ($i < $length && $depth > 0) {
@@ -241,10 +274,27 @@ final class CustomMotionStep implements Step
                 }
                 $i++;
             }
+            $bodies[] = substr($css, $bodyStart, max(0, $i - 1 - $bodyStart));
             $offset = $i;
         }
         $out .= substr($css, $offset);
-        return [$names, $out];
+        return [$names, $out, $bodies];
+    }
+
+    /**
+     * Whether an opacity value hides content: zero in any spelling (0, 0%,
+     * .0), or anything that cannot be proven to be a positive plain number
+     * (calc(), var(), garbage) — the validator fails closed. Shared with the
+     * page-styles validator, which enforces the same visible-at-rest rule.
+     */
+    public static function hidesContent(string $value): bool
+    {
+        $value = trim((string) preg_replace('/!important\s*$/i', '', trim($value)));
+        if (preg_match('/^(\d*\.?\d+)\s*(%?)$/', $value, $m) !== 1) {
+            return true;
+        }
+        $number = (float) $m[1];
+        return ($m[2] === '%' ? $number / 100 : $number) <= 0.0;
     }
 
     /** Strip a leading/trailing markdown code fence if the model added one. */

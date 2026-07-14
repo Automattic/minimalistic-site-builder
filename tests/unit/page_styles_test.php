@@ -95,6 +95,8 @@ test('validate rejects disallowed at-rules and url()', function () {
 test('validate rejects CSS that hides generated content', function () {
     foreach ([
         ".hover-reveal > :not(img) {\n    opacity: 0;\n}",
+        ".hover-reveal > :not(img) {\n    opacity: 0%;\n}",
+        ".hover-reveal > :not(img) {\n    opacity: calc(0);\n}",
         ".hover-reveal .caption {\n    visibility: hidden;\n}",
         ".hover-reveal .wp-block-image {\n    display: none;\n}",
     ] as $css) {

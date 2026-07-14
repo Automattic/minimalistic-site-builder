@@ -44,6 +44,13 @@ test('custom-motion validate keeps the hidden-content and scoping rules', functi
         'display none'              => ".custom-motion { display: none; }",
         'visibility hidden'         => ".custom-motion { visibility: hidden; }",
         'opacity 0 at rest'         => ".custom-motion { opacity: 0; }",
+        'opacity 0% at rest'        => ".custom-motion { opacity: 0%; }",
+        'opacity .0 at rest'        => ".custom-motion { opacity: .0; }",
+        'opacity calc(0) at rest'   => ".custom-motion { opacity: calc(0); }",
+        'exit animation ends hidden' => ".custom-motion { animation: custom-motion-out 1s forwards; }\n"
+            . "@keyframes custom-motion-out { from { opacity: 1; } to { opacity: 0; } }",
+        'mid-keyframe zero opacity' => ".custom-motion { animation: custom-motion-blink 1s both; }\n"
+            . "@keyframes custom-motion-blink { 0% { opacity: 1; } 50%, 100% { opacity: 0%; } }",
         'url()'                     => ".custom-motion { background: url(x.png); }",
         'image-set()'               => '.custom-motion { background-image: image-set("https://example.invalid/t.png" 1x); }',
         'prefixed image-set()'      => '.custom-motion { background-image: -webkit-image-set("https://example.invalid/t.png" 1x); }',
@@ -56,20 +63,26 @@ test('custom-motion validate keeps the hidden-content and scoping rules', functi
     foreach ($cases as $label => $css) {
         assert_true(CustomMotionStep::validate($css) !== [], $label);
     }
-    // opacity:0 INSIDE keyframes is the allowed exception (entrances).
+    // opacity:0 in a keyframe START is the allowed exception (entrances).
     assert_eq([], CustomMotionStep::validate(
         ".custom-motion { animation: custom-motion-in 1s both; }\n"
         . "@keyframes custom-motion-in { from { opacity: 0; } to { opacity: 1; } }"
     ));
+    assert_eq([], CustomMotionStep::validate(
+        ".custom-motion { animation: custom-motion-in 1s both; }\n"
+        . "@keyframes custom-motion-in { 0% { opacity: 0; } 100% { opacity: 1; } }"
+    ));
 });
 
-test('custom-motion stripKeyframes removes nested-brace blocks and collects names', function () {
-    [$names, $rest] = CustomMotionStep::stripKeyframes(
+test('custom-motion stripKeyframes removes nested-brace blocks and collects names and bodies', function () {
+    [$names, $rest, $bodies] = CustomMotionStep::stripKeyframes(
         ".custom-motion { color: inherit; }\n@keyframes custom-motion-a { 0% { opacity: 0; } 100% { opacity: 1; } }\n.custom-motion img { transform: none; }"
     );
     assert_eq(['custom-motion-a'], $names);
     assert_true(!str_contains($rest, 'opacity'), 'keyframe bodies removed');
     assert_contains('.custom-motion img', $rest, 'rules around the block survive');
+    assert_eq(1, count($bodies));
+    assert_contains('0% { opacity: 0; }', $bodies[0], 'body collected for the step-level checks');
 });
 
 test('custom-motion no-ops without an LLM call when no animation was requested', function () {
