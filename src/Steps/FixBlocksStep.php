@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Step 8 (deterministic): repair block-validation issues in generated markup.
@@ -103,7 +104,7 @@ final class FixBlocksStep implements Step
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $repaired = SectionsStep::constrainedPart($markup);
+            $repaired = GeneratedMarkup::constrainedPart($markup);
             if ($repaired !== $markup) {
                 $project->writeText('theme/' . $rel, $repaired);
             }
