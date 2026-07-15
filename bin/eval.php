@@ -75,7 +75,9 @@ foreach (SITES as $slug => $prompt) {
     }
 
     $problems = $error === null ? ThemeValidator::validate($project) : ['build failed before validation'];
-    $warnings = $error === null ? ThemeValidator::typographyWarnings($project) : [];
+    $warnings = $error === null
+        ? array_merge(ThemeValidator::typographyWarnings($project), ThemeValidator::layoutWarnings($project), ThemeValidator::planWarnings($project))
+        : [];
     $metrics = collect_metrics($project);
 
     $results[$slug] = [
@@ -125,7 +127,7 @@ function rebuild_report(): void
             'total'    => array_sum($timings),
             'error'    => null,
             'problems' => ThemeValidator::validate($project),
-            'warnings' => ThemeValidator::typographyWarnings($project),
+            'warnings' => array_merge(ThemeValidator::typographyWarnings($project), ThemeValidator::layoutWarnings($project), ThemeValidator::planWarnings($project)),
             'metrics'  => collect_metrics($project),
         ];
     }

@@ -31,6 +31,8 @@ use Automattic\SiteBuild\ProjectStore;
  * --no-screenshot.
  *
  * Options:
+ *   --multi-page    let each site plan inner pages beyond the homepage.
+ *                   Off by default: builds produce ONLY the landing page.
  *   --with-images   also generate the AI_IMAGE placeholders into real assets.
  *   --only=<slug>   build only the entry whose slug matches.
  *   --parallel=<n>  cap on concurrent builds (default: all entries at once).
@@ -48,15 +50,19 @@ use Automattic\SiteBuild\ProjectStore;
 require_once __DIR__ . '/../src/bootstrap.php';
 
 $withImages = false;
+$multiPage = false;
 $only = null;
 $serve = false;
 $screenshot = true;
 $parallel = 0; // 0 = no cap (all entries at once)
 $port = 9400;
+$provider = null;
 $file = repo_path('eval/theme-prompts.json');
 foreach (array_slice($argv, 1) as $a) {
     if ($a === '--with-images') { $withImages = true; }
+    elseif ($a === '--multi-page') { $multiPage = true; }
     elseif (str_starts_with($a, '--only=')) { $only = substr($a, 7); }
+    elseif (str_starts_with($a, '--provider=')) { $provider = substr($a, 11); }
     elseif (str_starts_with($a, '--parallel=')) { $parallel = max(1, (int) substr($a, 11)); }
     elseif (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
     elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
@@ -66,7 +72,19 @@ foreach (array_slice($argv, 1) as $a) {
     elseif ($a === '--screenshot') { $screenshot = true; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        exit(1);
+    }
+}
+
+// Validate --provider once up front and forward it to each child build.php, so
+// the whole demo set builds on one provider's model set. Per-step LLM_MODEL_*
+// env overrides still apply inside each child.
+if ($provider !== null) {
+    $provider = strtolower(trim($provider));
+    if (!\Automattic\SiteBuild\ModelConfig::hasProvider($provider)) {
+        fwrite(STDERR, "Unknown --provider '{$provider}'. Known: "
+            . implode(', ', \Automattic\SiteBuild\ModelConfig::providerNames()) . "\n");
         exit(1);
     }
 }
@@ -133,7 +151,9 @@ foreach ($entries as $i => $entry) {
             . ' ' . escapeshellarg($prompt)
             . ' --slug=' . escapeshellarg($project->slug())
             . ' --no-serve'
-            . ($withImages ? ' --with-images' : ''),
+            . ($provider !== null ? ' --provider=' . escapeshellarg($provider) : '')
+            . ($withImages ? ' --with-images' : '')
+            . ($multiPage ? ' --multi-page' : ''),
     ];
 }
 

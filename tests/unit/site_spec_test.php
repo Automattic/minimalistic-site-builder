@@ -8,11 +8,11 @@ use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /** @return array{0:Project,1:FakeLlm,2:string} */
-function make_sitespec_fixture(): array
+function make_sitespec_fixture(bool $multiPage = false): array
 {
     $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery', 'multi_page' => $multiPage]);
     return [$project, new FakeLlm(), $tmp];
 }
 
@@ -143,7 +143,7 @@ test('site-spec throws when language missing or implausible', function () {
 });
 
 test('site-spec normalizes the pages tree: slugs slugified and globally unique', function () {
-    [$project, $llm, $tmp] = make_sitespec_fixture();
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true);
     $llm->queueJson([
         'name' => 'Hearth & Crumb', 'language' => 'en',
         'pages' => [
@@ -164,6 +164,53 @@ test('site-spec normalizes the pages tree: slugs slugified and globally unique',
     assert_eq('Breads', $pages[1]['children'][0]['title']);
     assert_eq([], $pages[2]['children']);                      // non-array children dropped
     assert_eq('Hours and address', $pages[2]['purpose']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec without multi_page cuts the tree to the homepage and asks for one page', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(); // multi_page defaults to false
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        // The model disobeyed the one-page instruction — the flag must win.
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => [
+                ['title' => 'News', 'slug' => 'news', 'purpose' => 'Updates'],
+            ]],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'The menu', 'children' => []],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(1, count($pages));
+    assert_eq('home', $pages[0]['slug']);
+    assert_eq([], $pages[0]['children']);
+
+    // The rendered prompt must carry the one-page instruction, not the tree menu.
+    assert_contains('one-page site', $llm->calls[0]['prompt']);
+    assert_true(!str_contains($llm->calls[0]['prompt'], '1-6 top-level pages'), 'no multi-page scope in prompt');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec with multi_page keeps the tree and asks for it', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'The menu', 'children' => []],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(2, count($pages));
+    assert_eq('menu', $pages[1]['slug']);
+    assert_contains('1-6 top-level pages', $llm->calls[0]['prompt']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

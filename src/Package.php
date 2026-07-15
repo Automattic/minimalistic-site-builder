@@ -25,4 +25,10 @@ final class Package
     {
         return self::root() . '/bin/block-fixer/fix-templates.js';
     }
+
+    /** The static motion kit (motion.css, motion.js, profiles/) shipped into themes. */
+    public static function motionDir(): string
+    {
+        return self::root() . '/assets/motion';
+    }
 }

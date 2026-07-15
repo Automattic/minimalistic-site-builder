@@ -36,8 +36,9 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
 
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+page-plan', 'sections',
-        'collect-images', 'fix-blocks', 'assemble-pages', 'page-styles', 'fonts-php', 'finalize-theme',
+        'theme-json+page-plan', 'sections', 'section-rhythm',
+        'collect-images', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
+        'fonts-php', 'finalize-theme', 'validate-theme',
     ], $builder->pipeline()->stepIds());
     assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
     assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true), 'group member is a valid stop');

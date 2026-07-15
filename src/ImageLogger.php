@@ -122,8 +122,8 @@ final class ImageLogger
     /**
      * Render the full log file: a summary header (file, model, aspect ratio,
      * status, output), the spec fields that shaped the request (subject, page
-     * context, style), and finally the full prompt text (or, for a failed
-     * request, the error). Pure — unit-testable.
+     * context, style), the full prompt text exactly as sent to the API, and —
+     * for a failed request — the error last. Pure — unit-testable.
      *
      * @param array{model?:string,prompt?:string,aspect_ratio?:string,sample_image_size?:string,subject?:string,page_context?:string,style?:string,image_grade?:string} $request
      * @param array{path?:string,bytes?:int} $result
@@ -182,9 +182,12 @@ final class ImageLogger
             }
         }
 
-        $tail = $error !== null
-            ? [$sub, 'ERROR', $sub, $error]
-            : [$sub, 'PROMPT', $sub, (string) ($request['prompt'] ?? '')];
+        // The prompt is logged verbatim — exactly the text sent to the API —
+        // whether the request succeeded or failed; a failure appends its error.
+        $tail = [$sub, 'PROMPT', $sub, (string) ($request['prompt'] ?? '')];
+        if ($error !== null) {
+            $tail = array_merge($tail, [$sub, 'ERROR', $sub, $error]);
+        }
 
         return implode("\n", array_merge(
             [$header],

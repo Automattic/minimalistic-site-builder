@@ -109,10 +109,18 @@ final class ScaffoldPluginStep implements Step
             // only after this import, never at build time.
             $image_map = builder_content_import_images($state['attachment_ids']);
 
-            // The markup is trusted build output; bypass kses so block comments
-            // survive even when activation runs without a privileged user
-            // (WP-CLI, a Playground blueprint step).
-            kses_remove_filters();
+            // The page markup is generated content, not user input from this
+            // site — but kses would mangle its block comments when activation
+            // runs without an unfiltered_html user (WP-CLI, a Playground
+            // blueprint step). So ONLY the post-content kses filter is
+            // suspended around the inserts (titles, excerpts, and everything
+            // else stay filtered), and every page passes through
+            // builder_content_sanitize() below — the same script-stripping
+            // rules the build applies — before it is stored.
+            $kses_filtered = has_filter('content_save_pre', 'wp_filter_post_kses') !== false;
+            if ($kses_filtered) {
+                remove_filter('content_save_pre', 'wp_filter_post_kses');
+            }
 
             $ids = array();
             $front_id = 0;
@@ -133,6 +141,7 @@ final class ScaffoldPluginStep implements Step
                     trailingslashit(get_stylesheet_directory_uri()) . 'assets/',
                     $content
                 );
+                $content = builder_content_sanitize($content);
 
                 $parent_slug = isset($page['parent']) ? (string) $page['parent'] : '';
                 $id = wp_insert_post(array(
@@ -157,7 +166,9 @@ final class ScaffoldPluginStep implements Step
                 }
             }
 
-            kses_init_filters();
+            if ($kses_filtered) {
+                add_filter('content_save_pre', 'wp_filter_post_kses');
+            }
 
             if ($front_id) {
                 update_option('show_on_front', 'page');
@@ -272,6 +283,28 @@ final class ScaffoldPluginStep implements Step
                 $content = str_replace($placeholder, (string) $image['url'], $content);
             }
             return $content;
+        }
+
+        /**
+         * Deterministic strip of script-capable markup: script/embed elements,
+         * inline event handlers, and executable URL schemes. The build applies
+         * the same rules (MarkupSanitizer) to every generated part; repeating
+         * them here keeps seeding safe if a page file was edited between build
+         * and activation. wp_kses() is not usable for this — it mangles the
+         * block comments the content is made of.
+         */
+        function builder_content_sanitize($content) {
+            $content = (string) preg_replace('#<script\b[^>]*>.*?</script\s*>#is', '', $content);
+            $content = (string) preg_replace('#</?(script|iframe|object|embed|applet|base)\b[^>]*>#i', '', $content);
+            // Event handlers are matched only inside tags so prose is never touched.
+            $content = (string) preg_replace_callback('#<[a-z][^>]*>#i', function ($m) {
+                return (string) preg_replace('#\s+on[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', $m[0]);
+            }, $content);
+            return (string) preg_replace(
+                '#\b(href|src|xlink:href|formaction|action)\s*=\s*(["\'])\s*(?:javascript|vbscript|data)\s*:[^"\']*\2#i',
+                '$1=$2#$2',
+                $content
+            );
         }
 
         /**

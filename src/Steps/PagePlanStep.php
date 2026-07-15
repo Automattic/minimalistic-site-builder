@@ -19,8 +19,9 @@ use Automattic\SiteBuild\PromptRenderer;
  * Input:  meta.json (user prompt) + siteSpec.json (with its `pages` tree).
  * Output: pages.json — { "pages": [ { slug, title, path, front, parent,
  *         menu_order, purpose, sections: [ { slug, title, type, purpose,
- *         content_notes, layout_archetype, background, handoff } ] } ] },
- *         a FLAT list in display order, parents before children.
+ *         content_notes, layout_archetype, background, vertical_density,
+ *         handoff } ] } ] }, a FLAT list in display order, parents before
+ *         children.
  *
  * Each page's plan enriches the spec's purpose into concrete section briefs,
  * which the sections step then generates independently and in parallel and
@@ -47,19 +48,42 @@ final class PagePlanStep implements ConcurrentStep
     /** Background treatments — must match page-plan.md. */
     public const BACKGROUNDS = ['base', 'tinted', 'contrast', 'image'];
 
+    /** Page-owned outer spacing roles — must match page-plan.md. */
+    public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
+
     /** The most default-looking archetype is capped so it can't dominate a page. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
+
+    /** Whitespace-led pauses are accents, not a page's default cadence. */
+    private const MAX_SPACIOUS_SECTIONS = 2;
+
+    /**
+     * Content-dense section roles must not compound their height with the
+     * largest edge. "type" is free-form model output, so these are matched as
+     * lowercase word tokens ("Gallery" and "image-gallery" both count), not
+     * as exact strings.
+     */
+    private const DENSE_SECTION_TYPES = ['features', 'services', 'gallery', 'pricing', 'team', 'faq'];
 
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
         . ' energy: a strong hero, at least 3 unique, image-rich content sections, and a compelling closing CTA.'
         . " Use the spec's \"sections\" list as a starting point, but improve it: add, reorder, split, or rename"
-        . ' sections so the page is richer and flows well. Aim for 5 to 8 sections.';
+        . " sections so the page is richer and flows well. Let the design direction's signature device and mood"
+        . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
 
     private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections.'
-        . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero),'
+        . ' Open with a COMPACT page hero that orients the visitor on this page (not a second homepage hero —'
+        . ' never "full-bleed-cover" as the FIRST section; an image-led opening uses background "image" on a'
+        . ' compact archetype instead),'
         . " cover only THIS page's purpose (don't rebuild content that lives on other pages — see SITE PAGES),"
-        . ' and close with a next step that points onward.';
+        . " and close with a next step that points onward. The homepage already teases the site's topics (the"
+        . " spec's \"sections\" list): where this page's subject matter overlaps one of those teasers, plan the"
+        . ' DEEPER destination the teaser links to — different framing, more specific copy points, and imagery'
+        . ' subjects the homepage band would not have used — never a re-plan of the teaser itself. Let the'
+        . " design direction's signature device and mood inform the section choices here too, and remember the"
+        . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
+        . ' background the site chrome can sit on.';
 
     public function __construct(
         private Llm $llm,
@@ -110,25 +134,32 @@ final class PagePlanStep implements ConcurrentStep
         $out = [];
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
+            $front = (bool) $page['front'];
             $plan = $results[$slug] ?? null;
             if (!is_array($plan)) {
                 throw new \RuntimeException("page-plan: missing model output for page '{$slug}'");
             }
 
             try {
-                $sections = self::normalize($plan['sections'] ?? null);
+                $sections = self::normalize($plan['sections'] ?? null, $front);
                 if ($sections === []) {
                     throw new \RuntimeException(
                         "page-plan: page '{$slug}' has no sections — return the full JSON object with a non-empty \"sections\" array"
                     );
                 }
             } catch (\RuntimeException $e) {
-                // The art-direction rules (adjacency, enums, card-grid cap) are
-                // creative constraints the model occasionally violates. Re-ask
-                // ONCE per page with the specific rejections; a still-invalid
-                // repair aborts the build.
+                // The art-direction rules (adjacency, enums, card-grid cap,
+                // interior opening) are creative constraints the model
+                // occasionally violates. Re-ask ONCE per page with the
+                // specific rejections; if the repair still breaks the variety
+                // rules, reassign the offending archetypes mechanically
+                // instead of aborting the build.
                 $repaired = $this->repair($project, $slug, $plan, $e->getMessage());
-                $sections = self::normalize($repaired['sections'] ?? null);
+                try {
+                    $sections = self::normalize($repaired['sections'] ?? null, $front);
+                } catch (\RuntimeException $stillInvalid) {
+                    $sections = self::normalize(self::repairVariety($repaired['sections'] ?? null, $front), $front);
+                }
                 if ($sections === []) {
                     throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
                 }
@@ -155,7 +186,10 @@ final class PagePlanStep implements ConcurrentStep
             . json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
             . "\n\nIT WAS REJECTED FOR THESE REASONS:\n{$errors}\n"
             . "\nReturn the corrected full JSON object. Fix EVERY rejection above. "
-            . 'If you change a section\'s layout_archetype, background, or position, also update its content_notes, '
+            . 'For an adjacent-duplicate rejection, change only ONE of the two sections, and re-check the whole '
+            . 'corrected list top-to-bottom against every rule before returning — a repair that introduces a NEW '
+            . 'violation is rejected too. '
+            . 'If you change a section\'s layout_archetype, background, vertical_density, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
 
@@ -170,10 +204,12 @@ final class PagePlanStep implements ConcurrentStep
     /**
      * Flatten the spec's page tree into display order: depth-first, parents
      * before children, the FIRST page marked as the front page. Paths follow
-     * WordPress page permalinks ("/", "/menu/", "/menu/breads/"); menu_order
-     * steps by 10 so seeded pages sort — and wp:page-list renders — in plan
-     * order. A spec without pages degrades to a single homepage. Pure —
-     * unit-testable.
+     * WordPress page permalinks ("/", "/menu/", "/menu/breads/") — including
+     * for children of the front page, whose hierarchical URIs WordPress still
+     * builds from the front page's post_name ("/home/visit/", never
+     * "/visit/"). menu_order steps by 10 so seeded pages sort — and
+     * wp:page-list renders — in plan order. A spec without pages degrades to
+     * a single homepage. Pure — unit-testable.
      *
      * @param array<mixed> $spec
      * @return array<int,array<string,mixed>>
@@ -210,7 +246,11 @@ final class PagePlanStep implements ConcurrentStep
                 $order++;
 
                 if (is_array($page['children'] ?? null) && $page['children'] !== []) {
-                    $walk($page['children'], $slug, $front ? '/' : $path);
+                    // The front page's path is "/" but its children still
+                    // resolve under its real slug: the seeder parents them to
+                    // the Home page, and get_page_uri() prepends every
+                    // ancestor's post_name, front-page status notwithstanding.
+                    $walk($page['children'], $slug, $front ? "/{$slug}/" : $path);
                 }
             }
         };
@@ -256,16 +296,19 @@ final class PagePlanStep implements ConcurrentStep
      * Validate one page's section list and force unique, file-safe slugs.
      * Each section keeps its model-provided fields; missing optional fields
      * default benignly so the sections + assemble steps can rely on the keys.
-     * The art-direction fields (layout_archetype, background, handoff) are
-     * strict: unknown values, a missing handoff, adjacent duplicate
-     * archetypes, or too many card grids are collected and thrown together in
-     * ONE message, so the single repair call sees every violation at once.
-     * Pure — unit-testable.
+     * The art-direction fields (layout_archetype, background,
+     * vertical_density, handoff) are strict: unknown values, a missing
+     * handoff, adjacent duplicate archetypes, too many card grids, or an
+     * interior page opening at homepage-cover scale are collected and thrown
+     * together in ONE message, so the single repair call sees every violation
+     * at once. Pure — unit-testable.
      *
      * @param mixed $raw
+     * @param bool $front whether the page is the front page (interior pages
+     *                    must not OPEN with a full-bleed cover)
      * @return array<int,array<string,mixed>>
      */
-    public static function normalize($raw): array
+    public static function normalize($raw, bool $front = true): array
     {
         if (!is_array($raw)) {
             return [];
@@ -302,6 +345,16 @@ final class PagePlanStep implements ConcurrentStep
                 $errors[] = "page-plan: section '{$slug}' has invalid background '{$background}' — use one of: "
                     . implode(', ', self::BACKGROUNDS);
             }
+            $verticalDensity = trim((string) ($section['vertical_density'] ?? ''));
+            if (!in_array($verticalDensity, self::VERTICAL_DENSITIES, true)) {
+                $errors[] = "page-plan: section '{$slug}' has invalid vertical_density '{$verticalDensity}' — use one of: "
+                    . implode(', ', self::VERTICAL_DENSITIES);
+            }
+            $type = trim((string) ($section['type'] ?? 'content'));
+            if ($verticalDensity === 'spacious' && self::isDenseType($type)) {
+                $errors[] = "page-plan: section '{$slug}' is content-dense ({$type}, {$archetype}) — "
+                    . "use vertical_density 'compact' or 'standard', not 'spacious'";
+            }
             $handoff = trim((string) ($section['handoff'] ?? ''));
             if ($handoff === '') {
                 $errors[] = "page-plan: section '{$slug}' is missing 'handoff' — describe what sits immediately above and below it";
@@ -310,13 +363,25 @@ final class PagePlanStep implements ConcurrentStep
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
-                'type'             => trim((string) ($section['type'] ?? 'content')),
+                'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),
                 'layout_archetype' => $archetype,
                 'background'       => $background,
+                'vertical_density' => $verticalDensity,
                 'handoff'          => $handoff,
             ];
+        }
+
+        // An interior page that opens with a full-viewport cover is a second
+        // homepage, not an inner page (the prompt demands a COMPACT opening).
+        // The escape hatch for a deliberately image-led opening is explicit:
+        // background "image" on any compact archetype renders a full-bleed
+        // image band without homepage-hero scale.
+        if (!$front && ($out[0]['layout_archetype'] ?? '') === 'full-bleed-cover') {
+            $errors[] = "page-plan: the FIRST section '{$out[0]['slug']}' of this INTERIOR page uses "
+                . "layout_archetype 'full-bleed-cover' — interior pages open with a COMPACT hero, not a second "
+                . 'homepage hero; pick a compact archetype (use background "image" if the opening should be image-led)';
         }
 
         // Report every violation at once so the single repair call can fix them all.
@@ -328,10 +393,108 @@ final class PagePlanStep implements ConcurrentStep
     }
 
     /**
+     * Last-resort mechanical fix for the variety rules on a raw section list:
+     * an interior page's leading full-bleed cover, excess equal-card-grids,
+     * and the later section of each adjacent duplicate pair are reassigned to
+     * the first archetype that differs from both neighbors (never a card
+     * grid, so the cap holds and no new grids appear); spacious pauses on
+     * content-dense sections, adjacent to another pause, or beyond the cap
+     * are demoted to 'standard'. The reassigned section's prose
+     * (content_notes, handoff) may then lag its assignment slightly — an
+     * accepted trade against aborting the whole build. Only touches VALID
+     * values; enum and handoff errors still reject the plan in normalize().
+     * Pure — unit-testable.
+     *
+     * @param mixed $raw
+     * @param bool $front whether the page is the front page
+     * @return array<int,array<string,mixed>>
+     */
+    public static function repairVariety($raw, bool $front = true): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $sections = array_values(array_filter($raw, 'is_array'));
+        $archetypes = array_map(
+            fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
+            $sections
+        );
+
+        $pick = function (int $i, string ...$exclude) use (&$archetypes): string {
+            foreach (self::ARCHETYPES as $candidate) {
+                if ($candidate !== 'equal-card-grid'
+                    && !in_array($candidate, $exclude, true)
+                    && $candidate !== ($archetypes[$i - 1] ?? null)
+                    && $candidate !== ($archetypes[$i + 1] ?? null)
+                ) {
+                    return $candidate;
+                }
+            }
+            return $archetypes[$i]; // unreachable: 6 non-grid archetypes vs 2 neighbors + 1 exclusion
+        };
+
+        // Interior-opening pass: normalize() rejects an interior page whose
+        // first section is a full-bleed cover, so demote it to a compact
+        // archetype before the variety passes run.
+        if (!$front && ($archetypes[0] ?? '') === 'full-bleed-cover') {
+            $archetypes[0] = $pick(0, 'full-bleed-cover');
+        }
+
+        // Cap pass: keep the first MAX card grids, reassign the rest.
+        $grids = 0;
+        foreach ($archetypes as $i => $archetype) {
+            if ($archetype === 'equal-card-grid' && ++$grids > self::MAX_EQUAL_CARD_GRIDS) {
+                $archetypes[$i] = $pick($i);
+            }
+        }
+
+        // Adjacency pass, left to right, judging only valid archetypes (like
+        // varietyErrors). $pick avoids both neighbors, so a fix never breaks
+        // the pair behind it or pre-duplicates the one ahead.
+        foreach ($archetypes as $i => $archetype) {
+            if ($i > 0 && $archetype === $archetypes[$i - 1]
+                && in_array($archetype, self::ARCHETYPES, true)
+            ) {
+                $archetypes[$i] = $pick($i);
+            }
+        }
+
+        foreach ($archetypes as $i => $archetype) {
+            $sections[$i]['layout_archetype'] = $archetype;
+        }
+
+        // Density passes, mirroring the varietyErrors rules: demote a
+        // spacious pause on a content-dense section, the later of two
+        // adjacent pauses, and any pause beyond the page cap to 'standard'.
+        // Only valid 'spacious' values are touched; enum errors still reject.
+        $densities = array_map(
+            fn (array $s) => trim((string) ($s['vertical_density'] ?? '')),
+            $sections
+        );
+        $spacious = 0;
+        foreach ($densities as $i => $density) {
+            if ($density !== 'spacious') {
+                continue;
+            }
+            if (self::isDenseType(trim((string) ($sections[$i]['type'] ?? 'content')))
+                || ($i > 0 && $densities[$i - 1] === 'spacious')
+                || ++$spacious > self::MAX_SPACIOUS_SECTIONS
+            ) {
+                $densities[$i] = 'standard';
+            }
+        }
+        foreach ($densities as $i => $density) {
+            $sections[$i]['vertical_density'] = $density;
+        }
+        return $sections;
+    }
+
+    /**
      * The page-level variety violations of the rules the prompt states: no
-     * archetype on two adjacent sections, and the equal card grid at most twice
-     * per page. Adjacency is only judged between VALID archetypes so an enum
-     * error above doesn't cascade into a misleading adjacency error too.
+     * archetype on two adjacent sections, the equal card grid at most twice
+     * per page, and no adjacent / excessive spacious-density pauses. Adjacency
+     * is only judged between VALID values so an enum error above doesn't
+     * cascade into a misleading adjacency error too.
      *
      * @param array<int,array<string,mixed>> $sections
      * @return string[]
@@ -350,6 +513,10 @@ final class PagePlanStep implements ConcurrentStep
                 $errors[] = "page-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
                     . "layout_archetype '{$section['layout_archetype']}' — adjacent sections must use different archetypes";
             }
+            if ($section['vertical_density'] === 'spacious' && $prev['vertical_density'] === 'spacious') {
+                $errors[] = "page-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
+                    . "vertical_density 'spacious' — spacious pauses must be isolated";
+            }
         }
 
         $grids = count(array_filter($sections, fn (array $s) => $s['layout_archetype'] === 'equal-card-grid'));
@@ -357,6 +524,19 @@ final class PagePlanStep implements ConcurrentStep
             $errors[] = "page-plan: 'equal-card-grid' is used {$grids} times — use it at most "
                 . self::MAX_EQUAL_CARD_GRIDS . ' times per page and vary the other sections';
         }
+
+        $spacious = count(array_filter($sections, fn (array $s) => $s['vertical_density'] === 'spacious'));
+        if ($spacious > self::MAX_SPACIOUS_SECTIONS) {
+            $errors[] = "page-plan: vertical_density 'spacious' is used {$spacious} times — use it at most "
+                . self::MAX_SPACIOUS_SECTIONS . ' times per page and use standard/compact elsewhere';
+        }
         return $errors;
+    }
+
+    /** Word-token match against DENSE_SECTION_TYPES for free-form model types. */
+    private static function isDenseType(string $type): bool
+    {
+        $tokens = preg_split('/[^a-z]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return array_intersect($tokens, self::DENSE_SECTION_TYPES) !== [];
     }
 }

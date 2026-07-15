@@ -22,6 +22,7 @@ function plan_section(array $overrides = []): array
         'type'             => 'hero',
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
+        'vertical_density' => 'standard',
         'handoff'          => 'Sits between the site header above and the base-background about split below.',
     ], $overrides);
 }
@@ -86,6 +87,71 @@ test('PagePlanStep::normalize rejects a missing handoff', function () {
     }, 'handoff');
 });
 
+test('PagePlanStep::normalize requires a known vertical density', function () {
+    assert_throws(function () {
+        PagePlanStep::normalize([plan_section(['vertical_density' => 'enormous'])]);
+    }, 'invalid vertical_density');
+
+    assert_throws(function () {
+        $section = plan_section();
+        unset($section['vertical_density']);
+        PagePlanStep::normalize([$section]);
+    }, 'missing vertical_density');
+});
+
+test('PagePlanStep::normalize rations spacious density across the page', function () {
+    assert_throws(function () {
+        PagePlanStep::normalize([
+            plan_section(['slug' => 'one', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'two', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
+        ]);
+    }, 'adjacent spacious sections must be rejected');
+
+    assert_throws(function () {
+        PagePlanStep::normalize([
+            plan_section(['slug' => 'one', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'two', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'standard']),
+            plan_section(['slug' => 'three', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'four', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'compact']),
+            plan_section(['slug' => 'five', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        ]);
+    }, 'more than two spacious sections must be rejected');
+});
+
+test('PagePlanStep::normalize rejects spacious density for content-dense sections', function () {
+    foreach ([
+        ['type' => 'gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'features', 'layout_archetype' => 'offset-grid'],
+        ['type' => 'services', 'layout_archetype' => 'equal-card-grid'],
+        ['type' => 'faq', 'layout_archetype' => 'centered-stack'],
+        // "type" is free-form model output: capitalization and compound
+        // spellings still name the dense role.
+        ['type' => 'Gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'image-gallery', 'layout_archetype' => 'offset-grid'],
+        ['type' => 'Pricing Table', 'layout_archetype' => 'centered-stack'],
+    ] as $dense) {
+        $message = '';
+        try {
+            PagePlanStep::normalize([
+                plan_section(array_merge($dense, ['vertical_density' => 'spacious'])),
+            ]);
+        } catch (RuntimeException $e) {
+            $message = $e->getMessage();
+        }
+        assert_contains('content-dense', $message);
+        assert_contains("not 'spacious'", $message);
+    }
+
+    $shortCta = PagePlanStep::normalize([
+        plan_section([
+            'type' => 'cta',
+            'layout_archetype' => 'mixed-width-editorial',
+            'vertical_density' => 'spacious',
+        ]),
+    ]);
+    assert_eq('spacious', $shortCta[0]['vertical_density'], 'short editorial CTA may deliberately breathe');
+});
+
 test('PagePlanStep::normalize rejects adjacent duplicate archetypes', function () {
     assert_throws(function () {
         PagePlanStep::normalize([
@@ -133,6 +199,46 @@ test('PagePlanStep::normalize does not report adjacency between invalid archetyp
     }
 });
 
+test('PagePlanStep::normalize rejects an interior page opening with a full-bleed cover', function () {
+    try {
+        PagePlanStep::normalize([
+            plan_section(), // full-bleed-cover first
+            plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        ], front: false);
+        assert_true(false, 'expected the interior plan to be rejected');
+    } catch (RuntimeException $e) {
+        assert_contains('INTERIOR page', $e->getMessage());
+        assert_contains('full-bleed-cover', $e->getMessage());
+        assert_contains('COMPACT', $e->getMessage());
+    }
+});
+
+test('PagePlanStep::normalize allows a full-bleed cover opening on the front page and deeper in interior pages', function () {
+    // Front page: cover opening is the point of a homepage hero.
+    assert_eq(2, count(PagePlanStep::normalize([
+        plan_section(),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ], front: true)));
+    // Interior page: a cover is only banned as the OPENING section.
+    assert_eq(2, count(PagePlanStep::normalize([
+        plan_section(['slug' => 'intro', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'gallery-band']),
+    ], front: false)));
+});
+
+test('PagePlanStep::repairVariety demotes an interior page\'s leading full-bleed cover', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ], front: false);
+
+    assert_true($sections[0]['layout_archetype'] !== 'full-bleed-cover', 'leading cover reassigned');
+    PagePlanStep::normalize($sections, front: false); // the result passes interior validation
+    // The same plan on the FRONT page is left alone.
+    $front = PagePlanStep::repairVariety([plan_section()], front: true);
+    assert_eq('full-bleed-cover', $front[0]['layout_archetype']);
+});
+
 test('PagePlanStep::normalize caps equal-card-grid at twice per page', function () {
     assert_throws(function () {
         PagePlanStep::normalize([
@@ -143,6 +249,93 @@ test('PagePlanStep::normalize caps equal-card-grid at twice per page', function 
             plan_section(['slug' => 'd', 'layout_archetype' => 'equal-card-grid']),
         ]);
     }, 'equal-card-grid');
+});
+
+test('PagePlanStep::repairVariety reassigns the later section of each adjacent duplicate pair', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'asymmetric-split']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'asymmetric-split']),
+    ]);
+
+    assert_eq('centered-stack', $sections[0]['layout_archetype'], 'untouched');
+    assert_eq('asymmetric-split', $sections[1]['layout_archetype'], 'first of the pair kept');
+    assert_true($sections[2]['layout_archetype'] !== 'asymmetric-split', 'later section reassigned');
+    PagePlanStep::normalize($sections); // the result passes validation
+});
+
+test('PagePlanStep::repairVariety fixes a run of three duplicates without creating new ones', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'centered-stack']),
+    ]);
+
+    PagePlanStep::normalize($sections);
+    assert_eq('centered-stack', $sections[0]['layout_archetype']);
+    assert_eq('centered-stack', $sections[2]['layout_archetype'], 'non-adjacent repeat is allowed and kept');
+});
+
+test('PagePlanStep::repairVariety leaves a valid plan unchanged', function () {
+    $raw = [
+        plan_section(),
+        plan_section(['slug' => 'work', 'layout_archetype' => 'offset-grid']),
+        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack']),
+    ];
+    assert_eq(
+        array_column($raw, 'layout_archetype'),
+        array_column(PagePlanStep::repairVariety($raw), 'layout_archetype')
+    );
+});
+
+test('PagePlanStep::repairVariety reassigns equal-card-grids beyond the cap to non-grids', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'equal-card-grid']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'equal-card-grid']),
+        plan_section(['slug' => 'd', 'layout_archetype' => 'offset-grid']),
+        plan_section(['slug' => 'e', 'layout_archetype' => 'equal-card-grid']),
+    ]);
+
+    PagePlanStep::normalize($sections);
+    $grids = array_filter(array_column($sections, 'layout_archetype'), fn ($a) => $a === 'equal-card-grid');
+    assert_eq(2, count($grids), 'first two grids kept, the third reassigned');
+    assert_eq('equal-card-grid', $sections[0]['layout_archetype']);
+    assert_eq('equal-card-grid', $sections[2]['layout_archetype']);
+});
+
+test('PagePlanStep::repairVariety leaves invalid archetypes for normalize to reject', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'layout_archetype' => 'fancy-mosaic']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'fancy-mosaic']),
+    ]);
+    assert_eq(['fancy-mosaic', 'fancy-mosaic'], array_column($sections, 'layout_archetype'));
+});
+
+test('PagePlanStep::repairVariety demotes spacious pauses that break the density rules', function () {
+    // A dense section, an adjacent pause, and a pause beyond the cap all
+    // demote to 'standard'; the surviving pauses stay isolated.
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'type' => 'gallery', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'd', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'e', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+    ]);
+
+    assert_eq('standard', $sections[0]['vertical_density'], 'dense gallery demoted');
+    assert_eq(['spacious', 'standard', 'spacious'], array_column(array_slice($sections, 1, 3), 'vertical_density'));
+    assert_eq('standard', $sections[4]['vertical_density'], 'third pause is beyond the page cap');
+    PagePlanStep::normalize($sections); // the result passes validation
+});
+
+test('PagePlanStep::repairVariety leaves valid densities and invalid enums alone', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'vertical_density' => 'enormous']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'compact']),
+    ]);
+    assert_eq(['enormous', 'spacious', 'compact'], array_column($sections, 'vertical_density'));
 });
 
 test('PagePlanStep::flattenPages walks the tree depth-first with paths and menu order', function () {
@@ -157,6 +350,20 @@ test('PagePlanStep::flattenPages walks the tree depth-first with paths and menu 
     assert_eq('/menu/breads/', $flat[2]['path']);
     assert_eq('menu', $flat[2]['parent']);
     assert_eq([0, 10, 20], array_column($flat, 'menu_order'));
+});
+
+test('PagePlanStep::flattenPages paths front-page children under the front slug', function () {
+    $flat = PagePlanStep::flattenPages(plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => [
+            ['title' => 'Visit', 'slug' => 'visit', 'purpose' => 'Directions', 'children' => []],
+        ]],
+    ]]));
+
+    assert_eq('/', $flat[0]['path']);
+    // WordPress resolves the child's URI from its parent's post_name even
+    // when the parent is the front page — advertising "/visit/" would 404.
+    assert_eq('/home/visit/', $flat[1]['path']);
+    assert_eq('home', $flat[1]['parent']);
 });
 
 test('PagePlanStep::flattenPages degrades a pageless spec to a single homepage', function () {
@@ -248,9 +455,10 @@ test('page-plan repairs only the invalid page with one follow-up call', function
         plan_section(['slug' => 'a', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
         plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
-    // …and the repair call returns a fixed menu plan.
+    // …and the repair call returns a fixed menu plan (compact opening — menu
+    // is an interior page, so a full-bleed cover would be re-rejected).
     $llm->queueJson(['sections' => [
-        plan_section(['slug' => 'a', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image']),
+        plan_section(['slug' => 'a', 'layout_archetype' => 'offset-grid', 'background' => 'image']),
         plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -258,20 +466,89 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     (new PagePlanStep($llm, $renderer))->run($project);
 
     $plan = $project->readJson('pages.json');
-    assert_eq('full-bleed-cover', $plan['pages'][1]['sections'][0]['layout_archetype']);
+    assert_eq('offset-grid', $plan['pages'][1]['sections'][0]['layout_archetype']);
     // Batch (2 calls) + one repair; the repair prompt carries the rejected
     // plan and the specific error, labeled per page in the LLM logs.
     assert_eq(3, count($llm->calls));
     $repairPrompt = $llm->calls[2]['prompt'];
     assert_contains('IT WAS REJECTED', $repairPrompt);
     assert_contains('adjacent sections', $repairPrompt);
+    assert_contains('change only ONE of the two sections', $repairPrompt);
     assert_contains('also update its content_notes', $repairPrompt);
     assert_eq('page-plan-menu-repair', $llm->calls[2]['opts']['log_label'] ?? null);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan throws when the repair is still invalid', function () {
+test('page-plan falls back to a mechanical fix when the repair still breaks a variety rule', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ppv_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A portfolio']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    // The plan has adjacent duplicates…
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'closing-cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ]]);
+    // …and the repair fumbles it by moving BOTH sections to the same new archetype.
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'credibility-block', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['slug' => 'closing-cta', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
+    ]]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new PagePlanStep($llm, $renderer))->run($project);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(2, count($llm->calls), 'no second LLM repair — the fallback is mechanical');
+    assert_eq('asymmetric-split', $sections[0]['layout_archetype'], 'first of the pair kept');
+    assert_true($sections[1]['layout_archetype'] !== 'asymmetric-split', 'later section reassigned');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan enforces the compact interior opening through repair and mechanical fallback', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ppi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A tavern']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+        ['title' => 'Visit', 'slug' => 'visit', 'purpose' => 'Find us', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    // Home may open with a cover…
+    $llm->queueJson(['sections' => [plan_section()]]);
+    // …the interior page may not…
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'visit-hero']),
+        plan_section(['slug' => 'directions', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+    ]]);
+    // …and the repair insists on the cover, so the mechanical fallback demotes it.
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'visit-hero']),
+        plan_section(['slug' => 'directions', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+    ]]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new PagePlanStep($llm, $renderer))->run($project);
+
+    $plan = $project->readJson('pages.json');
+    assert_eq('full-bleed-cover', $plan['pages'][0]['sections'][0]['layout_archetype'], 'front page keeps its cover');
+    assert_true(
+        $plan['pages'][1]['sections'][0]['layout_archetype'] !== 'full-bleed-cover',
+        'interior opening demoted to a compact archetype'
+    );
+    assert_eq(3, count($llm->calls));
+    assert_contains('INTERIOR page', $llm->calls[2]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan throws when the repair is still invalid beyond the variety rules', function () {
     $tmp = sys_get_temp_dir() . '/builder_ppr2_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A bakery']);

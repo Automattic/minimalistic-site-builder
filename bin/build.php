@@ -2,16 +2,22 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BuildReport;
+use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--slug=my-slug] [--until=step-id] [--with-images] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--multi-page] [--with-images] [--port=9400] [--no-serve]
+ *
+ * --provider=<anthropic|openai|xai> picks the model set (config/models.json):
+ * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
+ * env overrides still win. Unset falls back to LLM_PROVIDER / the config default.
  *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
  * printing per-step timing and token spend and writing the full run overview to
@@ -22,6 +28,9 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * --until=<step-id> stops after that step (an unknown id errors with the list).
  * Steps that run concurrently share one id (e.g. theme-json+page-plan), but
  * --until also accepts a member id (theme-json) and stops once the group is done.
+ *
+ * --multi-page lets the site plan inner pages (about, contact, …) beyond the
+ * homepage. Off by default: the build produces ONLY the landing page.
  *
  * --with-images additionally generates the AI image placeholders into real
  * assets via the WPCOM AI proxy (slow + networked; off by default).
@@ -38,11 +47,15 @@ $prompt = null;
 $slug = null;
 $until = null;
 $withImages = false;
+$multiPage = false;
 $port = null;
 $serve = true;
+$provider = null;
 foreach ($args as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
+    } elseif (str_starts_with($a, '--provider=')) {
+        $provider = substr($a, 11);
     } elseif (str_starts_with($a, '--until=')) {
         $until = substr($a, 8);
     } elseif (str_starts_with($a, '--port=')) {
@@ -51,14 +64,30 @@ foreach ($args as $a) {
         $serve = false;
     } elseif ($a === '--with-images') {
         $withImages = true;
+    } elseif ($a === '--multi-page') {
+        $multiPage = true;
     } elseif ($prompt === null) {
         $prompt = $a;
     }
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--slug=...] [--until=step-id] [--with-images] [--port=9400] [--no-serve]\n");
+    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai] [--slug=...] [--until=step-id] [--multi-page] [--with-images] [--port=9400] [--no-serve]\n");
     exit(1);
+}
+
+// --provider selects the model set for the whole run. It just sets LLM_PROVIDER
+// (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
+// overrides still apply on top. Validate here for a friendly early error.
+if ($provider !== null) {
+    $provider = strtolower(trim($provider));
+    if (!ModelConfig::hasProvider($provider)) {
+        fwrite(STDERR, "Unknown --provider '{$provider}'. Known: "
+            . implode(', ', ModelConfig::providerNames()) . "\n");
+        exit(1);
+    }
+    putenv("LLM_PROVIDER={$provider}");
+    $_ENV['LLM_PROVIDER'] = $provider;
 }
 
 $llm = make_llm();
@@ -83,7 +112,7 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
 // Without an explicit --slug, createProject picks a free random adjective-noun
 // name. Explicit --slug reuses that directory across re-runs. meta.json is
 // seeded (and merged) inside createProject so demo orchestrators can pre-seed.
-$project = $builder->createProject($prompt, $slug);
+$project = $builder->createProject($prompt, $slug, $multiPage);
 
 echo "Building '{$project->slug()}'\n";
 
@@ -117,12 +146,22 @@ try {
 // Image generation is opt-in: slow and networked, so it runs only on request
 // and only for a full build (skipped when --until stops the pipeline early).
 if ($withImages && $until === null) {
-    $step = new GenerateImagesStep(make_image_client());
+    // The Llm rewrites safety-filtered prompts (small tier) and regenerates.
+    $step = new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
     $start = microtime(true);
     $step->run($project);
     $secs = microtime(true) - $start;
     // Image generation uses the Vertex proxy, not Claude, so it spends no LLM
     // tokens; the row records its wall time, and the tally comes from images.json.
+    $report->addStep($step->id(), $secs, 0, 0);
+    echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+
+    // Now that the real pixels exist, re-check cover text against the actual
+    // (dimmed) images and raise dimRatio / flip text colors where needed.
+    $step = new CoverContrastStep(NodeBlockFixer::default());
+    $start = microtime(true);
+    $step->run($project);
+    $secs = microtime(true) - $start;
     $report->addStep($step->id(), $secs, 0, 0);
     echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
 

@@ -26,6 +26,23 @@ namespace Automattic\SiteBuild;
  * outweighs the ink itself, so any "is it a deliberate white fill?" area
  * heuristic misfires on precisely the images this class exists to fix. A
  * background-colored subject fill is keyed too — the acceptable cost.
+ *
+ * The fuzz keying is binary, which leaves the anti-aliased edge behind: pixels
+ * that blend ink with the white background land outside the fuzz and survive
+ * fully opaque with their whitish color baked in — invisible on light pages, a
+ * crusty white fringe on dark ones, and for thin linework the whitening can
+ * swallow the entire stroke. So a third pass unmattes the survivors: each
+ * pixel's distance from white becomes its ink coverage, coverage becomes
+ * alpha, and the white contamination is divided back out of the color. Solid
+ * ink (coverage past a threshold) passes through mathematically unchanged;
+ * blends render as translucent ink instead of opaque pale gray. Over a white
+ * page this composites back to exactly the source pixel, so the pass can only
+ * improve how the asset sits on any other background.
+ *
+ * After keying, the transparent margins are trimmed to the ink's bounding box
+ * (plus a small pad): Imagen centers a small ornament on a full-size canvas,
+ * and shipping all that empty margin makes the page reserve a huge blank band
+ * for a tiny motif.
  */
 final class ImageTransparency
 {
@@ -36,6 +53,17 @@ final class ImageTransparency
      * subject edges.
      */
     private const FUZZ_PERCENT = 10.0;
+
+    /**
+     * Ink coverage (0..1, distance from white) at and above which a pixel
+     * counts as solid ink in the unmatting pass: it keeps full alpha and its
+     * exact color. Below it, coverage becomes alpha and the white blended
+     * into the pixel is divided back out. High enough that half-and-half
+     * anti-aliasing blends (the visible fringe) are always unmatted; low
+     * enough that mid-tone inks — terracotta, ochre, copper read as ~0.7+
+     * coverage — stay fully solid.
+     */
+    private const SOLID_INK_COVERAGE = 0.6;
 
     /** Whether the runtime can key backgrounds at all. */
     public static function available(): bool
@@ -86,13 +114,16 @@ final class ImageTransparency
                 $im->floodFillPaintImage($transparent, $fuzz, $seed, $x, $y, false, \Imagick::CHANNEL_ALPHA);
             }
 
-            // If almost nothing opaque survived, the fill ate the subject too
-            // (subject color ≈ background color) — keep the original. Checked
-            // BEFORE the global pass: thin line art can legitimately end up
-            // with ~1% ink once its enclosed pockets are keyed, and must not
-            // trip this guard.
+            // If essentially nothing opaque survived, the fill ate the subject
+            // too (subject color ≈ background color) — keep the original.
+            // The threshold must sit BELOW the ink share of the thinnest real
+            // asset: a hairline divider on a 1408x768 canvas is ~0.2-0.8% ink,
+            // and a guard at 1% was returning those with their white background
+            // baked in — a white box on the page, the worst outcome this class
+            // exists to prevent. A true wipeout keys everything, so 0.05%
+            // still catches it while every hairline passes.
             $alpha = $im->getImageChannelMean(\Imagick::CHANNEL_ALPHA);
-            if (($alpha['mean'] ?? 0) / \Imagick::getQuantum() < 0.01) {
+            if (($alpha['mean'] ?? 0) / \Imagick::getQuantum() < 0.0005) {
                 return $pngBytes;
             }
 
@@ -104,10 +135,91 @@ final class ImageTransparency
                 $im->transparentPaintImage($seed, 0.0, $fuzz, false);
             }
 
+            self::unmatteEdges($im);
+            self::trimToInk($im);
+
             $im->setImageFormat('png');
             return $im->getImageBlob();
         } catch (\Throwable) {
             return $pngBytes;
+        }
+    }
+
+    /**
+     * Turn the white anti-aliasing baked into surviving pixels into real
+     * translucency (see the class docblock). Per pixel: ink coverage
+     * t = max(1-R, 1-G, 1-B) scaled so t >= SOLID_INK_COVERAGE is 1, alpha
+     * becomes (keyed alpha × t), and the color is unmatted from white as
+     * C' = 1 - (1-C)/t — an identity where t is 1, so solid ink is untouched.
+     * Failure-soft: any error leaves the hard-keyed image as it was.
+     */
+    private static function unmatteEdges(\Imagick $im): void
+    {
+        try {
+            // N = 1 - C: per-channel white contamination.
+            $neg = clone $im;
+            $neg->setImageAlphaChannel(\Imagick::ALPHACHANNEL_OFF);
+            $neg->negateImage(false);
+
+            // t = max channel of N, boosted so solid ink saturates to 1.
+            $t = clone $neg;
+            $t->separateImageChannel(\Imagick::CHANNEL_RED);
+            foreach ([\Imagick::CHANNEL_GREEN, \Imagick::CHANNEL_BLUE] as $channel) {
+                $other = clone $neg;
+                $other->separateImageChannel($channel);
+                $t->compositeImage($other, \Imagick::COMPOSITE_LIGHTEN, 0, 0);
+            }
+            $t->levelImage(0.0, 1.0, self::SOLID_INK_COVERAGE * \Imagick::getQuantum());
+
+            // C' = 1 - N/t (DivideDst = dst/src, clamped; t=0 only where the
+            // key passes already zeroed the alpha, so the junk color there is
+            // never seen).
+            $neg->compositeImage($t, \Imagick::COMPOSITE_DIVIDEDST, 0, 0);
+            $neg->negateImage(false);
+
+            // alpha' = keyed alpha × t: keyed background stays fully
+            // transparent no matter its coverage reading.
+            $keyedAlpha = clone $im;
+            $keyedAlpha->separateImageChannel(\Imagick::CHANNEL_ALPHA);
+            $t->compositeImage($keyedAlpha, \Imagick::COMPOSITE_MULTIPLY, 0, 0);
+
+            $neg->compositeImage($t, \Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+            $im->setImage($neg);
+        } catch (\Throwable) {
+            // keep the hard-keyed image
+        }
+    }
+
+    /**
+     * Crop the now-transparent margins down to the ink's bounding box plus a
+     * small transparent pad. Imagen centers a small ornament on a full-size
+     * canvas, so after keying, most of the asset is empty margin — which the
+     * page then reserves layout space for (a hairline rule shipped as a
+     * 1408x768 image renders as a huge blank band with a line in the middle).
+     * Trimming makes the asset's canvas mean what it shows. Failure-soft: any
+     * trim error leaves the image as it was.
+     */
+    private static function trimToInk(\Imagick $im): void
+    {
+        try {
+            $trimmed = clone $im;
+            $trimmed->trimImage(0.0);
+            $tw = $trimmed->getImageWidth();
+            $th = $trimmed->getImageHeight();
+            if ($tw < 1 || $th < 1 || ($tw === $im->getImageWidth() && $th === $im->getImageHeight())) {
+                return;
+            }
+            $trimmed->setImagePage(0, 0, 0, 0);
+
+            // A sliver of breathing room so anti-aliased edges don't sit on
+            // the canvas edge; proportional, at least a couple of pixels.
+            $pad = max(2, intdiv(max($tw, $th), 50));
+            $trimmed->setImageBackgroundColor(new \ImagickPixel('transparent'));
+            $trimmed->extentImage($tw + 2 * $pad, $th + 2 * $pad, -$pad, -$pad);
+
+            $im->setImage($trimmed);
+        } catch (\Throwable) {
+            // keep the untrimmed image
         }
     }
 }

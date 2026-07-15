@@ -26,6 +26,9 @@ function wp_stub_reset(): void
     $GLOBALS['wp_attachments'] = [];
     $GLOBALS['wp_next_id'] = 100;
     $GLOBALS['wp_kses_calls'] = [];
+    // Simulate the unprivileged context (WP-CLI, Playground blueprint):
+    // the kses post-content filter is active.
+    $GLOBALS['wp_filters'] = ['content_save_pre' => ['wp_filter_post_kses' => 10]];
 }
 
 if (!function_exists('get_option')) {
@@ -83,13 +86,21 @@ if (!function_exists('get_option')) {
     {
         return rtrim($s, '/') . '/';
     }
-    function kses_remove_filters(): void
+    function has_filter(string $hook, $callback = false)
     {
-        $GLOBALS['wp_kses_calls'][] = 'remove';
+        return $GLOBALS['wp_filters'][$hook][$callback] ?? false;
     }
-    function kses_init_filters(): void
+    function remove_filter(string $hook, $callback, int $priority = 10): bool
     {
-        $GLOBALS['wp_kses_calls'][] = 'init';
+        $GLOBALS['wp_kses_calls'][] = "remove:{$hook}:{$callback}";
+        unset($GLOBALS['wp_filters'][$hook][$callback]);
+        return true;
+    }
+    function add_filter(string $hook, $callback, int $priority = 10): bool
+    {
+        $GLOBALS['wp_kses_calls'][] = "add:{$hook}:{$callback}";
+        $GLOBALS['wp_filters'][$hook][$callback] = $priority;
+        return true;
     }
     function flush_rewrite_rules(): void
     {
@@ -197,7 +208,11 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
         . '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} -->'
         . '<div class="wp-block-cover" style="background-image:url(theme:./assets/hero.jpg)"></div><!-- /wp:cover -->' . "\n"
         . '<img src="theme:./assets/never-generated.jpg" alt="AI_IMAGE: skipped | x | photo | landscape">');
-    $project->writeText('plugin/pages/menu.html', '<!-- wp:heading --><h2>Menu</h2><!-- /wp:heading -->');
+    // The menu page smuggles every script-capable vector a hand-edit (or a
+    // build-check gap) could carry; seeding must strip them, not store them.
+    $project->writeText('plugin/pages/menu.html', '<!-- wp:heading --><h2 onclick="alert(1)">Menu</h2><!-- /wp:heading -->' . "\n"
+        . '<!-- wp:html --><script>alert(2)</script><!-- /wp:html -->' . "\n"
+        . '<!-- wp:paragraph --><p><a href="javascript:alert(3)">Specials</a> and <a href="/breads/">breads</a>, come on in=side</p><!-- /wp:paragraph -->');
     $project->writeText('plugin/pages/breads.html', '<!-- wp:heading --><h2>Breads</h2><!-- /wp:heading -->');
     // The content-image bundle: hero.jpg shipped; never-generated.jpg listed
     // but absent (a build without --with-images), so it must fall back to the
@@ -257,6 +272,16 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // An image the build never generated falls back to the theme's assets.
     assert_contains('https://example.test/wp-content/themes/demo/assets/never-generated.jpg', $home);
 
+    // Script-capable markup was stripped before storage; content is intact.
+    $menuContent = $byName['menu']['post_content'];
+    assert_true(!str_contains($menuContent, '<script'), 'script element removed');
+    assert_true(!str_contains($menuContent, 'onclick'), 'event handler removed');
+    assert_true(!str_contains($menuContent, 'javascript:'), 'executable URL neutralized');
+    assert_contains('come on in=side', $menuContent, 'prose is untouched');
+    assert_contains('href="/breads/"', $menuContent, 'legitimate links survive');
+    assert_contains('<!-- wp:html -->', $menuContent, 'block comments survive');
+    assert_contains('>Menu</h2>', $menuContent, 'element content survives attribute stripping');
+
     // The seeded homepage became the front page; previous options snapshotted.
     assert_eq('page', get_option('show_on_front'));
     assert_eq($byName['home']['id'], get_option('page_on_front'));
@@ -265,8 +290,13 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq($ids, $state['page_ids']);
     assert_eq([$attId], $state['attachment_ids'], 'imported attachments recorded');
 
-    // kses was bypassed only around the seeding.
-    assert_eq(['remove', 'init'], $GLOBALS['wp_kses_calls']);
+    // Only the post-content kses filter was suspended, and only around the
+    // seeding — it is back in place afterwards.
+    assert_eq(
+        ['remove:content_save_pre:wp_filter_post_kses', 'add:content_save_pre:wp_filter_post_kses'],
+        $GLOBALS['wp_kses_calls']
+    );
+    assert_eq(10, has_filter('content_save_pre', 'wp_filter_post_kses'));
 
     // ── A second activation is a no-op (no duplicate pages or attachments). ──
     builder_content_activate();
@@ -287,3 +317,4 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+

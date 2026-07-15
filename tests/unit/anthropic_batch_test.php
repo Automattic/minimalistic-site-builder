@@ -116,6 +116,31 @@ test('retryTextBatch also reports a transient failure that exhausts its retries'
     assert_eq([['a', 'always down']], $reported, 'a call that gives up after retries is reported once');
 });
 
+test('retryTextBatch handles integer-keyed bodies end to end', function () {
+    // Numeric keys are ints in PHP whatever the caller wrote, and the image
+    // prompt-repair pass keys its rewrite batch by image index — so the whole
+    // path, including the string|int onFailure contract the clients' logging
+    // closures rely on, must accept them.
+    $bodies = [0 => [], 7 => []];
+    $transport = function (array $subset) {
+        $out = [];
+        foreach ($subset as $k => $_) {
+            $out[$k] = $k === 7
+                ? ['ok' => false, 'transient' => false, 'error' => 'HTTP 400']
+                : ['ok' => true, 'text' => "T:{$k}", 'input' => 0, 'output' => 0];
+        }
+        return $out;
+    };
+
+    $reported = [];
+    assert_throws(function () use ($bodies, $transport, &$reported) {
+        AnthropicClient::retryTextBatch($bodies, $transport, [0], function (string|int $key, string $error, float $time) use (&$reported) {
+            $reported[] = $key;
+        });
+    });
+    assert_eq([7], $reported, 'the int key reaches a string|int-typed onFailure intact');
+});
+
 test('concurrencyWindows caps each window at 10 and preserves keys in order', function () {
     $bodies = [];
     for ($i = 0; $i < 12; $i++) {
