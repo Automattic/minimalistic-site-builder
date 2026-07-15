@@ -45,14 +45,50 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     assert_true(in_array('accent', $slugs, true));
     assert_eq(true, $theme['settings']['spacing']['blockGap']);
     assert_eq(['sm', 'md', 'lg', 'xl', 'xxl'], array_column($theme['settings']['spacing']['spacingSizes'], 'slug'));
+    assert_eq(false, $theme['settings']['color']['defaultPalette']);
+    assert_eq(false, $theme['settings']['color']['defaultGradients']);
+    assert_eq(false, $theme['settings']['color']['defaultDuotone']);
+    assert_eq(false, $theme['settings']['typography']['defaultFontSizes']);
+    assert_eq(false, $theme['settings']['spacing']['defaultSpacingSizes']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('disableCoreDefaultPresets forces the flags even when the model re-enables them', function () {
+    // Missing settings sections are created.
+    $theme = ThemeJsonStep::disableCoreDefaultPresets([]);
+    assert_eq(false, $theme['settings']['color']['defaultPalette']);
+    assert_eq(false, $theme['settings']['color']['defaultGradients']);
+    assert_eq(false, $theme['settings']['color']['defaultDuotone']);
+    assert_eq(false, $theme['settings']['typography']['defaultFontSizes']);
+
+    // Model output opting back into core defaults is overridden; everything
+    // else in the touched sections is preserved, and core shadows stay on.
+    $theme = ThemeJsonStep::disableCoreDefaultPresets([
+        'settings' => [
+            'color' => [
+                'defaultPalette' => true,
+                'defaultGradients' => true,
+                'palette' => [['slug' => 'base', 'color' => '#fff', 'name' => 'Base']],
+            ],
+            'typography' => ['defaultFontSizes' => true, 'fluid' => true],
+            'shadow' => ['presets' => []],
+        ],
+    ]);
+    assert_eq(false, $theme['settings']['color']['defaultPalette']);
+    assert_eq(false, $theme['settings']['color']['defaultGradients']);
+    assert_eq(false, $theme['settings']['color']['defaultDuotone']);
+    assert_eq(false, $theme['settings']['typography']['defaultFontSizes']);
+    assert_eq('base', $theme['settings']['color']['palette'][0]['slug'], 'palette preserved');
+    assert_eq(true, $theme['settings']['typography']['fluid'], 'other typography settings preserved');
+    assert_true(!isset($theme['settings']['shadow']['defaultPresets']), 'core shadow presets stay enabled');
 });
 
 test('normalizeSpacingSettings installs the canonical bounded responsive profile', function () {
     $theme = ThemeJsonStep::normalizeSpacingSettings([]);
 
     assert_eq(true, $theme['settings']['spacing']['blockGap']);
+    assert_eq(false, $theme['settings']['spacing']['defaultSpacingSizes'], 'core spacing sizes disabled');
     assert_eq([
         ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
         ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
