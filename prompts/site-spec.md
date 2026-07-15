@@ -20,6 +20,7 @@ Always include exactly these fixed properties:
   "email_domain": string,    // domain for contact email addresses, derived from the name — lowercase, no "@" or scheme, e.g. "hearthandcrumb.com"
   "invented": [string],      // which of "name" / "persona_name" / "email_domain" you invented rather than took from the prompt; [] if all were stated by the user
   "visual_vibe": string,     // a SHORT descriptive phrase of the overall feeling, e.g. "warm and rustic", "clean and clinical" — a vibe, NOT concrete colors or fonts
+  "animation_request": string, // VERBATIM any SPECIFIC animation/motion behavior the user explicitly asked for (e.g. "the logo should spin on hover", "typewriter effect on the headline"); "" when none — never invent one, and general mood words ("dynamic", "lively") do NOT count
   "sections": [string],      // ordered sections the HOMEPAGE needs (4-7), e.g. ["Hero", "Menu", "About", "Visit"]
   "pages": [                 // the site's page tree — the FIRST page is the homepage. {{page_tree_scope}}
     {

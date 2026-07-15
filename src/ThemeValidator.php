@@ -266,6 +266,56 @@ final class ThemeValidator
     }
 
     /**
+     * Deterministic vertical-rhythm checks for a completed generated site.
+     *
+     * The theme must retain the bounded canonical spacing profile installed by
+     * ThemeJsonStep, and every planned section root must still match the
+     * page-owned density/seam calculation after all serialization passes.
+     * These are build failures in the default pipeline, not aesthetic hints.
+     *
+     * @return string[] list of warnings (empty means spacing follows the contract)
+     */
+    public static function spacingWarnings(Project $project): array
+    {
+        $warnings = [];
+
+        if ($project->exists('theme/theme.json')) {
+            $theme = json_decode($project->readText('theme/theme.json'), true);
+            if (is_array($theme)) {
+                $normalized = Steps\ThemeJsonStep::normalizeSpacingSettings($theme);
+                if (($theme['settings']['spacing'] ?? null) !== ($normalized['settings']['spacing'] ?? null)) {
+                    $warnings[] = 'theme.json settings.spacing drifted from the bounded canonical profile';
+                }
+            }
+        }
+
+        if (!$project->exists('pages.json')) {
+            return $warnings;
+        }
+
+        try {
+            // The same entry builder the build pass derives from, so this
+            // gate can never disagree with SectionRhythmStep about the
+            // plan's demands. The transient parts were inlined into the
+            // content plugin and dropped by assemble-pages, so each page is
+            // judged over its assembled plugin/pages/<slug>.html.
+            $footerSurface = Steps\SectionRhythmStep::footerSurface($project);
+            foreach (Steps\SectionRhythmStep::pages($project) as $page) {
+                $slug = trim((string) ($page['slug'] ?? ''));
+                $entries = Steps\SectionRhythmStep::assembledEntries($project, $page);
+                $result = SectionRhythm::rewrite($entries, $footerSurface);
+                foreach ($result['notes'] as $note) {
+                    $warnings[] = "section root spacing drift (page '{$slug}'): " . $note;
+                }
+            }
+        } catch (\Throwable $e) {
+            $warnings[] = 'could not validate section rhythm: ' . $e->getMessage();
+        }
+
+        return $warnings;
+    }
+
+    /**
      * Soft typography checks (warnings, not build failures): font sizes
      * hardcoded in block markup instead of drawn from the theme.json
      * fontSizes scale, a "display" preset that no markup uses, and

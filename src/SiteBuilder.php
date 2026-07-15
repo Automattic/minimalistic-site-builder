@@ -7,18 +7,22 @@ use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
+use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
+use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
+use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
 /**
  * Consumer-facing entry point for the default site-creation pipeline.
@@ -87,8 +91,11 @@ final class SiteBuilder
                 new PagePlanStep($this->llm, $renderer, $models['page-plan'], $temps['page-plan']),
             ]),
             // Generate the header, footer, and every page's section parts in one
-            // concurrent batch; the assemble step composes them deterministically.
+            // concurrent batch, then resolve each page's vertical seams while the
+            // parts are still separate files ordered by the plan; the assemble
+            // step later composes them deterministically.
             new SectionsStep($this->llm, $renderer, $models['sections'], $temps['sections']),
+            new SectionRhythmStep(),
             // Collect image placeholders BEFORE fix-blocks: the block re-serializer
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.
@@ -98,6 +105,11 @@ final class SiteBuilder
             // fix-blocks re-serialization below regenerates the saved HTML
             // from those attributes, keeping markup and attributes in sync.
             new ContrastFixStep(),
+            // Deterministic backstop for the motion-class budget the section
+            // prompts are asked to respect (independent concurrent calls can't
+            // coordinate it). Also BEFORE fix-blocks: it edits block-comment
+            // JSON attributes and the re-serialization syncs the HTML.
+            new MotionSanityStep(),
             new FixBlocksStep($this->blockFixer),
             // AFTER fix-blocks, so the markup inlined into the content plugin is
             // the final re-serialized form: writes plugin/pages/* + the manifest,
@@ -107,6 +119,11 @@ final class SiteBuilder
             // layout utility classes survived, and appends their CSS to style.css —
             // a file the fixer never touches, so nothing here can be stripped.
             new PageStylesStep($this->llm, $renderer, $models['page-styles'], $temps['page-styles']),
+            // Escape hatch: one scoped CSS-generation call, made ONLY when the
+            // user explicitly requested a specific animation (site-spec captured
+            // it verbatim) AND a section tagged its target. Default path: no-op,
+            // zero LLM calls.
+            new CustomMotionStep($this->llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
             // Also after fix-blocks: writes fonts.php from the design direction,
             // validated against a deterministic scan of the final theme.json +
             // markup (every family/weight/italic the build uses MUST be requested;
@@ -115,6 +132,9 @@ final class SiteBuilder
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
+            // Last chance to catch contract drift introduced by serialization or
+            // later append-only steps before the project is reported as complete.
+            new ValidateThemeStep(),
         ]);
     }
 

@@ -22,6 +22,7 @@ function plan_section(array $overrides = []): array
         'type'             => 'hero',
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
+        'vertical_density' => 'standard',
         'handoff'          => 'Sits between the site header above and the base-background about split below.',
     ], $overrides);
 }
@@ -84,6 +85,71 @@ test('PagePlanStep::normalize rejects a missing handoff', function () {
     assert_throws(function () {
         PagePlanStep::normalize([plan_section(['handoff' => '  '])]);
     }, 'handoff');
+});
+
+test('PagePlanStep::normalize requires a known vertical density', function () {
+    assert_throws(function () {
+        PagePlanStep::normalize([plan_section(['vertical_density' => 'enormous'])]);
+    }, 'invalid vertical_density');
+
+    assert_throws(function () {
+        $section = plan_section();
+        unset($section['vertical_density']);
+        PagePlanStep::normalize([$section]);
+    }, 'missing vertical_density');
+});
+
+test('PagePlanStep::normalize rations spacious density across the page', function () {
+    assert_throws(function () {
+        PagePlanStep::normalize([
+            plan_section(['slug' => 'one', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'two', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
+        ]);
+    }, 'adjacent spacious sections must be rejected');
+
+    assert_throws(function () {
+        PagePlanStep::normalize([
+            plan_section(['slug' => 'one', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'two', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'standard']),
+            plan_section(['slug' => 'three', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
+            plan_section(['slug' => 'four', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'compact']),
+            plan_section(['slug' => 'five', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        ]);
+    }, 'more than two spacious sections must be rejected');
+});
+
+test('PagePlanStep::normalize rejects spacious density for content-dense sections', function () {
+    foreach ([
+        ['type' => 'gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'features', 'layout_archetype' => 'offset-grid'],
+        ['type' => 'services', 'layout_archetype' => 'equal-card-grid'],
+        ['type' => 'faq', 'layout_archetype' => 'centered-stack'],
+        // "type" is free-form model output: capitalization and compound
+        // spellings still name the dense role.
+        ['type' => 'Gallery', 'layout_archetype' => 'centered-stack'],
+        ['type' => 'image-gallery', 'layout_archetype' => 'offset-grid'],
+        ['type' => 'Pricing Table', 'layout_archetype' => 'centered-stack'],
+    ] as $dense) {
+        $message = '';
+        try {
+            PagePlanStep::normalize([
+                plan_section(array_merge($dense, ['vertical_density' => 'spacious'])),
+            ]);
+        } catch (RuntimeException $e) {
+            $message = $e->getMessage();
+        }
+        assert_contains('content-dense', $message);
+        assert_contains("not 'spacious'", $message);
+    }
+
+    $shortCta = PagePlanStep::normalize([
+        plan_section([
+            'type' => 'cta',
+            'layout_archetype' => 'mixed-width-editorial',
+            'vertical_density' => 'spacious',
+        ]),
+    ]);
+    assert_eq('spacious', $shortCta[0]['vertical_density'], 'short editorial CTA may deliberately breathe');
 });
 
 test('PagePlanStep::normalize rejects adjacent duplicate archetypes', function () {
@@ -244,6 +310,32 @@ test('PagePlanStep::repairVariety leaves invalid archetypes for normalize to rej
         plan_section(['slug' => 'b', 'layout_archetype' => 'fancy-mosaic']),
     ]);
     assert_eq(['fancy-mosaic', 'fancy-mosaic'], array_column($sections, 'layout_archetype'));
+});
+
+test('PagePlanStep::repairVariety demotes spacious pauses that break the density rules', function () {
+    // A dense section, an adjacent pause, and a pause beyond the cap all
+    // demote to 'standard'; the surviving pauses stay isolated.
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'type' => 'gallery', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'd', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'e', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+    ]);
+
+    assert_eq('standard', $sections[0]['vertical_density'], 'dense gallery demoted');
+    assert_eq(['spacious', 'standard', 'spacious'], array_column(array_slice($sections, 1, 3), 'vertical_density'));
+    assert_eq('standard', $sections[4]['vertical_density'], 'third pause is beyond the page cap');
+    PagePlanStep::normalize($sections); // the result passes validation
+});
+
+test('PagePlanStep::repairVariety leaves valid densities and invalid enums alone', function () {
+    $sections = PagePlanStep::repairVariety([
+        plan_section(['slug' => 'a', 'vertical_density' => 'enormous']),
+        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'c', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'compact']),
+    ]);
+    assert_eq(['enormous', 'spacious', 'compact'], array_column($sections, 'vertical_density'));
 });
 
 test('PagePlanStep::flattenPages walks the tree depth-first with paths and menu order', function () {

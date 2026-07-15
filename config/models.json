@@ -25,6 +25,8 @@
         "page-plan": "small",
         "sections": "large",
         "page-styles": "large",
-        "fonts-php": "large"
+        "custom-motion": "large",
+        "fonts-php": "large",
+        "image-prompt-repair": "small"
     }
 }

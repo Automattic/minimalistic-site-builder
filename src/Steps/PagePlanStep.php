@@ -19,8 +19,9 @@ use Automattic\SiteBuild\PromptRenderer;
  * Input:  meta.json (user prompt) + siteSpec.json (with its `pages` tree).
  * Output: pages.json — { "pages": [ { slug, title, path, front, parent,
  *         menu_order, purpose, sections: [ { slug, title, type, purpose,
- *         content_notes, layout_archetype, background, handoff } ] } ] },
- *         a FLAT list in display order, parents before children.
+ *         content_notes, layout_archetype, background, vertical_density,
+ *         handoff } ] } ] }, a FLAT list in display order, parents before
+ *         children.
  *
  * Each page's plan enriches the spec's purpose into concrete section briefs,
  * which the sections step then generates independently and in parallel and
@@ -47,8 +48,22 @@ final class PagePlanStep implements ConcurrentStep
     /** Background treatments — must match page-plan.md. */
     public const BACKGROUNDS = ['base', 'tinted', 'contrast', 'image'];
 
+    /** Page-owned outer spacing roles — must match page-plan.md. */
+    public const VERTICAL_DENSITIES = ['compact', 'standard', 'spacious'];
+
     /** The most default-looking archetype is capped so it can't dominate a page. */
     private const MAX_EQUAL_CARD_GRIDS = 2;
+
+    /** Whitespace-led pauses are accents, not a page's default cadence. */
+    private const MAX_SPACIOUS_SECTIONS = 2;
+
+    /**
+     * Content-dense section roles must not compound their height with the
+     * largest edge. "type" is free-form model output, so these are matched as
+     * lowercase word tokens ("Gallery" and "image-gallery" both count), not
+     * as exact strings.
+     */
+    private const DENSE_SECTION_TYPES = ['features', 'services', 'gallery', 'pricing', 'team', 'faq'];
 
     /** Per-page creative emphasis injected as {{page_emphasis}}. */
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
@@ -174,7 +189,7 @@ final class PagePlanStep implements ConcurrentStep
             . 'For an adjacent-duplicate rejection, change only ONE of the two sections, and re-check the whole '
             . 'corrected list top-to-bottom against every rule before returning — a repair that introduces a NEW '
             . 'violation is rejected too. '
-            . 'If you change a section\'s layout_archetype, background, or position, also update its content_notes, '
+            . 'If you change a section\'s layout_archetype, background, vertical_density, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
 
@@ -281,12 +296,12 @@ final class PagePlanStep implements ConcurrentStep
      * Validate one page's section list and force unique, file-safe slugs.
      * Each section keeps its model-provided fields; missing optional fields
      * default benignly so the sections + assemble steps can rely on the keys.
-     * The art-direction fields (layout_archetype, background, handoff) are
-     * strict: unknown values, a missing handoff, adjacent duplicate
-     * archetypes, too many card grids, or an interior page opening at
-     * homepage-cover scale are collected and thrown together in ONE message,
-     * so the single repair call sees every violation at once.
-     * Pure — unit-testable.
+     * The art-direction fields (layout_archetype, background,
+     * vertical_density, handoff) are strict: unknown values, a missing
+     * handoff, adjacent duplicate archetypes, too many card grids, or an
+     * interior page opening at homepage-cover scale are collected and thrown
+     * together in ONE message, so the single repair call sees every violation
+     * at once. Pure — unit-testable.
      *
      * @param mixed $raw
      * @param bool $front whether the page is the front page (interior pages
@@ -330,6 +345,16 @@ final class PagePlanStep implements ConcurrentStep
                 $errors[] = "page-plan: section '{$slug}' has invalid background '{$background}' — use one of: "
                     . implode(', ', self::BACKGROUNDS);
             }
+            $verticalDensity = trim((string) ($section['vertical_density'] ?? ''));
+            if (!in_array($verticalDensity, self::VERTICAL_DENSITIES, true)) {
+                $errors[] = "page-plan: section '{$slug}' has invalid vertical_density '{$verticalDensity}' — use one of: "
+                    . implode(', ', self::VERTICAL_DENSITIES);
+            }
+            $type = trim((string) ($section['type'] ?? 'content'));
+            if ($verticalDensity === 'spacious' && self::isDenseType($type)) {
+                $errors[] = "page-plan: section '{$slug}' is content-dense ({$type}, {$archetype}) — "
+                    . "use vertical_density 'compact' or 'standard', not 'spacious'";
+            }
             $handoff = trim((string) ($section['handoff'] ?? ''));
             if ($handoff === '') {
                 $errors[] = "page-plan: section '{$slug}' is missing 'handoff' — describe what sits immediately above and below it";
@@ -338,11 +363,12 @@ final class PagePlanStep implements ConcurrentStep
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
-                'type'             => trim((string) ($section['type'] ?? 'content')),
+                'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),
                 'layout_archetype' => $archetype,
                 'background'       => $background,
+                'vertical_density' => $verticalDensity,
                 'handoff'          => $handoff,
             ];
         }
@@ -371,11 +397,13 @@ final class PagePlanStep implements ConcurrentStep
      * an interior page's leading full-bleed cover, excess equal-card-grids,
      * and the later section of each adjacent duplicate pair are reassigned to
      * the first archetype that differs from both neighbors (never a card
-     * grid, so the cap holds and no new grids appear). The reassigned
-     * section's prose (content_notes, handoff) may then lag its archetype
-     * slightly — an accepted trade against aborting the whole build. Only
-     * touches VALID archetypes; enum and handoff errors still reject the plan
-     * in normalize(). Pure — unit-testable.
+     * grid, so the cap holds and no new grids appear); spacious pauses on
+     * content-dense sections, adjacent to another pause, or beyond the cap
+     * are demoted to 'standard'. The reassigned section's prose
+     * (content_notes, handoff) may then lag its assignment slightly — an
+     * accepted trade against aborting the whole build. Only touches VALID
+     * values; enum and handoff errors still reject the plan in normalize().
+     * Pure — unit-testable.
      *
      * @param mixed $raw
      * @param bool $front whether the page is the front page
@@ -434,14 +462,39 @@ final class PagePlanStep implements ConcurrentStep
         foreach ($archetypes as $i => $archetype) {
             $sections[$i]['layout_archetype'] = $archetype;
         }
+
+        // Density passes, mirroring the varietyErrors rules: demote a
+        // spacious pause on a content-dense section, the later of two
+        // adjacent pauses, and any pause beyond the page cap to 'standard'.
+        // Only valid 'spacious' values are touched; enum errors still reject.
+        $densities = array_map(
+            fn (array $s) => trim((string) ($s['vertical_density'] ?? '')),
+            $sections
+        );
+        $spacious = 0;
+        foreach ($densities as $i => $density) {
+            if ($density !== 'spacious') {
+                continue;
+            }
+            if (self::isDenseType(trim((string) ($sections[$i]['type'] ?? 'content')))
+                || ($i > 0 && $densities[$i - 1] === 'spacious')
+                || ++$spacious > self::MAX_SPACIOUS_SECTIONS
+            ) {
+                $densities[$i] = 'standard';
+            }
+        }
+        foreach ($densities as $i => $density) {
+            $sections[$i]['vertical_density'] = $density;
+        }
         return $sections;
     }
 
     /**
      * The page-level variety violations of the rules the prompt states: no
-     * archetype on two adjacent sections, and the equal card grid at most twice
-     * per page. Adjacency is only judged between VALID archetypes so an enum
-     * error above doesn't cascade into a misleading adjacency error too.
+     * archetype on two adjacent sections, the equal card grid at most twice
+     * per page, and no adjacent / excessive spacious-density pauses. Adjacency
+     * is only judged between VALID values so an enum error above doesn't
+     * cascade into a misleading adjacency error too.
      *
      * @param array<int,array<string,mixed>> $sections
      * @return string[]
@@ -460,6 +513,10 @@ final class PagePlanStep implements ConcurrentStep
                 $errors[] = "page-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
                     . "layout_archetype '{$section['layout_archetype']}' — adjacent sections must use different archetypes";
             }
+            if ($section['vertical_density'] === 'spacious' && $prev['vertical_density'] === 'spacious') {
+                $errors[] = "page-plan: adjacent sections '{$prev['slug']}' and '{$section['slug']}' both use "
+                    . "vertical_density 'spacious' — spacious pauses must be isolated";
+            }
         }
 
         $grids = count(array_filter($sections, fn (array $s) => $s['layout_archetype'] === 'equal-card-grid'));
@@ -467,6 +524,19 @@ final class PagePlanStep implements ConcurrentStep
             $errors[] = "page-plan: 'equal-card-grid' is used {$grids} times — use it at most "
                 . self::MAX_EQUAL_CARD_GRIDS . ' times per page and vary the other sections';
         }
+
+        $spacious = count(array_filter($sections, fn (array $s) => $s['vertical_density'] === 'spacious'));
+        if ($spacious > self::MAX_SPACIOUS_SECTIONS) {
+            $errors[] = "page-plan: vertical_density 'spacious' is used {$spacious} times — use it at most "
+                . self::MAX_SPACIOUS_SECTIONS . ' times per page and use standard/compact elsewhere';
+        }
         return $errors;
+    }
+
+    /** Word-token match against DENSE_SECTION_TYPES for free-form model types. */
+    private static function isDenseType(string $type): bool
+    {
+        $tokens = preg_split('/[^a-z]+/', strtolower($type), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return array_intersect($tokens, self::DENSE_SECTION_TYPES) !== [];
     }
 }

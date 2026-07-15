@@ -54,7 +54,13 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
   Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
   Include EXACTLY these two fontFamilies and no others — do NOT add a third entry (e.g. a "mono" or "accent" family). Two families only: heading and body.
-- settings.spacing: include "spacingSizes" with slugs sm, md, lg, xl, xxl (a comfortable rising scale).
+- settings.spacing: set `"blockGap": true` and include EXACTLY this bounded, responsive `spacingSizes` profile (the build normalizes it deterministically, so do not rename or rescale it):
+    `sm` — Small — `clamp(0.75rem, 1vw, 1rem)`
+    `md` — Medium — `clamp(1.5rem, 2vw, 2rem)`
+    `lg` — Compact — `clamp(3rem, 4vw, 4rem)`
+    `xl` — Standard — `clamp(4rem, 6vw, 6rem)`
+    `xxl` — Spacious — `clamp(5rem, 7vw, 7rem)`
+  Use sm/md for component gaps and lg/xl/xxl for compact/standard/spacious section padding. Never replace these with fixed large values: the fluid bounds keep mobile padding proportional and cap a spacious desktop edge at 7rem.
 - styles.color.background = var(--wp--preset--color--base), styles.color.text = var(--wp--preset--color--contrast).
 - styles.typography.fontFamily = body font var, fontSize = var(--wp--preset--font-size--body), lineHeight 1.5–1.65.
 - styles.elements.heading.typography.lineHeight = a tight heading line-height (1.1–1.3).

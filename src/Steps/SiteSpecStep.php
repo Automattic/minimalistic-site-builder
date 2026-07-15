@@ -111,6 +111,18 @@ final class SiteSpecStep implements Step
     }
 
     /**
+     * The user's explicit animation request, verbatim — '' when none was
+     * stated (the default path). Non-empty is what lets CustomMotionStep run.
+     */
+    public static function animationRequestOf(Project $project): string
+    {
+        if (!$project->exists('siteSpec.json')) {
+            return '';
+        }
+        return trim((string) ($project->readJson('siteSpec.json')['animation_request'] ?? ''));
+    }
+
+    /**
      * Require the fixed factual properties and normalize name/slug/sections.
      * Any extra factual keys the model returned pass through untouched — the
      * spec has no fixed/exhaustive schema beyond the required properties. No
@@ -170,6 +182,11 @@ final class SiteSpecStep implements Step
             throw new \RuntimeException("site spec \"language\" is not a plausible language code or name: {$language}");
         }
         $spec['language'] = $language;
+
+        // The user's explicit animation request, verbatim. Its presence is
+        // what arms the optional custom-motion step; everything else in the
+        // motion feature is preset-driven and must not be triggered here.
+        $spec['animation_request'] = trim((string) ($spec['animation_request'] ?? ''));
 
         // Contact emails are minted from this domain; when the model returned
         // none (or something that is not a domain), derive it from the slug so

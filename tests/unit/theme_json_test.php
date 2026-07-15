@@ -43,8 +43,77 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     assert_eq('https://schemas.wp.org/trunk/theme.json', $theme['$schema']);
     $slugs = array_column($theme['settings']['color']['palette'], 'slug');
     assert_true(in_array('accent', $slugs, true));
+    assert_eq(true, $theme['settings']['spacing']['blockGap']);
+    assert_eq(['sm', 'md', 'lg', 'xl', 'xxl'], array_column($theme['settings']['spacing']['spacingSizes'], 'slug'));
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalizeSpacingSettings installs the canonical bounded responsive profile', function () {
+    $theme = ThemeJsonStep::normalizeSpacingSettings([]);
+
+    assert_eq(true, $theme['settings']['spacing']['blockGap']);
+    assert_eq([
+        ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
+        ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
+        ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
+        ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
+        ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
+    ], $theme['settings']['spacing']['spacingSizes']);
+});
+
+test('normalizeSpacingSettings repairs malformed and oversized model output', function () {
+    $theme = ThemeJsonStep::normalizeSpacingSettings([
+        'settings' => [
+            'color' => ['custom' => false],
+            'spacing' => [
+                'blockGap' => 'yes',
+                'units' => ['rem'],
+                'spacingSizes' => [
+                    ['slug' => 'sm', 'size' => 'banana'],
+                    ['slug' => 'xxl', 'size' => 'clamp(6rem, 12vw, 11rem)'],
+                    ['slug' => 'extra', 'size' => '20rem'],
+                ],
+            ],
+        ],
+        'styles' => ['color' => ['text' => '#123456']],
+    ]);
+
+    $spacing = $theme['settings']['spacing'];
+    assert_eq(true, $spacing['blockGap']);
+    assert_eq(['sm', 'md', 'lg', 'xl', 'xxl'], array_column($spacing['spacingSizes'], 'slug'));
+    assert_eq('clamp(5rem, 7vw, 7rem)', $spacing['spacingSizes'][4]['size']);
+    assert_eq(['rem'], $spacing['units'], 'unrelated spacing settings preserved');
+    assert_eq(['custom' => false], $theme['settings']['color'], 'non-spacing settings preserved');
+    assert_eq(['color' => ['text' => '#123456']], $theme['styles'], 'styles preserved');
+
+    $theme = ThemeJsonStep::normalizeSpacingSettings(['settings' => ['spacing' => 'invalid']]);
+    assert_eq(true, $theme['settings']['spacing']['blockGap']);
+    assert_eq(5, count($theme['settings']['spacing']['spacingSizes']));
+});
+
+test('canonical spacing profile has monotonic fluid bounds', function () {
+    $theme = ThemeJsonStep::normalizeSpacingSettings([]);
+    $previousMin = 0.0;
+    $previousMax = 0.0;
+
+    foreach ($theme['settings']['spacing']['spacingSizes'] as $preset) {
+        $matched = preg_match(
+            '/^clamp\\(([0-9.]+)rem, [0-9.]+vw, ([0-9.]+)rem\\)$/',
+            $preset['size'],
+            $bounds
+        );
+        assert_eq(1, $matched, $preset['slug'] . ' is a responsive clamp');
+        $minimum = (float) $bounds[1];
+        $maximum = (float) $bounds[2];
+        assert_true($minimum > $previousMin, $preset['slug'] . ' minimum rises');
+        assert_true($maximum > $previousMax, $preset['slug'] . ' maximum rises');
+        assert_true($minimum <= $maximum, $preset['slug'] . ' bounds are ordered');
+        $previousMin = $minimum;
+        $previousMax = $maximum;
+    }
+
+    assert_eq(7.0, $previousMax, 'largest edge is capped at 7rem');
 });
 
 test('theme-json throws when a required color slug is missing', function () {

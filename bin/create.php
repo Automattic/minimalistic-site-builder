@@ -97,9 +97,10 @@ $pipeline->runThrough(
 );
 
 // Opt-in image generation: turn the AI_IMAGE placeholders into real assets.
-// It makes no LLM calls, so its token columns are a deterministic zero.
+// Its only LLM use is rewriting prompts the image safety filter rejects (the
+// small tier), so its token columns stay a deterministic zero in normal runs.
 if ($withImages) {
-    $imageStep = new GenerateImagesStep(make_image_client());
+    $imageStep = new GenerateImagesStep(make_image_client(), $llm, $models['image-prompt-repair'] ?? null);
     announce_step($imageStep);
     $start = microtime(true);
     $imageStep->run($project);

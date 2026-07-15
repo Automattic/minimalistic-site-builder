@@ -1,7 +1,10 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\SectionRhythm;
+use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\ThemeValidator;
 
 function validator_project(): array
@@ -266,5 +269,52 @@ test('plan warnings flag interior pages opening with a full-bleed cover', functi
 test('plan warnings are empty without pages.json', function () {
     [$project, $tmp] = validator_project();
     assert_eq([], ThemeValidator::planWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('spacing warnings detect theme-profile and section-root rhythm drift', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3])
+    );
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'story', 'background' => 'base', 'vertical_density' => 'standard'],
+        ]],
+    ]]);
+
+    $raw = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>Story</p><!-- /wp:paragraph --></div>'
+        . '<!-- /wp:group -->';
+    $normalized = SectionRhythm::rewrite([[
+        'slug' => 'story', 'markup' => $raw, 'density' => 'standard', 'background' => 'base',
+    ]]);
+    $project->writeText('plugin/pages/home.html', $normalized['markups'][0]);
+    assert_eq([], ThemeValidator::spacingWarnings($project));
+
+    $classDrift = BlockMarkup::parse($normalized['markups'][0]);
+    $root = $classDrift->indices()[0];
+    $attrs = $classDrift->attrs($root) ?? [];
+    $attrs['className'] = 'overlap-up';
+    $classDrift->setAttrs($root, $attrs);
+    $classDrift->replaceInOwnHtml($root, 'wp-block-group', 'wp-block-group overlap-up');
+    $project->writeText('plugin/pages/home.html', $classDrift->render());
+    $project->writeText(
+        'theme/style.css',
+        $project->readText('theme/style.css') . ".overlap-up{margin-top:-6rem!important}\n"
+    );
+    $joined = implode(' ', ThemeValidator::spacingWarnings($project));
+    assert_contains('section root spacing drift', $joined, 'a root utility can override the owned margin reset');
+
+    $project->writeText('plugin/pages/home.html', $raw);
+    $joined = implode(' ', ThemeValidator::spacingWarnings($project));
+    assert_contains('section root spacing drift', $joined);
+
+    $theme = $project->readJson('theme/theme.json');
+    $theme['settings']['spacing']['spacingSizes'][4]['size'] = '12rem';
+    $project->writeJson('theme/theme.json', $theme);
+    $joined = implode(' ', ThemeValidator::spacingWarnings($project));
+    assert_contains('bounded canonical profile', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

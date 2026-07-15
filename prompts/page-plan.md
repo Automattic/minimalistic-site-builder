@@ -40,6 +40,7 @@ Return a single JSON object with this exact shape:
       "content_notes": "2-4 sentences of concrete guidance: the specific copy points, items, or layout idea for this section, grounded in the site spec (real facts where given)",
       "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, mixed-width-editorial, equal-card-grid, list-with-thumbnails",
       "background": "one of: base, tinted, contrast, image",
+      "vertical_density": "one of: compact, standard, spacious",
       "handoff": "1 line: what visually sits immediately above and below this section (each neighbor's background + archetype), so the transitions are designed rather than accidental"
     }
   ]
@@ -60,6 +61,16 @@ Background treatments:
 - contrast — a dark inverted band (contrast background, light text)
 - image — a full-bleed image band
 
+Vertical density controls the section's OUTER top/bottom breathing room. The
+builder applies it deterministically after all independently authored sections
+return, so it is a page-level rhythm decision rather than something each section
+author improvises:
+- compact — image-heavy galleries, long grids, practical information, or any
+  section whose content already creates substantial height
+- standard — the default for most heroes, stories, feature sections and CTAs
+- spacious — a deliberately slow, short text-led beat; ration this to the few
+  moments where whitespace itself carries the composition
+
 Rules:
 - LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" stays lowercase a-z ASCII regardless (transliterate).
 - IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly, and any planned email uses the spec's `email_domain` — never invent alternates.
@@ -72,6 +83,8 @@ Rules:
 - Variety is mandatory: NO layout_archetype may be used by two ADJACENT sections, and "equal-card-grid" may appear at most TWICE on the whole page.
 - Plan the background rhythm deliberately: mostly "base" with 1-2 "contrast" or "image" bands placed for pacing (e.g. under the hero's fold and before the closing CTA) — never alternating stripes, and let the design direction's mood decide how heavy the dark/image bands feel.
 - Plan the width rhythm the same way: centered-stack sections give the page its content-width beats; grid and cover archetypes carry wide or full bands. A page where every band renders at the same width reads flat — alternate deliberately.
+- Plan vertical density across the WHOLE page. Use `standard` by default, `compact` for tall/image-dense sections, and `spacious` only for short sections where the design direction explicitly needs a pause. Never make a long gallery or information-heavy section spacious, never assign spacious to adjacent sections, and use it at most twice on the page.
+- Adjacent sections on the same guaranteed-continuous solid surface (`base` or `contrast`) share one seam budget: the deterministic rhythm pass removes the upper section's bottom padding and lets the lower section's top padding own that gap. Tinted gradients and image assets keep separate edges because two independently authored instances may differ. Write handoff prose with that distinction in mind rather than budgeting whitespace twice.
 - An "image" background wraps whatever archetype the section uses inside a full-bleed cover band; pairing it with "full-bleed-cover" is the classic image-led band (a natural hero choice, not a redundancy). Reserve "image" for the 1-2 sections where imagery should carry the band.
 - When the DESIGN DIRECTION's **Canvas** is `framed`, "full-bleed" archetypes and bands still apply but render inside the page's mat (capped at wide width) rather than touching the viewport edge — plan the rhythm knowing every band keeps a visible margin of page background around it.
 - "handoff" must name the actual neighbors' assignments (e.g. "Sits between the full-bleed image hero above and the base-background menu grid below; this contrast band gives the eye a rest between two image-heavy blocks."). For the first section the neighbor above is the site header; for the last it is the footer.

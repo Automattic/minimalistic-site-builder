@@ -93,7 +93,7 @@ final class LayoutFixer
      * A top-level group with no "layout" attribute is flow, not constrained:
      * no centering, no global padding, so its align:wide children render
      * edge-to-edge at the viewport (tbilisi's "The Cuisine" band). Same
-     * contract SectionsStep::constrainedPart enforces for header/footer,
+     * contract Units\GeneratedMarkup::constrainedPart enforces for header/footer,
      * applied to every file's root groups.
      *
      * @param object[] $roots

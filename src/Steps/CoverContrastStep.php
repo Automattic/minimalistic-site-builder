@@ -9,6 +9,7 @@ use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Step (post-images, deterministic): verify cover text against the REAL image.
@@ -121,7 +122,7 @@ final class CoverContrastStep implements Step
                         continue;
                     }
                     $markup = $project->readText($rel);
-                    $constrained = SectionsStep::constrainedPart($markup);
+                    $constrained = GeneratedMarkup::constrainedPart($markup);
                     if ($constrained !== $markup) {
                         $project->writeText($rel, $constrained);
                     }

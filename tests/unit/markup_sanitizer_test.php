@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\MarkupSanitizer;
-use Automattic\SiteBuild\Steps\SectionsStep;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 test('sanitize removes script elements with their bodies', function () {
     $out = MarkupSanitizer::sanitize(
@@ -57,8 +57,8 @@ test('sanitize leaves well-formed block markup byte-identical', function () {
     assert_eq($markup, MarkupSanitizer::sanitize($markup));
 });
 
-test('SectionsStep::markup sanitizes the part at intake', function () {
-    $out = SectionsStep::markup(
+test('GeneratedMarkup::normalize sanitizes the part at intake', function () {
+    $out = GeneratedMarkup::normalize(
         '<!-- wp:html --><script>alert(1)</script><!-- /wp:html --><!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->',
         'section-test'
     );

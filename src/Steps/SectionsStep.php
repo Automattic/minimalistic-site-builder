@@ -4,11 +4,13 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Llm;
-use Automattic\SiteBuild\LlmOptions;
-use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Units\FooterUnit;
+use Automattic\SiteBuild\Units\HeaderUnit;
+use Automattic\SiteBuild\Units\MarkupUnit;
+use Automattic\SiteBuild\Units\SectionUnit;
 
 /**
  * Step (LLM, concurrent): generate every part of every page in ONE batch — the
@@ -28,20 +30,22 @@ use Automattic\SiteBuild\Step;
  * the site's page list so buttons and links can point at real sibling pages.
  * Image placeholders use the same AI_IMAGE convention collect-images parses.
  *
+ * The prompt rendering and response normalization for each part live in the
+ * Units\* markup units; this step only adapts Project state into their
+ * self-contained inputs and batches their requests.
+ *
  * Each part's response IS the block markup (raw text, via completeBatch) — not
  * JSON-wrapped — so the model never has to escape its HTML into a JSON string.
  */
 final class SectionsStep implements Step
 {
-    use LlmOptions;
-
     /** Prefix for a page section part's request key and filename. */
-    public const PART_PREFIX = 'page-';
+    public const PART_PREFIX = SectionUnit::KEY_PREFIX;
 
     /** The part slug (request key and file basename) for one page's section. */
     public static function partSlug(string $pageSlug, string $sectionSlug): string
     {
-        return self::PART_PREFIX . $pageSlug . '--' . $sectionSlug;
+        return SectionUnit::partKey($pageSlug, $sectionSlug);
     }
 
     /** {{nav_rule}} for header.md when the site has inner pages to list. */
@@ -56,12 +60,20 @@ final class SectionsStep implements Step
         . ' of `wp:navigation-link` items targeting section anchors from the HOMEPAGE OUTLINE (each outline line ends'
         . ' with its [#anchor]; a link\'s "url" is that anchor, e.g. href="#menu-highlights").';
 
+    private SectionUnit $sectionUnit;
+    private HeaderUnit $headerUnit;
+    private FooterUnit $footerUnit;
+
     public function __construct(
         private Llm $llm,
-        private PromptRenderer $renderer,
-        private ?string $model = null,
-        private ?float $temperature = null,
-    ) {}
+        PromptRenderer $renderer,
+        ?string $model = null,
+        ?float $temperature = null,
+    ) {
+        $this->sectionUnit = new SectionUnit($llm, $renderer, $model, $temperature);
+        $this->headerUnit = new HeaderUnit($llm, $renderer, $model, $temperature);
+        $this->footerUnit = new FooterUnit($llm, $renderer, $model, $temperature);
+    }
 
     public function id(): string
     {
@@ -75,45 +87,79 @@ final class SectionsStep implements Step
 
     public function requests(Project $project): array
     {
-        $siteSpec = $project->readText('siteSpec.json');
-        $themeJson = $project->readText('theme/theme.json');
-        $language = SiteSpecStep::languageOf($project);
+        return self::requestsFor($this->jobs($project));
+    }
+
+    public function run(Project $project): void
+    {
+        $jobs = $this->jobs($project);
+        $parts = $this->llm->completeBatch(self::requestsFor($jobs));
+
+        // Validate EVERY part before writing any, so one bad part doesn't leave
+        // a half-written set of files on disk (the build aborts either way).
+        $files = [];
+        foreach ($jobs as $key => $job) {
+            if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
+                throw new \RuntimeException("sections: missing result for part '{$key}'");
+            }
+            $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input']);
+        }
+
+        foreach ($files as $rel => $markup) {
+            $project->writeText('theme/' . $rel, $markup . "\n");
+        }
+    }
+
+    /**
+     * Ask each job's unit to render its self-contained LLM request.
+     *
+     * @param array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}> $jobs
+     * @return array<string,array{prompt:string,model?:string,temperature?:float}>
+     */
+    private static function requestsFor(array $jobs): array
+    {
+        $requests = [];
+        foreach ($jobs as $key => $job) {
+            $requests[$key] = $job['unit']->request($job['input']);
+        }
+        return $requests;
+    }
+
+    /**
+     * Read Project state once and adapt it into self-contained unit inputs.
+     *
+     * @return array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}>
+     */
+    private function jobs(Project $project): array
+    {
         $pages = self::pages($project);
-        $sitePages = PagePlanStep::sitePagesList($pages);
+
+        $common = [
+            'site_spec'        => $project->readText('siteSpec.json'),
+            'language'         => SiteSpecStep::languageOf($project),
+            'theme_json'       => $project->readText('theme/theme.json'),
+            'design_direction' => DesignDirectionStep::readFor($project),
+            'site_pages'       => PagePlanStep::sitePagesList($pages),
+        ];
 
         // The chrome is briefed on the FRONT page: that's what the header sits
         // directly above (or floats on) and what sets the site's opening tone.
-        $front = self::frontPage($pages);
-        $frontSections = $front['sections'];
-
-        // The AI_IMAGE authoring rules live in their own prompt file so they stay
-        // in sync with what CollectImagesStep parses; injected into every section
-        // (a section uses them only when its "Use imagery" is yes).
-        $imageInstructions = $this->renderer->render('image-generation.md', []);
-
-        // The committed creative concept, shared by every section so the whole
-        // site honors one direction (shape language, signature device, mood).
-        $designDirection = DesignDirectionStep::readFor($project);
-
-        $requests = [
-            'header' => $this->withOptions(['prompt' => $this->renderer->render('header.md', [
-                'site_spec'        => $siteSpec,
-                'language'         => $language,
-                'theme_json'       => $themeJson,
-                'design_direction' => $designDirection,
-                'hero_brief'       => self::heroBrief($frontSections),
-                'outline'          => self::outline($frontSections),
-                'site_pages'       => $sitePages,
-                'nav_rule'         => count($pages) > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE,
-            ])]),
-            'footer' => $this->withOptions(['prompt' => $this->renderer->render('footer.md', [
-                'site_spec'        => $siteSpec,
-                'language'         => $language,
-                'theme_json'       => $themeJson,
-                'design_direction' => $designDirection,
-                'outline'          => self::outline($frontSections),
-                'site_pages'       => $sitePages,
-            ])]),
+        $frontSections = self::frontPage($pages)['sections'];
+        $jobs = [
+            'header' => [
+                'unit'  => $this->headerUnit,
+                'input' => $common + [
+                    'outline'    => self::outline($frontSections),
+                    'hero_brief' => self::heroBrief($frontSections),
+                    'nav_rule'   => count($pages) > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE,
+                ],
+                'file'  => 'parts/header.html',
+            ],
+            'footer' => [
+                'unit'  => $this->footerUnit,
+                'input' => $common + ['outline' => self::outline($frontSections)],
+                'file'  => 'parts/footer.html',
+            ],
         ];
 
         foreach ($pages as $page) {
@@ -121,52 +167,26 @@ final class SectionsStep implements Step
             // A compact outline of THIS page, so each section knows its place.
             $outline = self::outline($sections);
             foreach ($sections as $i => $section) {
-                $key = self::partSlug((string) $page['slug'], (string) $section['slug']);
-                $requests[$key] = $this->withOptions(['prompt' => $this->renderer->render('section.md', [
-                    'site_spec'        => $siteSpec,
-                    'language'         => $language,
-                    'theme_json'       => $themeJson,
-                    'design_direction' => $designDirection,
-                    'outline'          => $outline,
-                    'page_title'       => (string) ($page['title'] ?? ''),
-                    'page_path'        => (string) ($page['path'] ?? '/'),
-                    'site_pages'       => $sitePages,
-                    'section_title' => (string) ($section['title'] ?? ''),
-                    'section_slug'  => (string) ($section['slug'] ?? ''),
-                    'section_type'  => (string) ($section['type'] ?? 'content'),
-                    'section_purpose' => (string) ($section['purpose'] ?? ''),
-                    'content_notes' => (string) ($section['content_notes'] ?? ''),
-                    'composition'   => $this->composition($sections, $i, (string) $page['slug']),
-                    'image_instructions' => $imageInstructions,
-                ])]);
+                $input = $common + [
+                    'outline'   => $outline,
+                    'page'      => [
+                        'slug'  => (string) ($page['slug'] ?? ''),
+                        'title' => (string) ($page['title'] ?? ''),
+                        'path'  => (string) ($page['path'] ?? '/'),
+                    ],
+                    'section'   => $section,
+                    'neighbors' => self::neighbors($sections, $i),
+                ];
+                $key = $this->sectionUnit->key($input);
+                $jobs[$key] = [
+                    'unit'  => $this->sectionUnit,
+                    'input' => $input,
+                    'file'  => 'parts/' . $key . '.html',
+                ];
             }
         }
 
-        return $requests;
-    }
-
-    public function run(Project $project): void
-    {
-        $parts = $this->llm->completeBatch($this->requests($project));
-
-        // Validate EVERY part before writing any, so one bad part doesn't leave
-        // a half-written set of files on disk (the build aborts either way).
-        $files = [];
-        foreach ($parts as $key => $text) {
-            $rel = match (true) {
-                $key === 'header' => 'parts/header.html',
-                $key === 'footer' => 'parts/footer.html',
-                default           => 'parts/' . $key . '.html', // page-<page>--<section>
-            };
-            // Every part's top-level group must declare a layout — sections
-            // included: a flow-layout section band renders its children
-            // edge-to-edge at the viewport with no page gutter.
-            $files[$rel] = self::constrainedPart(self::markup($text, $key));
-        }
-
-        foreach ($files as $rel => $markup) {
-            $project->writeText('theme/' . $rel, $markup . "\n");
-        }
+        return $jobs;
     }
 
     /**
@@ -231,32 +251,6 @@ final class SectionsStep implements Step
     }
 
     /**
-     * The section's COMPOSITION prompt block: the assigned archetype/background/
-     * handoff plus its neighbors' assignments (section-composition.md). Missing
-     * composition fields mean the plan step contract was broken, so fail before
-     * sending a half-empty prompt to the model.
-     *
-     * @param array<int,array<string,mixed>> $sections
-     */
-    private function composition(array $sections, int $i, string $pageSlug): string
-    {
-        $section = $sections[$i];
-        $slug = (string) ($section['slug'] ?? "section-{$i}");
-        foreach (['layout_archetype', 'background', 'handoff'] as $field) {
-            if (trim((string) ($section[$field] ?? '')) === '') {
-                throw new \RuntimeException("sections: page '{$pageSlug}' section '{$slug}' is missing {$field} from page-plan");
-            }
-        }
-
-        return $this->renderer->render('section-composition.md', [
-            'layout_archetype' => (string) ($section['layout_archetype'] ?? ''),
-            'background'       => (string) ($section['background'] ?? ''),
-            'handoff'          => (string) ($section['handoff'] ?? ''),
-            'neighbors'        => self::neighbors($sections, $i),
-        ]);
-    }
-
-    /**
      * The plan's art-direction context for the section at $i: its neighbors'
      * archetype/background assignments, so each seam is designed on both sides.
      * Pure — unit-testable.
@@ -289,10 +283,12 @@ final class SectionsStep implements Step
     {
         $archetype = trim((string) ($section['layout_archetype'] ?? ''));
         $background = trim((string) ($section['background'] ?? ''));
-        if ($archetype === '' && $background === '') {
+        $density = trim((string) ($section['vertical_density'] ?? ''));
+        if ($archetype === '' && $background === '' && $density === '') {
             return '';
         }
-        return trim($archetype . ($background !== '' ? " on {$background} background" : ''));
+        $assignment = trim($archetype . ($background !== '' ? " on {$background} background" : ''));
+        return trim($assignment . ($density !== '' ? ", {$density} vertical density" : ''));
     }
 
     /**
@@ -324,76 +320,5 @@ final class SectionsStep implements Step
             }
         }
         return $lines === [] ? '(No hero section planned.)' : implode("\n", $lines);
-    }
-
-    /**
-     * Ensure a part's top-level wp:group declares a layout. The header and
-     * footer prompts demand `"layout":{"type":"constrained"}` on the top-level
-     * group, but the model sometimes drops it — and a group with no layout is
-     * flow, not constrained: no centering, no root-padding-aware gutter, so
-     * its content renders edge-to-edge at the viewport (a header's align:wide
-     * row hugs the screen corners; a footer's text touches the screen edge).
-     * Only adds a missing layout; an explicit one (e.g. a deliberate flex row)
-     * is left alone. Pure — unit-testable.
-     */
-    public static function constrainedPart(string $markup): string
-    {
-        if (preg_match('/^<!--\s*wp:group\s*(\{.*?\})?\s*-->/s', $markup, $m) !== 1) {
-            return $markup;
-        }
-        $attrs = isset($m[1]) && $m[1] !== '' ? json_decode($m[1], true) : [];
-        if (!is_array($attrs) || isset($attrs['layout'])) {
-            return $markup;
-        }
-        $attrs['layout'] = ['type' => 'constrained'];
-        $json = json_encode($attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        return '<!-- wp:group ' . $json . ' -->' . substr($markup, strlen($m[0]));
-    }
-
-    /**
-     * Validate one part's raw block-markup response. The model returns the
-     * markup verbatim; we defensively strip a stray ```…``` code fence if one
-     * slipped in, then require it to actually be block markup. The part is
-     * untrusted model output headed for templates and stored post content, so
-     * script-capable markup is stripped here — the one intake every generated
-     * part passes through. Pure — testable.
-     */
-    public static function markup(string $text, string $key): string
-    {
-        $markup = self::stripFences(trim($text));
-        if ($markup === '' || !str_contains($markup, 'wp:')) {
-            throw new \RuntimeException("sections: part '{$key}' is not block markup");
-        }
-        return MarkupSanitizer::sanitize(self::normalizePresetRefs(rtrim($markup)));
-    }
-
-    /**
-     * Repair the model's recurring preset-reference typo: `var:preset--type--slug`
-     * instead of `var:preset|type|slug` in block-comment attributes. WordPress
-     * resolves only the pipe form, so the malformed ref produces NO style — and
-     * the block-fixer then deletes the (correct) inline CSS as "not mirrored in
-     * attributes", leaving e.g. a section with zero padding beside 8rem siblings.
-     * The type names are a fixed vocabulary, so the rewrite is unambiguous.
-     * Pure — unit-testable.
-     */
-    public static function normalizePresetRefs(string $markup): string
-    {
-        // `--` may also appear as the serializer's `--` escape.
-        $dashes = '(?:--|(?:\\\u002d){2})';
-        return (string) preg_replace(
-            "/var:preset{$dashes}(color|gradient|shadow|spacing|font-size|font-family|aspect-ratio|duotone){$dashes}/",
-            'var:preset|$1|',
-            $markup
-        );
-    }
-
-    /** Strip a leading/trailing markdown code fence if the model added one. */
-    private static function stripFences(string $text): string
-    {
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
     }
 }
