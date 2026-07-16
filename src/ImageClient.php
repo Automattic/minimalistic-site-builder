@@ -34,8 +34,11 @@ interface ImageClient
      * image failing must not abort the others.
      *
      * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string,mime?:?string}> $specs
-     * @return array<int,array{ok:bool,bytes?:string,error?:string}> keyed by the
-     *         same index as $specs (one result per spec, order preserved)
+     * @return array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>
+     *         keyed by the same index as $specs (one result per spec, order
+     *         preserved); `filtered` marks a failure caused by the endpoint's
+     *         safety filter rejecting the prompt — repairable by rewording it,
+     *         unlike a transport failure
      */
     public function generateBatch(array $specs): array;
 }

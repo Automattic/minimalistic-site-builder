@@ -7,7 +7,7 @@ Rewrite it into ONE clear, self-contained brief that the builder can turn into a
 Your rewrite should:
 
 - Fix vague or one-word requests. If the prompt is short (e.g. "a bakery", "portfolio") or ambiguous, flesh it out into a concrete, buildable description: what the site is, who it's for, what it offers, and the overall vibe. Make reasonable, conventional assumptions for anything the user left unspecified.
-- PRESERVE every concrete fact the user gave — names, locations, hours, contact details, products/services, prices, taglines, colors or style words, requested sections. Never drop or contradict a stated fact.
+- PRESERVE every concrete fact the user gave — names, locations, hours, contact details, products/services, prices, taglines, colors or style words, requested sections, and any specific animation/motion behavior they asked for (keep such requests verbatim). Never drop or contradict a stated fact.
 - Do NOT invent specific unverifiable facts (real addresses, phone numbers, prices, dates, named people). Keep added detail generic and descriptive, not falsely precise.
 - Stay faithful to intent. A good rewrite is what the user *meant*, expanded — not a different site. Do not change the type of site, the topic, or the language.
 

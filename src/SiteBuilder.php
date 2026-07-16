@@ -7,17 +7,22 @@ use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
+use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
+use Automattic\SiteBuild\Steps\MotionSanityStep;
+use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\SectionPlanStep;
+use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
 /**
  * Consumer-facing entry point for the default site-creation pipeline.
@@ -83,23 +88,41 @@ final class SiteBuilder
                 new SectionPlanStep($this->llm, $renderer, $models['section-plan'], $temps['section-plan']),
             ]),
             // Generate the header, footer, and every section part in one concurrent
-            // batch, then stitch them into the page deterministically.
+            // batch. Resolve page-level vertical seams while the parts are still
+            // ordered by the plan, then stitch them into the page deterministically.
             new SectionsStep($this->llm, $renderer, $models['sections'], $temps['sections']),
+            new SectionRhythmStep(),
             new AssembleLandingPageStep(),
             // Collect image placeholders BEFORE fix-blocks: the block re-serializer
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.
             new CollectImagesStep(),
+            // Attribute repair + layout/rhythm normalization BEFORE the
+            // contrast/motion policy passes: LayoutFixer can activate
+            // previously-inert attributes (unparseable JSON, HTML-only
+            // declarations), and those must exist when the policies run or
+            // repaired markup would bypass them unchecked.
+            new NormalizeLayoutStep(),
             // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
             // repairs rewrite only the block-comment JSON attributes, and the
             // fix-blocks re-serialization below regenerates the saved HTML
             // from those attributes, keeping markup and attributes in sync.
             new ContrastFixStep(),
+            // Deterministic backstop for the motion-class budget the section
+            // prompts are asked to respect (independent concurrent calls can't
+            // coordinate it). Also BEFORE fix-blocks: it edits block-comment
+            // JSON attributes and the re-serialization syncs the HTML.
+            new MotionSanityStep(),
             new FixBlocksStep($this->blockFixer),
             // AFTER fix-blocks: reads the final (re-serialized) markup for which
             // layout utility classes survived, and appends their CSS to style.css —
             // a file the fixer never touches, so nothing here can be stripped.
             new PageStylesStep($this->llm, $renderer, $models['page-styles'], $temps['page-styles']),
+            // Escape hatch: one scoped CSS-generation call, made ONLY when the
+            // user explicitly requested a specific animation (site-spec captured
+            // it verbatim) AND a section tagged its target. Default path: no-op,
+            // zero LLM calls.
+            new CustomMotionStep($this->llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
             // Also after fix-blocks: writes fonts.php from the design direction,
             // validated against a deterministic scan of the final theme.json +
             // markup (every family/weight/italic the build uses MUST be requested;
@@ -108,6 +131,9 @@ final class SiteBuilder
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
+            // Last chance to catch contract drift introduced by serialization or
+            // later append-only steps before the project is reported as complete.
+            new ValidateThemeStep(),
         ]);
     }
 

@@ -21,14 +21,29 @@ test('compose includes the page context and site context as labelled guidance', 
         'A sourdough loaf on a board',
         'menu item card in a 3-column grid',
         'photorealistic',
-        'Image for the website “Hearth & Crumb” about artisan sourdough.'
+        'the website “Hearth & Crumb”. A neighborhood bakery selling sourdough and pastries.'
     );
-    assert_contains('menu item card in a 3-column grid', $out);
-    assert_contains('Hearth & Crumb', $out);
+    // Page and site context fold into one grammatical sentence.
+    assert_contains(
+        'This image is used as menu item card in a 3-column grid on the website “Hearth & Crumb”.',
+        $out
+    );
+    assert_contains('A neighborhood bakery selling sourdough and pastries.', $out);
     // The guidance is explicitly framed as non-literal so the model doesn't draw it.
     assert_contains('do not render', $out);
     // Subject is still present in full.
     assert_contains('A sourdough loaf on a board. Style: photorealistic', $out);
+});
+
+test('compose frames a site context without page context as its own sentence', function () {
+    $out = ImagePromptComposer::compose(
+        'A sourdough loaf on a board',
+        '',
+        'photorealistic',
+        'the website “Hearth & Crumb”.'
+    );
+    assert_contains('This image appears on the website “Hearth & Crumb”.', $out);
+    assert_true(!str_contains($out, 'used as'), 'no page-context clause without a page context');
 });
 
 test('compose with no page or site context is just the subject + style', function () {
@@ -55,7 +70,7 @@ test('compose injects the image grade as its own art-direction clause', function
         'A sourdough loaf on a board',
         'menu item card',
         'photorealistic',
-        'Image for the website “Hearth & Crumb”.',
+        'the website “Hearth & Crumb”.',
         $grade
     );
 

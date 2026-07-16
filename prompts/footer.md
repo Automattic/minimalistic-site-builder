@@ -25,6 +25,7 @@ Rules:
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Any inline `style` or extra class you write in the HTML MUST be mirrored in the block comment's JSON attributes (supported paths like `"style":{"spacing":{...},"elements":{...}}`, `"className"`) — a later build step re-serializes blocks from their attributes and silently deletes styles that exist only in the HTML.
 - Every block comment must be correctly closed and HTML class names must match the block.
+- If the SITE SPEC carries a non-empty `animation_request` AND the element it describes lives in the footer (e.g. a social icon or the footer wordmark), add `"className":"custom-motion"` to that ONE block; a later build step generates the CSS implementing the request for exactly that class. On dynamic blocks (wp:site-title, wp:social-links) the comment attribute alone is enough. Do NOT write the animation CSS yourself, and do not use the class anywhere else.
 - LANGUAGE: write ALL user-facing footer copy — link labels, contact lines, the copyright and credit lines — in {{language}}. Do not mix languages; proper nouns and the spec's identity values stay verbatim.
 - IDENTITY: the footer speaks for the spec's ONE committed identity. The copyright line credits `persona_name` when set, otherwise `name` — exactly as written in the spec, never a rephrased or generic descriptor. Any email shown must be at the spec's `email_domain`. NEVER invent alternate names or domains.
 

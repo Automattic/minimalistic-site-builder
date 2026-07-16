@@ -81,6 +81,54 @@ test('retryBatch does not retry permanent failures', function () {
     assert_eq('HTTP 400', $out['results'][0]['error']);
 });
 
+test('retryBatch retries safety-filtered failures and keeps the flag on give-up', function () {
+    $bodies = [0 => ['b' => 0]];
+    $calls = 0;
+    // Filtered every time — retried like a transient failure (the filter is
+    // non-deterministic), and the final failure keeps the filtered flag so the
+    // caller can repair the prompt.
+    $transport = function (array $subset) use (&$calls) {
+        $calls++;
+        return [array_key_first($subset) => [
+            'ok' => false, 'transient' => true, 'filtered' => true, 'error' => 'rai: blocked',
+        ]];
+    };
+
+    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0, 0]); // 3 retries
+
+    assert_eq(4, $calls, 'initial attempt + 3 retries');
+    assert_eq(false, $out['results'][0]['ok']);
+    assert_eq(true, $out['results'][0]['filtered']);
+    assert_eq('rai: blocked', $out['results'][0]['error']);
+});
+
+test('retryBatch marks a filtered prompt that passes on a retry as a plain success', function () {
+    $bodies = [0 => ['b' => 0]];
+    $round = 0;
+    $transport = function (array $subset) use (&$round) {
+        $round++;
+        return [array_key_first($subset) => $round === 1
+            ? ['ok' => false, 'transient' => true, 'filtered' => true, 'error' => 'rai: blocked']
+            : ['ok' => true, 'bytes' => 'X']];
+    };
+
+    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0]);
+
+    assert_eq(true, $out['results'][0]['ok']);
+    assert_eq(1, $out['succeeded']);
+});
+
+test('filteredReason spots an Imagen RAI rejection, null otherwise', function () {
+    // The exact shape the proxy returned for a real filtered request.
+    $filtered = json_decode('{"predictions":[{"raiFilteredReason":'
+        . '"Unable to show generated images. Support codes: 29578790"}]}', true);
+    assert_contains('29578790', (string) WpcomImageClient::filteredReason($filtered));
+
+    assert_eq(null, WpcomImageClient::filteredReason(['predictions' => [['bytesBase64Encoded' => 'QUJD']]]));
+    assert_eq(null, WpcomImageClient::filteredReason(['predictions' => []]));
+    assert_eq(null, WpcomImageClient::filteredReason(null));
+});
+
 /**
  * The 480-token input cap (WpcomImageClient::fitToTokens). ImagePromptComposer
  * leans on this to keep a fully-composed prompt under the model's hard limit.
