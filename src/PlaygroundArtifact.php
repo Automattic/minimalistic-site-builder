@@ -103,6 +103,39 @@ final class PlaygroundArtifact
         return implode("\n", $lines) . "\n";
     }
 
+    /**
+     * Blueprint step neutralizing outbound HTTP for the local Playground CLI.
+     *
+     * The CLI's wasm PHP cannot complete outbound requests, so a block whose
+     * render fetches remote content — wp:embed → server-side oEmbed discovery —
+     * blocks forever and pins its worker. This mu-plugin makes the local preview
+     * fail fast instead. Published browser artifacts use Playground's networking
+     * support and must not install this step.
+     *
+     * @return array<mixed>
+     */
+    public static function offlineGuardStep(): array
+    {
+        return [
+            'step' => 'writeFile',
+            'path' => '/wordpress/wp-content/mu-plugins/0-preview-offline.php',
+            'data' => <<<'PHP'
+                <?php
+                /**
+                 * The local Playground CLI cannot complete outbound requests.
+                 * Resolve oEmbeds to a plain link and fail any other WordPress
+                 * HTTP request fast so a render never pins a worker.
+                 */
+                add_filter( 'pre_oembed_result', function ( $result, $url ) {
+                    return '<a href="' . esc_url( $url ) . '">' . esc_html( $url ) . '</a>';
+                }, 10, 2 );
+                add_filter( 'pre_http_request', function () {
+                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in the local Playground preview.' );
+                } );
+                PHP,
+        ];
+    }
+
     /** @return array<mixed> */
     public static function blueprint(Project $project): array
     {

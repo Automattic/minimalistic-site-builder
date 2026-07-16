@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
@@ -181,22 +182,31 @@ function command_exists(string $bin): bool
     return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
 }
 
-/** First available Chrome/Chromium binary (CHROME_BIN wins), or null. */
+/** First working Chrome/Chromium binary (CHROME_BIN wins), or null. */
 function chrome_binary(): ?string
 {
+    // Env::get, not getenv: CHROME_BIN set in .env never reaches the real
+    // environment, only the Env map. Absolute paths come before the bare
+    // names: each name costs a `command -v` subprocess, a path just a stat.
     $candidates = array_filter([
-        getenv('CHROME_BIN') ?: null,
+        Env::get('CHROME_BIN'),
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
         'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
     ]);
     foreach ($candidates as $bin) {
-        if (str_contains($bin, '/') && is_executable($bin)) {
-            return $bin;
+        $path = str_contains($bin, '/')
+            ? $bin
+            : trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
+        if ($path === '' || !is_executable($path)) {
+            continue;
         }
-        if (!str_contains($bin, '/')) {
-            $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
-            if ($path !== '') {
-                return $path;
-            }
+        // Existing and executable isn't enough: a stale Homebrew cask wrapper
+        // execs an app bundle that may no longer exist (exit 126/127). Only
+        // trust a binary that actually runs.
+        exec(escapeshellarg($path) . ' --version 2>/dev/null', $ignored, $code);
+        if ($code === 0) {
+            return $path;
         }
     }
     return null;
