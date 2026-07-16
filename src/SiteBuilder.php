@@ -13,6 +13,7 @@ use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
+use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
@@ -96,6 +97,12 @@ final class SiteBuilder
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.
             new CollectImagesStep(),
+            // Attribute repair + layout/rhythm normalization BEFORE the
+            // contrast/motion policy passes: LayoutFixer can activate
+            // previously-inert attributes (unparseable JSON, HTML-only
+            // declarations), and those must exist when the policies run or
+            // repaired markup would bypass them unchecked.
+            new NormalizeLayoutStep(),
             // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
             // repairs rewrite only the block-comment JSON attributes, and the
             // fix-blocks re-serialization below regenerates the saved HTML
