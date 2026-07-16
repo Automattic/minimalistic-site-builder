@@ -5,6 +5,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Unit tests for SectionsStep: it fires one request per part (header, footer,
@@ -18,8 +19,8 @@ function sections_fixture(): array
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the site header above and the base about split below.'],
-        ['slug' => 'about', 'title' => 'About', 'type' => 'about', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'handoff' => 'Between the image hero above and the footer below.'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base about split below.'],
+        ['slug' => 'about', 'title' => 'About', 'type' => 'about', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the image hero above and the footer below.'],
     ]]);
     return [$project, $tmp];
 }
@@ -40,8 +41,8 @@ test('sections passes the design direction and hero brief to header and footer p
         'description' => 'Full-bleed black-and-white photography, chrome-less.',
     ]);
     $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'handoff' => 'Between the header and about section.'],
-        ['slug' => 'about', 'title' => 'About', 'type' => 'about', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'handoff' => 'Between the hero and footer.'],
+        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header and about section.'],
+        ['slug' => 'about', 'title' => 'About', 'type' => 'about', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'vertical_density' => 'spacious', 'handoff' => 'Between the hero and footer.'],
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
@@ -81,18 +82,19 @@ test('sections passes each part its assigned composition and its neighbors\' ass
     $hero = $reqs['section-hero']['prompt'];
     assert_true((bool) preg_match('/Layout archetype:\s+full-bleed-cover/', $hero), 'hero archetype in prompt');
     assert_true((bool) preg_match('/Background:\s+image/', $hero), 'hero background in prompt');
+    assert_true((bool) preg_match('/Vertical density:\s+standard/', $hero), 'hero density in prompt');
     assert_contains('Between the site header above and the base about split below.', $hero);
     assert_contains('Above: the site header (this is the first section)', $hero);
-    assert_contains('Below: "About" — asymmetric-split on base background', $hero);
+    assert_contains('Below: "About" — asymmetric-split on base background, standard vertical density', $hero);
     assert_contains('If SECTION Notes mention a different layout or background', $hero);
 
     $about = $reqs['section-about']['prompt'];
     assert_true((bool) preg_match('/Layout archetype:\s+asymmetric-split/', $about), 'about archetype in prompt');
-    assert_contains('Above: "Hero" — full-bleed-cover on image background', $about);
+    assert_contains('Above: "Hero" — full-bleed-cover on image background, standard vertical density', $about);
     assert_contains('Below: the site footer (this is the last section)', $about);
 
     // The shared outline carries the whole page's rhythm to every part.
-    assert_contains('1. Hero (hero) — full-bleed-cover on image background', $reqs['header']['prompt']);
+    assert_contains('1. Hero (hero) — full-bleed-cover on image background, standard vertical density', $reqs['header']['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -148,6 +150,8 @@ test('sections writes header, footer and a part per section', function () {
 
     (new SectionsStep($llm, $renderer))->run($project);
 
+    assert_eq(1, $llm->completeBatchCalls, 'all parts sent through one concurrent batch');
+    assert_eq(0, $llm->completeCalls, 'step never falls back to sequential single calls');
     foreach (['parts/header.html', 'parts/footer.html', 'parts/section-hero.html', 'parts/section-about.html'] as $rel) {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
         assert_contains('wp:', $project->readText('theme/' . $rel));
@@ -161,22 +165,22 @@ test('constrainedPart adds a missing layout to a part top-level group', function
     $in = '<!-- wp:group {"className":"header-overlay","style":{"spacing":{"padding":{"top":"var:preset|spacing|md"}}}} -->' . "\n"
         . '<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>' . "\n"
         . '<!-- /wp:group -->';
-    $out = SectionsStep::constrainedPart($in);
+    $out = GeneratedMarkup::constrainedPart($in);
     assert_contains('"layout":{"type":"constrained"}', $out);
     assert_contains('"className":"header-overlay"', $out, 'existing attributes preserved');
     assert_contains('<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>', $out, 'body untouched');
 
     // An attribute-less top-level group gets one too.
-    $out = SectionsStep::constrainedPart('<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->');
+    $out = GeneratedMarkup::constrainedPart('<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->');
     assert_contains('"layout":{"type":"constrained"}', $out);
 });
 
 test('constrainedPart leaves an explicit layout and non-group markup alone', function () {
     $flex = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"space-between"}} --><div class="wp-block-group"></div><!-- /wp:group -->';
-    assert_eq($flex, SectionsStep::constrainedPart($flex));
+    assert_eq($flex, GeneratedMarkup::constrainedPart($flex));
 
     $cover = '<!-- wp:cover {"align":"full"} --><div class="wp-block-cover"></div><!-- /wp:cover -->';
-    assert_eq($cover, SectionsStep::constrainedPart($cover));
+    assert_eq($cover, GeneratedMarkup::constrainedPart($cover));
 });
 
 test('sections writes header AND footer with a constrained layout when the model omits one', function () {
@@ -199,22 +203,54 @@ test('sections writes header AND footer with a constrained layout when the model
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('markup repairs the var:preset--type--slug typo into the pipe form', function () {
-    $in = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset--spacing--xxl","bottom":"var:preset--spacing--md"},"blockGap":"var:preset|spacing|sm"},"typography":{"fontSize":"var:preset--font-size--lead"}}} -->'
-        . '<div class="wp-block-group">x</div><!-- /wp:group -->';
-    $out = SectionsStep::markup($in, 'section-test');
-    assert_contains('"top":"var:preset|spacing|xxl"', $out);
-    assert_contains('"bottom":"var:preset|spacing|md"', $out);
-    assert_contains('"fontSize":"var:preset|font-size|lead"', $out);
-    assert_contains('"blockGap":"var:preset|spacing|sm"', $out, 'valid refs untouched');
+test('normalizePresetRefs canonicalizes both delimiter positions independently', function () {
+    $cases = [
+        ['var:preset|spacing|xl', 'var:preset|spacing|xl'],
+        ['var:preset--spacing--xl', 'var:preset|spacing|xl'],
+        ['var:preset|spacing--xl', 'var:preset|spacing|xl'],
+        ['var:preset--spacing|xl', 'var:preset|spacing|xl'],
+        ['var:preset:spacing:sm', 'var:preset|spacing|sm'],
+        ['var:preset|color:accent', 'var:preset|color|accent'],
+        ['var:preset--font-size--lead', 'var:preset|font-size|lead'],
+    ];
 
-    // The serializer-escaped spelling (-- for --) is repaired too,
-    // and CSS custom properties (var(--wp--preset--…)) are never touched.
-    $escaped = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset\u002d\u002dspacing\u002d\u002dxxl"}}}} -->'
-        . '<div style="padding-top:var(--wp--preset--spacing--xxl)">x</div><!-- /wp:group -->';
-    $out = SectionsStep::markup($escaped, 'section-test');
-    assert_contains('"top":"var:preset|spacing|xxl"', $out);
-    assert_contains('var(--wp--preset--spacing--xxl)', $out);
+    foreach ($cases as [$input, $expected]) {
+        assert_eq($expected, GeneratedMarkup::normalizePresetRefs($input), "normalizes {$input}");
+    }
+});
+
+test('normalizePresetRefs accepts serializer-escaped delimiters in either position', function () {
+    $cases = [
+        ['var:preset\u002d\u002dspacing\u002d\u002dxl', 'var:preset|spacing|xl'],
+        ['var:preset\u002d\u002dspacing|xl', 'var:preset|spacing|xl'],
+        ['var:preset|spacing\u002d\u002dxl', 'var:preset|spacing|xl'],
+        ['var:preset\u002D\u002dspacing\u002d\u002Dxl', 'var:preset|spacing|xl'],
+        ['var:preset\u007cspacing\u007Cxl', 'var:preset|spacing|xl'],
+    ];
+
+    foreach ($cases as [$input, $expected]) {
+        assert_eq($expected, GeneratedMarkup::normalizePresetRefs($input), "normalizes {$input}");
+    }
+});
+
+test('normalizePresetRefs leaves unknown refs and CSS custom properties untouched and is idempotent', function () {
+    $input = '<!-- wp:group {"style":{"spacing":{"padding":{'
+        . '"top":"var:preset|spacing--xl",'
+        . '"right":"var:preset--unknown--xl",'
+        . '"bottom":"var:preset|not-spacing|xl"'
+        . '}}}} -->'
+        . '<div style="padding-top:var(--wp--preset--spacing--xl);color:var(--wp--preset--color--ink)">x</div>'
+        . '<!-- /wp:group -->';
+
+    $once = GeneratedMarkup::normalizePresetRefs($input);
+    $twice = GeneratedMarkup::normalizePresetRefs($once);
+
+    assert_contains('"top":"var:preset|spacing|xl"', $once);
+    assert_contains('"right":"var:preset--unknown--xl"', $once);
+    assert_contains('"bottom":"var:preset|not-spacing|xl"', $once);
+    assert_contains('var(--wp--preset--spacing--xl)', $once);
+    assert_contains('var(--wp--preset--color--ink)', $once);
+    assert_eq($once, $twice, 'normalization is idempotent');
 });
 
 test('sections strips a stray markdown code fence from a part response', function () {

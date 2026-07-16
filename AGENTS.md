@@ -1,5 +1,15 @@
 # AGENTS.md
 
+## Issue tracking: Linear, not GitHub Issues
+
+Issues for this repo are tracked in the Linear project **[Generated themes: replace assembler in Big Sky](https://linear.app/a8c/project/generated-themes-replace-assembler-in-big-sky-ea75fac8fa1f/overview)** (a8c workspace, issue keys like `BIGR-644`). GitHub Issues on this repo are deprecated — do not open new ones.
+
+- **Creating issues:** create them in that Linear project (via the Linear MCP tools or the web UI), never as GitHub issues.
+- **Branches:** include the Linear issue key in the branch name, e.g. `feat/bigr-644-stateless-generation-units`.
+- **PRs:** reference the issue so Linear auto-links the PR — put the key in the PR title (e.g. `... (BIGR-644)`) and include a `Fixes BIGR-XXX` line plus the full Linear issue URL in the PR description.
+- **Status:** move the Linear issue to *In Progress* when work starts; the PR merge closes it via the `Fixes` magic word.
+- **Linear MCP setup (one-time):** Linear's official MCP server is `https://mcp.linear.app/mcp` (HTTP transport, OAuth). In Claude Code: `claude mcp add --transport http --scope user linear https://mcp.linear.app/mcp`, then run `/mcp` in a fresh session and pick **Authenticate** — the OAuth step is interactive, so ask the user to complete it in the browser.
+
 ## Backwards compatibility
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.

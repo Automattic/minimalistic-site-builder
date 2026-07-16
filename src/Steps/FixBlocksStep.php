@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Step 8 (deterministic): repair block-validation issues in generated markup.
@@ -73,7 +74,27 @@ final class FixBlocksStep implements Step
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
         }
+
+        // Re-serialization is allowed to discard incidental HTML-only styling,
+        // but losing vertical spacing changes the page's authored rhythm. The
+        // block fixer reports every such loss as `DROPPED style `prop:value``;
+        // turn rhythm-affecting declarations into a hard failure while leaving
+        // unrelated losses (for example image height/object-fit/width) as the
+        // existing logged warning. Persist the complete report before throwing
+        // so a failed build still carries the evidence that explains it.
+        $rhythmDrops = self::droppedVerticalRhythmStyles($summary);
+        if ($rhythmDrops !== []) {
+            $summary .= "\n[rhythm] build rejected: block re-serialization dropped vertical rhythm CSS:\n  "
+                . implode("\n  ", $rhythmDrops);
+        }
         $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
+        if ($rhythmDrops !== []) {
+            throw new \RuntimeException(
+                'fix-blocks: block re-serialization dropped vertical rhythm CSS: '
+                . implode(', ', $rhythmDrops)
+                . ' (details: logs/' . self::LOG_FILE . ')'
+            );
+        }
 
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert
@@ -83,7 +104,7 @@ final class FixBlocksStep implements Step
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $repaired = SectionsStep::constrainedPart($markup);
+            $repaired = GeneratedMarkup::constrainedPart($markup);
             if ($repaired !== $markup) {
                 $project->writeText('theme/' . $rel, $repaired);
             }
@@ -120,6 +141,55 @@ final class FixBlocksStep implements Step
             }
         }
         return $notes;
+    }
+
+    /**
+     * Extract DROPPED inline-style declarations that affect vertical rhythm.
+     *
+     * The fixer report encloses each lost declaration in backticks. Match that
+     * stable boundary, then classify the CSS property exactly so similarly
+     * named but unrelated properties cannot make a build fail accidentally.
+     * Logical block-axis properties and shorthands count because they include a
+     * vertical component; left/right-only padding and margin do not.
+     *
+     * @return string[] unique `property:value` declarations, in report order
+     */
+    public static function droppedVerticalRhythmStyles(string $report): array
+    {
+        if (preg_match_all('/\bDROPPED\s+style\s+`([^`\r\n]+)`/i', $report, $matches) < 1) {
+            return [];
+        }
+
+        $rhythmProperties = [
+            'padding',
+            'padding-top',
+            'padding-bottom',
+            'padding-block',
+            'padding-block-start',
+            'padding-block-end',
+            'margin',
+            'margin-top',
+            'margin-bottom',
+            'margin-block',
+            'margin-block-start',
+            'margin-block-end',
+            'gap',
+            'row-gap',
+            'column-gap',
+        ];
+
+        $dropped = [];
+        foreach ($matches[1] as $declaration) {
+            $property = strtolower(trim((string) strtok($declaration, ':')));
+            if (!in_array($property, $rhythmProperties, true)) {
+                continue;
+            }
+            $declaration = trim($declaration);
+            if (!in_array($declaration, $dropped, true)) {
+                $dropped[] = $declaration;
+            }
+        }
+        return $dropped;
     }
 
     /** @return string[] parts/*.html and templates/*.html, theme-relative */

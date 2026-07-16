@@ -27,6 +27,23 @@ final class ThemeJsonStep implements ConcurrentStep
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
+    /**
+     * One bounded spacing vocabulary for every generated site.
+     *
+     * sm/md are component-level gaps. lg/xl/xxl are the compact, standard,
+     * and spacious section-padding choices. Their fluid ranges prevent the
+     * largest token from becoming fixed 128px padding on mobile or growing
+     * beyond 112px on wide screens.
+     *
+     * @var list<array{slug: string, name: string, size: string}>
+     */
+    private const SPACING_PROFILE = [
+        ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
+        ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
+        ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
+        ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
+        ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
+    ];
     private const REQ = 'theme-json';
 
     public function __construct(
@@ -68,6 +85,8 @@ final class ThemeJsonStep implements ConcurrentStep
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
+        $theme = self::disableCoreDefaultPresets($theme);
+        $theme = self::normalizeSpacingSettings($theme);
         $theme = self::normalizeRootPadding($theme);
 
         self::assertColors($theme);
@@ -79,6 +98,75 @@ final class ThemeJsonStep implements ConcurrentStep
     public function run(Project $project): void
     {
         $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+    }
+
+    /**
+     * Disable WordPress core's default presets so the slugs declared in
+     * theme.json are the only presets that exist at runtime.
+     *
+     * Without these flags, markup referencing a core slug ("fontSize":"large",
+     * "textColor":"white", a core gradient or duotone) renders with values
+     * from outside the designed scale, and PresetReferences' declared-slug
+     * model diverges from runtime. Shadows deliberately stay enabled: the
+     * scaffold CSS and the page-styles prompt use core shadow presets, and
+     * PresetReferences honors settings.shadow.defaultPresets when a theme
+     * opts out. (defaultSpacingSizes is part of the canonical spacing stanza
+     * in normalizeSpacingSettings.)
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function disableCoreDefaultPresets(array $theme): array
+    {
+        if (!isset($theme['settings']) || !is_array($theme['settings'])) {
+            $theme['settings'] = [];
+        }
+        $flags = [
+            'color'      => ['defaultPalette', 'defaultGradients', 'defaultDuotone'],
+            'typography' => ['defaultFontSizes'],
+        ];
+        foreach ($flags as $section => $names) {
+            if (!isset($theme['settings'][$section]) || !is_array($theme['settings'][$section])) {
+                $theme['settings'][$section] = [];
+            }
+            foreach ($names as $name) {
+                $theme['settings'][$section][$name] = false;
+            }
+        }
+        return $theme;
+    }
+
+    /**
+     * Install the canonical responsive spacing scale and enable block gaps.
+     *
+     * The model still owns all visual choices outside settings.spacing. Any
+     * additional valid spacing settings (such as units) are preserved, while
+     * a missing or malformed spacing stanza is repaired rather than allowed
+     * to produce missing CSS custom properties downstream. Core default
+     * spacing sizes are disabled here (not in disableCoreDefaultPresets) so
+     * ThemeValidator::spacingWarnings' drift comparison covers the flag.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function normalizeSpacingSettings(array $theme): array
+    {
+        if (!isset($theme['settings']) || !is_array($theme['settings'])) {
+            $theme['settings'] = [];
+        }
+        if (!isset($theme['settings']['spacing']) || !is_array($theme['settings']['spacing'])) {
+            $theme['settings']['spacing'] = [];
+        }
+
+        $theme['settings']['spacing']['blockGap'] = true;
+        $theme['settings']['spacing']['defaultSpacingSizes'] = false;
+        $theme['settings']['spacing']['spacingSizes'] = self::SPACING_PROFILE;
+
+        return $theme;
     }
 
     /**

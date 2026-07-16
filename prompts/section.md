@@ -48,7 +48,7 @@ Rules:
 - IDENTITY: the spec's `name`, `persona_name`, and `email_domain` are the site's ONE committed identity — masthead, hero, contact, and footer are all generated from them. Wherever this section names the brand or the person, use those exact values; any email address must be minted at `email_domain` (e.g. hello@that-domain). NEVER invent alternate names, personas, email addresses, or domains.
 
 Section discipline:
-- **Margin reset:** add `"style":{"spacing":{"margin":{"top":"0"}}}` to the section's top-level group so it sits flush in the page flow.
+- **Outer rhythm is deterministic:** add `"style":{"spacing":{"margin":{"top":"0","bottom":"0"}}}` to the section's top-level group, but do NOT set its top/bottom padding and do not put a spacer at either edge. For an image band, do not set top/bottom padding or margins on its direct cover either. A later page-level pass applies the plan's compact/standard/spacious density inside the correct visual band and reconciles continuous-surface seams. You own internal composition spacing only.
 - **Width discipline:** heroes, cover blocks and feature/card grids use `"align":"wide"` or `"align":"full"`. Reserve the default (content) width for text-heavy reading sections only. When the DESIGN DIRECTION's **Canvas** is `framed`, cap every band at `"align":"wide"` — nothing uses `"align":"full"`; the mat of page background around each band IS the design.
 - **Rows match their band:** inside a wide/full band, every grid row — a multi-column `wp:columns`, a `wp:gallery`, a `wp:media-text` feature row — takes `"align":"wide"` ITSELF. A non-aligned row inside a constrained band silently caps at the reading measure and floats narrow in the wide band; only headline/copy stacks are meant to stay at the reading measure there.
 - **Text measure:** the band may be full-width, but the TEXT inside it must keep a readable measure. Wrap headline/copy stacks in an inner group with `"layout":{"type":"constrained"}` whose `contentSize` is at or below the theme's contentSize — never the wide size (1200px+). Paragraphs running the full width of a wide band read as broken. That narrowed wrapper is for PURE TEXT stacks (heading/paragraph/buttons) ONLY — never box columns, galleries, media-text rows or images inside one. And inside a `wp:cover`, do NOT narrow the measure at all (no contentSize override below the theme's own): a hero headline squeezed into a 640px sliver of a full-bleed cover reads as a mistake.
@@ -83,6 +83,7 @@ Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick 
 2. `staggered-grid` — offset rhythm, for directions that promise energy or a broken grid:
    - `wp:columns` (no equal-cards class); each `wp:column` still gets a `"width"` and the widths MUST sum to 100%.
    - Push every SECOND column's card down by giving its inner card `wp:group` `"style":{"spacing":{"margin":{"top":"3rem"}}}` (odd columns get no offset). Use "4rem" for a stronger stagger.
+   - For image galleries with more than six mixed-aspect items, prefer one `masonry-3` group over repeated `wp:columns` rows. Repeated unequal rows inherit the tallest card's height and create large accidental vertical holes. If masonry does not fit the direction, normalize image media with the documented card crop classes and keep row margins at md/lg — never stack xl/xxl row margins on top of outer section spacing.
 3. `editorial-row` — one dominant card plus supporting cards, for curated/selected-work sections:
    - `wp:columns` with mixed widths that sum to 100% (e.g. 50/25/25 or 60/40); the dominant column gets the bigger image (`"className":"card-media-tall"` → 320px crop) and a larger heading; supporting cards stay on `"className":"card-media"` (200px).
 4. `list-thumb` — stacked rows with a small thumbnail and text, for menus, article lists, or dense catalogs:
@@ -90,12 +91,38 @@ Card & grid recipes — let the DESIGN DIRECTION and the section's purpose pick 
    - Optionally a `wp:separator` between rows for an index/menu feel.
 
 Layout utility classes (optional, powerful) — a later build step generates the CSS for EXACTLY these class names, tuned to this design direction. You MAY add them via `"className"` on the blocks noted; NEVER invent other utility classes and NEVER add `<style>` tags:
-- `overlap-up` — on a group/columns block: pulls it upward with a negative top margin so it overlaps the element above (e.g. a card row breaking into the hero). If you put it on the section's TOP-LEVEL group, omit that group's margin-top:0 reset — the class supplies the pull.
+- `overlap-up` — ONLY on an INNER group/columns block: pulls it upward with a negative top margin so it overlaps the element above (e.g. a card row breaking into the hero). NEVER put it on the section's top-level root; the builder's page-level rhythm pass owns that root's margin-top, which must retain its margin reset.
 - `masonry-3` — on a group whose direct children are cards/images of varying height: flows them into a 3-column masonry (fewer columns on small screens). Use instead of forcing unequal content into equal columns.
-- `hover-lift` — on a card `wp:group` or an image: lifts with a soft shadow on hover.
-- `hover-reveal` — on a card `wp:group` with an image: the image dims/zooms on hover while captions and details remain visible at rest. Do not depend on hidden overlay text.
 - `sticky-side` — on ONE `wp:column` of a two-column layout: that column stays pinned while the other scrolls (desktop only). Good for a sticky title/intro beside a long list.
-Combine them with the recipes (e.g. a staggered-grid of hover-lift cards, or a masonry-3 gallery of hover-reveal tiles) when the direction calls for that energy.
+Combine them with the recipes when the direction calls for that structure.
+
+Motion classes (optional) — semantic hover, scroll, and ambient presets whose CSS ships statically with the theme; the chosen profile maps them to a distinct keyframe family as well as distinct timing. NEVER write animation CSS or `@keyframes` yourself. Add them via `"className"` exactly like the layout utilities. The DESIGN DIRECTION's **Motion** line is the contract: `none` → use NO motion class; `minimal` → use only the two hover classes below; otherwise pick from all of these:
+- `hover-lift` — on a card `wp:group` or an image: lifts with a profile-tuned shadow on hover.
+- `hover-reveal` — on a card `wp:group` with an image: the image dims/zooms on hover while captions and details remain visible at rest. Do not depend on hidden overlay text.
+- `reveal` — on a group/image/heading: fades in with a small rise when scrolled into view. The default entrance.
+- `reveal-up` — like `reveal` but with a longer rise, for a band that should arrive with presence.
+- `reveal-fade` — pure fade, no movement; for quiet, editorial content.
+- `reveal-scale` — fades in while settling down from a slight zoom; suits imagery and framed cards.
+- `stagger-children` — ONLY on a container (`wp:columns`, `wp:gallery`, or a card-grid group) whose direct children are cards/columns: the children cascade in one by one. Each child waits for its own viewport entry, so this also works when a row stacks on mobile. Never combine with a `reveal-*` class on the same block.
+- `hero-entrance` — a once-on-page-load entrance for the hero's inner headline group ONLY; at most one per page, and only in the first section.
+- `ken-burns` — AMBIENT: on a `wp:cover` or image figure — its image zooms very slowly.
+- `gradient-shift` — AMBIENT: on a group whose background is a gradient — the gradient drifts slowly.
+- `ambient-drift` — AMBIENT: on ONE small decorative element (never a text band) — a slow vertical float.
+
+Profile choreography — let the chosen profile affect WHICH effects you reach for, not just their timing. Follow the DESIGN DIRECTION's motion note when it is more specific:
+- `calm`: favor sparse `reveal-fade`/`reveal` entrances and quiet image motion; the kit renders them as soft fades and gentle settles. Use stagger only when the sequence matters.
+- `energetic`: favor `stagger-children`, `reveal-up`, and hover responses; the kit renders entrances with diagonal travel and spring overshoot. For a focal ambient effect consider `ambient-drift` or `gradient-shift` instead of defaulting to an image zoom.
+- `dramatic`: favor `hero-entrance`, `reveal-up`/`reveal-scale`, and at most one cinematic `ken-burns` or `gradient-shift` focal effect; the kit renders them with directional masks and a focused hero reveal.
+Do NOT automatically pair `hero-entrance` with `ken-burns` on every hero. The budget is a ceiling, not a quota; zero motion classes is valid when the composition already has enough presence.
+
+Motion budget (hard rules — a deterministic build step strips violations, so overspending just wastes your choices):
+- At most ONE motion class per block (`hover-lift`/`hover-reveal` don't count toward this limit).
+- Even though hover is a separate budget, never combine `ambient-drift` + `hover-lift` on one block or `ken-burns` + `hover-reveal` on one block: each pair fights over the same transform. Put hover on a nested card/image wrapper instead.
+- Put a `reveal*` class on the actual content block that should enter, NEVER on an empty-padded outer section shell: the viewport trigger follows the animated block's outer edge.
+- Motion is seasoning, not sauce: at most one or two entrances per section — the section's key content group, or its one card grid via `stagger-children`. A deterministic pass keeps only the first two, so NEVER put the same reveal on every repeated row; animate their shared container once or leave most rows still. Let text-heavy sections stay still.
+- The three AMBIENT classes are signature effects: at most ONE ambient effect on the WHOLE page, and only if this section is the page's focal moment (usually the hero). Look at the COMPOSITION block's neighbors — mid-page support sections get no ambient motion.
+- NEVER write `is-visible` or any `motion-*` runtime state class (the theme's script owns them), and NEVER invent motion class names beyond this list.
+- If the SITE SPEC carries a non-empty `animation_request` AND the element it describes lives in THIS section, add `"className":"custom-motion"` to that ONE block (a later build step generates the CSS implementing the request for exactly that class). Do not write the animation yourself and do not use the class anywhere else.
 
 - Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS below. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
 - Every block comment must be correctly closed and the HTML class names must match the block (standard WordPress block classes).

@@ -36,6 +36,7 @@ Design intelligence to encode as tokens:
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 
 - Top-level: "$schema": "https://schemas.wp.org/trunk/theme.json", "version": 3.
+- WordPress core's default presets are DISABLED in every generated theme: the build forces `settings.color.defaultPalette`, `settings.color.defaultGradients`, `settings.color.defaultDuotone`, `settings.typography.defaultFontSizes`, and `settings.spacing.defaultSpacingSizes` to `false` (only core SHADOW presets remain available). The slugs YOU declare below are the only presets that exist at runtime — never reference a core default slug (e.g. color "white"/"black", fontSize "large", a core gradient or duotone name), and do not set those flags to `true`.
 - settings.layout: set "contentSize" (800–900px) and "wideSize" (1200–1400px).
 - settings.color.palette: an array with EXACTLY these five slugs, each a valid #RRGGBB hex you choose:
     "base"      = page background (body text on it must meet the CONTRAST REQUIREMENTS above)
@@ -54,7 +55,13 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
   Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
   Include EXACTLY these two fontFamilies and no others — do NOT add a third entry (e.g. a "mono" or "accent" family). Two families only: heading and body.
-- settings.spacing: include "spacingSizes" with slugs sm, md, lg, xl, xxl (a comfortable rising scale).
+- settings.spacing: set `"blockGap": true` and include EXACTLY this bounded, responsive `spacingSizes` profile (the build normalizes it deterministically, so do not rename or rescale it):
+    `sm` — Small — `clamp(0.75rem, 1vw, 1rem)`
+    `md` — Medium — `clamp(1.5rem, 2vw, 2rem)`
+    `lg` — Compact — `clamp(3rem, 4vw, 4rem)`
+    `xl` — Standard — `clamp(4rem, 6vw, 6rem)`
+    `xxl` — Spacious — `clamp(5rem, 7vw, 7rem)`
+  Use sm/md for component gaps and lg/xl/xxl for compact/standard/spacious section padding. Never replace these with fixed large values: the fluid bounds keep mobile padding proportional and cap a spacious desktop edge at 7rem.
 - styles.color.background = var(--wp--preset--color--base), styles.color.text = var(--wp--preset--color--contrast).
 - styles.typography.fontFamily = body font var, fontSize = var(--wp--preset--font-size--body), lineHeight 1.5–1.65.
 - styles.elements.heading.typography.lineHeight = a tight heading line-height (1.1–1.3).

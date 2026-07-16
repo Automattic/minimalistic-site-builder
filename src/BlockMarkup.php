@@ -142,11 +142,43 @@ final class BlockMarkup
         return $this->nodes[$i]['children'];
     }
 
+    /** The block's raw opening comment as it appears in the source. */
+    public function openingComment(int $i): string
+    {
+        $n = $this->nodes[$i];
+        return substr($this->source, $n['offset'], $n['length']);
+    }
+
+    /** Byte offset and length of this block's opening delimiter in the source. */
+    public function openingOffset(int $i): int
+    {
+        return $this->nodes[$i]['offset'];
+    }
+
+    public function openingLength(int $i): int
+    {
+        return $this->nodes[$i]['length'];
+    }
+
     /** Raw source between this block's delimiters (includes child blocks). */
     public function innerHtml(int $i): string
     {
         $n = $this->nodes[$i];
         return substr($this->source, $n['innerStart'], $n['innerEnd'] - $n['innerStart']);
+    }
+
+    /**
+     * The HTML this node itself owns: from its opening comment up to its
+     * first child block (or its closing comment when it has none) — i.e. the
+     * block's own root tag, untouched by descendants.
+     */
+    public function ownHtml(int $i): string
+    {
+        $n = $this->nodes[$i];
+        $end = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        return substr($this->source, $n['innerStart'], $end - $n['innerStart']);
     }
 
     /** Replace a node's attributes; render() writes the new opening comment. */
@@ -179,6 +211,29 @@ final class BlockMarkup
             'end'     => $end,
             'search'  => $search,
             'replace' => $replace,
+            'token'   => null,
+        ];
+    }
+
+    /**
+     * Remove one class token from `class` attribute values in the HTML this
+     * node itself owns. Unlike replaceInOwnHtml() this TOKENIZES the value —
+     * tab/newline separators (valid HTML) can't shelter a token from removal
+     * — and never eats into a longer token ('reveal' leaves 'reveal-up'
+     * alone). Remaining tokens are rejoined with single spaces.
+     */
+    public function removeClassTokenInOwnHtml(int $i, string $token): void
+    {
+        $n = $this->nodes[$i];
+        $end = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        $this->innerEdits[] = [
+            'start'   => $n['innerStart'],
+            'end'     => $end,
+            'search'  => '',
+            'replace' => '',
+            'token'   => $token,
         ];
     }
 
@@ -217,8 +272,18 @@ final class BlockMarkup
                 'content' => substr($this->source, $edit['start'], $edit['end'] - $edit['start']),
             ];
             $regions[$key]['content'] = (string) preg_replace_callback(
-                '/\bclass="[^"]*"/i',
-                static fn (array $m) => str_replace($edit['search'], $edit['replace'], $m[0]),
+                '/\bclass\s*=\s*(["\'])(.*?)\1/is',
+                static function (array $m) use ($edit): string {
+                    if ($edit['token'] === null) {
+                        return str_replace($edit['search'], $edit['replace'], $m[0]);
+                    }
+                    $kept = array_filter(
+                        preg_split('/\s+/', $m[2], -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                        static fn (string $t): bool => $t !== $edit['token']
+                    );
+                    return substr($m[0], 0, strlen($m[0]) - strlen($m[2]) - 1)
+                        . implode(' ', $kept) . $m[1];
+                },
                 $regions[$key]['content']
             );
         }

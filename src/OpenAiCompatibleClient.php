@@ -168,8 +168,8 @@ final class OpenAiCompatibleClient implements Llm
     /**
      * Shared concurrent-batch transport for completeJsonBatch and completeBatch.
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
-     * @return array<string,string>
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
+     * @return array<array-key,string>
      */
     private function textBatch(array $requests, bool $json): array
     {
@@ -186,13 +186,14 @@ final class OpenAiCompatibleClient implements Llm
             $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens, $this->provider);
         }
 
-        $labelFor = fn (string $key): string => (string) ($requests[$key]['log_label'] ?? $key);
+        // Keys may be ints too (PHP coerces numeric keys), so admit both.
+        $labelFor = fn (string|int $key): string => (string) ($requests[$key]['log_label'] ?? $key);
 
         $results = AnthropicClient::retryTextBatch(
             $bodies,
             fn (array $subset): array => $this->streamMulti($subset),
             [2, 5, 12],
-            function (string $key, string $error, float $time) use ($labelFor, &$bodies): void {
+            function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
                 LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
             },
         );
