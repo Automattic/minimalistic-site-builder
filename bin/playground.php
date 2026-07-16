@@ -88,8 +88,10 @@ $blueprint = [
         ['step' => 'activateTheme', 'themeFolderName' => $slug],
     ],
 ];
-$blueprintPath = repo_path("projects/{$slug}/.playground-blueprint.json");
+// Pid-stamped, instance-unique path — the why lives on the helper.
+$blueprintPath = playground_blueprint_path($slug, getmypid());
 file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+register_shutdown_function(static fn () => @unlink($blueprintPath));
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 
