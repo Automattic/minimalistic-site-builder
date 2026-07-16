@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\WpcomImageClient;
 
 /**
@@ -61,6 +62,17 @@ final class GenerateImagesStep implements Step
     public function label(): string
     {
         return 'Generate AI images';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['images.json', 'siteSpec.json', 'theme/parts/*', 'theme/templates/*'],
+            writes: ['images.json', 'theme/assets/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

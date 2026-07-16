@@ -6,6 +6,7 @@ use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /**
@@ -23,8 +24,28 @@ final class RecorderStep implements Step
     public function __construct(private string $id) {}
     public function id(): string { return $this->id; }
     public function label(): string { return $this->id; }
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration($this->id, $this->id, [], [], false);
+    }
     public function run(Project $project): void { self::$ran[] = $this->id; }
 }
+
+test('Pipeline rejects a step list with unmet reads', function () {
+    assert_throws(function () {
+        new Pipeline([
+            new class implements Step {
+                public function id(): string { return 'sections'; }
+                public function label(): string { return 'sections'; }
+                public function declaration(): StepDeclaration
+                {
+                    return new StepDeclaration('sections', 'sections', ['sections.json'], ['theme/parts/*'], true);
+                }
+                public function run(Project $project): void {}
+            },
+        ]);
+    });
+});
 
 test('stopIds expands a concurrent group into its member ids', function () {
     $llm = new FakeLlm();

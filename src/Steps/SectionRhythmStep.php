@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Deterministically apply the page plan's outer vertical rhythm to every
@@ -26,6 +27,17 @@ final class SectionRhythmStep implements Step
     public function label(): string
     {
         return 'Normalize section rhythm';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['sections.json', 'theme/parts/*'],
+            writes: ['theme/parts/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

@@ -38,6 +38,38 @@ final class ConcurrentGroup implements Step
         return 'Concurrently: ' . implode(', ', array_map(static fn (Step $s) => $s->label(), $this->steps));
     }
 
+    /**
+     * Member steps in construction order (for graph export).
+     *
+     * @return ConcurrentStep[]
+     */
+    public function members(): array
+    {
+        return $this->steps;
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        $reads = [];
+        $writes = [];
+        foreach ($this->steps as $step) {
+            $d = $step->declaration();
+            foreach ($d->reads as $path) {
+                $reads[$path] = true;
+            }
+            foreach ($d->writes as $path) {
+                $writes[$path] = true;
+            }
+        }
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: array_keys($reads),
+            writes: array_keys($writes),
+            concurrent: true,
+        );
+    }
+
     public function run(Project $project): void
     {
         // Collect every member's prompts, tagging each key with the member index

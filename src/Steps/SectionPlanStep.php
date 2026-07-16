@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM, concurrent): plan the landing page as an ordered list of sections.
@@ -80,6 +81,17 @@ final class SectionPlanStep implements ConcurrentStep
     public function label(): string
     {
         return 'Plan landing-page sections';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
+            writes: ['sections.json'],
+            concurrent: false,
+        );
     }
 
     public function requests(Project $project): array

@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (deterministic): compose the landing page from the parts the sections
@@ -29,6 +30,17 @@ final class AssembleLandingPageStep implements Step
     public function label(): string
     {
         return 'Assemble landing page';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['sections.json', 'theme/parts/*', 'theme/theme.json'],
+            writes: ['theme/templates/*', 'theme/theme.json'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

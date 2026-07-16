@@ -16,5 +16,12 @@ interface Step
     /** Human-readable label for logs. */
     public function label(): string;
 
+    /**
+     * Self-description for composition validation and host graph export:
+     * id, label, project files read/written, and whether this step fans out
+     * concurrent work. id/label here must match id()/label().
+     */
+    public function declaration(): StepDeclaration;
+
     public function run(Project $project): void;
 }

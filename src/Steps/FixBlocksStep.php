@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
@@ -35,6 +36,17 @@ final class FixBlocksStep implements Step
     public function label(): string
     {
         return 'Fix block validation';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['theme/*'],
+            writes: ['theme/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

@@ -9,6 +9,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM, optional): implement an EXPLICIT user animation request.
@@ -62,6 +63,17 @@ final class CustomMotionStep implements Step
     public function label(): string
     {
         return 'Custom motion (explicit requests only)';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['siteSpec.json', 'theme/style.css', 'theme/parts/*', 'theme/templates/*'],
+            writes: ['theme/style.css'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

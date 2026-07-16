@@ -10,8 +10,13 @@ namespace Automattic\SiteBuild;
  */
 final class Pipeline
 {
-    /** @param Step[] $steps */
-    public function __construct(private array $steps) {}
+    /**
+     * @param Step[] $steps Validated immediately via StepGraph (default seed: meta.json).
+     */
+    public function __construct(private array $steps)
+    {
+        StepGraph::validate($this->steps);
+    }
 
     /** @return string[] ordered step ids */
     public function stepIds(): array

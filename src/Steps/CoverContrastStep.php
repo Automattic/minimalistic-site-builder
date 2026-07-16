@@ -9,6 +9,7 @@ use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
@@ -63,6 +64,17 @@ final class CoverContrastStep implements Step
     public function label(): string
     {
         return 'Cover contrast vs real images';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*'],
+            writes: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void
