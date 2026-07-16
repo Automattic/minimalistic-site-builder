@@ -11,11 +11,12 @@ namespace Automattic\SiteBuild;
 final class Pipeline
 {
     /**
-     * @param Step[] $steps Validated immediately via StepGraph (default seed: meta.json).
+     * @param Step[]       $steps Validated immediately via StepGraph.
+     * @param list<string> $seeds Project paths available before any step.
      */
-    public function __construct(private array $steps)
+    public function __construct(private array $steps, array $seeds = StepGraph::DEFAULT_SEEDS)
     {
-        StepGraph::validate($this->steps);
+        StepGraph::validate($this->steps, $seeds);
     }
 
     /** @return string[] ordered step ids */

@@ -49,7 +49,7 @@ StepComposition::default(deps) ──► ordered Step[]
         ▼
 StepGraph::validate(steps, seeds) ── throw if bad
         │
-        ├──► Pipeline (constructor also validates)
+        ├──► Pipeline (constructor validates with the composition's seeds)
         └──► StepGraph::describe(steps) ── portable list for hosts
 ```
 
@@ -157,7 +157,11 @@ $composition = $composition
     ->replace('fix-blocks', $otherFixerStep)
     ->withSeeds('meta.json', 'plugins.json'); // optional
 
-$steps = $composition->steps(); // validates
+$steps = $composition->steps(); // already validated on construction
+
+// Seeds travel with the composition — hand BOTH to Pipeline (or let
+// SiteBuilder::pipeline($composition) do it for you):
+$pipeline = new Pipeline($composition->steps(), $composition->seeds());
 ```
 
 - Mutations return a **new** instance (immutable style).
@@ -170,12 +174,12 @@ $steps = $composition->steps(); // validates
 **`SiteBuilder::pipeline()`**
 
 - Builds deps (`PromptRenderer`, merged models/temps) as today.
-- Returns `new Pipeline(StepComposition::default(...)->steps())`.
+- Returns `new Pipeline($composition->steps(), $composition->seeds())`.
 - Optional follow-up ergonomics (same PR if cheap): `pipeline(?StepComposition $composition = null)` so hosts pass a customized composition without re-constructing deps.
 
 **`Pipeline`**
 
-- Constructor runs `StepGraph::validate($steps)`.
+- Constructor runs `StepGraph::validate($steps, $seeds)` (seeds default: `StepGraph::DEFAULT_SEEDS`).
 - `stepIds()`, `stopIds()`, `runThrough()` unchanged in behavior.
 
 **`createProject()`**

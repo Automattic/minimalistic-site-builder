@@ -39,7 +39,7 @@ final class StepComposition
      */
     private function __construct(
         private array $steps,
-        private array $seeds = ['meta.json'],
+        private array $seeds = StepGraph::DEFAULT_SEEDS,
     ) {
         StepGraph::validate($this->steps, $this->seeds);
     }
@@ -139,6 +139,12 @@ final class StepComposition
     public function steps(): array
     {
         return $this->steps;
+    }
+
+    /** @return list<string> */
+    public function seeds(): array
+    {
+        return $this->seeds;
     }
 
     public function without(string ...$ids): self

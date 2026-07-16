@@ -50,7 +50,7 @@ final class SiteBuilder
             blockFixer: $this->blockFixer,
         );
 
-        return new Pipeline($composition->steps());
+        return new Pipeline($composition->steps(), $composition->seeds());
     }
 
     public function store(): ProjectStore

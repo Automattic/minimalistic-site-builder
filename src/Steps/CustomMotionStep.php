@@ -70,7 +70,7 @@ final class CustomMotionStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['siteSpec.json', 'theme/style.css', 'theme/parts/*', 'theme/templates/*'],
+            reads: ['siteSpec.json', 'designDirection.json', 'theme/style.css', 'theme/parts/*', 'theme/templates/*'],
             writes: ['theme/style.css'],
             concurrent: false,
         );

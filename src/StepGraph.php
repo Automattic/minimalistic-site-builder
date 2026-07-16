@@ -10,11 +10,14 @@ namespace Automattic\SiteBuild;
  */
 final class StepGraph
 {
+    /** Project paths available before any step runs: meta.json from createProject(). */
+    public const DEFAULT_SEEDS = ['meta.json'];
+
     /**
      * @param Step[]   $steps
      * @param string[] $seeds Project paths available before any step (default meta.json).
      */
-    public static function validate(array $steps, array $seeds = ['meta.json']): void
+    public static function validate(array $steps, array $seeds = self::DEFAULT_SEEDS): void
     {
         if ($steps === []) {
             throw new \InvalidArgumentException('StepGraph: step list must not be empty');

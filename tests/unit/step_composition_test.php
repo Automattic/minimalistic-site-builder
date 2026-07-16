@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
@@ -104,4 +105,22 @@ test('StepComposition describe concurrent flags on sections and group', function
     assert_eq(true, $byId['theme-json+section-plan']['concurrent']);
     assert_eq(false, $byId['site-spec']['concurrent']);
     assert_eq(['theme-json', 'section-plan'], $byId['theme-json+section-plan']['members']);
+});
+
+test('StepComposition withSeeds survives the trip through Pipeline', function () {
+    $needsSeed = graph_fake_step('needs-extra-seed', ['plugins.json'], ['out.json']);
+
+    $d = composition_deps();
+    $c = StepComposition::default(
+        llm: $d['llm'],
+        renderer: $d['renderer'],
+        blockFixer: $d['blockFixer'],
+    )->withSeeds('meta.json', 'plugins.json')->insertAfter('scaffold-theme', $needsSeed);
+
+    // The composition's seeds must reach Pipeline's own validation.
+    $pipeline = new Pipeline($c->steps(), $c->seeds());
+    assert_true(in_array('needs-extra-seed', $pipeline->stepIds(), true));
+
+    // Without the extra seed the same list is rightly rejected.
+    assert_throws(fn () => new Pipeline($c->steps()));
 });

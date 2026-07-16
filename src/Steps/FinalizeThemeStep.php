@@ -51,7 +51,7 @@ final class FinalizeThemeStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['designDirection.json', 'theme/assets/motion/*'],
-            writes: ['theme/functions.php'],
+            writes: ['theme/functions.php', 'theme/assets/motion/*'],
             concurrent: false,
         );
     }

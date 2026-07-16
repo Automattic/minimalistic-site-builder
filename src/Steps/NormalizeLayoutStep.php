@@ -42,7 +42,7 @@ final class NormalizeLayoutStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/parts/*', 'theme/templates/*'],
+            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*'],
             writes: ['theme/parts/*', 'theme/templates/*'],
             concurrent: false,
         );
