@@ -81,6 +81,25 @@ test('SiteBuilder createProject respects an explicit slug and merges meta', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('SiteBuilder createProject records a fixed page list only when given', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    $project = $builder->createProject('a test cafe', 'with-pages', true, ['Home', 'Menu']);
+    $meta = $project->readJson('meta.json');
+    assert_eq(['Home', 'Menu'], $meta['pages']);
+    assert_eq(true, $meta['multi_page']);
+
+    // No list -> no `pages` key written, so a pre-seeded one survives the
+    // merge (a host whose site spec already names its pages).
+    $pre = $builder->store()->create('pre-seeded');
+    $pre->writeJson('meta.json', ['pages' => ['Home', 'About']]);
+    $project = $builder->createProject('a test cafe', 'pre-seeded', true);
+    assert_eq(['Home', 'About'], $project->readJson('meta.json')['pages']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
     $llm = new FakeLlm();
     // refine-prompt (text), then site-spec (json) — same order as the integration harness
