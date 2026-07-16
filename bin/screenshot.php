@@ -86,11 +86,15 @@ $serverLog = $project->logPath('playground-screenshot.log');
 // Start Playground in the background, routing its output to a log we tail for
 // the "Ready!" line (which carries the actual port — playground.php auto-bumps
 // if the requested one is busy). `exec` makes proc_open's pid the php process
-// itself, so teardown can walk and kill its npx/node subtree.
+// itself, so teardown can walk and kill its npx/node subtree. The shared child
+// command also pins PHP_BINARY and sys_temp_dir, keeping our independently
+// derived blueprint paths identical.
 @unlink($serverLog);
-$cmd = 'exec php ' . escapeshellarg(repo_path('bin/playground.php'))
-    . ' ' . escapeshellarg($slug) . ' --port=' . (int) $port
-    . ($workers !== null ? ' --workers=' . escapeshellarg($workers) : '');
+$playgroundArgs = [$slug, '--port=' . (int) $port];
+if ($workers !== null) {
+    $playgroundArgs[] = '--workers=' . $workers;
+}
+$cmd = php_child_command(repo_path('bin/playground.php'), $playgroundArgs);
 $proc = proc_open(
     $cmd,
     [0 => ['file', '/dev/null', 'r'], 1 => ['file', $serverLog, 'w'], 2 => ['file', $serverLog, 'a']],

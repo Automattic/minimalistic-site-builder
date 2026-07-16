@@ -364,11 +364,13 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
 
     $servers = [];
     foreach ($slugs as $i => $slug) {
-        // `exec` makes the child pid the php process itself, so teardown can
-        // walk and kill its npx/node subtree (same trick as bin/screenshot.php).
-        $cmd = 'exec php ' . escapeshellarg(repo_path('bin/playground.php'))
-            . ' ' . escapeshellarg($slug)
-            . ' --port=' . ($basePort + $i * PORT_STRIDE);
+        // php_child_command() uses `exec`, so teardown sees playground.php's
+        // own pid; it also pins the PHP binary and temp dir so both sides derive
+        // the same pid-stamped blueprint path.
+        $cmd = php_child_command(repo_path('bin/playground.php'), [
+            $slug,
+            '--port=' . ($basePort + $i * PORT_STRIDE),
+        ]);
         $proc = proc_open(
             $cmd,
             // Merge stderr into stdout: server chatter is informational here,
