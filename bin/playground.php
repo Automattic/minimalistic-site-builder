@@ -81,6 +81,9 @@ $blueprint = [
     'landingPage'  => '/',
     'login'        => true,
     'steps'        => [
+        // Neutralize outbound HTTP — a blocked fetch (e.g. wp:embed's oEmbed
+        // discovery) would pin a wasm worker forever. See offlineGuardStep().
+        PlaygroundArtifact::offlineGuardStep(),
         ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
         ['step' => 'activateTheme', 'themeFolderName' => $slug],
     ],
