@@ -221,7 +221,7 @@ test('pipeline step order is correct', function () {
     assert_eq([
         'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+section-plan', 'sections', 'section-rhythm', 'assemble-landing-page',
-        'collect-images', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme',
+        'collect-images', 'normalize-layout', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme',
         'validate-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
