@@ -104,15 +104,13 @@ final class PlaygroundArtifact
     }
 
     /**
-     * Blueprint step neutralizing outbound HTTP for networkless Playground.
+     * Blueprint step neutralizing outbound HTTP for the local Playground CLI.
      *
-     * Playground runs without outbound networking (the CLI's wasm PHP has
-     * none; the web runtime defaults to none), so a block whose render fetches
-     * remote content — wp:embed → server-side oEmbed discovery — blocks on a
-     * fetch that cannot complete, pinning its CLI worker forever. This
-     * mu-plugin makes every Playground surface degrade the way production
-     * would: oEmbed resolves to WordPress's own unreachable-provider fallback
-     * (a plain link) and any other outbound request fails fast with WP_Error.
+     * The CLI's wasm PHP cannot complete outbound requests, so a block whose
+     * render fetches remote content — wp:embed → server-side oEmbed discovery —
+     * blocks forever and pins its worker. This mu-plugin makes the local preview
+     * fail fast instead. Published browser artifacts use Playground's networking
+     * support and must not install this step.
      *
      * @return array<mixed>
      */
@@ -124,16 +122,15 @@ final class PlaygroundArtifact
             'data' => <<<'PHP'
                 <?php
                 /**
-                 * Playground runs without outbound networking. Resolve oEmbeds
-                 * to WordPress's own unreachable-provider fallback (a plain
-                 * link) and fail any other HTTP request fast, so a render
-                 * never blocks on a fetch that cannot complete.
+                 * The local Playground CLI cannot complete outbound requests.
+                 * Resolve oEmbeds to a plain link and fail any other WordPress
+                 * HTTP request fast so a render never pins a worker.
                  */
                 add_filter( 'pre_oembed_result', function ( $result, $url ) {
                     return '<a href="' . esc_url( $url ) . '">' . esc_html( $url ) . '</a>';
                 }, 10, 2 );
                 add_filter( 'pre_http_request', function () {
-                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in Playground.' );
+                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in the local Playground preview.' );
                 } );
                 PHP,
         ];
@@ -149,7 +146,6 @@ final class PlaygroundArtifact
             'landingPage' => '/',
             'login'       => true,
             'steps'       => [
-                self::offlineGuardStep(),
                 ['step' => 'setSiteOptions', 'options' => $options],
                 [
                     'step' => 'mkdir',
