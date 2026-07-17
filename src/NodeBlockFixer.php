@@ -4,10 +4,11 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Default BlockFixer: shells out to the bundled Node block-fixer
- * (bin/block-fixer/fix-templates.js). Needs Node 18+ and the script's npm
- * deps (`npm install` at the package root). Hosts without Node should inject
- * their own BlockFixer.
+ * Development override for the bundled one-pass Node fixer
+ * (bin/block-fixer/fix-templates.js). Fixed-point oracle tooling drives this
+ * transform separately. The override requires the pinned Node 22.19.0 runtime
+ * and dependencies installed from the root lockfile with `npm ci`; production
+ * callers use the PHP implementation and do not require Node.
  */
 final class NodeBlockFixer implements BlockFixer
 {

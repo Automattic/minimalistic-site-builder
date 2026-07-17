@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "reviewed": true,
+  "k": 1,
+  "repairs": [
+    {
+      "file": "parts/footer.html",
+      "blockPath": "document",
+      "code": "nested-paragraph"
+    }
+  ],
+  "secondInvocation": {
+    "k": 0,
+    "repairs": []
+  }
+}

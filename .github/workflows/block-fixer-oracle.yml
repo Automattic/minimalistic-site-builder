@@ -1,0 +1,32 @@
+name: Block fixer oracle
+
+on:
+  pull_request:
+  push:
+    branches:
+      - trunk
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    name: Pinned Node oracle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: docker.io/library/node:22.19.0-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run block-fixer workspace tests
+        run: npm test --workspace=bin/block-fixer
+
+      - name: Verify oracle snapshots and fixtures
+        run: npm run oracle:verify --workspace=bin/block-fixer

@@ -1,8 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Env;
-use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -48,7 +48,7 @@ $builder = new SiteBuilder(
     llm: $llm,
     promptsDir: Package::promptsDir(),
     outputRoot: repo_path('projects'),
-    blockFixer: NodeBlockFixer::default(),
+    blockFixer: BlockFixers::default(),
     models: step_models(),
 );
 

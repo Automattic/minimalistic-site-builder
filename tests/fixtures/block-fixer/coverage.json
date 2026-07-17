@@ -1,0 +1,1269 @@
+{
+  "schemaVersion": 1,
+  "cases": {
+    "group-html-attribute-repairs": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/group",
+        "repair:custom-class-recovery",
+        "repair:anchor-recovery",
+        "repair:aria-label-recovery",
+        "repair-gate:custom-class-already-authored",
+        "repair-gate:anchor-already-authored",
+        "repair-gate:aria-label-already-authored",
+        "selector:attribute-root",
+        "report:fixed"
+      ]
+    },
+    "nested-group-support": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/group",
+        "block:core/paragraph",
+        "nested-blocks",
+        "inner-content-interleaving",
+        "repair:nested-paragraph",
+        "repair-gate:valid-paragraph",
+        "rich-text:entities",
+        "rich-text:br",
+        "support:background-color",
+        "support:text-color",
+        "support:spacing",
+        "support:layout"
+      ]
+    },
+    "rich-text-literal-nbsp": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/paragraph",
+        "rich-text:literal-nbsp",
+        "deprecation:paragraph-align",
+        "report:ok"
+      ]
+    },
+    "pre-paragraph-repair-noop": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/paragraph",
+        "oracle:authoritative-changed-flag",
+        "repair-gate:pre-paragraph-noop",
+        "report:ok"
+      ]
+    },
+    "observed-deprecation-adapters": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/site-title",
+        "block:core/navigation",
+        "block:core/page-list",
+        "deprecation:site-title-align",
+        "deprecation:site-title-font-family",
+        "deprecation:navigation-font-family",
+        "report:fixed"
+      ]
+    },
+    "dropped-inner-image-content": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/image",
+        "report:dropped-style",
+        "report:dropped-class",
+        "report:repeat-counting",
+        "report:vertical-rhythm-drop",
+        "html:single-and-double-quotes"
+      ]
+    },
+    "freeform-missing-and-delimiters": {
+      "milestone": "M2",
+      "capabilities": [
+        "freeform:before-between-after",
+        "missing-block:paired",
+        "missing-block:void",
+        "missing-block:core/figure",
+        "strategy:missing-block",
+        "delimiter:balanced",
+        "delimiter:mismatched",
+        "delimiter:stray-closer",
+        "delimiter:unclosed",
+        "delimiter:malformed-json"
+      ]
+    },
+    "json-comment-boundaries": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/group",
+        "json:apostrophe",
+        "json:quote",
+        "json:backslash",
+        "json:comment-boundary",
+        "json:html-sensitive",
+        "json:empty-array",
+        "json:empty-object",
+        "json:unicode",
+        "json:numeric-key-order",
+        "json:negative-zero",
+        "json:exponent-formatting",
+        "json:wrong-type",
+        "json:defaults",
+        "json:object-key-order"
+      ]
+    },
+    "media-text-type-inference": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/media-text",
+        "block:core/paragraph",
+        "branch:media-text-image",
+        "branch:media-text-video",
+        "branch:media-text-position-left",
+        "branch:media-text-position-right",
+        "branch:media-text-image-fill",
+        "repair:media-type-inference",
+        "repair-gate:media-type-present",
+        "selector:descendant",
+        "source:attribute",
+        "strategy:static-renderer"
+      ]
+    },
+    "structural-block-renderers": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/buttons",
+        "block:core/button",
+        "block:core/spacer",
+        "block:core/list",
+        "block:core/list-item",
+        "branch:button-link-attributes",
+        "deprecation:button-tag",
+        "branch:spacer-height-width",
+        "branch:list-ordered-reversed-start",
+        "html:boolean-attribute",
+        "rich-text:inline-formatting",
+        "selector:descendant",
+        "strategy:static-renderer",
+        "support:layout-flex"
+      ]
+    },
+    "image-source-selector-branches": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/image",
+        "branch:image-link",
+        "branch:image-caption",
+        "branch:image-title-alt",
+        "html:void-element",
+        "rich-text:inline-formatting",
+        "selector:child",
+        "selector:descendant",
+        "source:attribute",
+        "source:rich-text",
+        "strategy:static-renderer"
+      ]
+    },
+    "block-support-pipeline": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/group",
+        "block:core/columns",
+        "block:core/column",
+        "block:core/paragraph",
+        "support:alignment",
+        "support:anchor",
+        "support:aria-label",
+        "support:background-image-skip-serialization",
+        "support:border",
+        "support:child-layout",
+        "support:color-custom",
+        "support:custom-class",
+        "support:dimensions",
+        "support:element-link-color",
+        "support:flex-size",
+        "support:font-family",
+        "support:font-size",
+        "support:gradient",
+        "support:layout-flex",
+        "support:self-stretch",
+        "support:shadow",
+        "support:spacing",
+        "support:typography"
+      ]
+    },
+    "cover-renderer-branches": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/cover",
+        "block:core/paragraph",
+        "branch:cover-image",
+        "branch:cover-video",
+        "branch:cover-parallax",
+        "branch:cover-repeat",
+        "branch:cover-dim-zero",
+        "branch:cover-dim-zero-gradient",
+        "deprecation:paragraph-selectorless",
+        "branch:cover-focal-point",
+        "branch:cover-min-height-unit",
+        "html:boolean-attribute",
+        "html:void-element",
+        "strategy:static-renderer",
+        "support:dimensions"
+      ]
+    },
+    "quote-embed-and-raw-renderers": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/quote",
+        "block:core/pullquote",
+        "block:core/embed",
+        "block:core/html",
+        "block:core/paragraph",
+        "branch:quote-inner-blocks-and-citation",
+        "branch:pullquote-value-and-citation",
+        "branch:embed-provider-caption",
+        "rich-text:inline-formatting",
+        "source:html",
+        "source:raw",
+        "source:rich-text",
+        "strategy:raw-content",
+        "strategy:static-renderer"
+      ]
+    },
+    "gallery-and-table-renderers": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/gallery",
+        "block:core/image",
+        "block:core/table",
+        "branch:gallery-caption",
+        "branch:gallery-cropped",
+        "branch:gallery-not-cropped",
+        "branch:gallery-nested-images",
+        "branch:table-head-body-foot",
+        "branch:table-caption",
+        "branch:table-fluid-layout",
+        "html:boolean-attribute",
+        "selector:recursive-query",
+        "source:attribute",
+        "source:query",
+        "source:rich-text",
+        "source:tag",
+        "strategy:static-renderer"
+      ]
+    },
+    "navigation-strategy-branches": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/navigation",
+        "block:core/navigation-link",
+        "branch:navigation-without-ref",
+        "branch:navigation-with-ref",
+        "branch:navigation-link-children",
+        "strategy:conditional",
+        "strategy:inner-blocks",
+        "serializer:rendered-content-void-paired"
+      ]
+    },
+    "social-and-dynamic-strategies": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/social-links",
+        "block:core/social-link",
+        "block:core/page-list",
+        "block:core/post-content",
+        "block:core/site-logo",
+        "block:core/site-tagline",
+        "block:core/site-title",
+        "block:core/template-part",
+        "branch:social-links-wrapper",
+        "branch:social-links-labels",
+        "branch:social-links-child-comments",
+        "strategy:dynamic-null",
+        "strategy:static-renderer"
+      ]
+    },
+    "report-order-status-and-skip": {
+      "milestone": "M1",
+      "capabilities": [
+        "block:core/paragraph",
+        "block:core/site-title",
+        "report:fixed",
+        "report:ok",
+        "report:skip",
+        "report:lexical-path-order",
+        "report:empty-drops"
+      ]
+    },
+    "tbilisi25-footer-fixed-point": {
+      "milestone": "M1",
+      "capabilities": [
+        "oracle:three-pass-convergence",
+        "deprecation:group-default-tag",
+        "deprecation:paragraph-pre-font-support",
+        "deprecation:paragraph-selectorless",
+        "deprecation:site-title-align",
+        "repair:nested-paragraph",
+        "nested-blocks",
+        "block:core/group",
+        "block:core/site-title",
+        "block:core/paragraph",
+        "block:core/separator",
+        "block:core/columns",
+        "block:core/column",
+        "block:core/heading",
+        "block:core/navigation",
+        "block:core/navigation-link",
+        "support:alignment",
+        "support:color-elements",
+        "support:custom-class",
+        "support:font-family",
+        "support:font-size",
+        "support:layout",
+        "support:preset-variables",
+        "support:spacing",
+        "support:typography"
+      ]
+    }
+  },
+  "capabilityCases": {
+    "block:core/group": [
+      "group-html-attribute-repairs",
+      "nested-group-support",
+      "json-comment-boundaries",
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "repair:custom-class-recovery": [
+      "group-html-attribute-repairs"
+    ],
+    "repair:anchor-recovery": [
+      "group-html-attribute-repairs"
+    ],
+    "repair:aria-label-recovery": [
+      "group-html-attribute-repairs"
+    ],
+    "repair-gate:custom-class-already-authored": [
+      "group-html-attribute-repairs"
+    ],
+    "repair-gate:anchor-already-authored": [
+      "group-html-attribute-repairs"
+    ],
+    "repair-gate:aria-label-already-authored": [
+      "group-html-attribute-repairs"
+    ],
+    "selector:attribute-root": [
+      "group-html-attribute-repairs"
+    ],
+    "report:fixed": [
+      "group-html-attribute-repairs",
+      "observed-deprecation-adapters",
+      "report-order-status-and-skip"
+    ],
+    "block:core/paragraph": [
+      "nested-group-support",
+      "rich-text-literal-nbsp",
+      "pre-paragraph-repair-noop",
+      "media-text-type-inference",
+      "block-support-pipeline",
+      "cover-renderer-branches",
+      "quote-embed-and-raw-renderers",
+      "report-order-status-and-skip",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "nested-blocks": [
+      "nested-group-support",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "inner-content-interleaving": [
+      "nested-group-support"
+    ],
+    "repair:nested-paragraph": [
+      "nested-group-support",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "repair-gate:valid-paragraph": [
+      "nested-group-support"
+    ],
+    "rich-text:entities": [
+      "nested-group-support"
+    ],
+    "rich-text:br": [
+      "nested-group-support"
+    ],
+    "support:background-color": [
+      "nested-group-support"
+    ],
+    "support:text-color": [
+      "nested-group-support"
+    ],
+    "support:spacing": [
+      "nested-group-support",
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:layout": [
+      "nested-group-support",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "rich-text:literal-nbsp": [
+      "rich-text-literal-nbsp"
+    ],
+    "deprecation:paragraph-align": [
+      "rich-text-literal-nbsp"
+    ],
+    "report:ok": [
+      "rich-text-literal-nbsp",
+      "pre-paragraph-repair-noop",
+      "report-order-status-and-skip"
+    ],
+    "oracle:authoritative-changed-flag": [
+      "pre-paragraph-repair-noop"
+    ],
+    "repair-gate:pre-paragraph-noop": [
+      "pre-paragraph-repair-noop"
+    ],
+    "block:core/site-title": [
+      "observed-deprecation-adapters",
+      "social-and-dynamic-strategies",
+      "report-order-status-and-skip",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "block:core/navigation": [
+      "observed-deprecation-adapters",
+      "navigation-strategy-branches",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "block:core/page-list": [
+      "observed-deprecation-adapters",
+      "social-and-dynamic-strategies"
+    ],
+    "deprecation:site-title-align": [
+      "observed-deprecation-adapters",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "deprecation:site-title-font-family": [
+      "observed-deprecation-adapters"
+    ],
+    "deprecation:navigation-font-family": [
+      "observed-deprecation-adapters"
+    ],
+    "block:core/image": [
+      "dropped-inner-image-content",
+      "image-source-selector-branches",
+      "gallery-and-table-renderers"
+    ],
+    "report:dropped-style": [
+      "dropped-inner-image-content"
+    ],
+    "report:dropped-class": [
+      "dropped-inner-image-content"
+    ],
+    "report:repeat-counting": [
+      "dropped-inner-image-content"
+    ],
+    "report:vertical-rhythm-drop": [
+      "dropped-inner-image-content"
+    ],
+    "html:single-and-double-quotes": [
+      "dropped-inner-image-content"
+    ],
+    "freeform:before-between-after": [
+      "freeform-missing-and-delimiters"
+    ],
+    "missing-block:paired": [
+      "freeform-missing-and-delimiters"
+    ],
+    "missing-block:void": [
+      "freeform-missing-and-delimiters"
+    ],
+    "missing-block:core/figure": [
+      "freeform-missing-and-delimiters"
+    ],
+    "strategy:missing-block": [
+      "freeform-missing-and-delimiters"
+    ],
+    "delimiter:balanced": [
+      "freeform-missing-and-delimiters"
+    ],
+    "delimiter:mismatched": [
+      "freeform-missing-and-delimiters"
+    ],
+    "delimiter:stray-closer": [
+      "freeform-missing-and-delimiters"
+    ],
+    "delimiter:unclosed": [
+      "freeform-missing-and-delimiters"
+    ],
+    "delimiter:malformed-json": [
+      "freeform-missing-and-delimiters"
+    ],
+    "json:apostrophe": [
+      "json-comment-boundaries"
+    ],
+    "json:quote": [
+      "json-comment-boundaries"
+    ],
+    "json:backslash": [
+      "json-comment-boundaries"
+    ],
+    "json:comment-boundary": [
+      "json-comment-boundaries"
+    ],
+    "json:html-sensitive": [
+      "json-comment-boundaries"
+    ],
+    "json:empty-array": [
+      "json-comment-boundaries"
+    ],
+    "json:empty-object": [
+      "json-comment-boundaries"
+    ],
+    "json:unicode": [
+      "json-comment-boundaries"
+    ],
+    "json:numeric-key-order": [
+      "json-comment-boundaries"
+    ],
+    "json:negative-zero": [
+      "json-comment-boundaries"
+    ],
+    "json:exponent-formatting": [
+      "json-comment-boundaries"
+    ],
+    "json:wrong-type": [
+      "json-comment-boundaries"
+    ],
+    "json:defaults": [
+      "json-comment-boundaries"
+    ],
+    "json:object-key-order": [
+      "json-comment-boundaries"
+    ],
+    "block:core/media-text": [
+      "media-text-type-inference"
+    ],
+    "branch:media-text-image": [
+      "media-text-type-inference"
+    ],
+    "branch:media-text-video": [
+      "media-text-type-inference"
+    ],
+    "branch:media-text-position-left": [
+      "media-text-type-inference"
+    ],
+    "branch:media-text-position-right": [
+      "media-text-type-inference"
+    ],
+    "branch:media-text-image-fill": [
+      "media-text-type-inference"
+    ],
+    "repair:media-type-inference": [
+      "media-text-type-inference"
+    ],
+    "repair-gate:media-type-present": [
+      "media-text-type-inference"
+    ],
+    "selector:descendant": [
+      "media-text-type-inference",
+      "structural-block-renderers",
+      "image-source-selector-branches"
+    ],
+    "source:attribute": [
+      "media-text-type-inference",
+      "image-source-selector-branches",
+      "gallery-and-table-renderers"
+    ],
+    "strategy:static-renderer": [
+      "media-text-type-inference",
+      "structural-block-renderers",
+      "image-source-selector-branches",
+      "cover-renderer-branches",
+      "quote-embed-and-raw-renderers",
+      "gallery-and-table-renderers",
+      "social-and-dynamic-strategies"
+    ],
+    "block:core/buttons": [
+      "structural-block-renderers"
+    ],
+    "block:core/button": [
+      "structural-block-renderers"
+    ],
+    "block:core/spacer": [
+      "structural-block-renderers"
+    ],
+    "block:core/list": [
+      "structural-block-renderers"
+    ],
+    "block:core/list-item": [
+      "structural-block-renderers"
+    ],
+    "branch:button-link-attributes": [
+      "structural-block-renderers"
+    ],
+    "deprecation:button-tag": [
+      "structural-block-renderers"
+    ],
+    "branch:spacer-height-width": [
+      "structural-block-renderers"
+    ],
+    "branch:list-ordered-reversed-start": [
+      "structural-block-renderers"
+    ],
+    "html:boolean-attribute": [
+      "structural-block-renderers",
+      "cover-renderer-branches",
+      "gallery-and-table-renderers"
+    ],
+    "rich-text:inline-formatting": [
+      "structural-block-renderers",
+      "image-source-selector-branches",
+      "quote-embed-and-raw-renderers"
+    ],
+    "support:layout-flex": [
+      "structural-block-renderers",
+      "block-support-pipeline"
+    ],
+    "branch:image-link": [
+      "image-source-selector-branches"
+    ],
+    "branch:image-caption": [
+      "image-source-selector-branches"
+    ],
+    "branch:image-title-alt": [
+      "image-source-selector-branches"
+    ],
+    "html:void-element": [
+      "image-source-selector-branches",
+      "cover-renderer-branches"
+    ],
+    "selector:child": [
+      "image-source-selector-branches"
+    ],
+    "source:rich-text": [
+      "image-source-selector-branches",
+      "quote-embed-and-raw-renderers",
+      "gallery-and-table-renderers"
+    ],
+    "block:core/columns": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "block:core/column": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:alignment": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:anchor": [
+      "block-support-pipeline"
+    ],
+    "support:aria-label": [
+      "block-support-pipeline"
+    ],
+    "support:background-image-skip-serialization": [
+      "block-support-pipeline"
+    ],
+    "support:border": [
+      "block-support-pipeline"
+    ],
+    "support:child-layout": [
+      "block-support-pipeline"
+    ],
+    "support:color-custom": [
+      "block-support-pipeline"
+    ],
+    "support:custom-class": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:dimensions": [
+      "block-support-pipeline",
+      "cover-renderer-branches"
+    ],
+    "support:element-link-color": [
+      "block-support-pipeline"
+    ],
+    "support:flex-size": [
+      "block-support-pipeline"
+    ],
+    "support:font-family": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:font-size": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:gradient": [
+      "block-support-pipeline"
+    ],
+    "support:self-stretch": [
+      "block-support-pipeline"
+    ],
+    "support:shadow": [
+      "block-support-pipeline"
+    ],
+    "support:typography": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "block:core/cover": [
+      "cover-renderer-branches"
+    ],
+    "branch:cover-image": [
+      "cover-renderer-branches"
+    ],
+    "branch:cover-video": [
+      "cover-renderer-branches"
+    ],
+    "branch:cover-parallax": [
+      "cover-renderer-branches"
+    ],
+    "branch:cover-repeat": [
+      "cover-renderer-branches"
+    ],
+    "branch:cover-dim-zero": [
+      "cover-renderer-branches"
+    ],
+    "branch:cover-dim-zero-gradient": [
+      "cover-renderer-branches"
+    ],
+    "deprecation:paragraph-selectorless": [
+      "cover-renderer-branches",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "branch:cover-focal-point": [
+      "cover-renderer-branches"
+    ],
+    "branch:cover-min-height-unit": [
+      "cover-renderer-branches"
+    ],
+    "block:core/quote": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "block:core/pullquote": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "block:core/embed": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "block:core/html": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "branch:quote-inner-blocks-and-citation": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "branch:pullquote-value-and-citation": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "branch:embed-provider-caption": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "source:html": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "source:raw": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "strategy:raw-content": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "block:core/gallery": [
+      "gallery-and-table-renderers"
+    ],
+    "block:core/table": [
+      "gallery-and-table-renderers"
+    ],
+    "branch:gallery-caption": [
+      "gallery-and-table-renderers"
+    ],
+    "branch:gallery-cropped": [
+      "gallery-and-table-renderers"
+    ],
+    "branch:gallery-not-cropped": [
+      "gallery-and-table-renderers"
+    ],
+    "branch:gallery-nested-images": [
+      "gallery-and-table-renderers"
+    ],
+    "branch:table-head-body-foot": [
+      "gallery-and-table-renderers"
+    ],
+    "branch:table-caption": [
+      "gallery-and-table-renderers"
+    ],
+    "branch:table-fluid-layout": [
+      "gallery-and-table-renderers"
+    ],
+    "selector:recursive-query": [
+      "gallery-and-table-renderers"
+    ],
+    "source:query": [
+      "gallery-and-table-renderers"
+    ],
+    "source:tag": [
+      "gallery-and-table-renderers"
+    ],
+    "block:core/navigation-link": [
+      "navigation-strategy-branches",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "branch:navigation-without-ref": [
+      "navigation-strategy-branches"
+    ],
+    "branch:navigation-with-ref": [
+      "navigation-strategy-branches"
+    ],
+    "branch:navigation-link-children": [
+      "navigation-strategy-branches"
+    ],
+    "strategy:conditional": [
+      "navigation-strategy-branches"
+    ],
+    "strategy:inner-blocks": [
+      "navigation-strategy-branches"
+    ],
+    "serializer:rendered-content-void-paired": [
+      "navigation-strategy-branches"
+    ],
+    "block:core/social-links": [
+      "social-and-dynamic-strategies"
+    ],
+    "block:core/social-link": [
+      "social-and-dynamic-strategies"
+    ],
+    "block:core/post-content": [
+      "social-and-dynamic-strategies"
+    ],
+    "block:core/site-logo": [
+      "social-and-dynamic-strategies"
+    ],
+    "block:core/site-tagline": [
+      "social-and-dynamic-strategies"
+    ],
+    "block:core/template-part": [
+      "social-and-dynamic-strategies"
+    ],
+    "branch:social-links-wrapper": [
+      "social-and-dynamic-strategies"
+    ],
+    "branch:social-links-labels": [
+      "social-and-dynamic-strategies"
+    ],
+    "branch:social-links-child-comments": [
+      "social-and-dynamic-strategies"
+    ],
+    "strategy:dynamic-null": [
+      "social-and-dynamic-strategies"
+    ],
+    "report:skip": [
+      "report-order-status-and-skip"
+    ],
+    "report:lexical-path-order": [
+      "report-order-status-and-skip"
+    ],
+    "report:empty-drops": [
+      "report-order-status-and-skip"
+    ],
+    "oracle:three-pass-convergence": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "deprecation:group-default-tag": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "deprecation:paragraph-pre-font-support": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "block:core/separator": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "block:core/heading": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:color-elements": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "support:preset-variables": [
+      "tbilisi25-footer-fixed-point"
+    ]
+  },
+  "requiredCapabilities": [
+    "oracle:three-pass-convergence",
+    "oracle:authoritative-changed-flag",
+    "freeform:before-between-after",
+    "missing-block:paired",
+    "missing-block:void",
+    "delimiter:balanced",
+    "delimiter:mismatched",
+    "delimiter:stray-closer",
+    "delimiter:unclosed",
+    "delimiter:malformed-json",
+    "serializer:rendered-content-void-paired",
+    "strategy:static-renderer",
+    "strategy:raw-content",
+    "strategy:conditional",
+    "strategy:inner-blocks",
+    "strategy:dynamic-null",
+    "strategy:missing-block",
+    "source:attribute",
+    "source:html",
+    "source:raw",
+    "source:query",
+    "source:rich-text",
+    "source:tag",
+    "selector:attribute-root",
+    "selector:descendant",
+    "selector:child",
+    "selector:recursive-query",
+    "rich-text:entities",
+    "rich-text:literal-nbsp",
+    "rich-text:br",
+    "rich-text:inline-formatting",
+    "deprecation:paragraph-align",
+    "deprecation:paragraph-pre-font-support",
+    "deprecation:paragraph-selectorless",
+    "deprecation:group-default-tag",
+    "deprecation:button-tag",
+    "deprecation:site-title-align",
+    "deprecation:site-title-font-family",
+    "deprecation:navigation-font-family",
+    "json:apostrophe",
+    "json:quote",
+    "json:backslash",
+    "json:comment-boundary",
+    "json:html-sensitive",
+    "json:unicode",
+    "json:empty-array",
+    "json:empty-object",
+    "json:numeric-key-order",
+    "json:object-key-order",
+    "json:negative-zero",
+    "json:exponent-formatting",
+    "json:wrong-type",
+    "json:defaults",
+    "repair:nested-paragraph",
+    "repair:media-type-inference",
+    "repair:custom-class-recovery",
+    "repair:anchor-recovery",
+    "repair:aria-label-recovery",
+    "repair-gate:valid-paragraph",
+    "repair-gate:pre-paragraph-noop",
+    "repair-gate:media-type-present",
+    "repair-gate:custom-class-already-authored",
+    "repair-gate:anchor-already-authored",
+    "repair-gate:aria-label-already-authored",
+    "report:fixed",
+    "report:ok",
+    "report:skip",
+    "report:lexical-path-order",
+    "report:dropped-style",
+    "report:dropped-class",
+    "report:repeat-counting",
+    "report:vertical-rhythm-drop",
+    "branch:cover-image",
+    "branch:cover-video",
+    "branch:cover-parallax",
+    "branch:cover-repeat",
+    "branch:cover-dim-zero-gradient",
+    "branch:media-text-image",
+    "branch:media-text-video",
+    "branch:table-head-body-foot",
+    "branch:table-caption",
+    "branch:gallery-caption",
+    "branch:gallery-cropped",
+    "branch:gallery-not-cropped",
+    "branch:navigation-with-ref",
+    "branch:navigation-without-ref",
+    "branch:navigation-link-children",
+    "branch:social-links-wrapper",
+    "branch:social-links-child-comments",
+    "support:alignment",
+    "support:anchor",
+    "support:aria-label",
+    "support:background-image-skip-serialization",
+    "support:border",
+    "support:child-layout",
+    "support:color-custom",
+    "support:custom-class",
+    "support:dimensions",
+    "support:element-link-color",
+    "support:flex-size",
+    "support:font-family",
+    "support:font-size",
+    "support:gradient",
+    "support:layout",
+    "support:layout-flex",
+    "support:preset-variables",
+    "support:self-stretch",
+    "support:shadow",
+    "support:spacing",
+    "support:typography"
+  ],
+  "uncoveredCapabilities": [],
+  "supportedBlocks": {
+    "core/paragraph": [
+      "nested-group-support",
+      "rich-text-literal-nbsp",
+      "pre-paragraph-repair-noop",
+      "media-text-type-inference",
+      "block-support-pipeline",
+      "cover-renderer-branches",
+      "quote-embed-and-raw-renderers",
+      "report-order-status-and-skip",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/group": [
+      "group-html-attribute-repairs",
+      "nested-group-support",
+      "json-comment-boundaries",
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/column": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/columns": [
+      "block-support-pipeline",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/heading": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/image": [
+      "dropped-inner-image-content",
+      "image-source-selector-branches",
+      "gallery-and-table-renderers"
+    ],
+    "core/separator": [
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/buttons": [
+      "structural-block-renderers"
+    ],
+    "core/button": [
+      "structural-block-renderers"
+    ],
+    "core/spacer": [
+      "structural-block-renderers"
+    ],
+    "core/list": [
+      "structural-block-renderers"
+    ],
+    "core/list-item": [
+      "structural-block-renderers"
+    ],
+    "core/cover": [
+      "cover-renderer-branches"
+    ],
+    "core/media-text": [
+      "media-text-type-inference"
+    ],
+    "core/quote": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "core/pullquote": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "core/gallery": [
+      "gallery-and-table-renderers"
+    ],
+    "core/table": [
+      "gallery-and-table-renderers"
+    ],
+    "core/embed": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "core/html": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "core/navigation": [
+      "observed-deprecation-adapters",
+      "navigation-strategy-branches",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/navigation-link": [
+      "navigation-strategy-branches",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/social-links": [
+      "social-and-dynamic-strategies"
+    ],
+    "core/social-link": [
+      "social-and-dynamic-strategies"
+    ],
+    "core/page-list": [
+      "observed-deprecation-adapters",
+      "social-and-dynamic-strategies"
+    ],
+    "core/post-content": [
+      "social-and-dynamic-strategies"
+    ],
+    "core/site-logo": [
+      "social-and-dynamic-strategies"
+    ],
+    "core/site-tagline": [
+      "social-and-dynamic-strategies"
+    ],
+    "core/site-title": [
+      "observed-deprecation-adapters",
+      "social-and-dynamic-strategies",
+      "report-order-status-and-skip",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "core/template-part": [
+      "social-and-dynamic-strategies"
+    ]
+  },
+  "strategies": {
+    "STATIC_RENDERER": [
+      "group-html-attribute-repairs",
+      "nested-group-support",
+      "rich-text-literal-nbsp",
+      "pre-paragraph-repair-noop",
+      "dropped-inner-image-content",
+      "json-comment-boundaries",
+      "media-text-type-inference",
+      "structural-block-renderers",
+      "image-source-selector-branches",
+      "block-support-pipeline",
+      "cover-renderer-branches",
+      "quote-embed-and-raw-renderers",
+      "gallery-and-table-renderers",
+      "social-and-dynamic-strategies",
+      "report-order-status-and-skip",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "RAW_CONTENT": [
+      "quote-embed-and-raw-renderers"
+    ],
+    "CONDITIONAL": [
+      "observed-deprecation-adapters",
+      "navigation-strategy-branches",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "INNER_BLOCKS": [
+      "navigation-strategy-branches",
+      "tbilisi25-footer-fixed-point"
+    ],
+    "DYNAMIC_NULL": [
+      "observed-deprecation-adapters",
+      "social-and-dynamic-strategies",
+      "report-order-status-and-skip",
+      "tbilisi25-footer-fixed-point"
+    ]
+  },
+  "observed": [
+    "core/button",
+    "core/buttons",
+    "core/column",
+    "core/columns",
+    "core/cover",
+    "core/embed",
+    "core/figure",
+    "core/gallery",
+    "core/group",
+    "core/heading",
+    "core/html",
+    "core/image",
+    "core/list",
+    "core/list-item",
+    "core/media-text",
+    "core/navigation",
+    "core/navigation-link",
+    "core/page-list",
+    "core/paragraph",
+    "core/post-content",
+    "core/pullquote",
+    "core/quote",
+    "core/separator",
+    "core/site-logo",
+    "core/site-tagline",
+    "core/site-title",
+    "core/social-link",
+    "core/social-links",
+    "core/spacer",
+    "core/table",
+    "core/template-part"
+  ],
+  "deprecations": {
+    "observed": [
+      "deprecation:core/button:3",
+      "deprecation:core/group:0",
+      "deprecation:core/navigation:3",
+      "deprecation:core/paragraph:0",
+      "deprecation:core/paragraph:1",
+      "deprecation:core/paragraph:6",
+      "deprecation:core/site-title:0",
+      "deprecation:core/site-title:1"
+    ],
+    "reviewed": {
+      "deprecation:core/button:3": "raw-overlay-current-save-equivalent",
+      "deprecation:core/group:0": "raw-overlay-current-save-equivalent",
+      "deprecation:core/navigation:3": "explicit-adapter",
+      "deprecation:core/paragraph:0": "explicit-adapter",
+      "deprecation:core/paragraph:1": "explicit-adapter",
+      "deprecation:core/paragraph:6": "explicit-adapter",
+      "deprecation:core/site-title:0": "explicit-adapter",
+      "deprecation:core/site-title:1": "explicit-adapter"
+    },
+    "unreviewed": [],
+    "unobservedReviewed": []
+  },
+  "rendererProbes": {
+    "schemaVersion": 1,
+    "sha256": "c57ef3ece1202de275b46a00dfa68ee92411a2f1e68d14988c2203a0102fee61",
+    "oracleCases": 97,
+    "staticRendererCases": 86,
+    "supportedStaticBlocks": [
+      "core/button",
+      "core/buttons",
+      "core/column",
+      "core/columns",
+      "core/cover",
+      "core/embed",
+      "core/gallery",
+      "core/group",
+      "core/heading",
+      "core/image",
+      "core/list",
+      "core/list-item",
+      "core/media-text",
+      "core/paragraph",
+      "core/pullquote",
+      "core/quote",
+      "core/separator",
+      "core/social-links",
+      "core/spacer",
+      "core/table"
+    ],
+    "probedStaticBlocks": [
+      "core/button",
+      "core/buttons",
+      "core/column",
+      "core/columns",
+      "core/cover",
+      "core/embed",
+      "core/gallery",
+      "core/group",
+      "core/heading",
+      "core/image",
+      "core/list",
+      "core/list-item",
+      "core/media-text",
+      "core/paragraph",
+      "core/pullquote",
+      "core/quote",
+      "core/separator",
+      "core/social-links",
+      "core/spacer",
+      "core/table"
+    ],
+    "uncoveredStaticBlocks": []
+  },
+  "uncoveredSupportedBlocks": [],
+  "registeredSnapshot": {
+    "count": 106,
+    "sha256": "3384dbf56db0506bbacd2e496db982b76354b02540c796f6704633157c5fcb3a"
+  }
+}

@@ -17,7 +17,7 @@
 const { parse, serialize, createBlock } = require('@wordpress/blocks');
 const { registerCoreBlocks } = require('@wordpress/block-library');
 const { parse: grammarParse } = require('@wordpress/block-serialization-default-parser');
-const { fixNestedParagraphs } = require('./paragraphFixer');
+const { fixNestedParagraphs, fixNestedParagraphsDetailed } = require('./paragraphFixer');
 
 let initialized = false;
 
@@ -25,7 +25,7 @@ let initialized = false;
  * Initialize the WordPress block registry with core blocks.
  * Must be called before any parsing/serialization.
  */
-function initializeBlockRegistry() {
+function initializeBlockRegistry({ throwOnError = false } = {}) {
   if (initialized) return;
 
   try {
@@ -36,6 +36,10 @@ function initializeBlockRegistry() {
     console.error('[BlockFixer] Block registry initialized with core blocks');
   } catch (error) {
     console.error('[BlockFixer] Failed to initialize block registry:', error);
+    if (throwOnError) {
+      initialized = false;
+      throw error;
+    }
     // Continue anyway - parsing might still work for basic blocks
     initialized = true;
   }
@@ -45,7 +49,7 @@ function initializeBlockRegistry() {
  * Recursively fix a block and its inner blocks.
  * Invalid blocks are recreated using createBlock() to regenerate clean HTML.
  */
-function normalizedAttributes(block) {
+function normalizedAttributes(block, compatibilityRepairs = [], blockPath = []) {
   const attrs = { ...block.attributes };
 
   // core/media-text serializes an empty <figure> when mediaUrl is present but
@@ -57,6 +61,12 @@ function normalizedAttributes(block) {
     attrs.mediaType = /<\s*video\b|\.(?:mp4|webm|ogv)(?:[?#]|$)/i.test(source)
       ? 'video'
       : 'image';
+    compatibilityRepairs.push({
+      code: 'media-type-inference',
+      blockName: block.name,
+      blockPath: blockPath.join('/'),
+      value: attrs.mediaType,
+    });
   }
 
   return attrs;
@@ -97,13 +107,18 @@ function overlayCommentAttributes(blocks, rawBlocks) {
   }
 }
 
-function fixBlockRecursively(block) {
+function fixBlockRecursively(block, compatibilityRepairs = [], blockPath = []) {
   // Recursively fix all inner blocks
   const fixedInnerBlocks = [];
 
   if (block.innerBlocks && block.innerBlocks.length > 0) {
-    for (const innerBlock of block.innerBlocks) {
-      const result = fixBlockRecursively(innerBlock);
+    for (let index = 0; index < block.innerBlocks.length; index++) {
+      const innerBlock = block.innerBlocks[index];
+      const result = fixBlockRecursively(
+        innerBlock,
+        compatibilityRepairs,
+        [...blockPath, index]
+      );
       fixedInnerBlocks.push(result.block);
     }
   }
@@ -118,7 +133,7 @@ function fixBlockRecursively(block) {
 
   const fixedBlock = createBlock(
     block.name,
-    normalizedAttributes(block),
+    normalizedAttributes(block, compatibilityRepairs, blockPath),
     fixedInnerBlocks.length > 0 ? fixedInnerBlocks : undefined
   );
 
@@ -134,7 +149,18 @@ function fixBlocksInTemplate(htmlContent) {
 
   try {
     // Apply manual fixes before WordPress block parsing
-    const preFixedContent = fixNestedParagraphs(htmlContent);
+    const compatibilityRepairs = [];
+    const preParagraphRepair = fixNestedParagraphsDetailed(htmlContent);
+    const preFixedContent = preParagraphRepair.html;
+    if (preParagraphRepair.count > 0) {
+      compatibilityRepairs.push({
+        code: 'nested-paragraph',
+        blockName: 'core/paragraph',
+        blockPath: 'document',
+        stage: 'pre-parse',
+        count: preParagraphRepair.count,
+      });
+    }
 
     // Parse the HTML into blocks, then restore the authored comment
     // attributes that a deprecated-version migration may have destroyed.
@@ -191,7 +217,9 @@ function fixBlocksInTemplate(htmlContent) {
     // order) that cause validation failures in WordPress Playground.
     // Re-serializing via createBlock() ensures the HTML matches exactly
     // what WordPress save() produces.
-    const fixedBlocks = blocks.map((block) => fixBlockRecursively(block).block);
+    const fixedBlocks = blocks.map((block, index) => (
+      fixBlockRecursively(block, compatibilityRepairs, [index]).block
+    ));
 
     // Serialize the fixed blocks back to HTML
     let fixedHtml = serialize(fixedBlocks);
@@ -201,7 +229,17 @@ function fixBlocksInTemplate(htmlContent) {
     // The serializer wraps the original content (with unexpected styles) inside
     // a new <p> tag (with expected styles), creating nested paragraphs.
     const beforeParaFix = fixedHtml;
-    fixedHtml = fixNestedParagraphs(fixedHtml);
+    const postParagraphRepair = fixNestedParagraphsDetailed(fixedHtml);
+    fixedHtml = postParagraphRepair.html;
+    if (postParagraphRepair.count > 0) {
+      compatibilityRepairs.push({
+        code: 'nested-paragraph',
+        blockName: 'core/paragraph',
+        blockPath: 'document',
+        stage: 'post-serialize',
+        count: postParagraphRepair.count,
+      });
+    }
     if (preFixedContent !== htmlContent || fixedHtml !== beforeParaFix) {
       fixedIssues.push('core/paragraph: Nested paragraph tags detected and removed');
     }
@@ -225,6 +263,7 @@ function fixBlocksInTemplate(htmlContent) {
       html: fixedHtml,
       changed: wasChanged,
       fixedIssues,
+      compatibilityRepairs,
     };
   } catch (error) {
     console.error('[BlockFixer] Error fixing blocks:', error);
@@ -232,6 +271,7 @@ function fixBlocksInTemplate(htmlContent) {
       html: htmlContent,
       changed: false,
       fixedIssues: [],
+      compatibilityRepairs: [],
     };
   }
 }
@@ -361,5 +401,7 @@ module.exports = {
   fixBlocksInTemplate,
   fixArtefactTemplates,
   fixNestedParagraphs,
+  normalizedAttributes,
+  overlayCommentAttributes,
   splitContentFile,
 };

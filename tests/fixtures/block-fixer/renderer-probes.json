@@ -1,0 +1,2948 @@
+{
+    "schemaVersion": 1,
+    "provenance": {
+        "generator": {
+            "version": "1.0.0",
+            "path": "tests/tools/block_renderer_differential.php",
+            "sha256": "a025a47d5dd897d5f3343043e0ac6a3a7d332eead7e738b7d0a711d211d48cd3"
+        },
+        "oracleAdapter": {
+            "path": "tests/tools/block_renderer_oracle.js",
+            "sha256": "d027442df163730fd0ec1579fa79ae147df2b1c4a338aae6b2c12db9fe523d4a"
+        },
+        "oracleManifest": {
+            "path": "tests/fixtures/block-fixer/oracle-manifest.json",
+            "sha256": "7c947b7dc6774b4f517eb3ed118c9ffe3ca46cffaa024adfc9d649b0449b2df5"
+        },
+        "packageLock": {
+            "path": "package-lock.json",
+            "sha256": "eb1b8c40981564cf9f1f01e0d4a5d910f20b83c8c73ee338d2b592df8d64150c"
+        },
+        "supportedBlocks": {
+            "path": "src/BlockSerializer/Registry/supported-blocks.php",
+            "sha256": "37c96f4cdb0493db459b4fe0019b8f6516b19a27c1afc9430948fb6bbcff03f4"
+        },
+        "registeredRuntime": {
+            "path": "tests/fixtures/block-fixer/registered-runtime.json",
+            "sha256": "3384dbf56db0506bbacd2e496db982b76354b02540c796f6704633157c5fcb3a"
+        },
+        "generatedRegistry": {
+            "path": "src/BlockSerializer/Registry/generated-registry.php",
+            "sha256": "3539f97fccf128399113284177cebba75349b9993b5727d8011ad4548e015cee"
+        },
+        "runtime": {
+            "version": "v22.19.0",
+            "platform": "linux",
+            "architecture": "x64",
+            "v8": "12.4.254.21-node.29",
+            "icu": "77.1"
+        },
+        "oracleFingerprint": {
+            "node": {
+                "version": "v22.19.0",
+                "platform": "linux",
+                "architecture": "x64",
+                "v8": "12.4.254.21-node.29",
+                "icu": "77.1"
+            },
+            "container": {
+                "image": "docker.io/library/node:22.19.0-bookworm-slim",
+                "indexDigest": "sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90",
+                "linuxAmd64Digest": "sha256:cff78eb5aa1cf27dc2b6aeea9d31366415a43e9a9ea0ddec00d780b2b66fad0f",
+                "sourceRevision": "8a6ee0d86da85db74f5bcf99c9dc6ef87203592f"
+            },
+            "packageLockSha256": "eb1b8c40981564cf9f1f01e0d4a5d910f20b83c8c73ee338d2b592df8d64150c",
+            "packages": {
+                "@wordpress/blocks": "15.15.0",
+                "@wordpress/block-library": "9.42.0",
+                "@wordpress/block-editor": "15.15.0",
+                "@wordpress/block-serialization-default-parser": "5.49.0",
+                "@wordpress/style-engine": "2.49.0",
+                "@wordpress/rich-text": "7.49.0",
+                "@wordpress/element": "6.46.0",
+                "react": "18.3.1",
+                "react-dom": "18.3.1",
+                "jsdom": "29.0.1"
+            },
+            "implementationSources": {
+                "bin/block-fixer/fix-templates.js": "6fe510e2f869d89a29f263734e9aff0f9a82d2767ecc7a93413d18bc03f943a7",
+                "bin/block-fixer/oracle.js": "34b863c7f6300e2190ba318601136d5f676b24ae3d9faeb1cbcd37b76d5508b4",
+                "bin/block-fixer/lib/blockFixer.js": "959145cbd9ee7ef90c4436a6e29f16180c5d3cc5bdfdffa06ee5a89523f19f42",
+                "bin/block-fixer/lib/paragraphFixer.js": "e11812214c0dbbf7643005462af1c7469268af330b1d854dabc532fe44cf6ed3",
+                "bin/block-fixer/lib/domEnvironment.js": "e4b799188c0afddd1fd99d4458e21a83e6cd84e4b16792998e006b556efc7fcd",
+                "bin/block-fixer/lib/droppedContentDetector.js": "e814e907fa16ec54c06f3a52a73423add68c3cc3af7bebdaabd4bd71aade3cbc",
+                "bin/block-fixer/lib/fixedPoint.js": "fd0d96de99bd8d32de189c2457ba37417436d98028b905955832f0c9939018e7",
+                "bin/block-fixer/lib/oracleFingerprint.js": "65f8d5ebfa003ef74ad5b3d5cb15a2f0a78b725615cdd7a4cc028bac6607d2c2"
+            },
+            "instrumentation": {
+                "version": "1.0.0",
+                "sourceSha256": "128bca987aa9afecd499418d43abec294002ea7a18e595e8ea789dea093db52f",
+                "captures": [
+                    "validation-result",
+                    "built-in-custom-class-recovery",
+                    "built-in-anchor-recovery",
+                    "built-in-aria-label-recovery",
+                    "deprecation-index-and-before-after"
+                ]
+            }
+        }
+    },
+    "coverage": {
+        "oracleCases": 97,
+        "staticRendererCases": 86,
+        "supportedStaticBlocks": [
+            "core/button",
+            "core/buttons",
+            "core/column",
+            "core/columns",
+            "core/cover",
+            "core/embed",
+            "core/gallery",
+            "core/group",
+            "core/heading",
+            "core/image",
+            "core/list",
+            "core/list-item",
+            "core/media-text",
+            "core/paragraph",
+            "core/pullquote",
+            "core/quote",
+            "core/separator",
+            "core/social-links",
+            "core/spacer",
+            "core/table"
+        ],
+        "probedStaticBlocks": [
+            "core/button",
+            "core/buttons",
+            "core/column",
+            "core/columns",
+            "core/cover",
+            "core/embed",
+            "core/gallery",
+            "core/group",
+            "core/heading",
+            "core/image",
+            "core/list",
+            "core/list-item",
+            "core/media-text",
+            "core/paragraph",
+            "core/pullquote",
+            "core/quote",
+            "core/separator",
+            "core/social-links",
+            "core/spacer",
+            "core/table"
+        ],
+        "uncoveredStaticBlocks": []
+    },
+    "cases": [
+        {
+            "id": "paragraph/default",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "Hello <strong>world</strong>",
+                "dropCap": false
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p>Hello <strong>world</strong></p>"
+        },
+        {
+            "id": "paragraph/literal-nbsp",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "A B",
+                "dropCap": false
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p>A B</p>"
+        },
+        {
+            "id": "paragraph/drop-cap",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "Drop",
+                "dropCap": true
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p class=\"has-drop-cap\">Drop</p>"
+        },
+        {
+            "id": "paragraph/drop-cap-centered",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "Drop",
+                "dropCap": true,
+                "style": {
+                    "typography": {
+                        "textAlign": "center"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p class=\"has-text-align-center\">Drop</p>"
+        },
+        {
+            "id": "paragraph/direction-border",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "RTL",
+                "dropCap": false,
+                "direction": "rtl",
+                "borderColor": "contrast",
+                "style": {
+                    "border": {
+                        "color": "#123",
+                        "style": "dashed",
+                        "width": "2px",
+                        "radius": "5px"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p class=\"has-border-color has-contrast-border-color\" dir=\"rtl\" style=\"border-color:#123;border-style:dashed;border-width:2px;border-radius:5px\">RTL</p>"
+        },
+        {
+            "id": "paragraph/support-composite",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "Supports",
+                "dropCap": false,
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "align": "right",
+                "anchor": "hello",
+                "className": "custom custom",
+                "fontSize": "large",
+                "style": {
+                    "color": {
+                        "text": "#123456",
+                        "background": "#abcdef"
+                    },
+                    "spacing": {
+                        "margin": {
+                            "top": "var:preset|spacing|20",
+                            "bottom": "2rem"
+                        },
+                        "padding": "3px"
+                    },
+                    "typography": {
+                        "fontSize": "21px",
+                        "lineHeight": "1.4",
+                        "textAlign": "right"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p class=\"has-text-align-right custom has-contrast-color has-base-background-color has-text-color has-background has-large-font-size\" id=\"hello\" style=\"color:#123456;background-color:#abcdef;margin-top:var(--wp--preset--spacing--20);margin-bottom:2rem;padding:3px;font-size:21px;line-height:1.4\">Supports</p>"
+        },
+        {
+            "id": "group/default",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-group\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "group/tag-supports",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "section",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "align": "wide",
+                "anchor": "region",
+                "ariaLabel": "Region",
+                "className": "featured",
+                "style": {
+                    "border": {
+                        "color": "#abc",
+                        "width": "2px",
+                        "radius": {
+                            "topLeft": "4px"
+                        }
+                    },
+                    "spacing": {
+                        "padding": {
+                            "top": "1rem",
+                            "left": "2rem"
+                        }
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Group</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<section class=\"wp-block-group alignwide featured has-border-color has-contrast-color has-base-background-color has-text-color has-background\" id=\"region\" aria-label=\"Region\" style=\"border-color:#abc;border-width:2px;border-top-left-radius:4px;min-height:10rem;padding-top:1rem;padding-left:2rem\"><!-- wp:paragraph -->\n<p>Group</p>\n<!-- /wp:paragraph --></section>"
+        },
+        {
+            "id": "group/background-position-supports",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "div",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover",
+                        "backgroundAttachment": "fixed"
+                    },
+                    "position": {
+                        "type": "sticky",
+                        "top": "var:preset|spacing|20"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Background</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-group\"><!-- wp:paragraph -->\n<p>Background</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "group/js-number-css",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "div",
+                "style": {
+                    "dimensions": {
+                        "minHeight": 33.33333333333333
+                    },
+                    "typography": {
+                        "lineHeight": 1.2345678901234567
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Numbers</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-group\" style=\"min-height:33.33333333333333px;line-height:1.2345678901234567\"><!-- wp:paragraph -->\n<p>Numbers</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "column/numeric-width",
+            "name": "core/column",
+            "attributes": {
+                "verticalAlignment": "center",
+                "width": 33.33333333333333
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-column is-vertically-aligned-center\" style=\"flex-basis:33.33333333333333%\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "column/percent-width",
+            "name": "core/column",
+            "attributes": {
+                "verticalAlignment": "bottom",
+                "width": "33.33333333333333%"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-column is-vertically-aligned-bottom\" style=\"flex-basis:33.333333333333%\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "column/unit-width-supports",
+            "name": "core/column",
+            "attributes": {
+                "width": "12rem",
+                "className": "unit",
+                "style": {
+                    "spacing": {
+                        "padding": "1px"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-column unit\" style=\"padding:1px;flex-basis:12rem\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "columns/default",
+            "name": "core/columns",
+            "attributes": {
+                "isStackedOnMobile": true
+            },
+            "innerSerialized": "<!-- wp:column -->\n<div class=\"wp-block-column\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>\n<!-- /wp:column -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-columns\"><!-- wp:column -->\n<div class=\"wp-block-column\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>\n<!-- /wp:column --></div>"
+        },
+        {
+            "id": "columns/no-stack-align",
+            "name": "core/columns",
+            "attributes": {
+                "verticalAlignment": "center",
+                "isStackedOnMobile": false,
+                "align": "full"
+            },
+            "innerSerialized": "<!-- wp:column -->\n<div class=\"wp-block-column\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>\n<!-- /wp:column -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-columns alignfull are-vertically-aligned-center is-not-stacked-on-mobile\"><!-- wp:column -->\n<div class=\"wp-block-column\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>\n<!-- /wp:column --></div>"
+        },
+        {
+            "id": "heading/level-supports",
+            "name": "core/heading",
+            "attributes": {
+                "content": "Heading",
+                "level": 4,
+                "anchor": "heading",
+                "style": {
+                    "typography": {
+                        "textAlign": "right"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<h4 class=\"wp-block-heading has-text-align-right\" id=\"heading\">Heading</h4>"
+        },
+        {
+            "id": "image/default",
+            "name": "core/image",
+            "attributes": {
+                "url": "https://example.com/a.jpg",
+                "alt": "A & B",
+                "caption": ""
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-image\"><img src=\"https://example.com/a.jpg\" alt=\"A &amp; B\"/></figure>"
+        },
+        {
+            "id": "image/link-caption",
+            "name": "core/image",
+            "attributes": {
+                "url": "https://example.com/a.jpg",
+                "alt": "alt",
+                "caption": "A <em>caption</em>",
+                "title": "Title",
+                "href": "https://example.com/",
+                "rel": "noreferrer noopener",
+                "linkClass": "linked",
+                "id": 42,
+                "sizeSlug": "large",
+                "linkTarget": "_blank"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-image size-large\"><a class=\"linked\" href=\"https://example.com/\" target=\"_blank\" rel=\"noreferrer noopener\"><img src=\"https://example.com/a.jpg\" alt=\"alt\" class=\"wp-image-42\" title=\"Title\"/></a><figcaption class=\"wp-element-caption\">A <em>caption</em></figcaption></figure>"
+        },
+        {
+            "id": "image/border-resize-focal",
+            "name": "core/image",
+            "attributes": {
+                "url": "/a.jpg",
+                "alt": "",
+                "caption": "",
+                "width": 320,
+                "height": "180px",
+                "aspectRatio": "16/9",
+                "scale": "cover",
+                "focalPoint": {
+                    "x": 0.2,
+                    "y": 0.75
+                },
+                "borderColor": "contrast",
+                "align": "none",
+                "style": {
+                    "border": {
+                        "color": "#010203",
+                        "style": "solid",
+                        "width": "3px",
+                        "radius": "4px"
+                    },
+                    "shadow": "0 1px 2px #000"
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-image alignnone is-resized has-custom-border\"><img src=\"/a.jpg\" alt=\"\" class=\"has-border-color has-contrast-border-color\" style=\"border-color:#010203;border-style:solid;border-width:3px;border-radius:4px;box-shadow:0 1px 2px #000;aspect-ratio:16/9;object-fit:cover;object-position:20% 75%;width:320px;height:180px\"/></figure>"
+        },
+        {
+            "id": "separator/default",
+            "name": "core/separator",
+            "attributes": {
+                "opacity": "alpha-channel",
+                "tagName": "hr"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<hr class=\"wp-block-separator has-alpha-channel-opacity\"/>"
+        },
+        {
+            "id": "separator/colors-opacity",
+            "name": "core/separator",
+            "attributes": {
+                "opacity": "css",
+                "tagName": "hr",
+                "backgroundColor": "contrast",
+                "className": "is-style-wide",
+                "style": {
+                    "color": {
+                        "background": "#f00"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<hr class=\"wp-block-separator has-text-color has-contrast-color has-css-opacity has-contrast-background-color has-background is-style-wide\" style=\"background-color:#f00\"/>"
+        },
+        {
+            "id": "buttons/default",
+            "name": "core/buttons",
+            "attributes": [],
+            "innerSerialized": "<!-- wp:button -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\">Go</a></div>\n<!-- /wp:button -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-buttons\"><!-- wp:button -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\">Go</a></div>\n<!-- /wp:button --></div>"
+        },
+        {
+            "id": "buttons/layout-font",
+            "name": "core/buttons",
+            "attributes": {
+                "fontSize": "large",
+                "layout": {
+                    "type": "flex",
+                    "justifyContent": "center",
+                    "orientation": "vertical"
+                }
+            },
+            "innerSerialized": "<!-- wp:button -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\">Go</a></div>\n<!-- /wp:button -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-buttons has-custom-font-size has-large-font-size\"><!-- wp:button -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\">Go</a></div>\n<!-- /wp:button --></div>"
+        },
+        {
+            "id": "button/link",
+            "name": "core/button",
+            "attributes": {
+                "tagName": "a",
+                "type": "button",
+                "url": "/go",
+                "title": "Go now",
+                "text": "Go",
+                "linkTarget": "_blank",
+                "rel": "nofollow"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\" href=\"/go\" title=\"Go now\" target=\"_blank\" rel=\"nofollow\">Go</a></div>"
+        },
+        {
+            "id": "button/button-tag",
+            "name": "core/button",
+            "attributes": {
+                "tagName": "button",
+                "type": "submit",
+                "text": "Submit"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-button\"><button type=\"submit\" class=\"wp-block-button__link wp-element-button\">Submit</button></div>"
+        },
+        {
+            "id": "button/width",
+            "name": "core/button",
+            "attributes": {
+                "tagName": "a",
+                "type": "button",
+                "text": "Wide"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\">Wide</a></div>"
+        },
+        {
+            "id": "button/supports",
+            "name": "core/button",
+            "attributes": {
+                "tagName": "a",
+                "type": "button",
+                "url": "#",
+                "text": "Styled",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "borderColor": "accent",
+                "fontFamily": "heading",
+                "fontSize": "medium",
+                "style": {
+                    "border": {
+                        "radius": 0,
+                        "width": "2px",
+                        "style": "solid"
+                    },
+                    "spacing": {
+                        "padding": {
+                            "top": "1em",
+                            "right": "2em"
+                        }
+                    },
+                    "typography": {
+                        "fontWeight": "700",
+                        "writingMode": "vertical-rl"
+                    },
+                    "shadow": "1px 2px 3px #000"
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div style=\"writing-mode:vertical-rl\" class=\"wp-block-button\"><a class=\"wp-block-button__link has-contrast-color has-base-background-color has-text-color has-background has-border-color has-accent-border-color has-heading-font-family has-medium-font-size no-border-radius has-custom-font-size wp-element-button\" href=\"#\" style=\"border-style:solid;border-width:2px;padding-top:1em;padding-right:2em;box-shadow:1px 2px 3px #000;font-weight:700\">Styled</a></div>"
+        },
+        {
+            "id": "spacer/default",
+            "name": "core/spacer",
+            "attributes": {
+                "height": "100px"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div style=\"height:100px\" aria-hidden=\"true\" class=\"wp-block-spacer\"></div>"
+        },
+        {
+            "id": "spacer/preset-width",
+            "name": "core/spacer",
+            "attributes": {
+                "height": "var:preset|spacing|40",
+                "width": "25%",
+                "style": {
+                    "layout": {
+                        "selfStretch": "fixed"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div style=\"height:var(--wp--preset--spacing--40);width:25%\" aria-hidden=\"true\" class=\"wp-block-spacer\"></div>"
+        },
+        {
+            "id": "spacer/fill",
+            "name": "core/spacer",
+            "attributes": {
+                "height": "20px",
+                "style": {
+                    "layout": {
+                        "selfStretch": "fill"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div aria-hidden=\"true\" class=\"wp-block-spacer\"></div>"
+        },
+        {
+            "id": "list/unordered",
+            "name": "core/list",
+            "attributes": {
+                "ordered": false
+            },
+            "innerSerialized": "<!-- wp:list-item -->\n<li>One</li>\n<!-- /wp:list-item -->\n\n<!-- wp:list-item -->\n<li>Two</li>\n<!-- /wp:list-item -->",
+            "saveKind": "element",
+            "expected": "<ul class=\"wp-block-list\"><!-- wp:list-item -->\n<li>One</li>\n<!-- /wp:list-item -->\n\n<!-- wp:list-item -->\n<li>Two</li>\n<!-- /wp:list-item --></ul>"
+        },
+        {
+            "id": "list/ordered-reversed-start",
+            "name": "core/list",
+            "attributes": {
+                "ordered": true,
+                "values": "",
+                "type": "upper-roman",
+                "start": 4,
+                "reversed": true
+            },
+            "innerSerialized": "<!-- wp:list-item -->\n<li>One</li>\n<!-- /wp:list-item -->\n\n<!-- wp:list-item -->\n<li>Two</li>\n<!-- /wp:list-item -->",
+            "saveKind": "element",
+            "expected": "<ol reversed start=\"4\" style=\"list-style-type:upper-roman\" class=\"wp-block-list\"><!-- wp:list-item -->\n<li>One</li>\n<!-- /wp:list-item -->\n\n<!-- wp:list-item -->\n<li>Two</li>\n<!-- /wp:list-item --></ol>"
+        },
+        {
+            "id": "list-item/nested",
+            "name": "core/list-item",
+            "attributes": {
+                "content": "Outer"
+            },
+            "innerSerialized": "<!-- wp:list -->\n<ul class=\"wp-block-list\"><!-- wp:list-item -->\n<li>Inner</li>\n<!-- /wp:list-item --></ul>\n<!-- /wp:list -->",
+            "saveKind": "element",
+            "expected": "<li>Outer<!-- wp:list -->\n<ul class=\"wp-block-list\"><!-- wp:list-item -->\n<li>Inner</li>\n<!-- /wp:list-item --></ul>\n<!-- /wp:list --></li>"
+        },
+        {
+            "id": "cover/image",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "id": 8,
+                "alt": "Cover",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "image",
+                "isDark": true,
+                "tagName": "div",
+                "sizeSlug": "large"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Cover</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><img class=\"wp-block-cover__image-background wp-image-8 size-large\" alt=\"Cover\" src=\"/cover.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Cover</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/image-focal-position",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "image",
+                "focalPoint": {
+                    "x": 0.12,
+                    "y": 0.88
+                },
+                "minHeight": 480,
+                "minHeightUnit": "px",
+                "contentPosition": "bottom right",
+                "isDark": false,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Cover</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover is-light has-custom-content-position is-position-bottom-right\" style=\"min-height:480px\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/cover.jpg\" style=\"object-position:12% 88%\" data-object-fit=\"cover\" data-object-position=\"12% 88%\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Cover</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/parallax",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "alt": "Parallax",
+                "hasParallax": true,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "image",
+                "focalPoint": {
+                    "x": 0.1,
+                    "y": 0.2
+                },
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover has-parallax\"><div role=\"img\" aria-label=\"Parallax\" class=\"wp-block-cover__image-background has-parallax\" style=\"background-position:10% 20%;background-image:url(/cover.jpg)\"></div><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/repeat",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/pattern.png",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": true,
+                "dimRatio": 100,
+                "backgroundType": "image",
+                "focalPoint": {
+                    "x": 1,
+                    "y": 0
+                },
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover is-repeated\"><div class=\"wp-block-cover__image-background is-repeated\" style=\"background-position:100% 0%;background-image:url(/pattern.png)\"></div><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/video",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/movie.mp4",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "video",
+                "focalPoint": {
+                    "x": 0.2,
+                    "y": 0.3
+                },
+                "isDark": true,
+                "tagName": "div",
+                "poster": "/poster.jpg"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><video class=\"wp-block-cover__video-background intrinsic-ignore\" autoplay muted loop playsinline src=\"/movie.mp4\" poster=\"/poster.jpg\" style=\"object-position:20% 30%\" data-object-fit=\"cover\" data-object-position=\"20% 30%\"></video><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/embed-video",
+            "name": "core/cover",
+            "attributes": {
+                "url": "https://youtu.be/abc",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "embed-video",
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><figure class=\"wp-block-cover__video-background wp-block-cover__embed-background wp-block-embed\"><div class=\"wp-block-embed__wrapper\">https://youtu.be/abc</div></figure><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/dim-zero",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 0,
+                "overlayColor": "base",
+                "backgroundType": "image",
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/cover.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-base-background-color has-background-dim-0 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/dim-zero-preset-gradient",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 0,
+                "backgroundType": "image",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/cover.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-0 has-background-dim has-background-gradient has-vivid-cyan-blue-to-vivid-purple-gradient-background\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/dim-zero-custom-gradient",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 0,
+                "overlayColor": "base",
+                "backgroundType": "image",
+                "customGradient": "linear-gradient(red, blue)",
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/cover.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-base-background-color has-background-dim-0 has-background-dim has-background-gradient\" style=\"background:linear-gradient(red, blue)\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/dim-custom-gradient",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 70,
+                "customOverlayColor": "#123456",
+                "backgroundType": "image",
+                "customGradient": "linear-gradient(red, blue)",
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/cover.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-70 has-background-dim wp-block-cover__gradient-background has-background-gradient\" style=\"background-color:#123456;background:linear-gradient(red, blue)\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/preset-gradient-no-image",
+            "name": "core/cover",
+            "attributes": {
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 50,
+                "backgroundType": "image",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim has-background-gradient has-vivid-cyan-blue-to-vivid-purple-gradient-background\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/featured-image",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/ignored.jpg",
+                "useFeaturedImage": true,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "image",
+                "isDark": true,
+                "tagName": "div"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover\"><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "cover/aspect-border-supports",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/cover.jpg",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "image",
+                "isDark": true,
+                "tagName": "div",
+                "borderColor": "base",
+                "align": "full",
+                "anchor": "cover",
+                "style": {
+                    "dimensions": {
+                        "aspectRatio": "16/9"
+                    },
+                    "border": {
+                        "color": "#123",
+                        "radius": "8px",
+                        "width": "1px"
+                    },
+                    "spacing": {
+                        "padding": "2rem"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover alignfull has-border-color has-base-border-color\" style=\"border-color:#123;border-width:1px;border-radius:8px;padding:2rem\" id=\"cover\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/cover.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "media-text/image-left",
+            "name": "core/media-text",
+            "attributes": {
+                "align": "none",
+                "mediaAlt": "Media",
+                "mediaPosition": "left",
+                "mediaId": 10,
+                "mediaUrl": "/media.jpg",
+                "mediaType": "image",
+                "mediaWidth": 50,
+                "isStackedOnMobile": true,
+                "useFeaturedImage": false
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-media-text is-stacked-on-mobile\"><figure class=\"wp-block-media-text__media\"><img src=\"/media.jpg\" alt=\"Media\" class=\"wp-image-10 size-full\"/></figure><div class=\"wp-block-media-text__content\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "media-text/image-right-link-focal",
+            "name": "core/media-text",
+            "attributes": {
+                "align": "none",
+                "mediaAlt": "Media",
+                "mediaPosition": "right",
+                "mediaId": 10,
+                "mediaUrl": "/media.jpg",
+                "linkTarget": "_blank",
+                "href": "/target",
+                "rel": "noopener",
+                "linkClass": "media-link",
+                "mediaType": "image",
+                "mediaWidth": 35,
+                "mediaSizeSlug": "large",
+                "isStackedOnMobile": false,
+                "verticalAlignment": "bottom",
+                "imageFill": true,
+                "focalPoint": {
+                    "x": 0.25,
+                    "y": 0.75
+                },
+                "useFeaturedImage": false
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-media-text has-media-on-the-right is-vertically-aligned-bottom is-image-fill-element\" style=\"grid-template-columns:auto 35%\"><div class=\"wp-block-media-text__content\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div><figure class=\"wp-block-media-text__media\"><a class=\"media-link\" href=\"/target\" target=\"_blank\" rel=\"noopener\"><img src=\"/media.jpg\" alt=\"Media\" class=\"wp-image-10 size-large\" style=\"object-position:25% 75%\"/></a></figure></div>"
+        },
+        {
+            "id": "media-text/video-left",
+            "name": "core/media-text",
+            "attributes": {
+                "align": "none",
+                "mediaAlt": "",
+                "mediaPosition": "left",
+                "mediaUrl": "/media.mp4",
+                "mediaType": "video",
+                "mediaWidth": 60,
+                "isStackedOnMobile": true,
+                "useFeaturedImage": false
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-media-text is-stacked-on-mobile\" style=\"grid-template-columns:60% auto\"><figure class=\"wp-block-media-text__media\"><video controls src=\"/media.mp4\"></video></figure><div class=\"wp-block-media-text__content\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "media-text/video-no-url",
+            "name": "core/media-text",
+            "attributes": {
+                "align": "none",
+                "mediaAlt": "",
+                "mediaPosition": "left",
+                "mediaType": "video",
+                "mediaWidth": 50,
+                "isStackedOnMobile": true,
+                "useFeaturedImage": false
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-media-text is-stacked-on-mobile\"><figure class=\"wp-block-media-text__media\"><video controls></video></figure><div class=\"wp-block-media-text__content\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "media-text/fractional-width",
+            "name": "core/media-text",
+            "attributes": {
+                "align": "none",
+                "mediaAlt": "",
+                "mediaPosition": "left",
+                "mediaUrl": "/media.jpg",
+                "mediaType": "image",
+                "mediaWidth": 33.33333333333333,
+                "isStackedOnMobile": true,
+                "useFeaturedImage": false
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-media-text is-stacked-on-mobile\" style=\"grid-template-columns:33.33333333333333% auto\"><figure class=\"wp-block-media-text__media\"><img src=\"/media.jpg\" alt=\"\"/></figure><div class=\"wp-block-media-text__content\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "quote/default",
+            "name": "core/quote",
+            "attributes": {
+                "value": "",
+                "citation": ""
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Quote</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>Quote</p>\n<!-- /wp:paragraph --></blockquote>"
+        },
+        {
+            "id": "quote/citation-align",
+            "name": "core/quote",
+            "attributes": {
+                "value": "",
+                "citation": "Author",
+                "textAlign": "right"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Quote</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<blockquote class=\"wp-block-quote has-text-align-right\"><!-- wp:paragraph -->\n<p>Quote</p>\n<!-- /wp:paragraph --><cite>Author</cite></blockquote>"
+        },
+        {
+            "id": "pullquote/default",
+            "name": "core/pullquote",
+            "attributes": {
+                "value": "Quote",
+                "citation": ""
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-pullquote\"><blockquote><p>Quote</p></blockquote></figure>"
+        },
+        {
+            "id": "pullquote/citation-align",
+            "name": "core/pullquote",
+            "attributes": {
+                "value": "Quote",
+                "citation": "<em>Author</em>",
+                "textAlign": "center"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-pullquote has-text-align-center\"><blockquote><p>Quote</p><cite><em>Author</em></cite></blockquote></figure>"
+        },
+        {
+            "id": "gallery/default",
+            "name": "core/gallery",
+            "attributes": {
+                "images": [],
+                "ids": [],
+                "navigationButtonType": "icon",
+                "shortCodeTransforms": [],
+                "caption": "",
+                "imageCrop": true,
+                "randomOrder": false,
+                "fixedHeight": true,
+                "sizeSlug": "large",
+                "allowResize": false,
+                "aspectRatio": "auto"
+            },
+            "innerSerialized": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/1.jpg\" alt=\"\"/></figure>\n<!-- /wp:image -->",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-gallery has-nested-images columns-default is-cropped\"><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/1.jpg\" alt=\"\"/></figure>\n<!-- /wp:image --></figure>"
+        },
+        {
+            "id": "gallery/columns-no-crop-caption",
+            "name": "core/gallery",
+            "attributes": {
+                "images": [],
+                "ids": [],
+                "navigationButtonType": "icon",
+                "shortCodeTransforms": [],
+                "columns": 3,
+                "caption": "Gallery <em>caption</em>",
+                "imageCrop": false,
+                "randomOrder": false,
+                "fixedHeight": true,
+                "sizeSlug": "large",
+                "allowResize": false,
+                "aspectRatio": "auto"
+            },
+            "innerSerialized": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/1.jpg\" alt=\"\"/></figure>\n<!-- /wp:image -->",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-gallery has-nested-images columns-3\"><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/1.jpg\" alt=\"\"/></figure>\n<!-- /wp:image --><figcaption class=\"blocks-gallery-caption wp-element-caption\">Gallery <em>caption</em></figcaption></figure>"
+        },
+        {
+            "id": "table/body",
+            "name": "core/table",
+            "attributes": {
+                "hasFixedLayout": true,
+                "caption": "",
+                "head": [],
+                "body": [
+                    {
+                        "cells": [
+                            {
+                                "tag": "td",
+                                "content": "A"
+                            },
+                            {
+                                "tag": "td",
+                                "content": "B"
+                            }
+                        ]
+                    }
+                ],
+                "foot": []
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-table\"><table class=\"has-fixed-layout\"><tbody><tr><td>A</td><td>B</td></tr></tbody></table></figure>"
+        },
+        {
+            "id": "table/all-sections-caption-align",
+            "name": "core/table",
+            "attributes": {
+                "hasFixedLayout": false,
+                "caption": "Table caption",
+                "head": [
+                    {
+                        "cells": [
+                            {
+                                "tag": "th",
+                                "content": "H",
+                                "scope": "col",
+                                "align": "center",
+                                "colspan": 2
+                            }
+                        ]
+                    }
+                ],
+                "body": [
+                    {
+                        "cells": [
+                            {
+                                "tag": "td",
+                                "content": "B",
+                                "align": "right",
+                                "rowspan": 2
+                            }
+                        ]
+                    }
+                ],
+                "foot": [
+                    {
+                        "cells": [
+                            {
+                                "tag": "td",
+                                "content": "F"
+                            }
+                        ]
+                    }
+                ],
+                "borderColor": "base",
+                "textColor": "contrast",
+                "style": {
+                    "color": {
+                        "background": "#eee"
+                    },
+                    "border": {
+                        "width": "1px"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-table\"><table class=\"has-contrast-color has-text-color has-background has-border-color has-base-border-color\" style=\"background-color:#eee;border-width:1px\"><thead><tr><th class=\"has-text-align-center\" data-align=\"center\" scope=\"col\" colspan=\"2\">H</th></tr></thead><tbody><tr><td class=\"has-text-align-right\" data-align=\"right\" rowspan=\"2\">B</td></tr></tbody><tfoot><tr><td>F</td></tr></tfoot></table><figcaption class=\"wp-element-caption\">Table caption</figcaption></figure>"
+        },
+        {
+            "id": "table/root-typography-spacing",
+            "name": "core/table",
+            "attributes": {
+                "hasFixedLayout": true,
+                "caption": "",
+                "head": [],
+                "body": [
+                    {
+                        "cells": [
+                            {
+                                "tag": "td",
+                                "content": "A"
+                            }
+                        ]
+                    }
+                ],
+                "foot": [],
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "spacing": {
+                        "margin": {
+                            "top": "2rem"
+                        },
+                        "padding": "4px"
+                    },
+                    "typography": {
+                        "fontWeight": "700",
+                        "lineHeight": "1.5"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure style=\"margin-top:2rem;padding:4px;font-weight:700;line-height:1.5\" class=\"wp-block-table has-heading-font-family has-large-font-size\"><table class=\"has-fixed-layout\"><tbody><tr><td>A</td></tr></tbody></table></figure>"
+        },
+        {
+            "id": "table/empty",
+            "name": "core/table",
+            "attributes": {
+                "hasFixedLayout": true,
+                "caption": "",
+                "head": [],
+                "body": [],
+                "foot": []
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "embed/default",
+            "name": "core/embed",
+            "attributes": {
+                "url": "https://example.com/embed",
+                "caption": "",
+                "allowResponsive": true,
+                "responsive": false,
+                "previewable": true
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-embed\"><div class=\"wp-block-embed__wrapper\">\nhttps://example.com/embed\n</div></figure>"
+        },
+        {
+            "id": "embed/provider-caption",
+            "name": "core/embed",
+            "attributes": {
+                "url": "https://youtube.com/watch?v=abc",
+                "caption": "Video caption",
+                "type": "video",
+                "providerNameSlug": "youtube",
+                "allowResponsive": true,
+                "responsive": true,
+                "previewable": true
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube\"><div class=\"wp-block-embed__wrapper\">\nhttps://youtube.com/watch?v=abc\n</div><figcaption class=\"wp-element-caption\">Video caption</figcaption></figure>"
+        },
+        {
+            "id": "embed/no-url",
+            "name": "core/embed",
+            "attributes": {
+                "caption": "",
+                "allowResponsive": true,
+                "responsive": false,
+                "previewable": true
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "social-links/default",
+            "name": "core/social-links",
+            "attributes": {
+                "openInNewTab": false,
+                "showLabels": false
+            },
+            "innerSerialized": "<!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /-->",
+            "saveKind": "element",
+            "expected": "<ul class=\"wp-block-social-links\"><!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /--></ul>"
+        },
+        {
+            "id": "social-links/variants",
+            "name": "core/social-links",
+            "attributes": {
+                "iconColorValue": "#fff",
+                "iconBackgroundColorValue": "#000",
+                "openInNewTab": false,
+                "showLabels": true,
+                "size": "has-large-icon-size",
+                "className": "is-style-pill-shape"
+            },
+            "innerSerialized": "<!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /-->",
+            "saveKind": "element",
+            "expected": "<ul class=\"wp-block-social-links has-large-icon-size has-visible-labels has-icon-color has-icon-background-color is-style-pill-shape\"><!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /--></ul>"
+        },
+        {
+            "id": "html/raw",
+            "name": "core/html",
+            "attributes": {
+                "content": "<div data-x=\"&\">raw</div>"
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div data-x=\"&\">raw</div>"
+        },
+        {
+            "id": "navigation/no-ref",
+            "name": "core/navigation",
+            "attributes": {
+                "showSubmenuIcon": true,
+                "submenuVisibility": "hover",
+                "overlayMenu": "mobile",
+                "icon": "handle",
+                "hasIcon": true,
+                "maxNestingLevel": 5
+            },
+            "innerSerialized": "<!-- wp:navigation-link {\"label\":\"Ignored\"} -->\n<!-- wp:paragraph -->\n<p>Nested</p>\n<!-- /wp:paragraph -->\n<!-- /wp:navigation-link -->",
+            "saveKind": "element",
+            "expected": "<!-- wp:navigation-link {\"label\":\"Ignored\"} -->\n<!-- wp:paragraph -->\n<p>Nested</p>\n<!-- /wp:paragraph -->\n<!-- /wp:navigation-link -->"
+        },
+        {
+            "id": "navigation/ref",
+            "name": "core/navigation",
+            "attributes": {
+                "ref": 123,
+                "showSubmenuIcon": true,
+                "submenuVisibility": "hover",
+                "overlayMenu": "mobile",
+                "icon": "handle",
+                "hasIcon": true,
+                "maxNestingLevel": 5
+            },
+            "innerSerialized": "<!-- wp:navigation-link -->\n<!-- wp:paragraph -->\n<p>Nested</p>\n<!-- /wp:paragraph -->\n<!-- /wp:navigation-link -->",
+            "saveKind": "element",
+            "expected": ""
+        },
+        {
+            "id": "navigation-link/inner",
+            "name": "core/navigation-link",
+            "attributes": {
+                "label": "Ignored",
+                "opensInNewTab": false
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Nested</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<!-- wp:paragraph -->\n<p>Nested</p>\n<!-- /wp:paragraph -->"
+        },
+        {
+            "id": "dynamic/post-content",
+            "name": "core/post-content",
+            "attributes": {
+                "tagName": "div"
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "dynamic/page-list",
+            "name": "core/page-list",
+            "attributes": {
+                "parentPageID": 0,
+                "isNested": false
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "dynamic/site-logo",
+            "name": "core/site-logo",
+            "attributes": {
+                "isLink": true,
+                "linkTarget": "_self"
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "dynamic/site-tagline",
+            "name": "core/site-tagline",
+            "attributes": {
+                "level": 0,
+                "levelOptions": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6
+                ]
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "dynamic/site-title",
+            "name": "core/site-title",
+            "attributes": {
+                "level": 3,
+                "levelOptions": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6
+                ],
+                "isLink": true,
+                "linkTarget": "_self"
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "dynamic/template-part",
+            "name": "core/template-part",
+            "attributes": {
+                "slug": "header"
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "dynamic/social-link",
+            "name": "core/social-link",
+            "attributes": {
+                "url": "https://wordpress.org",
+                "service": "wordpress"
+            },
+            "innerSerialized": "",
+            "saveKind": "null",
+            "expected": ""
+        },
+        {
+            "id": "supports/paragraph",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "Support paragraph",
+                "dropCap": false,
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p class=\"has-text-align-right alignfull support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\">Support paragraph</p>"
+        },
+        {
+            "id": "supports/group",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "div",
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "ariaLabel": "Support region",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-group alignfull support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" id=\"support-anchor\" aria-label=\"Support region\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "supports/column",
+            "name": "core/column",
+            "attributes": {
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-column support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\" id=\"support-anchor\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "supports/columns",
+            "name": "core/columns",
+            "attributes": {
+                "isStackedOnMobile": true,
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:column -->\n<div class=\"wp-block-column\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>\n<!-- /wp:column -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-columns alignfull support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><!-- wp:column -->\n<div class=\"wp-block-column\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>\n<!-- /wp:column --></div>"
+        },
+        {
+            "id": "supports/heading",
+            "name": "core/heading",
+            "attributes": {
+                "content": "Support heading",
+                "level": 2,
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<h2 class=\"wp-block-heading has-text-align-right alignfull support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\">Support heading</h2>"
+        },
+        {
+            "id": "supports/image",
+            "name": "core/image",
+            "attributes": {
+                "url": "/support.jpg",
+                "alt": "Support",
+                "caption": "",
+                "borderColor": "accent",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-image alignfull has-custom-border support-probe\" id=\"support-anchor\" style=\"color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl\"><img src=\"/support.jpg\" alt=\"Support\" class=\"has-border-color has-accent-border-color\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;box-shadow:0 1px 3px #000\"/></figure>"
+        },
+        {
+            "id": "supports/separator",
+            "name": "core/separator",
+            "attributes": {
+                "opacity": "alpha-channel",
+                "tagName": "hr",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<hr class=\"wp-block-separator alignfull has-text-color has-base-color has-alpha-channel-opacity has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-background has-link-color support-probe\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000;background-color:#eeeeee\" id=\"support-anchor\"/>"
+        },
+        {
+            "id": "supports/buttons",
+            "name": "core/buttons",
+            "attributes": {
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:button -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\">Support</a></div>\n<!-- /wp:button -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-buttons alignfull has-custom-font-size support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><!-- wp:button -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\">Support</a></div>\n<!-- /wp:button --></div>"
+        },
+        {
+            "id": "supports/button",
+            "name": "core/button",
+            "attributes": {
+                "tagName": "a",
+                "type": "button",
+                "url": "#support",
+                "text": "Support",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "borderColor": "accent",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div id=\"support-anchor\" class=\"wp-block-button support-probe\" style=\"min-height:10rem;writing-mode:vertical-rl\"><a class=\"wp-block-button__link has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-border-color has-accent-border-color has-heading-font-family has-text-align-right has-large-font-size has-custom-font-size wp-element-button\" href=\"#support\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;box-shadow:0 1px 3px #000;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase\">Support</a></div>"
+        },
+        {
+            "id": "supports/spacer",
+            "name": "core/spacer",
+            "attributes": {
+                "height": "100px",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000;height:100px\" aria-hidden=\"true\" id=\"support-anchor\" class=\"wp-block-spacer support-probe\"></div>"
+        },
+        {
+            "id": "supports/list",
+            "name": "core/list",
+            "attributes": {
+                "ordered": false,
+                "values": "",
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:list-item -->\n<li>Support</li>\n<!-- /wp:list-item -->",
+            "saveKind": "element",
+            "expected": "<ul style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\" id=\"support-anchor\" class=\"wp-block-list support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\"><!-- wp:list-item -->\n<li>Support</li>\n<!-- /wp:list-item --></ul>"
+        },
+        {
+            "id": "supports/list-item",
+            "name": "core/list-item",
+            "attributes": {
+                "content": "Support",
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<li id=\"support-anchor\" class=\"support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\">Support</li>"
+        },
+        {
+            "id": "supports/cover",
+            "name": "core/cover",
+            "attributes": {
+                "url": "/support.jpg",
+                "useFeaturedImage": false,
+                "alt": "",
+                "hasParallax": false,
+                "isRepeated": false,
+                "dimRatio": 100,
+                "backgroundType": "image",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "isDark": true,
+                "tagName": "div",
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-cover alignfull support-probe has-border-color has-accent-border-color has-contrast-color has-base-background-color has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background-color:#eeeeee;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\" id=\"support-anchor\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/support.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim wp-block-cover__gradient-background has-background-gradient has-vivid-cyan-blue-to-vivid-purple-gradient-background\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "supports/media-text",
+            "name": "core/media-text",
+            "attributes": {
+                "align": "full",
+                "mediaAlt": "",
+                "mediaPosition": "left",
+                "mediaUrl": "/support.jpg",
+                "mediaType": "image",
+                "mediaWidth": 50,
+                "isStackedOnMobile": true,
+                "useFeaturedImage": false,
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-media-text alignfull is-stacked-on-mobile support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\" id=\"support-anchor\"><figure class=\"wp-block-media-text__media\"><img src=\"/support.jpg\" alt=\"\"/></figure><div class=\"wp-block-media-text__content\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "supports/quote",
+            "name": "core/quote",
+            "attributes": {
+                "value": "",
+                "citation": "Support",
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<blockquote class=\"wp-block-quote alignfull support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --><cite>Support</cite></blockquote>"
+        },
+        {
+            "id": "supports/pullquote",
+            "name": "core/pullquote",
+            "attributes": {
+                "value": "Support",
+                "citation": "Citation",
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-pullquote alignfull support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-heading-font-family has-large-font-size\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><blockquote><p>Support</p><cite>Citation</cite></blockquote></figure>"
+        },
+        {
+            "id": "supports/gallery",
+            "name": "core/gallery",
+            "attributes": {
+                "images": [],
+                "ids": [],
+                "navigationButtonType": "icon",
+                "shortCodeTransforms": [],
+                "caption": "",
+                "imageCrop": true,
+                "randomOrder": false,
+                "fixedHeight": true,
+                "sizeSlug": "large",
+                "allowResize": false,
+                "aspectRatio": "auto",
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/support.jpg\" alt=\"\"/></figure>\n<!-- /wp:image -->",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-gallery alignfull has-nested-images columns-default is-cropped support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/support.jpg\" alt=\"\"/></figure>\n<!-- /wp:image --></figure>"
+        },
+        {
+            "id": "supports/table",
+            "name": "core/table",
+            "attributes": {
+                "hasFixedLayout": true,
+                "caption": "",
+                "head": [],
+                "body": [
+                    {
+                        "cells": [
+                            {
+                                "tag": "td",
+                                "content": "Support"
+                            }
+                        ]
+                    }
+                ],
+                "foot": [],
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "fontFamily": "heading",
+                "fontSize": "large",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-table alignfull support-probe has-heading-font-family has-large-font-size\" id=\"support-anchor\" style=\"min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><table class=\"has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color has-border-color has-accent-border-color has-fixed-layout\" style=\"color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;border-color:#123456;border-style:solid;border-width:2px;border-radius:6px\"><tbody><tr><td>Support</td></tr></tbody></table></figure>"
+        },
+        {
+            "id": "supports/embed",
+            "name": "core/embed",
+            "attributes": {
+                "url": "https://example.com/support",
+                "caption": "",
+                "allowResponsive": true,
+                "responsive": false,
+                "previewable": true,
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<figure class=\"wp-block-embed alignfull support-probe\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><div class=\"wp-block-embed__wrapper\">\nhttps://example.com/support\n</div></figure>"
+        },
+        {
+            "id": "supports/social-links",
+            "name": "core/social-links",
+            "attributes": {
+                "openInNewTab": false,
+                "showLabels": false,
+                "borderColor": "accent",
+                "backgroundColor": "base",
+                "textColor": "contrast",
+                "gradient": "vivid-cyan-blue-to-vivid-purple",
+                "align": "full",
+                "anchor": "support-anchor",
+                "className": "support-probe support-probe",
+                "style": {
+                    "background": {
+                        "backgroundImage": {
+                            "url": "https://example.com/a b.jpg"
+                        },
+                        "backgroundPosition": "25% 75%",
+                        "backgroundRepeat": "no-repeat",
+                        "backgroundSize": "cover"
+                    },
+                    "border": {
+                        "color": "#123456",
+                        "style": "solid",
+                        "width": "2px",
+                        "radius": "6px"
+                    },
+                    "color": {
+                        "text": "#111111",
+                        "background": "#eeeeee",
+                        "gradient": "linear-gradient(red,blue)"
+                    },
+                    "dimensions": {
+                        "minHeight": "10rem",
+                        "width": "80%",
+                        "aspectRatio": "16/9"
+                    },
+                    "elements": {
+                        "link": {
+                            "color": {
+                                "text": "#ff0000"
+                            }
+                        }
+                    },
+                    "shadow": "0 1px 3px #000",
+                    "spacing": {
+                        "margin": {
+                            "top": "1rem",
+                            "bottom": "2rem"
+                        },
+                        "padding": {
+                            "left": "3rem",
+                            "right": "4rem"
+                        }
+                    },
+                    "typography": {
+                        "fontSize": "22px",
+                        "fontWeight": "700",
+                        "letterSpacing": ".1em",
+                        "lineHeight": "1.4",
+                        "textAlign": "right",
+                        "textTransform": "uppercase",
+                        "writingMode": "vertical-rl"
+                    }
+                }
+            },
+            "innerSerialized": "<!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /-->",
+            "saveKind": "element",
+            "expected": "<ul class=\"wp-block-social-links support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /--></ul>"
+        }
+    ]
+}

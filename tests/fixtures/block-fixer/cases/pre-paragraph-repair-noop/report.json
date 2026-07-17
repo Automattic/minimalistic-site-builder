@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 0,
+    "M": 1,
+    "D": 0,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/nested-paragraph.html",
+      "status": "ok",
+      "dropped": []
+    }
+  ]
+}

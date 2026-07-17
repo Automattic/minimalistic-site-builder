@@ -12,17 +12,22 @@ cp .env.example .env
 # Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
-npm install   # once; installs the Node helper tools under bin/ (block-fixer, screenshot)
+npm ci   # optional; installs the development oracle and screenshot helpers
 ```
 
-Requires PHP 8.1+ (no Composer — the source set autoloads via the
-dependency-free PSR-4 loader `autoload.php`, loaded by `src/bootstrap.php`)
-and Node 18+.
+Theme generation and block fixing require PHP 8.1+ only. No Composer is needed:
+the source set autoloads through the dependency-free PSR-4 loader
+`autoload.php`, loaded by `src/bootstrap.php`.
 
-The `bin/` helper tools (`bin/block-fixer`, `bin/screenshot`) are npm
-workspaces, so a single `npm install` at the repo root installs all of them.
-The block-fixer runs as a standard step of `bin/build.php`, so this install is
-required for a normal build — not optional.
+The production block fixer is implemented in PHP and needs neither Node nor
+`node_modules` at runtime. Set `BLOCK_FIXER=node` to select the pinned legacy
+Node implementation during development. The fixed-point tooling around that
+implementation remains the parity oracle, not a production dependency. It is
+pinned to Node 22.19.0 and must be installed from the lockfile with `npm ci`;
+CI uses the immutable image recorded in
+`bin/block-fixer/lib/oracleFingerprint.js`. WordPress Playground previews and
+screenshot tooling also use Node. Use
+`php bin/build.php "…" --no-serve` for a PHP-only build.
 
 ## Build a site
 
@@ -161,7 +166,7 @@ actually fetched and rendered — a plain `fullPage` capture leaves them as empt
 boxes (see [issue #31](docs/evidence/issue-31/README.md)).
 
 ```bash
-npm install   # once, at the repo root; uses your system Chrome, no download
+npm ci   # once, at the repo root; uses your system Chrome, no download
 node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
 ```
 

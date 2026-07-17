@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "name": "rich-text-literal-nbsp",
+  "milestone": "M1",
+  "capabilities": [
+    "block:core/paragraph",
+    "rich-text:literal-nbsp",
+    "deprecation:paragraph-align",
+    "report:ok"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "deprecation:core/paragraph:0"
+    ],
+    "files": [
+      {
+        "path": "parts/literal-nbsp.html",
+        "passes": 1,
+        "secondInvocationPasses": 1,
+        "inputSha256": "0665455b77f382eb7c2c3340c8a4828d8b58ae6b6fec1b6a8f8c5b8486dbbfd0",
+        "outputSha256": "0665455b77f382eb7c2c3340c8a4828d8b58ae6b6fec1b6a8f8c5b8486dbbfd0",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "secondary",
+                    "align": "center",
+                    "className": "has-secondary-color has-text-color has-body-font-family",
+                    "fontFamily": "body",
+                    "fontSize": "caption",
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "content": "Studio: A&nbsp;·&nbsp;B",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "secondary",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": "has-secondary-color has-text-color has-body-font-family",
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

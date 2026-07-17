@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 2,
+    "M": 2,
+    "D": 0,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/gallery.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/table.html",
+      "status": "FIXED",
+      "dropped": []
+    }
+  ]
+}

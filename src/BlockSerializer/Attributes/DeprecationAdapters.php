@@ -1,0 +1,288 @@
+<?php
+declare(strict_types=1);
+
+namespace Automattic\SiteBuild\BlockSerializer\Attributes;
+
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
+use Automattic\SiteBuild\BlockSerializer\Html\RichText;
+use Automattic\SiteBuild\BlockSerializer\Repair;
+use Automattic\SiteBuild\BlockSerializer\Supports\SupportEngine;
+
+/**
+ * Reviewed adapters for deprecation signatures observed by the pinned oracle.
+ *
+ * New instrumentation hits must receive an explicit adapter or a reviewed
+ * current-save-equivalent disposition before the supported manifest can grow.
+ */
+final class DeprecationAdapters
+{
+    /**
+     * Legacy-only comment keys whose pinned migration is covered by a golden.
+     * The current-schema overlay deliberately omits these keys after the
+     * adapter has admitted the signature.
+     */
+    private const REVIEWED_LEGACY_COMMENT_KEYS = [
+        'core/site-title' => [
+            // Deprecated version 0; exercised by tbilisi25-footer-fixed-point.
+            'textAlign' => true,
+        ],
+    ];
+
+    public function isReviewedLegacyCommentAttribute(string $name, string $key): bool
+    {
+        return isset(self::REVIEWED_LEGACY_COMMENT_KEYS[$name][$key]);
+    }
+
+    /**
+     * Reject recognizable historical signatures which are outside the
+     * reviewed adapter set. This runs after current-schema recreation, while
+     * the original saved HTML is still available, and therefore prevents a
+     * lossy current renderer from disguising an unported deprecation match.
+     *
+     * @param array<string,mixed> $commentAttributes
+     */
+    public function assertNoUnknownSignature(
+        string $name,
+        array $commentAttributes,
+        string $originalContent,
+        string $currentContent,
+        string $blockPath,
+    ): void {
+        if ($name !== 'core/paragraph') {
+            return;
+        }
+        $actual = $this->rootStyles($originalContent);
+        if ($actual === []) {
+            return;
+        }
+        $current = $this->rootStyles($currentContent);
+        foreach ($actual as $property => $value) {
+            if (!array_key_exists($property, $current) || $current[$property] !== $value) {
+                throw new \RuntimeException(
+                    "Unsupported deprecated core/paragraph style signature at {$blockPath}: {$property}; "
+                    . 'a reviewed deprecation adapter is required'
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $attributes
+     * @param array<string,mixed> $rawCommentAttributes
+     * @return array{attributes:array<string,mixed>,repairs:list<Repair>,matched:bool}
+     */
+    public function apply(
+        string $name,
+        array $attributes,
+        string $originalContent,
+        string $blockPath,
+        array $rawCommentAttributes = [],
+        bool $currentCandidateValid = false,
+    ): array {
+        $matched = false;
+        if ($name === 'core/paragraph') {
+            $attributes = $this->paragraph(
+                $attributes,
+                $originalContent,
+                $matched,
+                $currentCandidateValid,
+            );
+            if ($matched && is_string($attributes['content'] ?? null)) {
+                $attributes['content'] = RichText::fromHtmlString($attributes['content']);
+            }
+        } elseif ($name === 'core/navigation') {
+            $attributes = $this->navigation($attributes, $matched);
+        } elseif ($name === 'core/site-title') {
+            $attributes = $this->siteTitle($attributes, $rawCommentAttributes, $matched);
+        }
+        return ['attributes' => $attributes, 'repairs' => [], 'matched' => $matched];
+    }
+
+    /**
+     * Reviewed site-title deprecations, in the pinned candidate order:
+     * textAlign/className migration first, then style-level font family.
+     * The caller's later shallow raw-comment overlay intentionally decides
+     * whether a raw style object supersedes the migrated text alignment.
+     *
+     * @param array<string,mixed> $attributes
+     * @param array<string,mixed> $rawCommentAttributes
+     * @return array<string,mixed>
+     */
+    private function siteTitle(
+        array $attributes,
+        array $rawCommentAttributes,
+        bool &$matched,
+    ): array {
+        $legacyAlign = $rawCommentAttributes['textAlign'] ?? null;
+        if ($legacyAlign !== null && !is_string($legacyAlign)) {
+            throw new \RuntimeException(
+                'Unsupported deprecated core/site-title text-align value; '
+                . 'a reviewed deprecation adapter is required'
+            );
+        }
+        $className = $rawCommentAttributes['className'] ?? ($attributes['className'] ?? null);
+        $alignEligible = is_string($legacyAlign) && $legacyAlign !== '';
+        $classEligible = is_string($className)
+            && preg_match('/\bhas-text-align-(?:left|center|right)\b/', $className) === 1;
+        if ($alignEligible || $classEligible) {
+            $matched = true;
+            if ($alignEligible) {
+                $style = is_array($attributes['style'] ?? null) ? $attributes['style'] : [];
+                $typography = is_array($style['typography'] ?? null) ? $style['typography'] : [];
+                $typography['textAlign'] = $legacyAlign;
+                $style['typography'] = $typography;
+                $attributes['style'] = $style;
+            }
+            return $attributes;
+        }
+
+        $typography = $attributes['style']['typography'] ?? null;
+        $legacyFamily = is_array($typography) ? ($typography['fontFamily'] ?? null) : null;
+        if ($legacyFamily === null || $legacyFamily === '') {
+            return $attributes;
+        }
+        if (!is_string($legacyFamily)) {
+            throw new \RuntimeException(
+                'Unsupported deprecated core/site-title font-family value; '
+                . 'a reviewed deprecation adapter is required'
+            );
+        }
+        $matched = true;
+        $parts = explode('|', $legacyFamily);
+        $attributes['fontFamily'] = $parts[count($parts) - 1];
+        return $attributes;
+    }
+
+    /**
+     * Navigation deprecation index 3 is eligible when the old style-level
+     * font-family value is present. Its migration supplies an overlay default
+     * and flex layout; the authored current-schema overlay later restores
+     * either key when it was explicitly present.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function navigation(array $attributes, bool &$matched): array
+    {
+        $typography = $attributes['style']['typography'] ?? null;
+        if (!is_array($typography) || !array_key_exists('fontFamily', $typography)
+            || $typography['fontFamily'] === null || $typography['fontFamily'] === '') {
+            return $attributes;
+        }
+        if (!is_string($typography['fontFamily'])) {
+            throw new \RuntimeException(
+                'Unsupported deprecated core/navigation font-family value; '
+                . 'a reviewed deprecation adapter is required'
+            );
+        }
+        $matched = true;
+        $attributes['overlayMenu'] = 'never';
+        $parts = explode('|', $typography['fontFamily']);
+        $attributes['fontFamily'] = $parts[count($parts) - 1];
+        if (!isset($attributes['layout'])) {
+            $attributes['layout'] = ['type' => 'flex', 'orientation' => 'horizontal'];
+        }
+        return $attributes;
+    }
+
+    /**
+     * Adapters for the paragraph deprecations observed by the fixed-point
+     * footer fixture: index 0 (align -> typography.textAlign), index 1 (the
+     * pre-font-support save), and index 6 (selector-less content). Their
+     * effects are intentionally not counted as PHP repair rows because the
+     * reviewed oracle expectation records only the byte-affecting paragraph
+     * nesting repair for this historical chain.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function paragraph(
+        array $attributes,
+        string $originalContent,
+        bool &$matched,
+        bool $currentCandidateValid,
+    ): array {
+        $root = HtmlFragment::parse($originalContent)->root()->elementChildren()[0] ?? null;
+        if ($root === null || $root->tagName() !== 'p') {
+            return $attributes;
+        }
+        $classes = preg_split(
+            '/\s+/',
+            trim((string) ($root->attribute('class') ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
+        $align = $attributes['align'] ?? null;
+        $fontSize = $attributes['fontSize'] ?? null;
+        $fontClass = is_string($fontSize) && $fontSize !== ''
+            ? 'has-' . SupportEngine::slug($fontSize) . '-font-size'
+            : null;
+
+        if (is_string($align) && $align !== ''
+            && in_array('has-text-align-' . $align, $classes, true)) {
+            $matched = true;
+            if ($fontClass !== null && !in_array($fontClass, $classes, true)) {
+                // The earlier align deprecations cannot validate when their
+                // font-size support would add a class absent from the input.
+                // The observed selector-less version sources the entire root,
+                // which creates the nested paragraph repaired post-save.
+                $attributes['content'] = $root->outerHtml();
+                unset($attributes['className']);
+                return $attributes;
+            }
+
+            $style = is_array($attributes['style'] ?? null) ? $attributes['style'] : [];
+            $typography = is_array($style['typography'] ?? null) ? $style['typography'] : [];
+            $typography['textAlign'] = $align;
+            $style['typography'] = $typography;
+            $attributes['style'] = $style;
+            $custom = array_values(array_filter(
+                $classes,
+                static fn (string $class): bool => $class !== 'has-text-align-' . $align
+                    && ($fontClass === null || $class !== $fontClass),
+            ));
+            if ($custom === []) {
+                unset($attributes['className']);
+            } else {
+                $attributes['className'] = implode(' ', $custom);
+            }
+            return $attributes;
+        }
+
+        // The observed pre-font-support version validates a paragraph whose
+        // authored HTML omits the current preset font-size class. Its built-in
+        // class recovery carries the remaining authored root classes forward.
+        if (!$currentCandidateValid
+            && $fontClass !== null
+            && !in_array($fontClass, $classes, true)) {
+            $matched = true;
+            if ($classes === []) {
+                unset($attributes['className']);
+            } else {
+                $attributes['className'] = implode(' ', $classes);
+            }
+        }
+        return $attributes;
+    }
+
+    /** @return array<string,string> */
+    private function rootStyles(string $html): array
+    {
+        $root = HtmlFragment::parse($html)->root()->elementChildren()[0] ?? null;
+        $style = $root?->attribute('style');
+        if ($style === null || trim($style) === '') {
+            return [];
+        }
+        $declarations = [];
+        foreach (explode(';', $style) as $declaration) {
+            $parts = explode(':', $declaration, 2);
+            if (count($parts) !== 2 || trim($parts[0]) === '') {
+                throw new \RuntimeException('Unsupported malformed paragraph style declaration');
+            }
+            $property = strtolower(trim($parts[0]));
+            $value = preg_replace('/\s+/', ' ', trim($parts[1])) ?? trim($parts[1]);
+            $declarations[$property] = $value;
+        }
+        return $declarations;
+    }
+}

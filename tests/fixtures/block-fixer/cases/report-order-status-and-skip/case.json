@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "name": "report-order-status-and-skip",
+  "milestone": "M1",
+  "capabilities": [
+    "block:core/paragraph",
+    "block:core/site-title",
+    "report:fixed",
+    "report:ok",
+    "report:skip",
+    "report:lexical-path-order",
+    "report:empty-drops"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [],
+    "files": [
+      {
+        "path": "parts/a-fixed.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "6c4652c031e94787f1276f088092be1b7086deae9fe37fe51c373e3cc9441a16",
+        "outputSha256": "86106270aa3a93ef80485f99d0ca6aeea862b05085e573ffadd1ec4a077d665b",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/z-skipped.html",
+        "passes": 0,
+        "secondInvocationPasses": 0,
+        "inputSha256": "d3c257e0fcb74a1f6550a23f3148e93b214311412392b419db555234fddd033f",
+        "outputSha256": "d3c257e0fcb74a1f6550a23f3148e93b214311412392b419db555234fddd033f",
+        "iterations": []
+      },
+      {
+        "path": "templates/a-ok.html",
+        "passes": 1,
+        "secondInvocationPasses": 1,
+        "inputSha256": "a4593dae6586758550b077d641134c89f33eb0adebc456dcfef9d45a2b954146",
+        "outputSha256": "a4593dae6586758550b077d641134c89f33eb0adebc456dcfef9d45a2b954146",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
@@ -62,6 +62,6 @@ $start = microtime(true);
 printf("  done in %.1fs\n", microtime(true) - $start);
 
 // With the real pixels on disk, verify cover text against the dimmed images.
-(new CoverContrastStep(NodeBlockFixer::default()))->run($project);
+(new CoverContrastStep(BlockFixers::default()))->run($project);
 
 echo "Output: {$project->themePath('assets')}\n";

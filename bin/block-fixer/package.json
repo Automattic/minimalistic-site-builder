@@ -3,7 +3,10 @@
   "private": true,
   "description": "WordPress block markup fixer script",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "oracle:verify": "node ../../bin/generate-block-fixer-fixtures.js && node ../../bin/generate-block-registry.js",
+    "oracle:update": "node ../../bin/generate-block-fixer-fixtures.js --update && node ../../bin/generate-block-registry.js --update && node ../../bin/generate-block-fixer-fixtures.js --update",
+    "probe-save": "node probe-save.js"
   },
   "dependencies": {
     "@wordpress/block-editor": "15.15.0",

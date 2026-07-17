@@ -16,10 +16,10 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Output: the same files, re-serialized to match WordPress save() exactly.
  *
  * Runs the LayoutFixer width/rhythm normalization FIRST — it edits only the
- * block-comment JSON attributes, and the Node re-serialization right after is
+ * block-comment JSON attributes, and the block re-serialization right after is
  * what syncs the authored HTML (align classes) with those attributes.
  *
- * Delegates the effectful Node (or host) repair to an injected BlockFixer.
+ * Delegates the effectful repair to an injected BlockFixer.
  */
 final class FixBlocksStep implements Step
 {
@@ -120,7 +120,7 @@ final class FixBlocksStep implements Step
     /**
      * Apply LayoutFixer to every part/template, writing changed files back.
      * Returns one "file: note" line per fix for the step log. The primary pass
-     * runs before the Node fixer because LayoutFixer rewrites only comment
+     * runs before the block fixer because LayoutFixer rewrites only comment
      * attributes and the following re-serialization syncs the HTML with them.
      * A post-repair pass handles markup that only became parseable afterwards.
      *

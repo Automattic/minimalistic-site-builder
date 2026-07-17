@@ -6,8 +6,9 @@
  * Port of the telex block-fixer (server/scripts/block-fixer) to a one-shot CLI.
  * telex runs the fixer as a warm HTTP sidecar (fix-html.js); the builder runs it
  * once after the landing-page step, so a plain CLI is a better fit. The fixing
- * logic itself is unchanged — lib/blockFixer.js and lib/paragraphFixer.js are
- * copied verbatim from telex.
+ * lib/blockFixer.js and lib/paragraphFixer.js originated in telex. Shared
+ * environment/report modules and development instrumentation now live beside
+ * them so the pinned one-pass transform can also drive the fixed-point oracle.
  *
  * What it does: parses each block-markup file with @wordpress/blocks and
  * re-serializes it, so the saved HTML matches exactly what WordPress save()
@@ -18,51 +19,17 @@
  * Usage:
  *   node fix-templates.js <themeDir> [<themeDir> ...]
  *
- * Each <themeDir> is a block-theme root; the runner fixes every
+ * Each <themeDir> is a block-theme root; this production-compatibility runner
+ * applies one transform pass to every
  * templates/*.html and parts/*.html file under it in place. Exits non-zero only
- * on a hard error; files with no block markup are skipped.
+ * on a hard error; files with no block markup are skipped. Development tools
+ * use oracle.js to repeat this exact pass to the five-pass-capped fixed point.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { JSDOM } = require('jsdom');
-
-// ── Set up the DOM globals @wordpress/blocks needs, BEFORE importing it.
-// (Mirrors the worker setup in telex's fix-html.js.)
-const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-  url: 'http://localhost',
-  pretendToBeVisual: true,
-});
-
-global.window = dom.window;
-global.document = dom.window.document;
-global.DOMParser = dom.window.DOMParser;
-global.XMLSerializer = dom.window.XMLSerializer;
-global.Node = dom.window.Node;
-global.Element = dom.window.Element;
-global.HTMLElement = dom.window.HTMLElement;
-global.getComputedStyle = dom.window.getComputedStyle;
-global.MutationObserver = dom.window.MutationObserver;
-global.requestAnimationFrame = (cb) => setTimeout(cb, 16);
-global.cancelAnimationFrame = (id) => clearTimeout(id);
-global.matchMedia = () => ({
-  matches: false,
-  addListener: () => {},
-  removeListener: () => {},
-  addEventListener: () => {},
-  removeEventListener: () => {},
-});
-global.ResizeObserver = class ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-};
-
-Object.defineProperty(global, 'navigator', {
-  value: dom.window.navigator,
-  writable: true,
-  configurable: true,
-});
+const { installDomEnvironment } = require('./lib/domEnvironment');
+const { detectDroppedContent } = require('./lib/droppedContentDetector');
 
 // @wordpress/blocks is extremely chatty: for every block it auto-fixes it calls
 // console.groupCollapsed + console.info('...%o...', blockType), dumping the whole
@@ -70,127 +37,57 @@ Object.defineProperty(global, 'navigator', {
 // of KB. Silence the noise entirely (it is purely informational) so neither
 // stdout nor stderr is polluted — we write our own report via process.stdout.
 // Genuine errors still come through console.error.
-const noop = () => {};
-console.log = noop;
-console.info = noop;
-console.warn = noop;
-console.debug = noop;
-console.dir = noop;
-console.trace = noop;
-console.group = noop;
-console.groupCollapsed = noop;
-console.groupEnd = noop;
-
-const out = (line) => process.stdout.write(line + '\n');
-
-const { fixBlocksInTemplate } = require('./lib/blockFixer.js');
-
-// ── Dropped-content detection.
-//
-// Re-serialization regenerates each block's HTML from its comment JSON
-// attributes, so any inline style declaration or class token that exists only
-// in the authored HTML is silently deleted (issue #48: card cropping, padding
-// and shadows lost). Diff the pre/post markup per file and report every loss
-// prominently so regressions are visible in each build's fix-blocks.log.
-
-/** Count each `prop:value` declaration across all style="..." attributes. */
-function styleDeclarationCounts(html) {
-  const counts = new Map();
-  for (const m of html.matchAll(/\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
-    const value = m[1] ?? m[2] ?? '';
-    for (const raw of value.split(';')) {
-      const decl = raw.trim();
-      if (!decl) continue;
-      // Gutenberg canonicalizes harmless whitespace around the declaration
-      // colon (e.g. `padding-top: var(...)` → `padding-top:var(...)`). Compare
-      // that semantic spelling so formatting-only changes are not reported as
-      // lost CSS and do not trip the PHP build gate.
-      const colon = decl.indexOf(':');
-      const normalized = colon === -1
-        ? decl
-        : decl.slice(0, colon).trim().toLowerCase() + ':' + decl.slice(colon + 1).trim();
-      counts.set(normalized, (counts.get(normalized) || 0) + 1);
-    }
+function silenceWordPressConsole() {
+  const noop = () => {};
+  for (const method of [
+    'log', 'info', 'warn', 'debug', 'dir', 'trace',
+    'group', 'groupCollapsed', 'groupEnd',
+  ]) {
+    console[method] = noop;
   }
-  return counts;
 }
 
-/** Count each class token across all class="..." attributes. */
-function classTokenCounts(html) {
-  const counts = new Map();
-  for (const m of html.matchAll(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
-    const value = m[1] ?? m[2] ?? '';
-    for (const token of value.split(/\s+/)) {
-      if (token) counts.set(token, (counts.get(token) || 0) + 1);
-    }
-  }
-  return counts;
-}
-
-/** Values whose occurrence count decreased from before to after. */
-function droppedValues(before, after) {
-  const dropped = [];
-  for (const [value, count] of before) {
-    const remaining = after.get(value) || 0;
-    if (remaining < count) dropped.push({ value, lost: count - remaining });
-  }
-  return dropped;
-}
-
-/**
- * Human-readable loss report for one file: every style declaration and class
- * token present in the original markup but absent (or less frequent) after
- * re-serialization. Empty array when nothing was lost.
- */
-function detectDroppedContent(original, fixed) {
-  const lines = [];
-  for (const d of droppedValues(styleDeclarationCounts(original), styleDeclarationCounts(fixed))) {
-    lines.push(
-      `DROPPED style \`${d.value}\`` +
-        (d.lost > 1 ? ` (x${d.lost})` : '') +
-        ' — not mirrored in the block comment JSON attributes'
-    );
-  }
-  for (const d of droppedValues(classTokenCounts(original), classTokenCounts(fixed))) {
-    lines.push(
-      `DROPPED class \`${d.value}\`` +
-        (d.lost > 1 ? ` (x${d.lost})` : '') +
-        ' — not mirrored in the block comment JSON attributes'
-    );
-  }
-  return lines;
+function loadFixBlocksInTemplate() {
+  installDomEnvironment();
+  return require('./lib/blockFixer.js').fixBlocksInTemplate;
 }
 
 /** Collect templates/*.html and parts/*.html under a theme directory. */
 function collectFiles(themeDir) {
-  const out = [];
+  const files = [];
   for (const sub of ['templates', 'parts']) {
     const dir = path.join(themeDir, sub);
     if (!fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir)) {
-      if (name.endsWith('.html')) out.push(path.join(dir, name));
+      if (name.endsWith('.html')) files.push(path.join(dir, name));
     }
   }
-  return out;
+  return files.sort((left, right) => (
+    path.relative(themeDir, left).localeCompare(path.relative(themeDir, right), 'en')
+  ));
 }
 
-function main() {
-  const themeDirs = process.argv.slice(2);
-  if (themeDirs.length === 0) {
-    console.error('Usage: node fix-templates.js <themeDir> [<themeDir> ...]');
-    process.exit(2);
-  }
-
+function runCli(themeDirs, {
+  fixBlocksInTemplate = loadFixBlocksInTemplate(),
+  writeLine = (line) => process.stdout.write(line + '\n'),
+  writeError = (line) => console.error(line),
+} = {}) {
   let totalFiles = 0;
   let totalChanged = 0;
   let totalIssues = 0;
   let totalDropped = 0;
+  let exitCode = 0;
   const report = [];
 
   for (const themeDir of themeDirs) {
     if (!fs.existsSync(themeDir)) {
-      console.error(`[fix-templates] theme dir not found: ${themeDir}`);
-      process.exitCode = 1;
+      writeError(`[fix-templates] theme dir not found: ${themeDir}`);
+      exitCode = 1;
+      continue;
+    }
+    if (!fs.statSync(themeDir).isDirectory()) {
+      writeError(`[fix-templates] theme path is not a directory: ${themeDir}`);
+      exitCode = 1;
       continue;
     }
 
@@ -227,19 +124,54 @@ function main() {
   // Human-readable report on stdout.
   for (const r of report) {
     const tag = r.status === 'fixed' ? 'FIXED ' : r.status === 'ok' ? 'ok    ' : 'skip  ';
-    out(`  ${tag} ${r.file}`);
+    writeLine(`  ${tag} ${r.file}`);
     for (const loss of r.dropped || []) {
-      out(`         ! ${loss}`);
+      writeLine(`         ! ${loss}`);
     }
     for (const issue of r.issues || []) {
-      out(`         - ${issue}`);
+      writeLine(`         - ${issue}`);
     }
   }
-  out(
+  const summary =
     `\n[fix-templates] ${totalChanged}/${totalFiles} file(s) re-serialized,` +
       ` ${totalIssues} issue(s) fixed,` +
-      ` ${totalDropped} style/class value(s) dropped across ${themeDirs.length} theme(s).`
-  );
+      ` ${totalDropped} style/class value(s) dropped across ${themeDirs.length} theme(s).`;
+  writeLine(summary);
+  return {
+    exitCode,
+    report,
+    summary: summary.trimStart(),
+    totals: {
+      changed: totalChanged,
+      files: totalFiles,
+      issues: totalIssues,
+      dropped: totalDropped,
+      themes: themeDirs.length,
+    },
+  };
 }
 
-main();
+function main(argv = process.argv.slice(2)) {
+  if (argv.length === 0) {
+    console.error('Usage: node fix-templates.js <themeDir> [<themeDir> ...]');
+    return 2;
+  }
+  silenceWordPressConsole();
+  try {
+    return runCli(argv).exitCode;
+  } catch (error) {
+    console.error('[fix-templates] hard error:', error);
+    return 1;
+  }
+}
+
+if (require.main === module) {
+  process.exitCode = main();
+}
+
+module.exports = {
+  collectFiles,
+  main,
+  runCli,
+  silenceWordPressConsole,
+};

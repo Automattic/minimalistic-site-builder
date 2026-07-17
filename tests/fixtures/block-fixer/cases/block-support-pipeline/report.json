@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 1,
+    "M": 1,
+    "D": 0,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/supports.html",
+      "status": "FIXED",
+      "dropped": []
+    }
+  ]
+}

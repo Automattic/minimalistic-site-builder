@@ -1,0 +1,2531 @@
+{
+  "schemaVersion": 1,
+  "name": "tbilisi25-footer-fixed-point",
+  "milestone": "M1",
+  "capabilities": [
+    "oracle:three-pass-convergence",
+    "deprecation:group-default-tag",
+    "deprecation:paragraph-pre-font-support",
+    "deprecation:paragraph-selectorless",
+    "deprecation:site-title-align",
+    "repair:nested-paragraph",
+    "nested-blocks",
+    "block:core/group",
+    "block:core/site-title",
+    "block:core/paragraph",
+    "block:core/separator",
+    "block:core/columns",
+    "block:core/column",
+    "block:core/heading",
+    "block:core/navigation",
+    "block:core/navigation-link",
+    "support:alignment",
+    "support:color-elements",
+    "support:custom-class",
+    "support:font-family",
+    "support:font-size",
+    "support:layout",
+    "support:preset-variables",
+    "support:spacing",
+    "support:typography"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "custom-class-recovery",
+      "deprecation:core/group:0",
+      "deprecation:core/paragraph:0",
+      "deprecation:core/paragraph:1",
+      "deprecation:core/paragraph:6",
+      "deprecation:core/site-title:0",
+      "nested-paragraph"
+    ],
+    "files": [
+      {
+        "path": "parts/footer.html",
+        "passes": 3,
+        "secondInvocationPasses": 1,
+        "inputSha256": "d74585d134c946334fa8c608b8fa96820c29b34f4825c689c1525944e9c66edd",
+        "outputSha256": "3c428ed37ef6a4c4119b5628a59091ac80b3aa1e73591dec3161ba0194eda738",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [
+              "core/paragraph: Nested paragraph tags detected and removed"
+            ],
+            "compatibilityRepairs": [
+              {
+                "code": "nested-paragraph",
+                "blockName": "core/paragraph",
+                "blockPath": "document",
+                "stage": "post-serialize",
+                "count": 1
+              }
+            ],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/separator",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/separator",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-accent-color has-text-color has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-accent-color has-text-color has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center has-text-color has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center has-accent-color has-text-color has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-base-color has-text-color"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-base-color has-text-color"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-secondary-color has-text-color has-body-font-family"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "isLink": true,
+                    "linkTarget": "_self",
+                    "fontFamily": "heading",
+                    "fontSize": "heading",
+                    "style": {
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|base"
+                          },
+                          ":hover": {
+                            "color": {
+                              "text": "var:preset|color|accent"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "isLink": true,
+                    "linkTarget": "_self",
+                    "borderColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "anchor": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": "heading",
+                    "style": {
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|base"
+                          },
+                          ":hover": {
+                            "color": {
+                              "text": "var:preset|color|accent"
+                            }
+                          }
+                        }
+                      },
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "accent",
+                    "align": "center",
+                    "fontFamily": "heading",
+                    "fontSize": "caption",
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.28em",
+                        "textTransform": "uppercase"
+                      }
+                    },
+                    "className": "has-text-align-center"
+                  },
+                  "afterAttributes": {
+                    "align": "center",
+                    "content": "<p class=\"has-text-align-center has-accent-color has-text-color has-heading-font-family\" style=\"letter-spacing:0.28em;text-transform:uppercase\">Traditional Georgian Tavern · Old Town</p>",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "accent",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.28em",
+                        "textTransform": "uppercase"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "fontSize": "body"
+                  },
+                  "afterAttributes": {
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "content": "Tbilisi Old Town<br>Tbilisi, Georgia",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "body",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "customTextColor": {
+                      "__type": "undefined"
+                    },
+                    "customBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customFontSize": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "fontSize": "body"
+                  },
+                  "afterAttributes": {
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "content": "<a href=\"mailto:reservations@tbilisitavern.com\">reservations@tbilisitavern.com</a>",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "body",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "customTextColor": {
+                      "__type": "undefined"
+                    },
+                    "customBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customFontSize": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "base",
+                    "fontSize": "caption"
+                  },
+                  "afterAttributes": {
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "content": "Open Tue–Sun, 12:00–23:00",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "base",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "customTextColor": {
+                      "__type": "undefined"
+                    },
+                    "customBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customFontSize": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": "has-base-color has-text-color",
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "secondary",
+                    "align": "center",
+                    "fontFamily": "body",
+                    "fontSize": "caption",
+                    "className": "has-text-align-center"
+                  },
+                  "afterAttributes": {
+                    "content": "© 2026 Tbilisi Tavern · Built with WordPress",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "secondary",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": "has-secondary-color has-text-color has-body-font-family",
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "tagName": "div",
+                    "backgroundColor": "contrast",
+                    "textColor": "base",
+                    "align": "full",
+                    "fontFamily": "body",
+                    "style": {
+                      "spacing": {
+                        "padding": {
+                          "top": "var:preset|spacing|xl",
+                          "bottom": "var:preset|spacing|lg",
+                          "left": "var:preset|spacing|md",
+                          "right": "var:preset|spacing|md"
+                        },
+                        "blockGap": "var:preset|spacing|lg"
+                      },
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|accent"
+                          },
+                          ":hover": {
+                            "color": {
+                              "text": "var:preset|color|base"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "layout": {
+                      "type": "constrained"
+                    }
+                  },
+                  "afterAttributes": {
+                    "align": "full",
+                    "backgroundColor": "contrast",
+                    "textColor": "base",
+                    "fontFamily": "body",
+                    "style": {
+                      "spacing": {
+                        "padding": {
+                          "top": "var:preset|spacing|xl",
+                          "bottom": "var:preset|spacing|lg",
+                          "left": "var:preset|spacing|md",
+                          "right": "var:preset|spacing|md"
+                        },
+                        "blockGap": "var:preset|spacing|lg"
+                      },
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|accent"
+                          },
+                          ":hover": {
+                            "color": {
+                              "text": "var:preset|color|base"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "layout": {
+                      "type": "constrained"
+                    }
+                  },
+                  "beforeInnerBlocks": [
+                    {
+                      "name": "core/group",
+                      "attributes": {
+                        "tagName": "div",
+                        "align": "wide",
+                        "style": {
+                          "spacing": {
+                            "blockGap": "var:preset|spacing|sm"
+                          }
+                        },
+                        "layout": {
+                          "type": "flex",
+                          "orientation": "vertical",
+                          "justifyContent": "center"
+                        }
+                      },
+                      "innerBlocks": [
+                        {
+                          "name": "core/site-title",
+                          "attributes": {
+                            "level": 0,
+                            "levelOptions": [
+                              0,
+                              1,
+                              2,
+                              3,
+                              4,
+                              5,
+                              6
+                            ],
+                            "isLink": true,
+                            "linkTarget": "_self",
+                            "borderColor": {
+                              "__type": "undefined"
+                            },
+                            "backgroundColor": {
+                              "__type": "undefined"
+                            },
+                            "textColor": {
+                              "__type": "undefined"
+                            },
+                            "gradient": {
+                              "__type": "undefined"
+                            },
+                            "align": {
+                              "__type": "undefined"
+                            },
+                            "lock": {
+                              "__type": "undefined"
+                            },
+                            "anchor": {
+                              "__type": "undefined"
+                            },
+                            "className": {
+                              "__type": "undefined"
+                            },
+                            "fontFamily": "heading",
+                            "fontSize": "heading",
+                            "style": {
+                              "elements": {
+                                "link": {
+                                  "color": {
+                                    "text": "var:preset|color|base"
+                                  },
+                                  ":hover": {
+                                    "color": {
+                                      "text": "var:preset|color|accent"
+                                    }
+                                  }
+                                }
+                              },
+                              "typography": {
+                                "textAlign": "center"
+                              }
+                            },
+                            "metadata": {
+                              "__type": "undefined"
+                            }
+                          },
+                          "innerBlocks": []
+                        },
+                        {
+                          "name": "core/paragraph",
+                          "attributes": {
+                            "align": "center",
+                            "content": "<p class=\"has-text-align-center has-accent-color has-text-color has-heading-font-family\" style=\"letter-spacing:0.28em;text-transform:uppercase\">Traditional Georgian Tavern · Old Town</p>",
+                            "dropCap": false,
+                            "placeholder": {
+                              "__type": "undefined"
+                            },
+                            "textColor": "accent",
+                            "backgroundColor": {
+                              "__type": "undefined"
+                            },
+                            "fontSize": "caption",
+                            "direction": {
+                              "__type": "undefined"
+                            },
+                            "style": {
+                              "typography": {
+                                "letterSpacing": "0.28em",
+                                "textTransform": "uppercase"
+                              }
+                            },
+                            "lock": {
+                              "__type": "undefined"
+                            },
+                            "className": {
+                              "__type": "undefined"
+                            },
+                            "metadata": {
+                              "__type": "undefined"
+                            }
+                          },
+                          "innerBlocks": []
+                        }
+                      ]
+                    },
+                    {
+                      "name": "core/separator",
+                      "attributes": {
+                        "opacity": "alpha-channel",
+                        "tagName": "hr",
+                        "backgroundColor": "accent",
+                        "align": "wide",
+                        "className": "is-style-wide",
+                        "style": {
+                          "spacing": {
+                            "margin": {
+                              "top": "var:preset|spacing|sm",
+                              "bottom": "var:preset|spacing|sm"
+                            }
+                          }
+                        }
+                      },
+                      "innerBlocks": []
+                    },
+                    {
+                      "name": "core/columns",
+                      "attributes": {
+                        "isStackedOnMobile": true,
+                        "align": "wide",
+                        "style": {
+                          "spacing": {
+                            "blockGap": {
+                              "top": "var:preset|spacing|lg",
+                              "left": "var:preset|spacing|lg"
+                            }
+                          }
+                        }
+                      },
+                      "innerBlocks": [
+                        {
+                          "name": "core/column",
+                          "attributes": {},
+                          "innerBlocks": [
+                            {
+                              "name": "core/heading",
+                              "attributes": {
+                                "content": {},
+                                "level": 3,
+                                "textColor": "accent",
+                                "fontFamily": "heading",
+                                "fontSize": "heading"
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/navigation",
+                              "attributes": {
+                                "showSubmenuIcon": true,
+                                "submenuVisibility": "hover",
+                                "overlayMenu": "never",
+                                "icon": "handle",
+                                "hasIcon": true,
+                                "maxNestingLevel": 5,
+                                "fontSize": "body",
+                                "style": {
+                                  "spacing": {
+                                    "blockGap": "var:preset|spacing|sm"
+                                  }
+                                },
+                                "layout": {
+                                  "type": "flex",
+                                  "orientation": "vertical",
+                                  "justifyContent": "left"
+                                }
+                              },
+                              "innerBlocks": [
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Our Story & Heritage",
+                                    "opensInNewTab": false,
+                                    "url": "#story"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Signature Dishes",
+                                    "opensInNewTab": false,
+                                    "url": "#dishes"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Full Menu",
+                                    "opensInNewTab": false,
+                                    "url": "#menu"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Voices of Our Guests",
+                                    "opensInNewTab": false,
+                                    "url": "#testimonials"
+                                  },
+                                  "innerBlocks": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "core/column",
+                          "attributes": {},
+                          "innerBlocks": [
+                            {
+                              "name": "core/heading",
+                              "attributes": {
+                                "content": {},
+                                "level": 3,
+                                "textColor": "accent",
+                                "fontFamily": "heading",
+                                "fontSize": "heading"
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/navigation",
+                              "attributes": {
+                                "showSubmenuIcon": true,
+                                "submenuVisibility": "hover",
+                                "overlayMenu": "never",
+                                "icon": "handle",
+                                "hasIcon": true,
+                                "maxNestingLevel": 5,
+                                "fontSize": "body",
+                                "style": {
+                                  "spacing": {
+                                    "blockGap": "var:preset|spacing|sm"
+                                  }
+                                },
+                                "layout": {
+                                  "type": "flex",
+                                  "orientation": "vertical",
+                                  "justifyContent": "left"
+                                }
+                              },
+                              "innerBlocks": [
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Visit Us",
+                                    "opensInNewTab": false,
+                                    "url": "#visit"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Hours & Location",
+                                    "opensInNewTab": false,
+                                    "url": "#visit"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Reserve Your Table",
+                                    "opensInNewTab": false,
+                                    "url": "#reserve"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Reservations & Contact",
+                                    "opensInNewTab": false,
+                                    "url": "#contact"
+                                  },
+                                  "innerBlocks": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "core/column",
+                          "attributes": {},
+                          "innerBlocks": [
+                            {
+                              "name": "core/heading",
+                              "attributes": {
+                                "content": {},
+                                "level": 3,
+                                "textColor": "accent",
+                                "fontFamily": "heading",
+                                "fontSize": "heading"
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/paragraph",
+                              "attributes": {
+                                "align": {
+                                  "__type": "undefined"
+                                },
+                                "content": "Tbilisi Old Town<br>Tbilisi, Georgia",
+                                "dropCap": false,
+                                "placeholder": {
+                                  "__type": "undefined"
+                                },
+                                "textColor": {
+                                  "__type": "undefined"
+                                },
+                                "backgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "fontSize": "body",
+                                "direction": {
+                                  "__type": "undefined"
+                                },
+                                "customTextColor": {
+                                  "__type": "undefined"
+                                },
+                                "customBackgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "customFontSize": {
+                                  "__type": "undefined"
+                                },
+                                "lock": {
+                                  "__type": "undefined"
+                                },
+                                "className": {
+                                  "__type": "undefined"
+                                },
+                                "style": {
+                                  "__type": "undefined"
+                                },
+                                "metadata": {
+                                  "__type": "undefined"
+                                }
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/paragraph",
+                              "attributes": {
+                                "align": {
+                                  "__type": "undefined"
+                                },
+                                "content": "<a href=\"mailto:reservations@tbilisitavern.com\">reservations@tbilisitavern.com</a>",
+                                "dropCap": false,
+                                "placeholder": {
+                                  "__type": "undefined"
+                                },
+                                "textColor": {
+                                  "__type": "undefined"
+                                },
+                                "backgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "fontSize": "body",
+                                "direction": {
+                                  "__type": "undefined"
+                                },
+                                "customTextColor": {
+                                  "__type": "undefined"
+                                },
+                                "customBackgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "customFontSize": {
+                                  "__type": "undefined"
+                                },
+                                "lock": {
+                                  "__type": "undefined"
+                                },
+                                "className": {
+                                  "__type": "undefined"
+                                },
+                                "style": {
+                                  "__type": "undefined"
+                                },
+                                "metadata": {
+                                  "__type": "undefined"
+                                }
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/paragraph",
+                              "attributes": {
+                                "align": {
+                                  "__type": "undefined"
+                                },
+                                "content": "Open Tue–Sun, 12:00–23:00",
+                                "dropCap": false,
+                                "placeholder": {
+                                  "__type": "undefined"
+                                },
+                                "textColor": "base",
+                                "backgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "fontSize": "caption",
+                                "direction": {
+                                  "__type": "undefined"
+                                },
+                                "customTextColor": {
+                                  "__type": "undefined"
+                                },
+                                "customBackgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "customFontSize": {
+                                  "__type": "undefined"
+                                },
+                                "lock": {
+                                  "__type": "undefined"
+                                },
+                                "className": "has-base-color has-text-color",
+                                "style": {
+                                  "__type": "undefined"
+                                },
+                                "metadata": {
+                                  "__type": "undefined"
+                                }
+                              },
+                              "innerBlocks": []
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "core/separator",
+                      "attributes": {
+                        "opacity": "alpha-channel",
+                        "tagName": "hr",
+                        "backgroundColor": "accent",
+                        "align": "wide",
+                        "className": "is-style-wide",
+                        "style": {
+                          "spacing": {
+                            "margin": {
+                              "top": "var:preset|spacing|sm",
+                              "bottom": "var:preset|spacing|sm"
+                            }
+                          }
+                        }
+                      },
+                      "innerBlocks": []
+                    },
+                    {
+                      "name": "core/paragraph",
+                      "attributes": {
+                        "content": "© 2026 Tbilisi Tavern · Built with WordPress",
+                        "dropCap": false,
+                        "placeholder": {
+                          "__type": "undefined"
+                        },
+                        "textColor": "secondary",
+                        "backgroundColor": {
+                          "__type": "undefined"
+                        },
+                        "fontSize": "caption",
+                        "direction": {
+                          "__type": "undefined"
+                        },
+                        "style": {
+                          "typography": {
+                            "textAlign": "center"
+                          }
+                        },
+                        "lock": {
+                          "__type": "undefined"
+                        },
+                        "className": "has-secondary-color has-text-color has-body-font-family",
+                        "metadata": {
+                          "__type": "undefined"
+                        }
+                      },
+                      "innerBlocks": []
+                    }
+                  ],
+                  "afterInnerBlocks": [
+                    {
+                      "name": "core/group",
+                      "attributes": {
+                        "tagName": "div",
+                        "align": "wide",
+                        "style": {
+                          "spacing": {
+                            "blockGap": "var:preset|spacing|sm"
+                          }
+                        },
+                        "layout": {
+                          "type": "flex",
+                          "orientation": "vertical",
+                          "justifyContent": "center"
+                        }
+                      },
+                      "innerBlocks": [
+                        {
+                          "name": "core/site-title",
+                          "attributes": {
+                            "level": 0,
+                            "levelOptions": [
+                              0,
+                              1,
+                              2,
+                              3,
+                              4,
+                              5,
+                              6
+                            ],
+                            "isLink": true,
+                            "linkTarget": "_self",
+                            "borderColor": {
+                              "__type": "undefined"
+                            },
+                            "backgroundColor": {
+                              "__type": "undefined"
+                            },
+                            "textColor": {
+                              "__type": "undefined"
+                            },
+                            "gradient": {
+                              "__type": "undefined"
+                            },
+                            "align": {
+                              "__type": "undefined"
+                            },
+                            "lock": {
+                              "__type": "undefined"
+                            },
+                            "anchor": {
+                              "__type": "undefined"
+                            },
+                            "className": {
+                              "__type": "undefined"
+                            },
+                            "fontFamily": "heading",
+                            "fontSize": "heading",
+                            "style": {
+                              "elements": {
+                                "link": {
+                                  "color": {
+                                    "text": "var:preset|color|base"
+                                  },
+                                  ":hover": {
+                                    "color": {
+                                      "text": "var:preset|color|accent"
+                                    }
+                                  }
+                                }
+                              },
+                              "typography": {
+                                "textAlign": "center"
+                              }
+                            },
+                            "metadata": {
+                              "__type": "undefined"
+                            }
+                          },
+                          "innerBlocks": []
+                        },
+                        {
+                          "name": "core/paragraph",
+                          "attributes": {
+                            "align": "center",
+                            "content": "<p class=\"has-text-align-center has-accent-color has-text-color has-heading-font-family\" style=\"letter-spacing:0.28em;text-transform:uppercase\">Traditional Georgian Tavern · Old Town</p>",
+                            "dropCap": false,
+                            "placeholder": {
+                              "__type": "undefined"
+                            },
+                            "textColor": "accent",
+                            "backgroundColor": {
+                              "__type": "undefined"
+                            },
+                            "fontSize": "caption",
+                            "direction": {
+                              "__type": "undefined"
+                            },
+                            "style": {
+                              "typography": {
+                                "letterSpacing": "0.28em",
+                                "textTransform": "uppercase"
+                              }
+                            },
+                            "lock": {
+                              "__type": "undefined"
+                            },
+                            "className": {
+                              "__type": "undefined"
+                            },
+                            "metadata": {
+                              "__type": "undefined"
+                            }
+                          },
+                          "innerBlocks": []
+                        }
+                      ]
+                    },
+                    {
+                      "name": "core/separator",
+                      "attributes": {
+                        "opacity": "alpha-channel",
+                        "tagName": "hr",
+                        "backgroundColor": "accent",
+                        "align": "wide",
+                        "className": "is-style-wide",
+                        "style": {
+                          "spacing": {
+                            "margin": {
+                              "top": "var:preset|spacing|sm",
+                              "bottom": "var:preset|spacing|sm"
+                            }
+                          }
+                        }
+                      },
+                      "innerBlocks": []
+                    },
+                    {
+                      "name": "core/columns",
+                      "attributes": {
+                        "isStackedOnMobile": true,
+                        "align": "wide",
+                        "style": {
+                          "spacing": {
+                            "blockGap": {
+                              "top": "var:preset|spacing|lg",
+                              "left": "var:preset|spacing|lg"
+                            }
+                          }
+                        }
+                      },
+                      "innerBlocks": [
+                        {
+                          "name": "core/column",
+                          "attributes": {},
+                          "innerBlocks": [
+                            {
+                              "name": "core/heading",
+                              "attributes": {
+                                "content": {},
+                                "level": 3,
+                                "textColor": "accent",
+                                "fontFamily": "heading",
+                                "fontSize": "heading"
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/navigation",
+                              "attributes": {
+                                "showSubmenuIcon": true,
+                                "submenuVisibility": "hover",
+                                "overlayMenu": "never",
+                                "icon": "handle",
+                                "hasIcon": true,
+                                "maxNestingLevel": 5,
+                                "fontSize": "body",
+                                "style": {
+                                  "spacing": {
+                                    "blockGap": "var:preset|spacing|sm"
+                                  }
+                                },
+                                "layout": {
+                                  "type": "flex",
+                                  "orientation": "vertical",
+                                  "justifyContent": "left"
+                                }
+                              },
+                              "innerBlocks": [
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Our Story & Heritage",
+                                    "opensInNewTab": false,
+                                    "url": "#story"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Signature Dishes",
+                                    "opensInNewTab": false,
+                                    "url": "#dishes"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Full Menu",
+                                    "opensInNewTab": false,
+                                    "url": "#menu"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Voices of Our Guests",
+                                    "opensInNewTab": false,
+                                    "url": "#testimonials"
+                                  },
+                                  "innerBlocks": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "core/column",
+                          "attributes": {},
+                          "innerBlocks": [
+                            {
+                              "name": "core/heading",
+                              "attributes": {
+                                "content": {},
+                                "level": 3,
+                                "textColor": "accent",
+                                "fontFamily": "heading",
+                                "fontSize": "heading"
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/navigation",
+                              "attributes": {
+                                "showSubmenuIcon": true,
+                                "submenuVisibility": "hover",
+                                "overlayMenu": "never",
+                                "icon": "handle",
+                                "hasIcon": true,
+                                "maxNestingLevel": 5,
+                                "fontSize": "body",
+                                "style": {
+                                  "spacing": {
+                                    "blockGap": "var:preset|spacing|sm"
+                                  }
+                                },
+                                "layout": {
+                                  "type": "flex",
+                                  "orientation": "vertical",
+                                  "justifyContent": "left"
+                                }
+                              },
+                              "innerBlocks": [
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Visit Us",
+                                    "opensInNewTab": false,
+                                    "url": "#visit"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Hours & Location",
+                                    "opensInNewTab": false,
+                                    "url": "#visit"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Reserve Your Table",
+                                    "opensInNewTab": false,
+                                    "url": "#reserve"
+                                  },
+                                  "innerBlocks": []
+                                },
+                                {
+                                  "name": "core/navigation-link",
+                                  "attributes": {
+                                    "label": "Reservations & Contact",
+                                    "opensInNewTab": false,
+                                    "url": "#contact"
+                                  },
+                                  "innerBlocks": []
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "core/column",
+                          "attributes": {},
+                          "innerBlocks": [
+                            {
+                              "name": "core/heading",
+                              "attributes": {
+                                "content": {},
+                                "level": 3,
+                                "textColor": "accent",
+                                "fontFamily": "heading",
+                                "fontSize": "heading"
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/paragraph",
+                              "attributes": {
+                                "align": {
+                                  "__type": "undefined"
+                                },
+                                "content": "Tbilisi Old Town<br>Tbilisi, Georgia",
+                                "dropCap": false,
+                                "placeholder": {
+                                  "__type": "undefined"
+                                },
+                                "textColor": {
+                                  "__type": "undefined"
+                                },
+                                "backgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "fontSize": "body",
+                                "direction": {
+                                  "__type": "undefined"
+                                },
+                                "customTextColor": {
+                                  "__type": "undefined"
+                                },
+                                "customBackgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "customFontSize": {
+                                  "__type": "undefined"
+                                },
+                                "lock": {
+                                  "__type": "undefined"
+                                },
+                                "className": {
+                                  "__type": "undefined"
+                                },
+                                "style": {
+                                  "__type": "undefined"
+                                },
+                                "metadata": {
+                                  "__type": "undefined"
+                                }
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/paragraph",
+                              "attributes": {
+                                "align": {
+                                  "__type": "undefined"
+                                },
+                                "content": "<a href=\"mailto:reservations@tbilisitavern.com\">reservations@tbilisitavern.com</a>",
+                                "dropCap": false,
+                                "placeholder": {
+                                  "__type": "undefined"
+                                },
+                                "textColor": {
+                                  "__type": "undefined"
+                                },
+                                "backgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "fontSize": "body",
+                                "direction": {
+                                  "__type": "undefined"
+                                },
+                                "customTextColor": {
+                                  "__type": "undefined"
+                                },
+                                "customBackgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "customFontSize": {
+                                  "__type": "undefined"
+                                },
+                                "lock": {
+                                  "__type": "undefined"
+                                },
+                                "className": {
+                                  "__type": "undefined"
+                                },
+                                "style": {
+                                  "__type": "undefined"
+                                },
+                                "metadata": {
+                                  "__type": "undefined"
+                                }
+                              },
+                              "innerBlocks": []
+                            },
+                            {
+                              "name": "core/paragraph",
+                              "attributes": {
+                                "align": {
+                                  "__type": "undefined"
+                                },
+                                "content": "Open Tue–Sun, 12:00–23:00",
+                                "dropCap": false,
+                                "placeholder": {
+                                  "__type": "undefined"
+                                },
+                                "textColor": "base",
+                                "backgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "fontSize": "caption",
+                                "direction": {
+                                  "__type": "undefined"
+                                },
+                                "customTextColor": {
+                                  "__type": "undefined"
+                                },
+                                "customBackgroundColor": {
+                                  "__type": "undefined"
+                                },
+                                "customFontSize": {
+                                  "__type": "undefined"
+                                },
+                                "lock": {
+                                  "__type": "undefined"
+                                },
+                                "className": "has-base-color has-text-color",
+                                "style": {
+                                  "__type": "undefined"
+                                },
+                                "metadata": {
+                                  "__type": "undefined"
+                                }
+                              },
+                              "innerBlocks": []
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "core/separator",
+                      "attributes": {
+                        "opacity": "alpha-channel",
+                        "tagName": "hr",
+                        "backgroundColor": "accent",
+                        "align": "wide",
+                        "className": "is-style-wide",
+                        "style": {
+                          "spacing": {
+                            "margin": {
+                              "top": "var:preset|spacing|sm",
+                              "bottom": "var:preset|spacing|sm"
+                            }
+                          }
+                        }
+                      },
+                      "innerBlocks": []
+                    },
+                    {
+                      "name": "core/paragraph",
+                      "attributes": {
+                        "content": "© 2026 Tbilisi Tavern · Built with WordPress",
+                        "dropCap": false,
+                        "placeholder": {
+                          "__type": "undefined"
+                        },
+                        "textColor": "secondary",
+                        "backgroundColor": {
+                          "__type": "undefined"
+                        },
+                        "fontSize": "caption",
+                        "direction": {
+                          "__type": "undefined"
+                        },
+                        "style": {
+                          "typography": {
+                            "textAlign": "center"
+                          }
+                        },
+                        "lock": {
+                          "__type": "undefined"
+                        },
+                        "className": "has-secondary-color has-text-color has-body-font-family",
+                        "metadata": {
+                          "__type": "undefined"
+                        }
+                      },
+                      "innerBlocks": []
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/separator",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/separator",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-accent-color has-text-color has-heading-font-family"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "accent",
+                    "align": "center",
+                    "fontFamily": "heading",
+                    "fontSize": "caption",
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.28em",
+                        "textTransform": "uppercase"
+                      }
+                    },
+                    "className": "has-text-align-center"
+                  },
+                  "afterAttributes": {
+                    "content": "Traditional Georgian Tavern · Old Town",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "accent",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.28em",
+                        "textTransform": "uppercase",
+                        "textAlign": "center"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": "has-accent-color has-text-color has-heading-font-family",
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "secondary",
+                    "align": "center",
+                    "className": "has-secondary-color has-text-color has-body-font-family",
+                    "fontFamily": "body",
+                    "fontSize": "caption",
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "content": "© 2026 Tbilisi Tavern · Built with WordPress",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "secondary",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": "has-secondary-color has-text-color has-body-font-family",
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          },
+          {
+            "pass": 3,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/separator",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/separator",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "secondary",
+                    "align": "center",
+                    "className": "has-secondary-color has-text-color has-body-font-family",
+                    "fontFamily": "body",
+                    "fontSize": "caption",
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "content": "© 2026 Tbilisi Tavern · Built with WordPress",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "secondary",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": "has-secondary-color has-text-color has-body-font-family",
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 1,
+  "provenance": {
+    "kind": "advisory-corpus-import",
+    "source": "projects/tbilisi25/theme/parts/footer.html",
+    "importedInputSha256": "d74585d134c946334fa8c608b8fa96820c29b34f4825c689c1525944e9c66edd"
+  }
+}

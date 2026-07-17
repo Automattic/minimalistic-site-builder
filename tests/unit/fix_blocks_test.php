@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
@@ -210,14 +211,11 @@ test('block fixer keeps the card-media class hook the card recipe relies on', fu
 HTML;
     file_put_contents($theme . '/parts/cards.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
 
     $fixed = (string) file_get_contents($theme . '/parts/cards.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('card-media', $fixed);
     assert_contains('0 style/class value(s) dropped', $stdout);
 });
@@ -236,13 +234,10 @@ test('block fixer reports inline styles it drops during re-serialization', funct
 HTML;
     file_put_contents($theme . '/parts/cards.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('DROPPED style `height:200px`', $stdout);
     assert_contains('DROPPED style `object-fit:cover`', $stdout);
     assert_contains('DROPPED style `width:100%`', $stdout);
@@ -262,12 +257,9 @@ test('block fixer does not report semantic styles dropped for colon whitespace n
 HTML;
     file_put_contents($theme . '/parts/section.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('0 style/class value(s) dropped', $stdout);
     assert_true(!str_contains($stdout, 'DROPPED style `padding-top'), $stdout);
 });
@@ -284,12 +276,9 @@ test('block fixer reports vertical styles dropped from single-quoted HTML attrib
 HTML;
     file_put_contents($theme . '/parts/section.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('DROPPED style `padding-top:8rem`', $stdout);
 });
 
@@ -311,13 +300,10 @@ test('block fixer drops nothing after the rhythm pass replaces mirrored root spa
     ]]);
     file_put_contents($theme . '/parts/section-story.html', $result['markups'][0]);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
     $fixed = (string) file_get_contents($theme . '/parts/section-story.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_true(!str_contains($stdout, 'DROPPED style'), $stdout);
     assert_eq([], FixBlocksStep::droppedVerticalRhythmStyles($stdout), 'the rhythm gate must not fire');
     assert_contains('padding-right:2rem', $fixed, 'Gutenberg restores promoted side padding');
@@ -345,13 +331,11 @@ test('block fixer preserves media-text images when mediaType is missing', functi
 HTML;
     file_put_contents($theme . '/parts/hero.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
+    (new PhpBlockFixer())->fix($theme);
 
     $fixed = (string) file_get_contents($theme . '/parts/hero.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, implode("\n", $out));
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
 });

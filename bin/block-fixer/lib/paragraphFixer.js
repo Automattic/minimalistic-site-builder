@@ -105,11 +105,11 @@ function serializeAttributes(attrs) {
  *   <p class="outer-class inner-class" style="color:red;font-size:1rem">Text</p>
  *   <!-- /wp:paragraph -->
  */
-function fixNestedParagraphs(htmlContent) {
+function fixNestedParagraphsDetailed(htmlContent) {
   // Only process content that contains WordPress paragraph blocks
   if (!htmlContent.includes('<!-- wp:paragraph')) {
     console.error('[ParagraphFixer] No wp:paragraph blocks found, skipping');
-    return htmlContent;
+    return { html: htmlContent, count: 0 };
   }
 
   console.error('[ParagraphFixer] Processing content with wp:paragraph blocks...');
@@ -148,11 +148,16 @@ function fixNestedParagraphs(htmlContent) {
     console.error(`[ParagraphFixer] Fixed ${totalFixCount} nested <p> tag(s) in WordPress paragraph blocks`);
   }
 
-  return result;
+  return { html: result, count: totalFixCount };
+}
+
+function fixNestedParagraphs(htmlContent) {
+  return fixNestedParagraphsDetailed(htmlContent).html;
 }
 
 module.exports = {
   fixNestedParagraphs,
+  fixNestedParagraphsDetailed,
   parseAttributes,
   mergeAttributes,
   serializeAttributes,

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "reviewed": true,
+  "k": 3,
+  "repairs": [
+    {
+      "file": "parts/content.html",
+      "blockPath": "0",
+      "code": "custom-class-recovery"
+    },
+    {
+      "file": "parts/content.html",
+      "blockPath": "0",
+      "code": "anchor-recovery"
+    },
+    {
+      "file": "parts/content.html",
+      "blockPath": "0",
+      "code": "aria-label-recovery"
+    }
+  ],
+  "secondInvocation": {
+    "k": 0,
+    "repairs": []
+  }
+}

@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\BuildReport;
 use Automattic\SiteBuild\ModelConfig;
-use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
@@ -89,7 +89,7 @@ $builder = new SiteBuilder(
     llm: $llm,
     promptsDir: Package::promptsDir(),
     outputRoot: repo_path('projects'),
-    blockFixer: NodeBlockFixer::default(),
+    blockFixer: BlockFixers::default(),
     models: step_models(),
 );
 $pipeline = $builder->pipeline();
@@ -152,7 +152,7 @@ if ($withImages && $until === null) {
 
     // Now that the real pixels exist, re-check cover text against the actual
     // (dimmed) images and raise dimRatio / flip text colors where needed.
-    $step = new CoverContrastStep(NodeBlockFixer::default());
+    $step = new CoverContrastStep(BlockFixers::default());
     $start = microtime(true);
     $step->run($project);
     $secs = microtime(true) - $start;
