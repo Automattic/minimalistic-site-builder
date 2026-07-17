@@ -52,12 +52,14 @@ test('registered blocks reject comment keys outside the current schema', functio
 });
 
 test('registered blocks reject recognizable unreviewed current-key deprecations', function () {
-    $paragraph = '<!-- wp:paragraph {"textColor":"base","align":"wide",'
-        . '"fontFamily":"body","fontSize":"caption",'
-        . '"style":{"typography":{"letterSpacing":"0.12em","textTransform":"uppercase"}}} -->'
-        . '<p class="alignwide has-base-color has-text-color has-body-font-family has-caption-font-size" '
-        . 'style="letter-spacing:0.12em;text-transform:uppercase;color:var(--wp--preset--color--accent)">'
-        . 'Legacy</p><!-- /wp:paragraph -->';
+    // A current-key inline color on a valid <p> root is now the reviewed
+    // selector-less carryover (paragraph-inline-color-carryover golden). An
+    // invalid paragraph whose root is not a <p> stays outside that reviewed
+    // domain — the nested-paragraph merge cannot reconcile it — so its
+    // authored inline color must still fail closed.
+    $paragraph = '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.12em"}}} -->'
+        . '<div style="letter-spacing:0.12em;color:var(--wp--preset--color--accent)">'
+        . 'Legacy</div><!-- /wp:paragraph -->';
     assert_throws(static fn () => (new Serializer())->transform($paragraph));
 });
 

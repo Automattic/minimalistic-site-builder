@@ -22,6 +22,12 @@ final class DeprecationAdapters
      * adapter has admitted the signature.
      */
     private const REVIEWED_LEGACY_COMMENT_KEYS = [
+        'core/heading' => [
+            // Deprecated version 0; exercised by heading-legacy-text-align.
+            // The pinned migration reads the recovered has-text-align-* class,
+            // not this comment key, so the key is dropped either way.
+            'textAlign' => true,
+        ],
         'core/site-title' => [
             // Deprecated version 0; exercised by tbilisi25-footer-fixed-point.
             'textAlign' => true,
@@ -55,7 +61,7 @@ final class DeprecationAdapters
         if ($actual === []) {
             return;
         }
-        $current = $this->rootStyles($currentContent);
+        $current = $this->effectiveRootStyles($currentContent);
         foreach ($actual as $property => $value) {
             if (!array_key_exists($property, $current) || $current[$property] !== $value) {
                 throw new \RuntimeException(
@@ -90,12 +96,60 @@ final class DeprecationAdapters
             if ($matched && is_string($attributes['content'] ?? null)) {
                 $attributes['content'] = RichText::fromHtmlString($attributes['content']);
             }
+        } elseif ($name === 'core/heading') {
+            $attributes = $this->heading($attributes, $rawCommentAttributes, $matched);
         } elseif ($name === 'core/navigation') {
             $attributes = $this->navigation($attributes, $matched);
         } elseif ($name === 'core/site-title') {
             $attributes = $this->siteTitle($attributes, $rawCommentAttributes, $matched);
         }
         return ['attributes' => $attributes, 'repairs' => [], 'matched' => $matched];
+    }
+
+    /**
+     * Reviewed heading deprecation index 0 (heading-legacy-text-align): a
+     * legacy top-level textAlign comment attribute leaves an authored
+     * has-text-align-* class that the current save() cannot emit, so the
+     * built-in class recovery carries it into className and the pinned
+     * migration then moves it into style.typography.textAlign. When the
+     * alignment class was authored in the comment's own className, the
+     * current save validates as-is and the pinned registry never migrates.
+     *
+     * @param array<string,mixed> $attributes
+     * @param array<string,mixed> $rawCommentAttributes
+     * @return array<string,mixed>
+     */
+    private function heading(
+        array $attributes,
+        array $rawCommentAttributes,
+        bool &$matched,
+    ): array {
+        $className = $attributes['className'] ?? null;
+        if (!is_string($className)
+            || preg_match('/\bhas-text-align-(left|center|right)\b/', $className, $m) !== 1) {
+            return $attributes;
+        }
+        $authored = $rawCommentAttributes['className'] ?? null;
+        if (is_string($authored)
+            && preg_match('/\b' . preg_quote($m[0], '/') . '\b/', $authored) === 1) {
+            return $attributes;
+        }
+        $matched = true;
+        $style = is_array($attributes['style'] ?? null) ? $attributes['style'] : [];
+        $typography = is_array($style['typography'] ?? null) ? $style['typography'] : [];
+        $typography['textAlign'] = $m[1];
+        $style['typography'] = $typography;
+        $attributes['style'] = $style;
+        $custom = array_values(array_filter(
+            preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+            static fn (string $class): bool => $class !== $m[0],
+        ));
+        if ($custom === []) {
+            unset($attributes['className']);
+        } else {
+            $attributes['className'] = implode(' ', $custom);
+        }
+        return $attributes;
     }
 
     /**
@@ -261,8 +315,49 @@ final class DeprecationAdapters
             } else {
                 $attributes['className'] = implode(' ', $classes);
             }
+            return $attributes;
+        }
+
+        // Every other invalid paragraph falls through to the selector-less
+        // deprecation, whose save reproduces the authored bytes and therefore
+        // always validates. It sources the entire root element as content;
+        // the current save then wraps it, and the post-serialize
+        // nested-paragraph repair merges the wrapper's classes and inline
+        // styles with the authored ones. Observed for authored inline styles
+        // that contradict the comment's preset color
+        // (paragraph-inline-color-carryover).
+        if (!$currentCandidateValid) {
+            $matched = true;
+            $attributes['content'] = $root->outerHtml();
+            unset($attributes['className']);
         }
         return $attributes;
+    }
+
+    /**
+     * Root style declarations of a rendered candidate after projecting the
+     * pinned post-serialize nested-paragraph merge: when the current save
+     * wraps selector-less deprecation content in a second <p>, the wrapper's
+     * declarations are merged with the authored inner ones, inner values
+     * winning — exactly what the document-level ParagraphFixer later applies.
+     *
+     * @return array<string,string>
+     */
+    private function effectiveRootStyles(string $html): array
+    {
+        $elements = HtmlFragment::parse($html)->root()->elementChildren();
+        $styles = $this->rootStyles($html);
+        // HTML parsing auto-closes a <p> when the next one opens, so the
+        // save wrapper and the authored root arrive as two sibling <p>
+        // elements rather than nested ones.
+        if (count($elements) === 2
+            && $elements[0]->tagName() === 'p'
+            && $elements[1]->tagName() === 'p') {
+            foreach ($this->rootStyles($elements[1]->outerHtml()) as $property => $value) {
+                $styles[$property] = $value;
+            }
+        }
+        return $styles;
     }
 
     /** @return array<string,string> */

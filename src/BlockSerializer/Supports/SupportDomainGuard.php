@@ -113,6 +113,16 @@ final class SupportDomainGuard
         'flexWrap' => ['wrap', 'nowrap'],
     ];
 
+    /**
+     * Free-string layout keys the pinned save() never consumes: they pass
+     * through to the comment untouched (group-layout-content-size).
+     *
+     * @var array<string,true>
+     */
+    private const LAYOUT_STRING_KEYS = [
+        'contentSize' => true,
+    ];
+
     /** @param array<string,mixed> $attributes */
     public function assertSupported(string $name, array $attributes, string $blockPath): void
     {
@@ -131,6 +141,15 @@ final class SupportDomainGuard
                 throw new \RuntimeException("Unsupported non-object layout for {$name} at {$blockPath}");
             }
             foreach ($layout as $key => $value) {
+                if (is_string($key) && isset(self::LAYOUT_STRING_KEYS[$key])) {
+                    if (!is_string($value) || $value === '') {
+                        $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
+                        throw new \RuntimeException(
+                            "Unsupported block-support layout value '{$encoded}' for {$name} at {$blockPath} layout.{$key}"
+                        );
+                    }
+                    continue;
+                }
                 if (!is_string($key) || !isset(self::LAYOUT_VALUES[$key])) {
                     $label = is_string($key) ? $key : (string) $key;
                     throw new \RuntimeException(

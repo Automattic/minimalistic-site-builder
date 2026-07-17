@@ -535,6 +535,82 @@ After`,
       { file: 'parts/footer.html', blockPath: 'document', code: 'nested-paragraph' },
     ],
   },
+  {
+    name: 'heading-legacy-text-align',
+    milestone: 'M2',
+    capabilities: [
+      'block:core/heading',
+      'deprecation:heading-text-align',
+      'support:text-color',
+      'support:font-family',
+      'report:fixed',
+    ],
+    // Reduced from projects/tbilisi27/theme/parts/section-about-welcome.html:
+    // the generator emits the legacy top-level textAlign comment attribute,
+    // which the pinned registry migrates to style.typography.textAlign and
+    // drops the default level from the comment.
+    files: {
+      'parts/heading.html': String.raw`<!-- wp:heading {"textAlign":"center","level":2,"fontFamily":"heading","textColor":"primary"} -->
+<h2 class="wp-block-heading has-text-align-center has-primary-color has-text-color has-heading-font-family">A table set for strangers, kept warm for centuries</h2>
+<!-- /wp:heading -->`,
+    },
+    repairs: [],
+  },
+  {
+    name: 'group-layout-content-size',
+    milestone: 'M2',
+    capabilities: [
+      'block:core/group',
+      'block:core/paragraph',
+      'support:layout',
+      'support:layout-content-size',
+      'support:spacing',
+      'report:fixed',
+    ],
+    // Reduced from projects/naturaleza24/theme/parts/section-hours-contact.html:
+    // a constrained group layout carrying a per-block contentSize, which the
+    // pinned save() does not consume — the attribute passes through to the
+    // comment untouched while inner whitespace normalizes.
+    files: {
+      'parts/constrained.html': String.raw`<!-- wp:group {"style":{"spacing":{"blockGap":"var:preset|spacing|sm"}},"layout":{"type":"constrained","contentSize":"850px"}} -->
+<div class="wp-block-group">
+<!-- wp:paragraph -->
+<p>Open Thursday through Sunday.</p>
+<!-- /wp:paragraph -->
+</div>
+<!-- /wp:group -->`,
+    },
+    repairs: [],
+  },
+  {
+    name: 'paragraph-inline-color-carryover',
+    milestone: 'M2',
+    capabilities: [
+      'block:core/paragraph',
+      'deprecation:paragraph-selectorless',
+      'repair:nested-paragraph',
+      'repair:nested-paragraph-style-merge',
+      'support:text-color',
+      'support:font-size',
+      'support:font-family',
+      'support:typography',
+      'report:fixed',
+    ],
+    // Reduced from projects/portfolio27/theme/parts/footer.html: the authored
+    // <p> carries an inline color that contradicts the textColor preset and
+    // omits has-base-color. The current candidate is invalid, the selector-less
+    // deprecation sources the entire root as content, and the post-serialize
+    // nested-paragraph repair merges the inner tag's classes and appends its
+    // inline color — nothing is dropped.
+    files: {
+      'parts/colophon.html': String.raw`<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.2em","textTransform":"uppercase"}},"fontSize":"caption","fontFamily":"heading","textColor":"base"} -->
+<p class="has-text-color has-caption-font-size has-heading-font-family" style="color:var(--wp--preset--color--secondary);letter-spacing:0.2em;text-transform:uppercase">06 — Colophon</p>
+<!-- /wp:paragraph -->`,
+    },
+    repairs: [
+      { file: 'parts/colophon.html', blockPath: 'document', code: 'nested-paragraph' },
+    ],
+  },
 ];
 
 /*
@@ -574,6 +650,7 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'rich-text:literal-nbsp',
   'rich-text:br',
   'rich-text:inline-formatting',
+  'deprecation:heading-text-align',
   'deprecation:paragraph-align',
   'deprecation:paragraph-pre-font-support',
   'deprecation:paragraph-selectorless',
@@ -597,6 +674,7 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'json:wrong-type',
   'json:defaults',
   'repair:nested-paragraph',
+  'repair:nested-paragraph-style-merge',
   'repair:media-type-inference',
   'repair:custom-class-recovery',
   'repair:anchor-recovery',
@@ -647,6 +725,7 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'support:font-size',
   'support:gradient',
   'support:layout',
+  'support:layout-content-size',
   'support:layout-flex',
   'support:preset-variables',
   'support:self-stretch',
@@ -661,6 +740,7 @@ const REQUIRED_CAPABILITIES = Object.freeze([
 const REVIEWED_DEPRECATIONS = Object.freeze({
   'deprecation:core/button:3': 'raw-overlay-current-save-equivalent',
   'deprecation:core/group:0': 'raw-overlay-current-save-equivalent',
+  'deprecation:core/heading:0': 'explicit-adapter',
   'deprecation:core/navigation:3': 'explicit-adapter',
   'deprecation:core/paragraph:0': 'explicit-adapter',
   'deprecation:core/paragraph:1': 'explicit-adapter',

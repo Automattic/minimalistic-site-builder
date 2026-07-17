@@ -451,12 +451,12 @@ test('PhpBlockFixer rejects an unknown deprecation signature before staging any 
 
 test('PhpBlockFixer rejects a current-key historical style signature before staging', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
-    $bOriginal = '<!-- wp:paragraph {"textColor":"base","align":"wide",'
-        . '"fontFamily":"body","fontSize":"caption",'
-        . '"style":{"typography":{"letterSpacing":"0.12em","textTransform":"uppercase"}}} -->'
-        . '<p class="alignwide has-base-color has-text-color has-body-font-family has-caption-font-size" '
-        . 'style="letter-spacing:0.12em;text-transform:uppercase;color:var(--wp--preset--color--accent)">'
-        . 'Legacy</p><!-- /wp:paragraph -->';
+    // An invalid paragraph whose root is not a <p> is outside the reviewed
+    // selector-less carryover (paragraph-inline-color-carryover golden), so
+    // its authored inline color still fails closed before staging.
+    $bOriginal = '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.12em"}}} -->'
+        . '<div style="letter-spacing:0.12em;color:var(--wp--preset--color--accent)">'
+        . 'Legacy</div><!-- /wp:paragraph -->';
     $theme = php_block_fixer_test_theme([
         'parts/a.html' => $aOriginal,
         'parts/b.html' => $bOriginal,
