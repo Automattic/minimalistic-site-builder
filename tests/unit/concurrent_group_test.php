@@ -58,6 +58,39 @@ test('ConcurrentGroup declaration unions member reads/writes and is concurrent',
     assert_eq(['theme-json', 'section-plan'], array_map(fn ($s) => $s->id(), $g->members()));
 });
 
+test('ConcurrentGroup allows members to share upstream reads', function () {
+    $llm = new FakeLlm();
+    $a = new RecordingConcurrentStep('alpha', [], ['meta.json'], ['alpha.json']);
+    $b = new RecordingConcurrentStep('beta', [], ['meta.json'], ['beta.json']);
+
+    new ConcurrentGroup($llm, [$a, $b]);
+    assert_true(true);
+});
+
+test('ConcurrentGroup rejects duplicate member ids', function () {
+    $llm = new FakeLlm();
+    $a = new RecordingConcurrentStep('duplicate', []);
+    $b = new RecordingConcurrentStep('duplicate', []);
+
+    assert_throws(fn () => new ConcurrentGroup($llm, [$a, $b]));
+});
+
+test('ConcurrentGroup rejects overlapping member writes', function () {
+    $llm = new FakeLlm();
+    $directoryWriter = new RecordingConcurrentStep('directory-writer', [], [], ['theme/parts/*']);
+    $fileWriter = new RecordingConcurrentStep('file-writer', [], [], ['theme/parts/header.html']);
+
+    assert_throws(fn () => new ConcurrentGroup($llm, [$directoryWriter, $fileWriter]));
+});
+
+test('ConcurrentGroup rejects a member reading another member write', function () {
+    $llm = new FakeLlm();
+    $reader = new RecordingConcurrentStep('reader', [], ['theme/parts/header.html']);
+    $writer = new RecordingConcurrentStep('writer', [], [], ['theme/parts/*']);
+
+    assert_throws(fn () => new ConcurrentGroup($llm, [$reader, $writer]));
+});
+
 test('ConcurrentGroup merges requests and routes results back per member', function () {
     $tmp = sys_get_temp_dir() . '/builder_cg_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

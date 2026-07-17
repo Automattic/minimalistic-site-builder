@@ -33,7 +33,17 @@ final class ValidateThemeStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/*', 'sections.json'],
+            reads: [
+                'sections.json',
+                'theme/style.css',
+                'theme/theme.json',
+                'theme/templates/index.html',
+                'theme/templates/front-page.html',
+                'theme/parts/header.html',
+                'theme/parts/footer.html',
+                'theme/parts/*',
+                'theme/templates/*',
+            ],
             writes: [],
             concurrent: false,
         );

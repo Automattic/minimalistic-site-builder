@@ -26,10 +26,11 @@ use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
 /**
  * Ordered Step list with assembly-time validation. Hosts start from default()
- * (the CLI full graph) and without/insertAfter/replace/withSeeds.
+ * (the CLI full graph) and withSeeds/without/insertAfter/replace.
  *
  * Mutations return a new instance. Validation runs on every construction via
- * StepGraph (default seed: meta.json).
+ * StepGraph (default seed: meta.json). Configure new seeds before inserting or
+ * replacing a step that reads them so every intermediate composition is valid.
  */
 final class StepComposition
 {
@@ -192,6 +193,12 @@ final class StepComposition
         return new self($next, $this->seeds);
     }
 
+    /**
+     * Replace the paths available before the first step runs.
+     *
+     * Call this before insertAfter() or replace() when the new step reads a seed
+     * that is not already available. Every mutation validates immediately.
+     */
     public function withSeeds(string ...$seeds): self
     {
         return new self($this->steps, array_values($seeds));

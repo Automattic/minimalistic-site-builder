@@ -18,7 +18,7 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Input:  theme/assets/* (generated images) + theme/parts|templates/*.html
  * Output: covers rewritten (higher dimRatio and/or flipped text colors) so
  *         their inner text reaches WCAG contrast against the dimmed image;
- *         findings appended to logs/contrast-report.txt.
+ *         findings written to logs/cover-contrast-report.txt.
  *
  * ContrastFixStep runs in the pipeline before any image exists, so covers
  * are only floored to dimRatio 40 there — the LLM picked the text color
@@ -37,7 +37,7 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  */
 final class CoverContrastStep implements Step
 {
-    private const REPORT_FILE = 'contrast-report.txt';
+    private const REPORT_FILE = 'cover-contrast-report.txt';
 
     /** Above this the image is more curtain than picture. */
     public const MAX_DIM = 80;
@@ -141,11 +141,9 @@ final class CoverContrastStep implements Step
         }
 
         if ($report !== []) {
-            $existing = $project->exists('logs/' . self::REPORT_FILE)
-                ? rtrim($project->readText('logs/' . self::REPORT_FILE)) . "\n" : '';
             $project->writeText(
                 'logs/' . self::REPORT_FILE,
-                $existing . "-- cover contrast (measured against generated images) --\n"
+                "-- cover contrast (measured against generated images) --\n"
                 . implode("\n", $report) . "\n"
             );
         }

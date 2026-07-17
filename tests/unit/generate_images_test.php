@@ -23,6 +23,12 @@ function generate_fixture(): array
     return [$project, $tmp];
 }
 
+test('generate-images declaration marks its batched work as concurrent', function () {
+    $declaration = (new GenerateImagesStep(new FakeImageClient()))->declaration();
+
+    assert_eq(true, $declaration->concurrent);
+});
+
 test('generate-images writes assets, rewrites src/url, and marks completed', function () {
     [$project, $tmp] = generate_fixture();
     $images = new FakeImageClient('JPEGDATA');

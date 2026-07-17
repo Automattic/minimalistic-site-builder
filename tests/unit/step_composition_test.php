@@ -107,15 +107,22 @@ test('StepComposition describe concurrent flags on sections and group', function
     assert_eq(['theme-json', 'section-plan'], $byId['theme-json+section-plan']['members']);
 });
 
-test('StepComposition withSeeds survives the trip through Pipeline', function () {
+test('StepComposition configures new seeds before inserting a step that reads them', function () {
     $needsSeed = graph_fake_step('needs-extra-seed', ['plugins.json'], ['out.json']);
 
     $d = composition_deps();
-    $c = StepComposition::default(
+    $base = StepComposition::default(
         llm: $d['llm'],
         renderer: $d['renderer'],
         blockFixer: $d['blockFixer'],
-    )->withSeeds('meta.json', 'plugins.json')->insertAfter('scaffold-theme', $needsSeed);
+    );
+
+    // Each mutation validates immediately, so configure a new seed before
+    // inserting a step that reads it.
+    assert_throws(fn () => $base->insertAfter('scaffold-theme', $needsSeed));
+    $c = $base
+        ->withSeeds('meta.json', 'plugins.json')
+        ->insertAfter('scaffold-theme', $needsSeed);
 
     // The composition's seeds must reach Pipeline's own validation.
     $pipeline = new Pipeline($c->steps(), $c->seeds());

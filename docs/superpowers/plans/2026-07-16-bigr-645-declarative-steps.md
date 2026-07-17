@@ -695,17 +695,17 @@ Reference declarations (copy into each class):
 | SectionRhythmStep | `sections.json`, `theme/parts/*` | `theme/parts/*` | false |
 | AssembleLandingPageStep | `sections.json`, `theme/parts/*`, `theme/theme.json` | `theme/templates/*`, `theme/theme.json` | false |
 | CollectImagesStep | `theme/parts/*`, `theme/templates/*` | `images.json` | false |
-| NormalizeLayoutStep | `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
+| NormalizeLayoutStep | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
 | ContrastFixStep | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | same three | false |
 | MotionSanityStep | `designDirection.json`, `sections.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
-| FixBlocksStep | `theme/*` | `theme/*` | false |
+| FixBlocksStep | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
 | PageStylesStep | `theme/theme.json`, `theme/style.css`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `theme/style.css` | false |
-| CustomMotionStep | `siteSpec.json`, `theme/style.css`, `theme/parts/*`, `theme/templates/*` | `theme/style.css` | false |
+| CustomMotionStep | `siteSpec.json`, `designDirection.json`, `theme/style.css`, `theme/parts/*`, `theme/templates/*` | `theme/style.css` | false |
 | FontsPhpStep | `theme/theme.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `theme/fonts.php` | false |
-| FinalizeThemeStep | `designDirection.json`, `theme/assets/motion/*` | `theme/functions.php` | false |
-| ValidateThemeStep | `theme/*` | `[]` | false |
-| CoverContrastStep | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | same | false |
-| GenerateImagesStep | `images.json`, `siteSpec.json`, `theme/parts/*`, `theme/templates/*` | `images.json`, `theme/assets/*` | false |
+| FinalizeThemeStep | `designDirection.json`, `theme/assets/motion/*` | `theme/functions.php`, `theme/assets/motion/*` | false |
+| ValidateThemeStep | `sections.json`, `theme/style.css`, `theme/theme.json`, required template/part files, `theme/parts/*`, `theme/templates/*` | `[]` | false |
+| CoverContrastStep | `theme/theme.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
+| GenerateImagesStep | `images.json`, `siteSpec.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `images.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | **true** |
 
 Example for `ScaffoldThemeStep`:
 
@@ -1167,7 +1167,7 @@ Plan complete and saved to `docs/superpowers/plans/2026-07-16-bigr-645-declarati
 
 **Two execution options:**
 
-1. **Subagent-Driven (recommended)** — fresh subagent per task, review between tasks  
-2. **Inline Execution** — execute tasks in this session with checkpoints  
+1. **Subagent-Driven (recommended)** — fresh subagent per task, review between tasks
+2. **Inline Execution** — execute tasks in this session with checkpoints
 
 Which approach?

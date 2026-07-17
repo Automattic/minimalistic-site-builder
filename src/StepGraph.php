@@ -36,7 +36,7 @@ final class StepGraph
             if (!$step instanceof Step) {
                 throw new \InvalidArgumentException("StepGraph: entry {$i} is not a Step");
             }
-            $decl = $step->declaration();
+            $decl = self::declarationOf($step);
             $id = $decl->id;
             if (isset($seenIds[$id])) {
                 throw new \InvalidArgumentException("StepGraph: duplicate step id '{$id}'");
@@ -67,7 +67,7 @@ final class StepGraph
     {
         $rows = [];
         foreach ($steps as $step) {
-            $decl = $step->declaration();
+            $decl = self::declarationOf($step);
             $row = [
                 'id'         => $decl->id,
                 'label'      => $decl->label,
@@ -77,13 +77,44 @@ final class StepGraph
             ];
             if ($step instanceof ConcurrentGroup) {
                 $row['members'] = array_map(
-                    static fn (Step $s) => $s->declaration()->id,
+                    static fn (Step $s) => self::declarationOf($s)->id,
                     $step->members(),
                 );
             }
             $rows[] = $row;
         }
         return $rows;
+    }
+
+    /**
+     * Return a step's declaration after checking the duplicated identity fields.
+     * Pipeline controls use id()/label(); graph export uses the declaration, so
+     * allowing them to drift would give one step two different identities.
+     */
+    private static function declarationOf(Step $step): StepDeclaration
+    {
+        $decl = $step->declaration();
+        $id = $step->id();
+        if ($decl->id !== $id) {
+            throw new \InvalidArgumentException(
+                "StepGraph: step id '{$id}' does not match declaration id '{$decl->id}'"
+            );
+        }
+
+        $label = $step->label();
+        if ($decl->label !== $label) {
+            throw new \InvalidArgumentException(
+                "StepGraph: step '{$id}' label '{$label}' does not match declaration label '{$decl->label}'"
+            );
+        }
+
+        if ($step instanceof ConcurrentGroup) {
+            foreach ($step->members() as $member) {
+                self::declarationOf($member);
+            }
+        }
+
+        return $decl;
     }
 
     /**

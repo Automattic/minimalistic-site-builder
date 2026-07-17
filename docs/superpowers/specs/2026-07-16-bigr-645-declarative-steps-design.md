@@ -1,8 +1,8 @@
 # Design: Declarative steps + validated compositions (BIGR-645)
 
-**Linear:** [BIGR-645](https://linear.app/a8c/issue/BIGR-645/site-builder-make-each-step-declare-what-it-reads-and-writes)  
-**Branch:** `bigr-645-site-builder-make-each-step-declare-what-it-reads-and-writes`  
-**Status:** approved for implementation planning  
+**Linear:** [BIGR-645](https://linear.app/a8c/issue/BIGR-645/site-builder-make-each-step-declare-what-it-reads-and-writes)<br>
+**Branch:** `bigr-645-site-builder-make-each-step-declare-what-it-reads-and-writes`<br>
+**Status:** approved for implementation planning<br>
 **Related:** `docs/composition-and-extension.md` (“Two building-block decisions”); unblocks BIGR-648 workflow generation on wpcom without hand-maintained step order.
 
 ## Problem
@@ -79,7 +79,7 @@ Add:
 public function declaration(): StepDeclaration;
 ```
 
-Keep existing `id()`, `label()`, `run(Project): void`. Convention: `declaration()->id` / `label` match `id()` / `label()`. Enforced for default steps in unit tests (no runtime dual-write machinery).
+Keep existing `id()`, `label()`, `run(Project): void`. `StepGraph` rejects a step when `declaration()->id` / `label` do not match `id()` / `label()`, so pipeline controls and portable exports always use one identity.
 
 ### `ConcurrentGroup`
 
@@ -90,7 +90,7 @@ Implements `Step` as today. Its `declaration()`:
 - `writes` = union of members’ writes
 - `concurrent` = `true`
 
-Members must not depend on each other’s writes (same as today’s concurrent group model: only shared upstream inputs).
+Construction rejects duplicate member ids, overlapping writes, and any member read that overlaps another member’s write. Members may only share upstream inputs.
 
 ### Meaning of `concurrent`
 
@@ -98,6 +98,7 @@ Members must not depend on each other’s writes (same as today’s concurrent g
 |------|----------------|
 | `ConcurrentGroup` | `true` |
 | `SectionsStep` (header/footer/N sections via batch) | `true` |
+| `GenerateImagesStep` (image batches) | `true` |
 | `ThemeJsonStep` / `SectionPlanStep` alone | `false` |
 | Deterministic steps | `false` |
 
@@ -152,10 +153,12 @@ $composition = StepComposition::default(
 );
 
 $composition = $composition
+    // Configure seeds before a mutation that introduces a step reading them:
+    // every mutation returns a fully validated composition.
+    ->withSeeds('meta.json', 'plugins.json') // optional
     ->without('custom-motion')
     ->insertAfter('site-spec', $hostStep)
-    ->replace('fix-blocks', $otherFixerStep)
-    ->withSeeds('meta.json', 'plugins.json'); // optional
+    ->replace('fix-blocks', $otherFixerStep);
 
 $steps = $composition->steps(); // already validated on construction
 
@@ -165,6 +168,7 @@ $pipeline = new Pipeline($composition->steps(), $composition->seeds());
 ```
 
 - Mutations return a **new** instance (immutable style).
+- Every mutation validates immediately. Call `withSeeds(...)` **before** inserting or replacing a step that reads a new seed.
 - `without` / `insertAfter` / `replace` operate on **top-level** entries only (a `ConcurrentGroup` is one entry; removing only `theme-json` requires dissolving/rebuilding the group).
 - Default seeds: `['meta.json']`.
 - `StepComposition::default(...)` is the **single** place that constructs the CLI full graph (today’s `SiteBuilder::pipeline()` body moves here).
@@ -224,15 +228,15 @@ Order must remain exactly the current default `stepIds()` list. Declarations mus
 | section-rhythm | `sections.json`, `theme/parts/*` | `theme/parts/*` | no |
 | assemble-landing-page | `sections.json`, `theme/parts/*`, `theme/theme.json` | `theme/templates/*`, `theme/theme.json` | no |
 | collect-images | `theme/parts/*`, `theme/templates/*` | `images.json` | no |
-| normalize-layout | `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | no |
+| normalize-layout | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | no |
 | contrast-fix | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | same | no |
 | motion-sanity | `designDirection.json`, `sections.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | no |
-| fix-blocks | `theme/*` | `theme/*` | no |
+| fix-blocks | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | no |
 | page-styles | `theme/theme.json`, `theme/style.css`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `theme/style.css` | no |
-| custom-motion | `siteSpec.json`, `theme/style.css`, `theme/parts/*`, `theme/templates/*` | `theme/style.css` | no |
+| custom-motion | `siteSpec.json`, `designDirection.json`, `theme/style.css`, `theme/parts/*`, `theme/templates/*` | `theme/style.css` | no |
 | fonts-php | `theme/theme.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `theme/fonts.php` | no |
-| finalize-theme | `designDirection.json`, `theme/assets/motion/*` | `theme/functions.php` | no |
-| validate-theme | `theme/*` | — | no |
+| finalize-theme | `designDirection.json`, `theme/assets/motion/*` | `theme/functions.php`, `theme/assets/motion/*` | no |
+| validate-theme | `sections.json`, `theme/style.css`, `theme/theme.json`, required template/part files, `theme/parts/*`, `theme/templates/*` | — | no |
 
 `theme/*` means “the theme tree” for validation coverage: available `theme/*` covers any `theme/...` read; writing `theme/*` marks the whole tree available. Exact path strings will be confirmed against each step’s code during implementation; this table is the intent.
 

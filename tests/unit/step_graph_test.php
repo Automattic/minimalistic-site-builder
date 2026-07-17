@@ -1,10 +1,13 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ConcurrentGroup;
+use Automattic\SiteBuild\ConcurrentStep;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\StepGraph;
+use Automattic\SiteBuild\Tests\FakeLlm;
 
 /** @param list<string> $reads @param list<string> $writes */
 function graph_fake_step(
@@ -98,6 +101,53 @@ test('StepGraph rejects duplicate top-level ids', function () {
             graph_fake_step('site-spec', ['meta.json'], ['siteSpec.json']),
         ]);
     });
+});
+
+test('StepGraph rejects an id that differs from the declaration', function () {
+    $step = new class implements Step {
+        public function id(): string { return 'runtime-id'; }
+        public function label(): string { return 'Label'; }
+        public function run(Project $project): void {}
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration('declared-id', 'Label', [], []);
+        }
+    };
+
+    assert_throws(fn () => StepGraph::validate([$step], seeds: []));
+    assert_throws(fn () => StepGraph::describe([$step]));
+});
+
+test('StepGraph rejects a label that differs from the declaration', function () {
+    $step = new class implements Step {
+        public function id(): string { return 'step'; }
+        public function label(): string { return 'Runtime label'; }
+        public function run(Project $project): void {}
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration('step', 'Declared label', [], []);
+        }
+    };
+
+    assert_throws(fn () => StepGraph::validate([$step], seeds: []));
+});
+
+test('StepGraph checks the identity of concurrent group members', function () {
+    $member = new class implements ConcurrentStep {
+        public function id(): string { return 'runtime-id'; }
+        public function label(): string { return 'Label'; }
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration('declared-id', 'Label', [], []);
+        }
+        public function requests(Project $project): array { return []; }
+        public function consume(Project $project, array $results): void {}
+        public function run(Project $project): void {}
+    };
+
+    assert_throws(fn () => StepGraph::validate([
+        new ConcurrentGroup(new FakeLlm(), [$member]),
+    ], seeds: []));
 });
 
 test('StepGraph rejects empty step list', function () {
