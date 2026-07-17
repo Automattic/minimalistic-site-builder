@@ -5,6 +5,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 const COVER_WHITE = [255, 255, 255];
 const COVER_BLACK = [17, 17, 17];
@@ -24,9 +25,25 @@ test('cover-contrast declaration does not depend on the shared contrast report',
     };
     $declaration = (new CoverContrastStep($fixer))->declaration();
 
+    assert_true(in_array(GenerateImagesStep::COMPLETION_ARTIFACT, $declaration->reads, true));
     assert_true(!in_array('logs/contrast-report.txt', $declaration->reads, true));
     assert_true(!in_array('logs/contrast-report.txt', $declaration->writes, true));
     assert_true(!in_array('logs/cover-contrast-report.txt', $declaration->writes, true));
+});
+
+test('cover-contrast refuses to run without image-generation completion', function () {
+    $tmp = sys_get_temp_dir() . '/builder_cover_order_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $fixer = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return 'block-fixer: ok';
+        }
+    };
+
+    assert_throws(fn () => (new CoverContrastStep($fixer))->run($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('planCover keeps a passing cover unchanged', function () {
@@ -175,6 +192,7 @@ function cover_step_project(string $markup, string $imageColor): array
         ]]],
         'styles'   => ['elements' => ['link' => ['color' => ['text' => 'var(--wp--preset--color--primary)']]]],
     ]);
+    $project->writeJson(GenerateImagesStep::COMPLETION_ARTIFACT, ['status' => 'completed']);
     $project->writeText('theme/templates/front-page.html', $markup);
     $im = new Imagick();
     $im->newImage(64, 64, new ImagickPixel($imageColor));
@@ -207,6 +225,7 @@ test('cover-contrast writes its own report without changing the shared contrast 
     $tmp = sys_get_temp_dir() . '/builder_cover_report_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson(GenerateImagesStep::COMPLETION_ARTIFACT, ['status' => 'completed']);
     $project->writeText(
         'theme/templates/front-page.html',
         '<!-- wp:cover {"url":"theme:./assets/broken.png"} -->'

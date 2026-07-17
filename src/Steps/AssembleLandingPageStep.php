@@ -37,8 +37,18 @@ final class AssembleLandingPageStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['sections.json', 'theme/parts/*', 'theme/theme.json'],
-            writes: ['theme/templates/*', 'theme/theme.json'],
+            reads: [
+                'sections.json',
+                'theme/parts/header.html',
+                'theme/parts/footer.html',
+                'theme/parts/*',
+                'theme/theme.json',
+            ],
+            writes: [
+                'theme/templates/front-page.html',
+                'theme/templates/index.html',
+                'theme/theme.json',
+            ],
             concurrent: false,
         );
     }

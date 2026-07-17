@@ -15,7 +15,8 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
 /**
  * Step (post-images, deterministic): verify cover text against the REAL image.
  *
- * Input:  theme/assets/* (generated images) + theme/parts|templates/*.html
+ * Input:  images.generated.json (generation completion) + theme/assets/*
+ *         (generated images) + theme/parts|templates/*.html
  * Output: covers rewritten (higher dimRatio and/or flipped text colors) so
  *         their inner text reaches WCAG contrast against the dimmed image;
  *         findings written to logs/cover-contrast-report.txt.
@@ -31,9 +32,11 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  *
  * Mutations rewrite the block-comment JSON only, then the injected
  * BlockFixer re-serializes the saved HTML from those attributes (the same
- * contract as ContrastFixStep). Fails soft: no imagick, unreadable images,
- * or unparsable covers are skipped with a report line — a build must never
- * die on a readability polish.
+ * contract as ContrastFixStep). A missing or invalid generation-completion
+ * artifact is a phase-order violation and fails hard. Once that contract is
+ * satisfied, image-analysis problems fail soft: no imagick, unreadable images,
+ * or unparsable covers are skipped with a report line — a build must never die
+ * on a readability polish.
  */
 final class CoverContrastStep implements Step
 {
@@ -71,7 +74,13 @@ final class CoverContrastStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/theme.json', 'theme/assets/*', 'theme/parts/*', 'theme/templates/*'],
+            reads: [
+                GenerateImagesStep::COMPLETION_ARTIFACT,
+                'theme/theme.json',
+                'theme/assets/*',
+                'theme/parts/*',
+                'theme/templates/*',
+            ],
             writes: ['theme/parts/*', 'theme/templates/*'],
             concurrent: false,
         );
@@ -79,6 +88,14 @@ final class CoverContrastStep implements Step
 
     public function run(Project $project): void
     {
+        if (!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT)) {
+            throw new \RuntimeException('cover-contrast: image generation has not completed');
+        }
+        $completion = $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT);
+        if (($completion['status'] ?? null) !== 'completed') {
+            throw new \RuntimeException('cover-contrast: image generation completion artifact is invalid');
+        }
+
         if (!$project->exists('theme/theme.json')) {
             return;
         }
