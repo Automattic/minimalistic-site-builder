@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step 3 (deterministic): apply the project identity to the scaffolded theme
@@ -29,6 +30,17 @@ final class ApplyIdentityStep implements Step
     public function label(): string
     {
         return 'Apply project identity';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['siteSpec.json', 'theme/style.css', 'theme/readme.txt', ScaffoldPluginStep::MAIN_FILE],
+            writes: ['theme/style.css', 'theme/readme.txt', ScaffoldPluginStep::MAIN_FILE],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

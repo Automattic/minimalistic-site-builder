@@ -9,17 +9,19 @@ use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
  * Step (post-images, deterministic): verify cover text against the REAL image.
  *
- * Input:  theme/assets/* (generated images) + theme/parts|templates/*.html
+ * Input:  images.generated.json (generation completion) + theme/assets/*
+ *         (generated images) + theme/parts|templates/*.html
  *         + plugin/pages/*.html (the seeded page content, where every page's
  *         section covers live once assemble-pages has run)
  * Output: covers rewritten (higher dimRatio and/or flipped text colors) so
  *         their inner text reaches WCAG contrast against the dimmed image;
- *         findings appended to logs/contrast-report.txt.
+ *         findings written to logs/cover-contrast-report.txt.
  *
  * ContrastFixStep runs in the pipeline before any image exists, so covers
  * are only floored to dimRatio 40 there — the LLM picked the text color
@@ -32,13 +34,15 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  *
  * Mutations rewrite the block-comment JSON only, then the injected
  * BlockFixer re-serializes the saved HTML from those attributes (the same
- * contract as ContrastFixStep). Fails soft: no imagick, unreadable images,
- * or unparsable covers are skipped with a report line — a build must never
- * die on a readability polish.
+ * contract as ContrastFixStep). A missing or invalid generation-completion
+ * artifact is a phase-order violation and fails hard. Once that contract is
+ * satisfied, image-analysis problems fail soft: no imagick, unreadable images,
+ * or unparsable covers are skipped with a report line — a build must never die
+ * on a readability polish.
  */
 final class CoverContrastStep implements Step
 {
-    private const REPORT_FILE = 'contrast-report.txt';
+    private const REPORT_FILE = 'cover-contrast-report.txt';
 
     /** Above this the image is more curtain than picture. */
     public const MAX_DIM = 80;
@@ -67,8 +71,34 @@ final class CoverContrastStep implements Step
         return 'Cover contrast vs real images';
     }
 
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                GenerateImagesStep::COMPLETION_ARTIFACT,
+                'theme/theme.json',
+                'theme/assets/*',
+                'theme/parts/*',
+                'theme/templates/*',
+                'plugin/pages/*',
+            ],
+            writes: ['theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
+            concurrent: false,
+        );
+    }
+
     public function run(Project $project): void
     {
+        if (!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT)) {
+            throw new \RuntimeException('cover-contrast: image generation has not completed');
+        }
+        $completion = $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT);
+        if (($completion['status'] ?? null) !== 'completed') {
+            throw new \RuntimeException('cover-contrast: image generation completion artifact is invalid');
+        }
+
         if (!$project->exists('theme/theme.json')) {
             return;
         }
@@ -141,11 +171,9 @@ final class CoverContrastStep implements Step
         }
 
         if ($report !== []) {
-            $existing = $project->exists('logs/' . self::REPORT_FILE)
-                ? rtrim($project->readText('logs/' . self::REPORT_FILE)) . "\n" : '';
             $project->writeText(
                 'logs/' . self::REPORT_FILE,
-                $existing . "-- cover contrast (measured against generated images) --\n"
+                "-- cover contrast (measured against generated images) --\n"
                 . implode("\n", $report) . "\n"
             );
         }

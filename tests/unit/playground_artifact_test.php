@@ -39,7 +39,9 @@ test('playground artifact bundles runnable blueprint and full project archive on
     assert_true(in_array('project/demo-site/logs/home.png', $projectEntries, true), 'screenshots copied into archive');
     assert_true(in_array('project/demo-site/siteSpec.json', $projectEntries, true), 'project JSON copied into archive');
 
-    $blueprint = json_decode(zip_file($bundle, 'blueprint.json'), true);
+    $blueprintJson = zip_file($bundle, 'blueprint.json');
+    $blueprint = json_decode($blueprintJson, true);
+    assert_true(!str_contains($blueprintJson, '0-preview-offline.php'), 'published browser blueprint keeps networking enabled');
     assert_eq('Demo Site Name', $blueprint['steps'][0]['options']['blogname']);
     assert_eq('A test tagline', $blueprint['steps'][0]['options']['blogdescription']);
     assert_eq('mkdir', $blueprint['steps'][1]['step']);
@@ -80,6 +82,16 @@ test('blueprint installs and activates the content plugin after the theme', func
     assert_eq('demo-site-content/site-content.php', $steps[6]['pluginPath']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('offline guard step fails outbound HTTP fast for local CLI previews', function () {
+    $step = PlaygroundArtifact::offlineGuardStep();
+
+    assert_eq('writeFile', $step['step']);
+    assert_eq('/wordpress/wp-content/mu-plugins/0-preview-offline.php', $step['path']);
+    assert_contains('pre_oembed_result', $step['data']);
+    assert_contains('pre_http_request', $step['data']);
+    assert_contains('local Playground preview', $step['data']);
 });
 
 test('playground artifact URLs point a raw branch asset at Playground blueprint-url', function () {

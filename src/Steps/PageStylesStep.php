@@ -8,6 +8,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM): generate the CSS for the layout utility classes the sections used.
@@ -108,6 +109,23 @@ final class PageStylesStep implements Step
     public function label(): string
     {
         return 'Generate page styles';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                'theme/theme.json',
+                'theme/style.css',
+                'designDirection.json',
+                'theme/parts/*',
+                'theme/templates/*',
+            ],
+            writes: ['theme/style.css'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

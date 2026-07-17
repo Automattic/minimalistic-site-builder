@@ -369,11 +369,13 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
 
     $servers = [];
     foreach ($slugs as $i => $slug) {
-        // `exec` makes the child pid the php process itself, so teardown can
-        // walk and kill its npx/node subtree (same trick as bin/screenshot.php).
-        $cmd = 'exec php ' . escapeshellarg(repo_path('bin/playground.php'))
-            . ' ' . escapeshellarg($slug)
-            . ' --port=' . ($basePort + $i * PORT_STRIDE);
+        // php_child_command() uses `exec`, so teardown sees playground.php's
+        // own pid; it also pins the PHP binary and temp dir so both sides derive
+        // the same pid-stamped blueprint path.
+        $cmd = php_child_command(repo_path('bin/playground.php'), [
+            $slug,
+            '--port=' . ($basePort + $i * PORT_STRIDE),
+        ]);
         $proc = proc_open(
             $cmd,
             // Merge stderr into stdout: server chatter is informational here,
@@ -403,18 +405,9 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
 
     register_shutdown_function(static function () use ($servers): void {
         foreach ($servers as $s) {
-            if ($s['pid'] > 0) {
-                kill_tree($s['pid']);
-            }
-            // Catch the reparented node server, which the tree walk misses. The
-            // blueprint path is unique per project, so this stops exactly this
-            // project's server and nothing else's.
-            $blueprint = repo_path("projects/{$s['slug']}/.playground-blueprint.json");
-            @exec('pkill -f ' . escapeshellarg(preg_quote($blueprint, '~')) . ' 2>/dev/null');
-            if (is_resource($s['proc'])) {
-                proc_terminate($s['proc']);
-                proc_close($s['proc']);
-            }
+            // Thanks to `exec` in the spawn command, $s['pid'] is
+            // playground.php's own pid — the one its blueprint is stamped with.
+            teardown_playground($s['proc'], $s['pid'], playground_blueprint_path($s['slug'], $s['pid']));
         }
     });
     if (function_exists('pcntl_async_signals')) {
@@ -469,15 +462,4 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
             unset($servers[$idx]);
         }
     }
-}
-
-/** Recursively SIGTERM a process and all its descendants (leaves first). */
-function kill_tree(int $pid): void
-{
-    $children = [];
-    @exec('pgrep -P ' . $pid . ' 2>/dev/null', $children);
-    foreach ($children as $child) {
-        kill_tree((int) $child);
-    }
-    @exec('kill -TERM ' . $pid . ' 2>/dev/null');
 }
