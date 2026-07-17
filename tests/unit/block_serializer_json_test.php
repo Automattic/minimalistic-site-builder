@@ -158,7 +158,7 @@ test('seeded finite-double formatting differential matches Node', function () {
         skip_test('Node is unavailable; committed number-boundary vectors still ran');
     }
 
-    $helper = repo_path('bin/block-fixer/test/js-json-vectors.js');
+    $helper = repo_path('tests/tools/js-json-vectors.js');
     $command = escapeshellarg($node[0]) . ' ' . escapeshellarg($helper)
         . ' ' . escapeshellarg('0x243f6a8885a308d3') . ' 1024 2>&1';
     $lines = [];

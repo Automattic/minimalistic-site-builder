@@ -12,22 +12,16 @@ cp .env.example .env
 # Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
-npm ci   # optional; installs the development oracle and screenshot helpers
+npm ci   # optional; installs screenshot helpers
 ```
 
 Theme generation and block fixing require PHP 8.1+ only. No Composer is needed:
 the source set autoloads through the dependency-free PSR-4 loader
 `autoload.php`, loaded by `src/bootstrap.php`.
 
-The production block fixer is implemented in PHP and needs neither Node nor
-`node_modules` at runtime. Set `BLOCK_FIXER=node` to select the pinned legacy
-Node implementation during development. The fixed-point tooling around that
-implementation remains the parity oracle, not a production dependency. It is
-pinned to Node 22.19.0 and must be installed from the lockfile with `npm ci`;
-CI uses the immutable image recorded in
-`bin/block-fixer/lib/oracleFingerprint.js`. WordPress Playground previews and
-screenshot tooling also use Node. Use
-`php bin/build.php "…" --no-serve` for a PHP-only build.
+The block fixer is implemented entirely in PHP and needs neither Node nor
+`node_modules`. WordPress Playground previews and screenshot tooling still use
+Node. Use `php bin/build.php "…" --no-serve` for a PHP-only build.
 
 ## Build a site
 

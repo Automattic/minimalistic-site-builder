@@ -2,32 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
-use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\ThemeValidator;
-
-/**
- * Unit tests for NodeBlockFixer::summaryLine and FixBlocksStep → BlockFixer.
- */
-
-test('summaryLine returns the [fix-templates] summary, ignoring the verbose report', function () {
-    $stdout = "  FIXED  parts/header.html\n"
-        . "         - core/button: Expected attribute `class` ...\n"
-        . "  ok     parts/footer.html\n"
-        . "\n[fix-templates] 7/11 file(s) re-serialized, 14 issue(s) fixed across 1 theme(s).";
-
-    assert_eq(
-        '[fix-templates] 7/11 file(s) re-serialized, 14 issue(s) fixed across 1 theme(s).',
-        NodeBlockFixer::summaryLine($stdout)
-    );
-});
-
-test('summaryLine falls back when no summary line is present', function () {
-    assert_eq('block-fixer: no files changed', NodeBlockFixer::summaryLine("   \n  noise\n"));
-});
 
 test('FixBlocksStep delegates repair to the injected BlockFixer', function () {
     $fake = new class implements BlockFixer {

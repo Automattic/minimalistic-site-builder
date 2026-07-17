@@ -1,15 +1,6 @@
 'use strict';
 
-/**
- * Seeded JavaScript-number vectors for the PHP JsJsonEncoder differential.
- *
- * Usage:
- *   node js-json-vectors.js [seed] [count]
- *
- * The bit pattern, rather than a decimal input spelling, is the interchange
- * format so PHP and Node are guaranteed to stringify the same IEEE-754 value.
- */
-
+/** Seeded JavaScript-number vectors for the PHP JsJsonEncoder differential. */
 const MASK_64 = (1n << 64n) - 1n;
 
 function nextBits(state) {
@@ -36,11 +27,9 @@ function serializeAttributes(attributes) {
         .replaceAll('\\"', '\\u0022');
 }
 
-function vectors(seed = 0x6a09e667f3bcc909n, count = 512) {
+function vectors(seed, count) {
     let state = BigInt(seed) & MASK_64;
-    if (state === 0n) {
-        state = 1n;
-    }
+    if (state === 0n) state = 1n;
     const output = [];
     for (let index = 0; index < count; index++) {
         state = nextBits(state);
@@ -54,19 +43,13 @@ function vectors(seed = 0x6a09e667f3bcc909n, count = 512) {
     return output;
 }
 
-if (require.main === module) {
-    const seed = process.argv[2] === undefined
-        ? 0x6a09e667f3bcc909n
-        : BigInt(process.argv[2]);
-    const count = process.argv[3] === undefined ? 512 : Number(process.argv[3]);
-    if (!Number.isSafeInteger(count) || count < 1 || count > 100000) {
-        throw new Error('count must be an integer from 1 through 100000');
-    }
-    process.stdout.write(JSON.stringify({
-        seed: `0x${seed.toString(16)}`,
-        count,
-        vectors: vectors(seed, count),
-    }) + '\n');
+const seed = process.argv[2] === undefined ? 0x6a09e667f3bcc909n : BigInt(process.argv[2]);
+const count = process.argv[3] === undefined ? 512 : Number(process.argv[3]);
+if (!Number.isSafeInteger(count) || count < 1 || count > 100000) {
+    throw new Error('count must be an integer from 1 through 100000');
 }
-
-module.exports = { doubleFromBits, nextBits, serializeAttributes, vectors };
+process.stdout.write(JSON.stringify({
+    seed: `0x${seed.toString(16)}`,
+    count,
+    vectors: vectors(seed, count),
+}) + '\n');

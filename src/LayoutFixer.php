@@ -23,7 +23,7 @@ namespace Automattic\SiteBuild;
  *
  * This fixer parses the block-comment grammar, repairs those patterns by
  * editing the comment JSON attributes, and leaves the authored HTML
- * untouched — it is meant to run immediately BEFORE the Node block-fixer,
+ * untouched — it is meant to run immediately before the PHP block serializer,
  * which re-serializes every block from its comment attributes and thereby
  * syncs the HTML (align classes etc.) with what this pass wrote. The one
  * exception is inline gap CSS (see mirrorHtmlOnlyGap): blockGap is rendered
@@ -171,7 +171,7 @@ final class LayoutFixer
      * A vertical padding/margin declaration present ONLY in a container's
      * inline HTML (no attribute anywhere, canonical or misplaced) is deleted
      * by re-serialization and rejected by the rhythm gate. Mirror-copy the
-     * declared value into style.spacing.* — the inverse of the Node fixer's
+     * declared value into style.spacing.* — the inverse of the serializer's
      * sync direction — so the authored rhythm survives (BIGR-674 case 1).
      * Only sides absent from the attributes are copied: a declared attribute
      * (including SectionRhythm's owned root values, which that pass also
@@ -670,7 +670,7 @@ final class LayoutFixer
      * Repair attribute JSON containing a stray closer: an extra `}` splits
      * the opener into a valid prefix and dangling members (tbilisi24 wrote
      * `{"style":{...,"padding":{...}}},"layout":{...}}`), so json_decode fails,
-     * this fixer skips the whole file, and the Node fixer erases EVERY
+     * this fixer skips the whole file, and block serialization erases every
      * attribute of the block — the fatal rhythm drop plus silent losses.
      * The repair stays mechanical by refusing to guess: every single-closer
      * deletion is tried (see withoutPrematureClosers), and the rewrite is
@@ -873,7 +873,7 @@ final class LayoutFixer
     /**
      * Splice every dirty node's re-encoded opening comment — plus any rule's
      * explicit HTML edits — back into the original markup. Apart from those
-     * edits the HTML is left as authored; the Node block-fixer re-serializes
+     * edits the HTML is left as authored; the PHP block serializer re-serializes
      * it from these attributes right after. Comment spans and HTML-edit spans
      * never overlap (edits target attribute values inside wrapper tags), so
      * one descending-offset pass keeps every recorded byte offset valid.

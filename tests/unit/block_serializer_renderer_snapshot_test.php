@@ -5,7 +5,6 @@ use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
 use Automattic\SiteBuild\BlockSerializer\Save\SaveStrategy;
 use Automattic\SiteBuild\BlockSerializer\Save\SaveStrategyRegistry;
 
-$rendererSnapshotRepositoryRoot = dirname(__DIR__, 2);
 $rendererSnapshotPath = dirname(__DIR__) . '/fixtures/block-fixer/renderer-probes.json';
 
 /** @return array<string,mixed> */
@@ -21,67 +20,11 @@ $loadRendererSnapshot = static function () use ($rendererSnapshotPath): array {
     return $snapshot;
 };
 
-test('renderer snapshot is tied to the pinned Node oracle and current registry', function () use (
-    $loadRendererSnapshot,
-    $rendererSnapshotRepositoryRoot,
-) {
+test('renderer snapshot remains a complete immutable PHP regression input', function () use ($loadRendererSnapshot) {
     $snapshot = $loadRendererSnapshot();
     assert_eq(1, $snapshot['schemaVersion'] ?? null);
-
-    $provenance = $snapshot['provenance'] ?? null;
-    assert_true(is_array($provenance), 'renderer snapshot has provenance');
-    assert_eq('1.0.0', $provenance['generator']['version'] ?? null);
-
-    foreach ([
-        'generator',
-        'oracleAdapter',
-        'oracleManifest',
-        'packageLock',
-        'supportedBlocks',
-        'registeredRuntime',
-        'generatedRegistry',
-    ] as $input) {
-        $relativePath = $provenance[$input]['path'] ?? null;
-        $expectedHash = $provenance[$input]['sha256'] ?? null;
-        assert_true(is_string($relativePath) && $relativePath !== '', "{$input} provenance path");
-        assert_true(!str_starts_with($relativePath, '/'), "{$input} path is repository-relative");
-        assert_true(!str_contains($relativePath, '..'), "{$input} path stays in the repository");
-        assert_true(is_string($expectedHash) && preg_match('/^[a-f0-9]{64}$/', $expectedHash) === 1, "{$input} SHA-256");
-        $actualHash = hash_file('sha256', $rendererSnapshotRepositoryRoot . '/' . $relativePath);
-        assert_eq($expectedHash, $actualHash, "{$input} provenance drift");
-    }
-
-    $manifestPath = $rendererSnapshotRepositoryRoot . '/'
-        . $provenance['oracleManifest']['path'];
-    $manifestContents = file_get_contents($manifestPath);
-    assert_true($manifestContents !== false, 'pinned oracle manifest is readable');
-    $manifest = json_decode($manifestContents, true, flags: JSON_THROW_ON_ERROR);
-    assert_true(is_array($manifest), 'pinned oracle manifest is an object');
-    assert_eq($manifest['fingerprint'] ?? null, $provenance['oracleFingerprint'] ?? null);
-    assert_eq($manifest['fingerprint']['node'] ?? null, $provenance['runtime'] ?? null);
-    assert_eq(
-        $manifest['fingerprint']['packageLockSha256'] ?? null,
-        $provenance['packageLock']['sha256'] ?? null,
-    );
-    assert_eq(
-        $manifest['registry']['runtimeJsonSha256'] ?? null,
-        $provenance['registeredRuntime']['sha256'] ?? null,
-    );
-    assert_eq(
-        $manifest['registry']['generatedPhpSha256'] ?? null,
-        $provenance['generatedRegistry']['sha256'] ?? null,
-    );
-
-    $implementationSources = $manifest['fingerprint']['implementationSources'] ?? null;
-    assert_true(is_array($implementationSources), 'oracle implementation source hashes are pinned');
-    foreach ($implementationSources as $relativePath => $expectedHash) {
-        assert_true(is_string($relativePath) && is_string($expectedHash), 'valid implementation source row');
-        assert_eq(
-            $expectedHash,
-            hash_file('sha256', $rendererSnapshotRepositoryRoot . '/' . $relativePath),
-            "oracle implementation source drift: {$relativePath}",
-        );
-    }
+    assert_true(is_array($snapshot['coverage'] ?? null), 'renderer snapshot has coverage metadata');
+    assert_true(is_array($snapshot['cases'] ?? null), 'renderer snapshot has cases');
 });
 
 test('PHP save strategies exactly replay every checked renderer probe', function () use ($loadRendererSnapshot) {
@@ -110,7 +53,7 @@ test('PHP save strategies exactly replay every checked renderer probe', function
         assert_true(!isset($ids[$id]), "duplicate renderer probe id: {$id}");
         $ids[$id] = true;
         assert_true(is_string($name) && $name !== '', "probe {$id} has a block name");
-        assert_true(!isset($case['error']), "checked Node renderer probe failed: {$id}");
+        assert_true(!isset($case['error']), "checked renderer probe failed: {$id}");
         assert_true(isset($case['attributes']) && is_array($case['attributes']), "probe {$id} has attributes");
         assert_true(isset($case['innerSerialized']) && is_string($case['innerSerialized']), "probe {$id} has serialized inner blocks");
         assert_true(array_key_exists('expected', $case) && is_string($case['expected']), "probe {$id} has expected bytes");

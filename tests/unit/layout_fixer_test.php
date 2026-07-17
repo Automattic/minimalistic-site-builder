@@ -376,7 +376,7 @@ test('layout fixer leaves correctly nested spacing attributes untouched', functi
 
 test('layout fixer repairs attribute JSON whose only reading deletes a stray closer', function () {
     // A stray `}` closes the attrs object before ",layout" — json_decode
-    // fails and the Node fixer would erase EVERY attribute of the block.
+    // fails and block serialization would erase every attribute of the block.
     // Deleting any brace of the run yields the same, single valid object, so
     // the repair is unambiguous and applied.
     $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
