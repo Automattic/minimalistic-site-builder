@@ -29,7 +29,7 @@ final class Pipeline
      * Every id `--until` accepts: each step id, plus each member id of a
      * concurrent group (whose own id is its members joined by '+'). So
      * `--until=theme-json` is a valid stop even though it runs inside the
-     * `theme-json+section-plan` group.
+     * `theme-json+page-plan` group.
      *
      * @return string[]
      */

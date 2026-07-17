@@ -31,6 +31,12 @@ use Automattic\SiteBuild\ProjectStore;
  * --no-screenshot.
  *
  * Options:
+ *   --multi-page    let each site plan inner pages beyond the homepage.
+ *                   Off by default: builds produce ONLY the landing page.
+ *   --pages="…"     (requires --multi-page) fix every site's page list —
+ *                   comma-separated titles, the FIRST one is the homepage —
+ *                   instead of letting the LLM invent one per site;
+ *                   forwarded verbatim to each child build.
  *   --with-images   also generate the AI_IMAGE placeholders into real assets.
  *   --only=<slug>   build only the entry whose slug matches.
  *   --parallel=<n>  cap on concurrent builds (default: all entries at once).
@@ -48,6 +54,8 @@ use Automattic\SiteBuild\ProjectStore;
 require_once __DIR__ . '/../src/bootstrap.php';
 
 $withImages = false;
+$multiPage = false;
+$pagesArg = null;
 $only = null;
 $serve = false;
 $screenshot = true;
@@ -57,6 +65,8 @@ $provider = null;
 $file = repo_path('eval/theme-prompts.json');
 foreach (array_slice($argv, 1) as $a) {
     if ($a === '--with-images') { $withImages = true; }
+    elseif ($a === '--multi-page') { $multiPage = true; }
+    elseif (str_starts_with($a, '--pages=')) { $pagesArg = substr($a, 8); }
     elseif (str_starts_with($a, '--only=')) { $only = substr($a, 7); }
     elseif (str_starts_with($a, '--provider=')) { $provider = substr($a, 11); }
     elseif (str_starts_with($a, '--parallel=')) { $parallel = max(1, (int) substr($a, 11)); }
@@ -68,9 +78,17 @@ foreach (array_slice($argv, 1) as $a) {
     elseif ($a === '--screenshot') { $screenshot = true; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
         exit(1);
     }
+}
+
+// --pages fixes WHICH pages each site gets; --multi-page owns WHETHER inner
+// pages exist at all, so a list without the flag is a contradiction — fail
+// loud here rather than let every child build fail with the same message.
+if ($pagesArg !== null && !$multiPage) {
+    fwrite(STDERR, "--pages requires --multi-page.\n");
+    exit(1);
 }
 
 // Validate --provider once up front and forward it to each child build.php, so
@@ -148,7 +166,9 @@ foreach ($entries as $i => $entry) {
             . ' --slug=' . escapeshellarg($project->slug())
             . ' --no-serve'
             . ($provider !== null ? ' --provider=' . escapeshellarg($provider) : '')
-            . ($withImages ? ' --with-images' : ''),
+            . ($withImages ? ' --with-images' : '')
+            . ($multiPage ? ' --multi-page' : '')
+            . ($pagesArg !== null ? ' --pages=' . escapeshellarg($pagesArg) : ''),
     ];
 }
 

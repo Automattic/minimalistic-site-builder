@@ -3,12 +3,16 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\MarkupSanitizer;
+
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
 {
     /**
-     * Strip an accidental code fence, require block markup, and repair common
-     * malformed preset references.
+     * Strip an accidental code fence, require block markup, repair common
+     * malformed preset references, and strip script-capable markup. Every
+     * part is untrusted model output headed for templates and stored post
+     * content, so this is the one intake it all passes through.
      */
     public static function normalize(string $text, string $key): string
     {
@@ -16,7 +20,7 @@ final class GeneratedMarkup
         if ($markup === '' || !str_contains($markup, 'wp:')) {
             throw new \RuntimeException("part '{$key}' is not block markup");
         }
-        return self::normalizePresetRefs(rtrim($markup));
+        return MarkupSanitizer::sanitize(self::normalizePresetRefs(rtrim($markup)));
     }
 
     /**

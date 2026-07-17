@@ -62,20 +62,39 @@ final class SiteBuilder
      * Create a project directory and seed meta.json. Null slug → free random
      * adjective-noun name (claimed atomically). Explicit slug is used as-is
      * (re-runs can target the same folder). Merges over any pre-seeded meta.
+     *
+     * $multiPage lets the site-spec step plan inner pages; the default builds
+     * ONLY the landing page. Recorded in meta.json as `multi_page` so the
+     * pipeline needs no further wiring.
+     *
+     * $pages (multi-page builds only) fixes the page list instead of letting
+     * the site-spec step invent one via LLM: entries are title strings or page
+     * maps ({title, slug, purpose, children}), first entry = the homepage.
+     * Recorded in meta.json as `pages`; [] records nothing, so a pre-seeded
+     * `pages` (a host whose site spec already names its pages) survives the
+     * merge and behaves exactly like the argument.
+     *
+     * @param array<int,string|array<string,mixed>> $pages
      */
-    public function createProject(string $prompt, ?string $slug = null): Project
+    public function createProject(string $prompt, ?string $slug = null, bool $multiPage = false, array $pages = []): Project
     {
         $store = $this->store();
         $project = $slug === null
             ? $store->claimNew(ProjectStore::randomSlug())
             : $store->create($slug);
 
-        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-        $project->writeJson('meta.json', array_merge($meta, [
+        $seed = [
             'prompt'           => $prompt,
             'provisional_slug' => $project->slug(),
             'created_at'       => gmdate('c'),
-        ]));
+            'multi_page'       => $multiPage,
+        ];
+        if ($pages !== []) {
+            $seed['pages'] = array_values($pages);
+        }
+
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        $project->writeJson('meta.json', array_merge($meta, $seed));
 
         return $project;
     }

@@ -368,3 +368,70 @@ test('gradient backgrounds are checked against every stop', function () {
     assert_eq(false, $res['findings'] === []);
     assert_eq(false, $res['findings'][0]['repaired']);
 });
+
+// ── overlay-header lint (ContrastFixStep) ────────────────────────────────
+
+/** Temp project with a palette, an overlay (or standard) header, and two pages. */
+function overlay_lint_project(bool $overlay): array
+{
+    $tmp = sys_get_temp_dir() . '/builder_overlay_' . uniqid();
+    $project = (new Automattic\SiteBuild\ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', [
+        'version'  => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+            ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+            ['slug' => 'primary', 'color' => '#1D4ED8', 'name' => 'Primary'],
+        ]]],
+    ]);
+    $className = $overlay ? 'header-overlay' : 'site-header';
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"className":"' . $className . '","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group ' . $className . ' has-base-color has-text-color"><!-- wp:site-title /--></div>'
+        . '<!-- /wp:group -->'
+    );
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [['slug' => 'hero']]],
+        ['slug' => 'menu', 'front' => false, 'sections' => [['slug' => 'menu-hero']]],
+    ]]);
+    // Homepage opens dark (light header text reads); menu opens on base (it doesn't).
+    $project->writeText(
+        'theme/parts/page-home--hero.html',
+        '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-contrast-background-color has-base-color has-background has-text-color">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Dark opening</h2><!-- /wp:heading --></div><!-- /wp:group -->'
+    );
+    $project->writeText(
+        'theme/parts/page-menu--menu-hero.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">Light opening</h2><!-- /wp:heading --></div><!-- /wp:group -->'
+    );
+    return [$project, $tmp];
+}
+
+test('overlay header text is linted against every page opening section', function () {
+    [$project, $tmp] = overlay_lint_project(overlay: true);
+    ob_start();
+    (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project);
+    ob_end_clean();
+    $log = $project->readText('logs/contrast-report.txt');
+    assert_contains("overlay header text base floats over page 'menu'", $log);
+    assert_true(
+        !str_contains($log, "floats over page 'home'"),
+        'the dark homepage opening must pass'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('non-overlay headers skip the overlay lint', function () {
+    [$project, $tmp] = overlay_lint_project(overlay: false);
+    ob_start();
+    (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project);
+    ob_end_clean();
+    assert_true(
+        !str_contains($project->readText('logs/contrast-report.txt'), 'overlay header'),
+        'a solid header must not trigger overlay warnings'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

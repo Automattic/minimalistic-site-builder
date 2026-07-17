@@ -51,12 +51,12 @@ test('stopIds expands a concurrent group into its member ids', function () {
     $llm = new FakeLlm();
     $group = new ConcurrentGroup($llm, [
         new RecordingConcurrentStep('theme-json', ['out' => ['prompt' => 'P']]),
-        new RecordingConcurrentStep('section-plan', ['out' => ['prompt' => 'P']]),
+        new RecordingConcurrentStep('page-plan', ['out' => ['prompt' => 'P']]),
     ]);
     $pipeline = new Pipeline([new RecorderStep('site-spec'), $group, new RecorderStep('sections')]);
 
-    assert_eq('theme-json+section-plan', $group->id());
-    assert_eq(['site-spec', 'theme-json', 'section-plan', 'sections'], $pipeline->stopIds());
+    assert_eq('theme-json+page-plan', $group->id());
+    assert_eq(['site-spec', 'theme-json', 'page-plan', 'sections'], $pipeline->stopIds());
 });
 
 test('--until stops after a concurrent group when given a member id', function () {
@@ -66,10 +66,10 @@ test('--until stops after a concurrent group when given a member id', function (
 
     $llm = new FakeLlm();
     $llm->queueJson(['v' => 1]); // theme-json member
-    $llm->queueJson(['v' => 2]); // section-plan member
+    $llm->queueJson(['v' => 2]); // page-plan member
     $group = new ConcurrentGroup($llm, [
         new RecordingConcurrentStep('theme-json', ['out' => ['prompt' => 'P']]),
-        new RecordingConcurrentStep('section-plan', ['out' => ['prompt' => 'P']]),
+        new RecordingConcurrentStep('page-plan', ['out' => ['prompt' => 'P']]),
     ]);
     $pipeline = new Pipeline([new RecorderStep('site-spec'), $group, new RecorderStep('sections')]);
 

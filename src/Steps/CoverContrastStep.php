@@ -17,6 +17,8 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  *
  * Input:  images.generated.json (generation completion) + theme/assets/*
  *         (generated images) + theme/parts|templates/*.html
+ *         + plugin/pages/*.html (the seeded page content, where every page's
+ *         section covers live once assemble-pages has run)
  * Output: covers rewritten (higher dimRatio and/or flipped text colors) so
  *         their inner text reaches WCAG contrast against the dimmed image;
  *         findings written to logs/cover-contrast-report.txt.
@@ -80,8 +82,9 @@ final class CoverContrastStep implements Step
                 'theme/assets/*',
                 'theme/parts/*',
                 'theme/templates/*',
+                'plugin/pages/*',
             ],
-            writes: ['theme/parts/*', 'theme/templates/*'],
+            writes: ['theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
             concurrent: false,
         );
     }
@@ -113,14 +116,17 @@ final class CoverContrastStep implements Step
         if (!extension_loaded('imagick')) {
             $report[] = 'cover-contrast: imagick not available — covers not verified against images';
         } else {
-            foreach (['parts', 'templates'] as $dir) {
-                foreach (glob($project->themePath($dir . '/*.html')) ?: [] as $abs) {
+            // The theme's chrome/templates AND the content plugin's pages: by
+            // the time this step runs, assemble-pages has moved every page's
+            // sections (the covers that matter most) into plugin/pages/*.
+            foreach (['theme/parts', 'theme/templates', 'plugin/pages'] as $dir) {
+                foreach (glob($project->path($dir . '/*.html')) ?: [] as $abs) {
                     $rel = $dir . '/' . basename($abs);
-                    $original = $project->readText('theme/' . $rel);
+                    $original = $project->readText($rel);
                     $doc = BlockMarkup::parse($original);
                     $fileRepairs = $this->fixCovers($project, $doc, $helper, $linkDefault, $rel, $report);
                     if ($fileRepairs > 0) {
-                        $project->writeText('theme/' . $rel, $doc->render());
+                        $project->writeText($rel, $doc->render());
                         $written[$rel] = $original;
                         $repaired += $fileRepairs;
                     }
@@ -130,18 +136,25 @@ final class CoverContrastStep implements Step
 
         // Re-sync the saved HTML with the rewritten attributes, and re-assert
         // the header/footer layout contract the fixer can migrate away
-        // (same follow-up FixBlocksStep does).
+        // (same follow-up FixBlocksStep does). The fixer scans a directory's
+        // templates/, parts/, and pages/ subdirs, so the plugin dir (markup in
+        // pages/) goes through the same entry point as the theme.
         if ($written !== []) {
             try {
-                $this->fixer->fix($project->themePath());
-                foreach (['parts/header.html', 'parts/footer.html'] as $rel) {
-                    if (!$project->exists('theme/' . $rel)) {
+                if (self::anyUnder($written, 'theme/')) {
+                    $this->fixer->fix($project->themePath());
+                }
+                if (self::anyUnder($written, 'plugin/')) {
+                    $this->fixer->fix($project->pluginPath());
+                }
+                foreach (['theme/parts/header.html', 'theme/parts/footer.html'] as $rel) {
+                    if (!$project->exists($rel)) {
                         continue;
                     }
-                    $markup = $project->readText('theme/' . $rel);
+                    $markup = $project->readText($rel);
                     $constrained = GeneratedMarkup::constrainedPart($markup);
                     if ($constrained !== $markup) {
-                        $project->writeText('theme/' . $rel, $constrained);
+                        $project->writeText($rel, $constrained);
                     }
                 }
             } catch (\RuntimeException $e) {
@@ -149,7 +162,7 @@ final class CoverContrastStep implements Step
                 // saved HTML — without the fixer's re-serialization that drift
                 // would ship. Restore the originals instead of keeping it.
                 foreach ($written as $rel => $original) {
-                    $project->writeText('theme/' . $rel, $original);
+                    $project->writeText($rel, $original);
                 }
                 $repaired = 0;
                 $report[] = 'cover-contrast: block re-serialization failed, cover repairs rolled back: '
@@ -169,6 +182,21 @@ final class CoverContrastStep implements Step
             "  cover-contrast: %d cover(s) adjusted (details: logs/%s)\n",
             $repaired, self::REPORT_FILE
         );
+    }
+
+    /**
+     * Whether any written file lives under the given project-relative prefix.
+     *
+     * @param array<string,string> $written rel => original markup
+     */
+    private static function anyUnder(array $written, string $prefix): bool
+    {
+        foreach (array_keys($written) as $rel) {
+            if (str_starts_with($rel, $prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -342,3 +342,44 @@ test('regionStats measures the sampled half and spreads low/high on a split imag
     assert_true($center[0][0] < 15, "center low percentile should be dark, got {$center[0][0]}");
     assert_true($center[2][0] > 240, "center high percentile should be bright, got {$center[2][0]}");
 });
+
+test('covers in the content plugin pages are verified and repaired too', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    // After assemble-pages every page's sections live in plugin/pages/*, not
+    // theme parts — the step must follow the content there.
+    $markup = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":40} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    [$project, $tmp] = cover_step_project(
+        '<!-- wp:template-part {"slug":"header"} /-->',
+        'white'
+    );
+    $project->writeText('plugin/pages/menu.html', $markup);
+    cover_step_run($project);
+    $out = $project->readText('plugin/pages/menu.html');
+    assert_true(!str_contains($out, '"dimRatio":40'), 'a plugin-page cover must be re-checked against the real image');
+    assert_contains('plugin/pages/menu.html', $project->readText('logs/cover-contrast-report.txt'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('a fixer failure rolls plugin-page cover repairs back too', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    $markup = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":40} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    [$project, $tmp] = cover_step_project(
+        '<!-- wp:template-part {"slug":"header"} /-->',
+        'white'
+    );
+    $project->writeText('plugin/pages/menu.html', $markup);
+    cover_step_run($project, failFixer: true);
+    assert_eq($markup, $project->readText('plugin/pages/menu.html'),
+        'plugin-page attribute edits must not ship without the fixer re-sync');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

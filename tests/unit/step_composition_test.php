@@ -40,10 +40,10 @@ test('StepComposition default matches CLI step order and validates', function ()
     );
     $steps = $c->steps();
     assert_eq([
-        'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+section-plan', 'sections', 'section-rhythm', 'assemble-landing-page',
+        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'theme-json+page-plan', 'sections', 'section-rhythm',
         'collect-images', 'normalize-layout', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-        'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
+        'assemble-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
 });
 
@@ -102,9 +102,9 @@ test('StepComposition describe concurrent flags on sections and group', function
         $byId[$row['id']] = $row;
     }
     assert_eq(true, $byId['sections']['concurrent']);
-    assert_eq(true, $byId['theme-json+section-plan']['concurrent']);
+    assert_eq(true, $byId['theme-json+page-plan']['concurrent']);
     assert_eq(false, $byId['site-spec']['concurrent']);
-    assert_eq(['theme-json', 'section-plan'], $byId['theme-json+section-plan']['members']);
+    assert_eq(['theme-json', 'page-plan'], $byId['theme-json+page-plan']['members']);
 });
 
 test('StepComposition configures new seeds before inserting a step that reads them', function () {

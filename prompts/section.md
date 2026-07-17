@@ -9,11 +9,17 @@ THEME TOKENS (theme.json):
 DESIGN DIRECTION (the committed creative concept for THIS site — honor its shape language, hero composition and signature device in the layout):
 {{design_direction}}
 
+THIS SECTION'S PAGE: "{{page_title}}" — one page of a multi-page site. The outline below is THIS page's outline.
+
 THE FULL PAGE OUTLINE (for context — build ONLY the section marked below):
 {{outline}}
 
+SITE PAGES (the whole site, for internal links):
+{{site_pages}}
+
 SECTION TO BUILD:
   Title:    {{section_title}}
+  Slug:     {{section_slug}}
   Type:     {{section_type}}
   Purpose:  {{section_purpose}}
   Notes:    {{content_notes}}
@@ -23,7 +29,9 @@ SECTION TO BUILD:
 Rules:
 - The markup is the section's content ONLY — no header, no footer, no <html>/<body>. Do NOT emit a wp:template-part.
 - NEVER include site chrome in the section: no wordmark, no site-title lockup, no navigation or menu links — even if the DESIGN DIRECTION, hero composition, or Notes mention them. The real site header is a separate part rendered above (often overlaid on) your section; duplicating it here puts two headers on the page. If the Notes say "wordmark top-left" or "nav reduced to one link", skip that furniture and build only the section's own content.
-- Wrap the whole section in a single top-level <!-- wp:group --> that ALWAYS declares `"layout":{"type":"constrained"}` — including when the band is `"align":"full"` (a full-bleed band is align:full PLUS constrained layout). A top-level group with no "layout" attribute is flow layout: its children render edge-to-edge at the viewport with no page gutter, which reads as broken.
+- INTERNAL LINKS: when a button or link leads to another page of THIS site, use that page's path from SITE PAGES verbatim (e.g. href="/menu/") — never a placeholder "#" when a real page exists, and never a path that isn't in the list. Do not link the page to itself; external/social links may stay placeholders.
+- NO FORM MARKUP: never emit `<form>`, `<input>`, `<textarea>`, or `<select>` — the site has no form backend, so a form is dead UI that silently discards whatever visitors type. Where the brief asks for a contact, booking, or signup form, present the spec's contact facts instead and make the CTA a mailto: button minted at the spec's `email_domain` (or a link to the page that holds those facts).
+- Wrap the whole section in a single top-level <!-- wp:group --> that ALWAYS declares `"layout":{"type":"constrained"}` — including when the band is `"align":"full"` (a full-bleed band is align:full PLUS constrained layout). A top-level group with no "layout" attribute is flow layout: its children render edge-to-edge at the viewport with no page gutter, which reads as broken. Give that group the section's anchor — `"anchor":"{{section_slug}}"` in its JSON attributes and the matching `id="{{section_slug}}"` on its opening tag — so navigation and buttons can deep-link it (href="#{{section_slug}}" within the page, href="{{page_path}}#{{section_slug}}" from other pages — a deep link always carries the owning page's path, since a bare "#anchor" only resolves on the page that renders it).
 - Use valid CORE block markup only (group, cover, columns/column, heading, paragraph, buttons/button, image, gallery, media-text, quote, pullquote, list, separator, spacer; query/post-template only if useful).
 - Reach beyond group/columns when the content calls for it:
     media-text — a split row with the image filling one half edge-to-edge and copy in the other; supports `"mediaPosition":"right"`, `"verticalAlignment"`, `"isStackedOnMobile":true`. The best tool for alternating feature rows and about/story sections.

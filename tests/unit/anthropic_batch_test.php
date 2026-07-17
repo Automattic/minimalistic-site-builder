@@ -13,7 +13,7 @@ use Automattic\SiteBuild\AnthropicClient;
  */
 
 test('retryTextBatch returns text + usage per request, keyed as input', function () {
-    $bodies = ['theme-json' => [], 'section-plan' => []];
+    $bodies = ['theme-json' => [], 'page-plan' => []];
     $transport = function (array $subset) {
         $out = [];
         foreach ($subset as $k => $_) {
@@ -24,10 +24,10 @@ test('retryTextBatch returns text + usage per request, keyed as input', function
 
     $out = AnthropicClient::retryTextBatch($bodies, $transport, [0, 0]);
 
-    assert_eq(['section-plan', 'theme-json'], (function ($k) { sort($k); return $k; })(array_keys($out)));
+    assert_eq(['page-plan', 'theme-json'], (function ($k) { sort($k); return $k; })(array_keys($out)));
     assert_eq('T:theme-json', $out['theme-json']['text']);
-    assert_eq(5, $out['section-plan']['input']);
-    assert_eq(7, $out['section-plan']['output']);
+    assert_eq(5, $out['page-plan']['input']);
+    assert_eq(7, $out['page-plan']['output']);
 });
 
 test('retryTextBatch retries only the transient failures, then succeeds', function () {

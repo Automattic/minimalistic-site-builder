@@ -14,6 +14,12 @@ function section_unit_input(): array
         'theme_json'       => '{"unit-theme-sentinel":true}',
         'design_direction' => 'UNIT-DIRECTION-SENTINEL',
         'outline'          => '1. UNIT-OUTLINE-SENTINEL (hero)',
+        'site_pages'       => '- "Home" — / (front page): UNIT-PAGES-SENTINEL',
+        'page'             => [
+            'slug'  => 'unit-page',
+            'title' => 'UNIT-PAGE-TITLE-SENTINEL',
+            'path'  => '/unit-page/',
+        ],
         'section'          => [
             'slug'             => 'unit-section',
             'title'            => 'UNIT-TITLE-SENTINEL',
@@ -51,7 +57,7 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq(0, $llm->completeBatchCalls, 'the single-unit wrapper does not create a batch');
     assert_eq('unit-model', $llm->calls[0]['opts']['model'] ?? null);
     assert_eq(0.42, $llm->calls[0]['opts']['temperature'] ?? null);
-    assert_eq('section-unit-section', $llm->calls[0]['opts']['log_label'] ?? null);
+    assert_eq('page-unit-page--unit-section', $llm->calls[0]['opts']['log_label'] ?? null);
 
     $prompt = $llm->calls[0]['prompt'];
     foreach ([
@@ -65,6 +71,8 @@ test('SectionUnit generates normalized markup from self-contained input', functi
         'UNIT-NOTES-SENTINEL',
         'UNIT-HANDOFF-SENTINEL',
         'UNIT-NEIGHBORS-SENTINEL',
+        'UNIT-PAGES-SENTINEL',
+        'UNIT-PAGE-TITLE-SENTINEL',
         'AI_IMAGE:',
     ] as $sentinel) {
         assert_contains($sentinel, $prompt);

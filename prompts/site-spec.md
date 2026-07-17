@@ -21,10 +21,20 @@ Always include exactly these fixed properties:
   "invented": [string],      // which of "name" / "persona_name" / "email_domain" you invented rather than took from the prompt; [] if all were stated by the user
   "visual_vibe": string,     // a SHORT descriptive phrase of the overall feeling, e.g. "warm and rustic", "clean and clinical" — a vibe, NOT concrete colors or fonts
   "animation_request": string, // VERBATIM any SPECIFIC animation/motion behavior the user explicitly asked for (e.g. "the logo should spin on hover", "typewriter effect on the headline"); "" when none — never invent one, and general mood words ("dynamic", "lively") do NOT count
-  "sections": [string]       // ordered sections the landing page needs (4-7), e.g. ["Hero", "Menu", "About", "Visit"]
+  "sections": [string],      // ordered sections the HOMEPAGE needs (4-7), e.g. ["Hero", "Menu", "About", "Visit"]
+  "pages": [                 // the site's page tree — the FIRST page is the homepage. {{page_tree_scope}}
+    {
+      "title": string,       // short, nav-friendly title in the site's `language` (the homepage is usually that language's word for "Home")
+      "slug": string,        // lowercase a-z 0-9 hyphens, unique across the WHOLE tree ("home" for the homepage)
+      "purpose": string,     // 1 sentence: what this page is for and what content it holds
+      "children": []         // sub-pages, same shape; [] when none
+    }
+  ]
 }
 
 **Identity is the one place you may — and must — invent.** The site needs exactly ONE coherent identity: masthead, hero, contact email, and footer copyright will all be generated from `name`, `persona_name`, and `email_domain`, so they must agree. When the prompt states a name, person, or domain, use it verbatim. When it doesn't, COMMIT to one invented identity that fits the topic and `language` — a short proper name (e.g. "Hearth & Crumb", "Mercedes Alcorta"), not a description of the site type — and list every key you invented in `invented` so the user can later be told to replace it. Never output a generic descriptor as `name`, and never invent more than one identity.
+
+{{page_tree_rule}}
 
 Beyond these fixed properties, **add any additional factual fields the user actually stated or strongly implied** — for example business hours, location/address, phone, email, a product or service list, price ranges, social links, founding year, tagline. Preserve them as structured data (strings, arrays, or nested objects) under clearly named keys. Only include facts that are grounded in the prompt; apart from the identity fields above, do NOT invent specifics, and do NOT add design fields (colors, typography, layout, imagery).
 

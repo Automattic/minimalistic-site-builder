@@ -42,8 +42,10 @@ final class NormalizeLayoutStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*'],
-            writes: ['theme/parts/*', 'theme/templates/*'],
+            // Templates are only scanned when they exist; in the default graph
+            // they are written by assemble-pages, which runs after this step.
+            reads: ['theme/theme.json', 'theme/parts/*'],
+            writes: ['theme/parts/*'],
             concurrent: false,
         );
     }

@@ -260,6 +260,18 @@ test('run rejects invalid CSS, leaves style.css untouched, and logs the problems
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('usedClasses sees classes that only appear in the content plugin pages', function () {
+    [$project, $tmp] = ps_project('builder_ps_plug_');
+    $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">x</div><!-- /wp:group -->'
+    );
+
+    assert_eq(['overlap-up'], PageStylesStep::usedClasses($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run skips when markup contains only static hover classes', function () {
     [$project, $tmp] = ps_project('builder_ps_static_hover_');
     $project->writeText(

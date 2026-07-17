@@ -17,7 +17,7 @@ function generate_fixture(): array
 {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeText('theme/templates/front-page.html',
+    $project->writeText('theme/templates/page.html',
         '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div class="wp-block-cover">'
         . '<img class="wp-block-cover__image-background" src="theme:./assets/hero.jpg" '
         . 'alt="AI_IMAGE: A bakery at dawn | full-bleed hero with text overlay | photorealistic | landscape"/></div><!-- /wp:cover -->'
@@ -44,7 +44,8 @@ test('cover-contrast graph requires generate-images even when scaffold assets ex
         'theme/theme.json',
         'theme/assets/motion/runtime.js',
         'theme/parts/header.html',
-        'theme/templates/front-page.html',
+        'theme/templates/page.html',
+        'plugin/pages/*',
     ];
 
     assert_throws(
@@ -78,7 +79,7 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
 
     // Both the cover url and the img src are rewritten to the served path; no
     // theme: placeholder remains.
-    $markup = $project->readText('theme/templates/front-page.html');
+    $markup = $project->readText('theme/templates/page.html');
     assert_contains('/wp-content/themes/demo/assets/hero.jpg', $markup);
     assert_true(!str_contains($markup, 'theme:./assets/hero.jpg'), 'no theme: placeholder left');
 
@@ -271,7 +272,7 @@ test('generate-images marks failed and leaves the placeholder on error', functio
     (new GenerateImagesStep($images))->run($project);
 
     assert_true(!$project->exists('theme/assets/hero.jpg'), 'no asset on failure');
-    $markup = $project->readText('theme/templates/front-page.html');
+    $markup = $project->readText('theme/templates/page.html');
     assert_contains('theme:./assets/hero.jpg', $markup); // placeholder untouched
 
     $specs = $project->readJson('images.json');

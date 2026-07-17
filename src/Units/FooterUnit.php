@@ -5,7 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 /**
  * Generate the site footer from self-contained site/theme/direction/outline
- * context. Reads and writes no Project state.
+ * context plus the site's page list. Reads and writes no Project state.
  */
 final class FooterUnit extends AbstractMarkupUnit
 {
@@ -17,12 +17,14 @@ final class FooterUnit extends AbstractMarkupUnit
     /**
      * @param array{
      *   site_spec:string|array<mixed>,language:string,theme_json:string|array<mixed>,
-     *   design_direction:string,outline:string
+     *   design_direction:string,outline:string,site_pages:string
      * } $input
      */
     public function request(array $input): array
     {
-        return $this->renderedRequest('footer.md', $this->commonVars($input));
+        return $this->renderedRequest('footer.md', $this->commonVars($input) + [
+            'site_pages' => $this->inputString($input, 'site_pages'),
+        ]);
     }
 
     public function finish(string $raw, array $input): string

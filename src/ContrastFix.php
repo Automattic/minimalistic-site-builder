@@ -570,11 +570,13 @@ final class ContrastFix
     /**
      * The background this block paints, if any: backgroundColor preset,
      * raw style.color.background, or a gradient (checked per color stop).
+     * Public: ContrastFixStep's overlay-header lint evaluates a section's
+     * top-level background with the same rules.
      *
      * @param list<array{0:int,1:int,2:int}>|null $parentColors
      * @return array{colors: list<array{0:int,1:int,2:int}>, label: string}|null
      */
-    private function ownBackground(array $attrs, ?array $parentColors): ?array
+    public function ownBackground(array $attrs, ?array $parentColors): ?array
     {
         $solid = null;
         $solidLabel = null;

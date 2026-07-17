@@ -76,7 +76,7 @@ final class StepDefaults
             'site-spec'        => self::temperature('SITE_SPEC', null),
             'design-direction' => self::temperature('DESIGN_DIRECTION', 1.0),
             'theme-json'       => self::temperature('THEME_JSON', null),
-            'section-plan'     => self::temperature('SECTION_PLAN', null),
+            'page-plan'        => self::temperature('PAGE_PLAN', null),
             'sections'         => self::temperature('SECTIONS', 0.9),
             'page-styles'      => self::temperature('PAGE_STYLES', null),
             'custom-motion'    => self::temperature('CUSTOM_MOTION', null),

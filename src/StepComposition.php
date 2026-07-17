@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
-use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
+use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
@@ -14,10 +14,11 @@ use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
+use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
+use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
-use Automattic\SiteBuild\Steps\SectionPlanStep;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
@@ -65,6 +66,9 @@ final class StepComposition
 
         return new self([
             new ScaffoldThemeStep(),
+            // The companion content plugin is pure static code — scaffold it up
+            // front next to the theme; apply-identity fills its header later.
+            new ScaffoldPluginStep(),
             // Cheap, fast first pass on a small model: expand short/vague prompts and
             // normalize the brief before any expensive step reads it. Rewrites the
             // `prompt` in meta.json (original kept as `original_prompt`), so every
@@ -79,19 +83,19 @@ final class StepComposition
             // (the concurrent group now depends on its output) — a deliberate cost
             // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
             new DesignDirectionStep($llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['design-direction-seeds']),
-            // theme.json and the section plan both derive from the prompt + siteSpec +
+            // theme.json and the page plan both derive from the prompt + siteSpec +
             // the design direction, so run them concurrently. Design decisions are
             // made inline, steered by designDirection.json.
             new ConcurrentGroup($llm, [
                 new ThemeJsonStep($llm, $renderer, $models['theme-json'], $temps['theme-json']),
-                new SectionPlanStep($llm, $renderer, $models['section-plan'], $temps['section-plan']),
+                new PagePlanStep($llm, $renderer, $models['page-plan'], $temps['page-plan']),
             ]),
-            // Generate the header, footer, and every section part in one concurrent
-            // batch. Resolve page-level vertical seams while the parts are still
-            // ordered by the plan, then stitch them into the page deterministically.
+            // Generate the header, footer, and every page's section parts in one
+            // concurrent batch, then resolve each page's vertical seams while the
+            // parts are still separate files ordered by the plan; the assemble
+            // step later composes them deterministically.
             new SectionsStep($llm, $renderer, $models['sections'], $temps['sections']),
             new SectionRhythmStep(),
-            new AssembleLandingPageStep(),
             // Collect image placeholders BEFORE fix-blocks: the block re-serializer
             // strips the alt from wp:cover background images (core cover save()
             // resets it to ""), which would lose every hero's AI_IMAGE spec.
@@ -113,6 +117,10 @@ final class StepComposition
             // JSON attributes and the re-serialization syncs the HTML.
             new MotionSanityStep(),
             new FixBlocksStep($blockFixer),
+            // AFTER fix-blocks, so the markup inlined into the content plugin is
+            // the final re-serialized form: writes plugin/pages/* + the manifest,
+            // the theme's page/index templates, and drops the transient parts.
+            new AssemblePagesStep(),
             // AFTER fix-blocks: reads the final (re-serialized) markup for which
             // layout utility classes survived, and appends their CSS to style.css —
             // a file the fixer never touches, so nothing here can be stripped.

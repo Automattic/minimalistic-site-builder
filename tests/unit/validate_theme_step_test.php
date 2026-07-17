@@ -21,7 +21,7 @@ function final_validation_project(): array
         . '<!-- wp:paragraph --><p>Content</p><!-- /wp:paragraph -->'
         . '<!-- wp:template-part {"slug":"footer"} /-->';
     $project->writeText('theme/templates/index.html', $template);
-    $project->writeText('theme/templates/front-page.html', $template);
+    $project->writeText('theme/templates/page.html', $template);
     $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
     $project->writeText('theme/parts/footer.html', '<!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph -->');
     return [$project, $tmp];
@@ -29,21 +29,22 @@ function final_validation_project(): array
 
 test('validate-theme declaration rejects an incomplete theme graph', function () {
     assert_eq([
-        'sections.json',
+        'pages.json',
         'theme/style.css',
         'theme/theme.json',
         'theme/templates/index.html',
-        'theme/templates/front-page.html',
+        'theme/templates/page.html',
         'theme/parts/header.html',
         'theme/parts/footer.html',
         'theme/parts/*',
         'theme/templates/*',
+        'plugin/pages/*',
     ], (new ValidateThemeStep())->declaration()->reads);
 
     assert_throws(
         fn () => new Pipeline(
             [new ScaffoldThemeStep(), new ValidateThemeStep()],
-            seeds: ['sections.json'],
+            seeds: ['pages.json'],
         ),
         'a scaffold alone does not provide theme.json, templates, or parts',
     );
