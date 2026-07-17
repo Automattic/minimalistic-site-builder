@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\WpcomImageClient;
 
 /**
@@ -21,8 +22,9 @@ use Automattic\SiteBuild\WpcomImageClient;
  * Input:  images.json + theme/parts/*.html + theme/templates/*.html
  * Output: theme/assets/<filename> for each generated image, the theme markup
  *         rewritten so "theme:./assets/<file>" becomes a URL WordPress can serve
- *         ("/wp-content/themes/<slug>/assets/<file>"), and images.json updated
- *         with per-image status.
+ *         ("/wp-content/themes/<slug>/assets/<file>"), images.json updated
+ *         with per-image status, and images.generated.json written last as the
+ *         completion artifact consumed by post-image steps.
  *
  * This is gated behind `--with-images` (or bin/images.php) because it is slow
  * (~30-60s/image) and hits the network — unlike the rest of the deterministic
@@ -38,6 +40,9 @@ use Automattic\SiteBuild\WpcomImageClient;
  */
 final class GenerateImagesStep implements Step
 {
+    /** Written only once this step has completed all generation and rewrites. */
+    public const COMPLETION_ARTIFACT = 'images.generated.json';
+
     /** How many images to generate concurrently per batch. */
     private const BATCH_SIZE = 10;
 
@@ -63,14 +68,35 @@ final class GenerateImagesStep implements Step
         return 'Generate AI images';
     }
 
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            writes: [
+                'images.json',
+                self::COMPLETION_ARTIFACT,
+                'theme/assets/*',
+                'theme/parts/*',
+                'theme/templates/*',
+            ],
+            concurrent: true,
+        );
+    }
+
     public function run(Project $project): void
     {
+        $this->clearCompletion($project);
+
         if (!$project->exists('images.json')) {
+            $this->markComplete($project);
             return; // collect-images never ran or wrote nothing
         }
 
         $specs = $project->readJson('images.json');
         if ($specs === []) {
+            $this->markComplete($project);
             return;
         }
 
@@ -161,6 +187,27 @@ final class GenerateImagesStep implements Step
 
         if ($resolved !== []) {
             $this->rewriteMarkup($project, $resolved);
+        }
+
+        $this->markComplete($project);
+    }
+
+    /** Publish the dependency stamp only after every required operation succeeds. */
+    private function markComplete(Project $project): void
+    {
+        $project->writeJson(self::COMPLETION_ARTIFACT, ['status' => 'completed']);
+    }
+
+    /** A failed re-run must not leave a previous run's success stamp behind. */
+    private function clearCompletion(Project $project): void
+    {
+        if (!$project->exists(self::COMPLETION_ARTIFACT)) {
+            return;
+        }
+
+        $path = $project->path(self::COMPLETION_ARTIFACT);
+        if (!is_file($path) || !unlink($path)) {
+            throw new \RuntimeException("Could not clear image-generation completion artifact: {$path}");
         }
     }
 

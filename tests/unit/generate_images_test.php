@@ -1,8 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\StepGraph;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\Tests\FakeImageClient;
 use Automattic\SiteBuild\Tests\FakeLlm;
@@ -22,6 +25,43 @@ function generate_fixture(): array
     (new CollectImagesStep())->run($project);
     return [$project, $tmp];
 }
+
+test('generate-images declaration marks its batched work as concurrent', function () {
+    $declaration = (new GenerateImagesStep(new FakeImageClient()))->declaration();
+
+    assert_eq(true, $declaration->concurrent);
+    assert_true(in_array(GenerateImagesStep::COMPLETION_ARTIFACT, $declaration->writes, true));
+});
+
+test('cover-contrast graph requires generate-images even when scaffold assets exist', function () {
+    $cover = new CoverContrastStep(new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return 'block-fixer: ok';
+        }
+    });
+    $scaffolded = [
+        'theme/theme.json',
+        'theme/assets/motion/runtime.js',
+        'theme/parts/header.html',
+        'theme/templates/front-page.html',
+    ];
+
+    assert_throws(
+        fn () => StepGraph::validate([$cover], seeds: $scaffolded),
+        'motion assets must not satisfy the image-generation dependency',
+    );
+
+    StepGraph::validate([
+        new GenerateImagesStep(new FakeImageClient()),
+        $cover,
+    ], seeds: array_merge($scaffolded, [
+        'images.json',
+        'siteSpec.json',
+        'designDirection.json',
+    ]));
+    assert_true(true);
+});
 
 test('generate-images writes assets, rewrites src/url, and marks completed', function () {
     [$project, $tmp] = generate_fixture();
@@ -46,6 +86,10 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
     $specs = $project->readJson('images.json');
     assert_eq('completed', $specs[0]['status']);
     assert_eq('/wp-content/themes/demo/assets/hero.jpg', $specs[0]['url']);
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -292,6 +336,11 @@ test('generate-images tolerates a partial failure within a batch', function () {
     assert_true($project->exists('theme/assets/img-0.jpg'));
     assert_true(!$project->exists('theme/assets/img-1.jpg'), 'no asset for failed image');
     assert_true($project->exists('theme/assets/img-2.jpg'));
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+        'the step completed even though one image failed softly',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -407,6 +456,38 @@ test('generate-images is a no-op when there are no placeholders', function () {
     (new GenerateImagesStep($images))->run($project);
 
     assert_eq([], $images->calls);
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images publishes completion when the image manifest is absent', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $images = new FakeImageClient();
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq([], $images->calls);
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images clears a stale completion artifact before a failed re-run', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson(GenerateImagesStep::COMPLETION_ARTIFACT, ['status' => 'completed']);
+    $project->writeText('images.json', '{invalid');
+
+    assert_throws(fn () => (new GenerateImagesStep(new FakeImageClient()))->run($project));
+    assert_true(!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -9,6 +9,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM): generate the block theme's theme.json.
@@ -61,6 +62,17 @@ final class ThemeJsonStep implements ConcurrentStep
     public function label(): string
     {
         return 'Generate theme.json';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
+            writes: ['theme/theme.json'],
+            concurrent: false,
+        );
     }
 
     public function requests(Project $project): array

@@ -7,6 +7,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (deterministic): enforce the motion-class budget across the whole page.
@@ -55,6 +56,17 @@ final class MotionSanityStep implements Step
     public function label(): string
     {
         return 'Motion sanity pass';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['designDirection.json', 'sections.json', 'theme/parts/*', 'theme/templates/*'],
+            writes: ['theme/parts/*', 'theme/templates/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

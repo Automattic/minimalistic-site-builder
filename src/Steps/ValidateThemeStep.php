@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\PresetReferences;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
 
 /**
@@ -25,6 +26,27 @@ final class ValidateThemeStep implements Step
     public function label(): string
     {
         return 'Validate final theme';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                'sections.json',
+                'theme/style.css',
+                'theme/theme.json',
+                'theme/templates/index.html',
+                'theme/templates/front-page.html',
+                'theme/parts/header.html',
+                'theme/parts/footer.html',
+                'theme/parts/*',
+                'theme/templates/*',
+            ],
+            writes: [],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

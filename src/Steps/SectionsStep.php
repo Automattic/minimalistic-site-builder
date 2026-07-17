@@ -7,6 +7,7 @@ use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\HeaderUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
@@ -57,6 +58,22 @@ final class SectionsStep implements Step
     public function label(): string
     {
         return 'Build landing-page sections';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                'siteSpec.json',
+                'theme/theme.json',
+                'sections.json',
+                'designDirection.json',
+            ],
+            writes: ['theme/parts/*'],
+            concurrent: true,
+        );
     }
 
     public function requests(Project $project): array

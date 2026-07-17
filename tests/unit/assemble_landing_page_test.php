@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\StepGraph;
 use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
 
 /**
@@ -9,6 +10,49 @@ use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
  * landing page from the generated parts, in plan order, plus templateParts
  * registration in theme.json.
  */
+
+test('assemble declaration names mandatory parts and concrete template outputs', function () {
+    $declaration = (new AssembleLandingPageStep())->declaration();
+
+    assert_eq([
+        'sections.json',
+        'theme/parts/header.html',
+        'theme/parts/footer.html',
+        'theme/parts/*',
+        'theme/theme.json',
+    ], $declaration->reads);
+    assert_eq([
+        'theme/templates/front-page.html',
+        'theme/templates/index.html',
+        'theme/theme.json',
+    ], $declaration->writes);
+
+    $outputs = array_fill_keys($declaration->writes, true);
+    assert_true(StepGraph::covers($outputs, 'theme/templates/front-page.html'));
+    assert_true(!StepGraph::covers($outputs, 'theme/templates/archive.html'));
+});
+
+test('assemble graph requires header and footer while accepting plan-derived parts', function () {
+    $base = [
+        'sections.json',
+        'theme/theme.json',
+        'theme/parts/section-hero.html',
+    ];
+
+    foreach (['header', 'footer'] as $missing) {
+        $other = $missing === 'header' ? 'footer' : 'header';
+        assert_throws(fn () => StepGraph::validate(
+            [new AssembleLandingPageStep()],
+            seeds: array_merge($base, ["theme/parts/{$other}.html"]),
+        ));
+    }
+
+    StepGraph::validate([new AssembleLandingPageStep()], seeds: array_merge($base, [
+        'theme/parts/header.html',
+        'theme/parts/footer.html',
+    ]));
+    assert_true(true);
+});
 
 test('frontPage composes header, sections in order, footer', function () {
     $markup = AssembleLandingPageStep::frontPage(['section-hero', 'section-about']);

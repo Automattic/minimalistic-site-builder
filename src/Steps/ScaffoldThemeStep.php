@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step 1 (deterministic): scaffold a new block theme.
@@ -28,6 +29,21 @@ final class ScaffoldThemeStep implements Step
     public function label(): string
     {
         return 'Scaffold theme';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [],
+            writes: [
+                'theme/style.css',
+                'theme/readme.txt',
+                'theme/assets/motion/*',
+            ],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void
