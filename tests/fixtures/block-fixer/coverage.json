@@ -356,6 +356,27 @@
         "support:typography",
         "report:fixed"
       ]
+    },
+    "generated-demo-layout-and-paragraph-signatures": {
+      "milestone": "M3",
+      "capabilities": [
+        "block:core/group",
+        "block:core/columns",
+        "block:core/column",
+        "block:core/paragraph",
+        "deprecation:columns-element-link",
+        "deprecation:group-element-link",
+        "deprecation:paragraph-selectorless",
+        "legacy:group-top-level-shadow-drop",
+        "repair:nested-paragraph",
+        "support:layout",
+        "support:layout-align-items",
+        "support:layout-default",
+        "support:layout-wide-size",
+        "support:short-spacing-preset-signature",
+        "support:spacing",
+        "report:fixed"
+      ]
     }
   },
   "capabilityCases": {
@@ -365,7 +386,8 @@
       "json-comment-boundaries",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size"
+      "group-layout-content-size",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "repair:custom-class-recovery": [
       "group-html-attribute-repairs"
@@ -394,7 +416,8 @@
       "report-order-status-and-skip",
       "heading-legacy-text-align",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "block:core/paragraph": [
       "nested-group-support",
@@ -407,7 +430,8 @@
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "nested-blocks": [
       "nested-group-support",
@@ -419,7 +443,8 @@
     "repair:nested-paragraph": [
       "nested-group-support",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "repair-gate:valid-paragraph": [
       "nested-group-support"
@@ -442,12 +467,14 @@
       "nested-group-support",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size"
+      "group-layout-content-size",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "support:layout": [
       "nested-group-support",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size"
+      "group-layout-content-size",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "rich-text:literal-nbsp": [
       "rich-text-literal-nbsp"
@@ -690,11 +717,13 @@
     ],
     "block:core/columns": [
       "block-support-pipeline",
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "block:core/column": [
       "block-support-pipeline",
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "support:alignment": [
       "block-support-pipeline",
@@ -781,7 +810,8 @@
     "deprecation:paragraph-selectorless": [
       "cover-renderer-branches",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "branch:cover-focal-point": [
       "cover-renderer-branches"
@@ -946,6 +976,27 @@
     ],
     "repair:nested-paragraph-style-merge": [
       "paragraph-inline-color-carryover"
+    ],
+    "deprecation:columns-element-link": [
+      "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "deprecation:group-element-link": [
+      "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "legacy:group-top-level-shadow-drop": [
+      "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "support:layout-align-items": [
+      "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "support:layout-default": [
+      "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "support:layout-wide-size": [
+      "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "support:short-spacing-preset-signature": [
+      "generated-demo-layout-and-paragraph-signatures"
     ]
   },
   "requiredCapabilities": [
@@ -954,10 +1005,13 @@
     "freeform:before-between-after",
     "missing-block:paired",
     "missing-block:void",
+    "legacy:group-top-level-shadow-drop",
     "delimiter:balanced",
     "delimiter:mismatched",
     "delimiter:stray-closer",
     "delimiter:unclosed",
+    "deprecation:columns-element-link",
+    "deprecation:group-element-link",
     "delimiter:malformed-json",
     "serializer:rendered-content-void-paired",
     "strategy:static-renderer",
@@ -1056,10 +1110,14 @@
     "support:gradient",
     "support:layout",
     "support:layout-content-size",
+    "support:layout-align-items",
+    "support:layout-default",
     "support:layout-flex",
+    "support:layout-wide-size",
     "support:preset-variables",
     "support:self-stretch",
     "support:shadow",
+    "support:short-spacing-preset-signature",
     "support:spacing",
     "support:typography"
   ],
@@ -1076,7 +1134,8 @@
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "core/group": [
       "group-html-attribute-repairs",
@@ -1084,15 +1143,18 @@
       "json-comment-boundaries",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size"
+      "group-layout-content-size",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "core/column": [
       "block-support-pipeline",
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "core/columns": [
       "block-support-pipeline",
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "core/heading": [
       "tbilisi25-footer-fixed-point",
@@ -1203,7 +1265,8 @@
       "tbilisi25-footer-fixed-point",
       "heading-legacy-text-align",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "generated-demo-layout-and-paragraph-signatures"
     ],
     "RAW_CONTENT": [
       "quote-embed-and-raw-renderers"
@@ -1260,7 +1323,9 @@
   "deprecations": {
     "observed": [
       "deprecation:core/button:3",
+      "deprecation:core/columns:0",
       "deprecation:core/group:0",
+      "deprecation:core/group:4",
       "deprecation:core/heading:0",
       "deprecation:core/navigation:3",
       "deprecation:core/paragraph:0",
@@ -1271,7 +1336,9 @@
     ],
     "reviewed": {
       "deprecation:core/button:3": "raw-overlay-current-save-equivalent",
+      "deprecation:core/columns:0": "explicit-adapter",
       "deprecation:core/group:0": "raw-overlay-current-save-equivalent",
+      "deprecation:core/group:4": "explicit-adapter",
       "deprecation:core/heading:0": "explicit-adapter",
       "deprecation:core/navigation:3": "explicit-adapter",
       "deprecation:core/paragraph:0": "explicit-adapter",
@@ -1285,9 +1352,9 @@
   },
   "rendererProbes": {
     "schemaVersion": 1,
-    "sha256": "c57ef3ece1202de275b46a00dfa68ee92411a2f1e68d14988c2203a0102fee61",
-    "oracleCases": 97,
-    "staticRendererCases": 86,
+    "sha256": "d786c031ee2bf1e8e3cc8141830d9ea295931b03ec625b40b7733c8698157567",
+    "oracleCases": 101,
+    "staticRendererCases": 90,
     "supportedStaticBlocks": [
       "core/button",
       "core/buttons",

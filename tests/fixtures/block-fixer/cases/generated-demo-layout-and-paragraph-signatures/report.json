@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 5,
+    "M": 7,
+    "D": 1,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/align-items.html",
+      "status": "ok",
+      "dropped": []
+    },
+    {
+      "path": "parts/columns-element-link.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/group-element-link.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/layout-default.html",
+      "status": "ok",
+      "dropped": []
+    },
+    {
+      "path": "parts/legacy-shadow.html",
+      "status": "FIXED",
+      "dropped": [
+        {
+          "kind": "style",
+          "value": "box-shadow:var(--wp--preset--shadow--soft-settle)",
+          "lost": 1,
+          "line": "DROPPED style `box-shadow:var(--wp--preset--shadow--soft-settle)` — not mirrored in the block comment JSON attributes"
+        }
+      ]
+    },
+    {
+      "path": "parts/paragraph-spacing.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/wide-size.html",
+      "status": "FIXED",
+      "dropped": []
+    }
+  ]
+}

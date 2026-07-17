@@ -4,7 +4,7 @@
         "generator": {
             "version": "1.0.0",
             "path": "tests/tools/block_renderer_differential.php",
-            "sha256": "a025a47d5dd897d5f3343043e0ac6a3a7d332eead7e738b7d0a711d211d48cd3"
+            "sha256": "0a0b3f97b3725cde4603609f51465bdc23b6f67525b286adc0ad71a299065583"
         },
         "oracleAdapter": {
             "path": "tests/tools/block_renderer_oracle.js",
@@ -12,7 +12,7 @@
         },
         "oracleManifest": {
             "path": "tests/fixtures/block-fixer/oracle-manifest.json",
-            "sha256": "7c947b7dc6774b4f517eb3ed118c9ffe3ca46cffaa024adfc9d649b0449b2df5"
+            "sha256": "9de4c90fbd6e15845a70aaf53dfd378f6d726a47359508fc11663aa21b20f4e3"
         },
         "packageLock": {
             "path": "package-lock.json",
@@ -88,8 +88,8 @@
         }
     },
     "coverage": {
-        "oracleCases": 97,
-        "staticRendererCases": 86,
+        "oracleCases": 101,
+        "staticRendererCases": 90,
         "supportedStaticBlocks": [
             "core/button",
             "core/buttons",
@@ -243,6 +243,28 @@
             "expected": "<p class=\"has-text-align-right custom has-contrast-color has-base-background-color has-text-color has-background has-large-font-size\" id=\"hello\" style=\"color:#123456;background-color:#abcdef;margin-top:var(--wp--preset--spacing--20);margin-bottom:2rem;padding:3px;font-size:21px;line-height:1.4\">Supports</p>"
         },
         {
+            "id": "paragraph/short-spacing-slugs",
+            "name": "core/paragraph",
+            "attributes": {
+                "content": "Short spacing",
+                "dropCap": false,
+                "textColor": "secondary",
+                "align": "center",
+                "fontSize": "lead",
+                "style": {
+                    "spacing": {
+                        "margin": {
+                            "top": "md",
+                            "bottom": "lg"
+                        }
+                    }
+                }
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<p class=\"has-secondary-color has-text-color has-lead-font-size\" style=\"margin-top:md;margin-bottom:lg\">Short spacing</p>"
+        },
+        {
             "id": "group/default",
             "name": "core/group",
             "attributes": {
@@ -251,6 +273,52 @@
             "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
             "saveKind": "element",
             "expected": "<div class=\"wp-block-group\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "group/layout-wide-size",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "div",
+                "layout": {
+                    "type": "constrained",
+                    "wideSize": "1320px"
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Wide size</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-group\"><!-- wp:paragraph -->\n<p>Wide size</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "group/layout-align-items",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "div",
+                "align": "wide",
+                "layout": {
+                    "type": "flex",
+                    "orientation": "vertical",
+                    "justifyContent": "center",
+                    "alignItems": "center"
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Align items</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-group alignwide\"><!-- wp:paragraph -->\n<p>Align items</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "group/layout-default",
+            "name": "core/group",
+            "attributes": {
+                "tagName": "div",
+                "align": "wide",
+                "className": "masonry-3",
+                "layout": {
+                    "type": "default"
+                }
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>Default layout</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-group alignwide masonry-3\"><!-- wp:paragraph -->\n<p>Default layout</p>\n<!-- /wp:paragraph --></div>"
         },
         {
             "id": "group/tag-supports",

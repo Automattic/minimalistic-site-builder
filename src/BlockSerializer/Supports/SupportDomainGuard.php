@@ -106,10 +106,14 @@ final class SupportDomainGuard
 
     /** @var array<string,list<string>> */
     private const LAYOUT_VALUES = [
-        'type' => ['constrained', 'flex'],
+        'type' => ['constrained', 'flex', 'default'],
         'orientation' => ['horizontal', 'vertical'],
         'justifyContent' => ['left', 'center', 'right', 'space-between'],
         'verticalAlignment' => ['top', 'center', 'bottom', 'stretch'],
+        // Retained in the delimiter by the pinned registry but not consumed
+        // by core/group save(). `center` is the reviewed generated-theme
+        // signature covered by group-layout-align-items.
+        'alignItems' => ['center'],
         'flexWrap' => ['wrap', 'nowrap'],
     ];
 
@@ -121,6 +125,7 @@ final class SupportDomainGuard
      */
     private const LAYOUT_STRING_KEYS = [
         'contentSize' => true,
+        'wideSize' => true,
     ];
 
     /** @param array<string,mixed> $attributes */

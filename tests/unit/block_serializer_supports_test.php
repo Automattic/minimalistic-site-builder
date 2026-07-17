@@ -132,8 +132,15 @@ test('SupportDomainGuard rejects style families outside the reviewed PHP pipelin
             'orientation' => 'vertical',
             'justifyContent' => 'space-between',
             'verticalAlignment' => 'center',
+            'alignItems' => 'center',
             'flexWrap' => 'wrap',
+            'contentSize' => '850px',
+            'wideSize' => '1320px',
         ],
+    ], '0');
+
+    $guard->assertSupported('core/group', [
+        'layout' => ['type' => 'default'],
     ], '0');
 
     assert_throws(static fn () => $guard->assertSupported(
@@ -154,6 +161,16 @@ test('SupportDomainGuard rejects style families outside the reviewed PHP pipelin
     assert_throws(static fn () => $guard->assertSupported(
         'core/group',
         ['layout' => ['type' => 'grid']],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        ['layout' => ['alignItems' => 'baseline']],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        ['layout' => ['wideSize' => '']],
         '0',
     ));
 });

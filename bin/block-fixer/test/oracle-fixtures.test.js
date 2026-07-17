@@ -103,8 +103,8 @@ test('registered runtime fingerprint and reviewed support manifest are consisten
     uncoveredStaticBlocks: supportedStaticBlocks.filter((name) => !probedStaticBlocks.has(name)),
   };
   assert.equal(rendererSnapshot.schemaVersion, 1);
-  assert.equal(rendererSnapshot.cases.length, 97);
-  assert.equal(staticRendererCases, 86);
+  assert.equal(rendererSnapshot.cases.length, 101);
+  assert.equal(staticRendererCases, 90);
   assert.deepEqual(rendererSnapshot.coverage, rendererCoverage);
   assert.deepEqual(coverage.rendererProbes, {
     schemaVersion: rendererSnapshot.schemaVersion,

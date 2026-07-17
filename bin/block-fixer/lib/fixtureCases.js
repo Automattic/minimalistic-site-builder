@@ -611,6 +611,60 @@ After`,
       { file: 'parts/colophon.html', blockPath: 'document', code: 'nested-paragraph' },
     ],
   },
+  {
+    name: 'generated-demo-layout-and-paragraph-signatures',
+    milestone: 'M3',
+    capabilities: [
+      'block:core/group',
+      'block:core/columns',
+      'block:core/column',
+      'block:core/paragraph',
+      'deprecation:columns-element-link',
+      'deprecation:group-element-link',
+      'deprecation:paragraph-selectorless',
+      'legacy:group-top-level-shadow-drop',
+      'repair:nested-paragraph',
+      'support:layout',
+      'support:layout-align-items',
+      'support:layout-default',
+      'support:layout-wide-size',
+      'support:short-spacing-preset-signature',
+      'support:spacing',
+      'report:fixed',
+    ],
+    // Reduced from the first PHP-only build-demos run after cutover. The two
+    // layout keys survive as inert delimiter data. The paragraph's short
+    // spacing slugs make deprecation index 0 invalid, so reviewed index 6
+    // carries the authored preset-variable styles through the paragraph merge.
+    files: {
+      'parts/wide-size.html': String.raw`<!-- wp:group {"tagName":"header","className":"header-overlay","textColor":"base","layout":{"type":"constrained","wideSize":"1320px"}} -->
+<header class="wp-block-group header-overlay has-base-color has-text-color"></header>
+<!-- /wp:group -->`,
+      'parts/align-items.html': String.raw`<!-- wp:group {"align":"wide","style":{"spacing":{"blockGap":"var:preset|spacing|sm"}},"layout":{"type":"flex","orientation":"vertical","justifyContent":"center","alignItems":"center"}} -->
+<div class="wp-block-group alignwide"></div>
+<!-- /wp:group -->`,
+      'parts/paragraph-spacing.html': String.raw`<!-- wp:paragraph {"align":"center","fontSize":"lead","textColor":"secondary","style":{"spacing":{"margin":{"top":"md","bottom":"lg"}}}} -->
+<p class="has-text-align-center has-secondary-color has-text-color has-lead-font-size" style="margin-top:var(--wp--preset--spacing--md);margin-bottom:var(--wp--preset--spacing--lg)">Twenty years of documentary photography from Argentina.</p>
+<!-- /wp:paragraph -->`,
+      'parts/legacy-shadow.html': String.raw`<!-- wp:group {"backgroundColor":"base","shadow":"var:preset|shadow|soft-settle","layout":{"type":"constrained"}} -->
+<div class="wp-block-group has-base-background-color has-background" style="box-shadow:var(--wp--preset--shadow--soft-settle)"></div>
+<!-- /wp:group -->`,
+      'parts/columns-element-link.html': String.raw`<!-- wp:columns {"align":"wide","textColor":"base","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"}}}}} -->
+<div class="wp-block-columns alignwide has-base-color has-text-color"><!-- wp:column -->
+<div class="wp-block-column"></div>
+<!-- /wp:column --></div>
+<!-- /wp:columns -->`,
+      'parts/group-element-link.html': String.raw`<!-- wp:group {"align":"full","backgroundColor":"contrast","textColor":"base","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"}}}},"layout":{"type":"constrained"}} -->
+<div class="wp-block-group alignfull has-base-color has-contrast-background-color has-text-color has-background"></div>
+<!-- /wp:group -->`,
+      'parts/layout-default.html': String.raw`<!-- wp:group {"align":"wide","className":"masonry-3","layout":{"type":"default"}} -->
+<div class="wp-block-group alignwide masonry-3"></div>
+<!-- /wp:group -->`,
+    },
+    repairs: [
+      { file: 'parts/paragraph-spacing.html', blockPath: 'document', code: 'nested-paragraph' },
+    ],
+  },
 ];
 
 /*
@@ -624,10 +678,13 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'freeform:before-between-after',
   'missing-block:paired',
   'missing-block:void',
+  'legacy:group-top-level-shadow-drop',
   'delimiter:balanced',
   'delimiter:mismatched',
   'delimiter:stray-closer',
   'delimiter:unclosed',
+  'deprecation:columns-element-link',
+  'deprecation:group-element-link',
   'delimiter:malformed-json',
   'serializer:rendered-content-void-paired',
   'strategy:static-renderer',
@@ -726,10 +783,14 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'support:gradient',
   'support:layout',
   'support:layout-content-size',
+  'support:layout-align-items',
+  'support:layout-default',
   'support:layout-flex',
+  'support:layout-wide-size',
   'support:preset-variables',
   'support:self-stretch',
   'support:shadow',
+  'support:short-spacing-preset-signature',
   'support:spacing',
   'support:typography',
 ]);
@@ -739,7 +800,9 @@ const REQUIRED_CAPABILITIES = Object.freeze([
 // hit or a stale disposition which is no longer exercised.
 const REVIEWED_DEPRECATIONS = Object.freeze({
   'deprecation:core/button:3': 'raw-overlay-current-save-equivalent',
+  'deprecation:core/columns:0': 'explicit-adapter',
   'deprecation:core/group:0': 'raw-overlay-current-save-equivalent',
+  'deprecation:core/group:4': 'explicit-adapter',
   'deprecation:core/heading:0': 'explicit-adapter',
   'deprecation:core/navigation:3': 'explicit-adapter',
   'deprecation:core/paragraph:0': 'explicit-adapter',

@@ -22,6 +22,13 @@ final class DeprecationAdapters
      * adapter has admitted the signature.
      */
     private const REVIEWED_LEGACY_COMMENT_KEYS = [
+        'core/group' => [
+            // AI-authored legacy support form observed in a generated demo.
+            // The pinned current schema has no top-level shadow attribute,
+            // so createBlock drops both the delimiter key and stale HTML
+            // declaration. Covered by generated-demo-* golden drops.
+            'shadow' => true,
+        ],
         'core/heading' => [
             // Deprecated version 0; exercised by heading-legacy-text-align.
             // The pinned migration reads the recovered has-text-align-* class,
@@ -96,6 +103,20 @@ final class DeprecationAdapters
             if ($matched && is_string($attributes['content'] ?? null)) {
                 $attributes['content'] = RichText::fromHtmlString($attributes['content']);
             }
+        } elseif ($name === 'core/columns') {
+            $attributes = $this->columns(
+                $attributes,
+                $originalContent,
+                $matched,
+                $currentCandidateValid,
+            );
+        } elseif ($name === 'core/group') {
+            $attributes = $this->group(
+                $attributes,
+                $originalContent,
+                $matched,
+                $currentCandidateValid,
+            );
         } elseif ($name === 'core/heading') {
             $attributes = $this->heading($attributes, $rawCommentAttributes, $matched);
         } elseif ($name === 'core/navigation') {
@@ -104,6 +125,83 @@ final class DeprecationAdapters
             $attributes = $this->siteTitle($attributes, $rawCommentAttributes, $matched);
         }
         return ['attributes' => $attributes, 'repairs' => [], 'matched' => $matched];
+    }
+
+    /**
+     * Reviewed group deprecation index 4: element-link support invalidates the
+     * current candidate, while the old save recovers authored text-color
+     * classes before the raw current attributes are overlaid.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function group(
+        array $attributes,
+        string $originalContent,
+        bool &$matched,
+        bool $currentCandidateValid,
+    ): array {
+        if ($currentCandidateValid
+            || ($attributes['align'] ?? null) !== 'full'
+            || !is_array($attributes['style']['elements'] ?? null)) {
+            return $attributes;
+        }
+        $root = HtmlFragment::parse($originalContent)->root()->elementChildren()[0] ?? null;
+        if ($root === null) {
+            return $attributes;
+        }
+        $classes = preg_split('/\s+/', trim((string) ($root->attribute('class') ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (in_array('has-link-color', $classes, true)) {
+            return $attributes;
+        }
+        $recovered = array_values(array_filter(
+            $classes,
+            static fn (string $class): bool => $class !== 'wp-block-group'
+                && !str_starts_with($class, 'align')
+                && $class !== 'has-background'
+                && !str_ends_with($class, '-background-color')
+                && $class !== 'has-link-color',
+        ));
+        if ($recovered === []) {
+            return $attributes;
+        }
+        $matched = true;
+        $attributes['className'] = implode(' ', $recovered);
+        return $attributes;
+    }
+
+    /**
+     * Reviewed columns deprecation index 0: its save predates element-link
+     * support and recovers the authored alignment class while the raw current
+     * style object is restored by the later overlay.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function columns(
+        array $attributes,
+        string $originalContent,
+        bool &$matched,
+        bool $currentCandidateValid,
+    ): array {
+        $align = $attributes['align'] ?? null;
+        if ($currentCandidateValid
+            || !is_string($align)
+            || !is_array($attributes['style']['elements'] ?? null)) {
+            return $attributes;
+        }
+        $root = HtmlFragment::parse($originalContent)->root()->elementChildren()[0] ?? null;
+        if ($root === null || $root->tagName() !== 'div') {
+            return $attributes;
+        }
+        $class = 'align' . $align;
+        $classes = preg_split('/\s+/', trim((string) ($root->attribute('class') ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (!in_array($class, $classes, true)) {
+            return $attributes;
+        }
+        $matched = true;
+        $attributes['className'] = $class;
+        return $attributes;
     }
 
     /**
@@ -273,7 +371,8 @@ final class DeprecationAdapters
             : null;
 
         if (is_string($align) && $align !== ''
-            && in_array('has-text-align-' . $align, $classes, true)) {
+            && in_array('has-text-align-' . $align, $classes, true)
+            && !$this->hasShortSpacingPresetSignature($attributes, $originalContent)) {
             $matched = true;
             if ($fontClass !== null && !in_array($fontClass, $classes, true)) {
                 // The earlier align deprecations cannot validate when their
@@ -300,6 +399,41 @@ final class DeprecationAdapters
             } else {
                 $attributes['className'] = implode(' ', $custom);
             }
+            return $attributes;
+        }
+
+        // Paragraph deprecation index 0 predates element-link support. If
+        // that newer support is the reason the current candidate is invalid,
+        // the old save validates and Gutenberg's deprecation-phase class
+        // recovery carries the authored root classes into className.
+        if (!$currentCandidateValid
+            && is_array($attributes['style']['elements'] ?? null)) {
+            $matched = true;
+            $recovered = array_values(array_filter(
+                $classes,
+                static fn (string $class): bool => $fontClass === null || $class !== $fontClass,
+            ));
+            if ($recovered === []) {
+                unset($attributes['className']);
+            } else {
+                $attributes['className'] = implode(' ', $recovered);
+            }
+            return $attributes;
+        }
+
+        // Index 1 predates spacing support. It validates when spacing exists
+        // only in the comment (the authored root has none of those
+        // declarations), while retaining the existing font-size class via
+        // the same built-in recovery. If authored spacing is present, this
+        // candidate cannot match and the reviewed selector-less adapter below
+        // remains responsible for carrying it through.
+        if (!$currentCandidateValid
+            && $fontClass !== null
+            && in_array($fontClass, $classes, true)
+            && is_array($attributes['style']['spacing'] ?? null)
+            && !$this->hasAuthoredSpacingDeclaration($attributes, $originalContent)) {
+            $matched = true;
+            $attributes['className'] = implode(' ', $classes);
             return $attributes;
         }
 
@@ -332,6 +466,63 @@ final class DeprecationAdapters
             unset($attributes['className']);
         }
         return $attributes;
+    }
+
+    /**
+     * Paragraph deprecation index 0 serializes short spacing slugs literally,
+     * while the selector-less index 6 can validate authored preset-variable
+     * declarations and carry them through the nested-paragraph merge. This
+     * exact signature is emitted by generated themes (`top: "md"` paired
+     * with `margin-top:var(--wp--preset--spacing--md)`).
+     *
+     * @param array<string,mixed> $attributes
+     */
+    private function hasShortSpacingPresetSignature(array $attributes, string $originalContent): bool
+    {
+        $spacing = $attributes['style']['spacing'] ?? null;
+        if (!is_array($spacing)) {
+            return false;
+        }
+        $actual = $this->rootStyles($originalContent);
+        foreach (['margin', 'padding'] as $family) {
+            $box = $spacing[$family] ?? null;
+            if (!is_array($box)) {
+                continue;
+            }
+            foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                $slug = $box[$side] ?? null;
+                if (!is_string($slug) || $slug === '' || str_contains($slug, ':')) {
+                    continue;
+                }
+                $property = $family . '-' . $side;
+                if (($actual[$property] ?? null) === "var(--wp--preset--spacing--{$slug})") {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $attributes */
+    private function hasAuthoredSpacingDeclaration(array $attributes, string $originalContent): bool
+    {
+        $spacing = $attributes['style']['spacing'] ?? null;
+        if (!is_array($spacing)) {
+            return false;
+        }
+        $actual = $this->rootStyles($originalContent);
+        foreach (['margin', 'padding'] as $family) {
+            $box = $spacing[$family] ?? null;
+            if (!is_array($box)) {
+                continue;
+            }
+            foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                if (array_key_exists($side, $box) && array_key_exists("{$family}-{$side}", $actual)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

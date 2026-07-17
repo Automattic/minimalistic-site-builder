@@ -1,0 +1,1051 @@
+{
+  "schemaVersion": 1,
+  "name": "generated-demo-layout-and-paragraph-signatures",
+  "milestone": "M3",
+  "capabilities": [
+    "block:core/group",
+    "block:core/columns",
+    "block:core/column",
+    "block:core/paragraph",
+    "deprecation:columns-element-link",
+    "deprecation:group-element-link",
+    "deprecation:paragraph-selectorless",
+    "legacy:group-top-level-shadow-drop",
+    "repair:nested-paragraph",
+    "support:layout",
+    "support:layout-align-items",
+    "support:layout-default",
+    "support:layout-wide-size",
+    "support:short-spacing-preset-signature",
+    "support:spacing",
+    "report:fixed"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "custom-class-recovery",
+      "deprecation:core/columns:0",
+      "deprecation:core/group:4",
+      "deprecation:core/paragraph:6",
+      "nested-paragraph"
+    ],
+    "files": [
+      {
+        "path": "parts/align-items.html",
+        "passes": 1,
+        "secondInvocationPasses": 1,
+        "inputSha256": "2ade1f1f32dc08742b8075288a012d9b3e027e8abb0e995bcc581db7bbae71cd",
+        "outputSha256": "2ade1f1f32dc08742b8075288a012d9b3e027e8abb0e995bcc581db7bbae71cd",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/columns-element-link.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "491f4b4b173dd1021946b69e0c737543e0e431a761cd8a69d3305b608cf06e87",
+        "outputSha256": "0d6a974f1a465e65fb3f89f144d1cac4cb790586e7d4c7f8c27c414cdf2121e9",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/columns",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "alignwide"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "isStackedOnMobile": true,
+                    "textColor": "base",
+                    "align": "wide",
+                    "style": {
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|base"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "verticalAlignment": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customTextColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "base",
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": "alignwide",
+                    "style": {
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|base"
+                          }
+                        }
+                      }
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [
+                    {
+                      "name": "core/column",
+                      "attributes": {},
+                      "innerBlocks": []
+                    }
+                  ],
+                  "afterInnerBlocks": [
+                    {
+                      "name": "core/column",
+                      "attributes": {},
+                      "innerBlocks": []
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/column",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/columns",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/group-element-link.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "2abd400d67cc63e010e5aa8ddf851e660e8846257fba00f5468a38c4393c3d7c",
+        "outputSha256": "5a153ea1cd260c420a4a130096a4d5b31bba6089ff5dcf0c97faaf5cfd46f85e",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 4,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/group",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-base-color"
+                },
+                {
+                  "blockName": "core/group",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-base-color has-text-color"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 4,
+                  "beforeAttributes": {
+                    "tagName": "div",
+                    "backgroundColor": "contrast",
+                    "textColor": "base",
+                    "align": "full",
+                    "style": {
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|base"
+                          }
+                        }
+                      }
+                    },
+                    "layout": {
+                      "type": "constrained"
+                    }
+                  },
+                  "afterAttributes": {
+                    "backgroundColor": "contrast",
+                    "customBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "align": "full",
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "anchor": {
+                      "__type": "undefined"
+                    },
+                    "className": "has-base-color has-text-color",
+                    "style": {
+                      "elements": {
+                        "link": {
+                          "color": {
+                            "text": "var:preset|color|base"
+                          }
+                        }
+                      }
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    },
+                    "tagName": "div"
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/layout-default.html",
+        "passes": 1,
+        "secondInvocationPasses": 1,
+        "inputSha256": "36cfa8199037cc12693b98f40d779e2664f6109743e0b16e1dd894545b8cba47",
+        "outputSha256": "36cfa8199037cc12693b98f40d779e2664f6109743e0b16e1dd894545b8cba47",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/legacy-shadow.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "86c6ea759c139afd0fefc13aacd8422088f5ca8686fc05223f9f9db7b73eb75b",
+        "outputSha256": "641501f9a53426298a6b76e20a3910c4ba61b0e0a70b13f437ea51c0c3fa00d4",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [
+              "core/group: Expected attributes [class], instead saw [class, style].",
+              "core/group: Block validation failed for `core/group` ({...}).\n\nContent generated by `save` function:\n\n<div class=\"wp-block-group has-base-background-color has-background\"></div>\n\nContent retrieved from post body:\n\n<div class=\"wp-block-group has-base-background-color has-background\" style=\"box-shadow:var(--wp--preset--shadow--soft-settle)\"></div>"
+            ],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/paragraph-spacing.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "67294009ecf4ff849115304cda08a7c634e4bbb8d83fe0d9eff01d72577878e4",
+        "outputSha256": "2606bdc45ff7e9d492a32ba5005c18c27860a17b4e3b3bc432c4866514b68b2a",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [
+              "core/paragraph: Nested paragraph tags detected and removed"
+            ],
+            "compatibilityRepairs": [
+              {
+                "code": "nested-paragraph",
+                "blockName": "core/paragraph",
+                "blockPath": "document",
+                "stage": "post-serialize",
+                "count": 1
+              }
+            ],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-secondary-color has-text-color"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-secondary-color has-text-color has-lead-font-size"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center has-text-color has-lead-font-size"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center has-secondary-color has-text-color has-lead-font-size"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "secondary",
+                    "align": "center",
+                    "fontSize": "lead",
+                    "style": {
+                      "spacing": {
+                        "margin": {
+                          "top": "md",
+                          "bottom": "lg"
+                        }
+                      }
+                    },
+                    "className": "has-text-align-center"
+                  },
+                  "afterAttributes": {
+                    "align": "center",
+                    "content": "<p class=\"has-text-align-center has-secondary-color has-text-color has-lead-font-size\" style=\"margin-top:var(--wp--preset--spacing--md);margin-bottom:var(--wp--preset--spacing--lg)\">Twenty years of documentary photography from Argentina.</p>",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "secondary",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "lead",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "spacing": {
+                        "margin": {
+                          "top": "md",
+                          "bottom": "lg"
+                        }
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [
+              "core/paragraph: Nested paragraph tags detected and removed"
+            ],
+            "compatibilityRepairs": [
+              {
+                "code": "nested-paragraph",
+                "blockName": "core/paragraph",
+                "blockPath": "document",
+                "stage": "post-serialize",
+                "count": 1
+              }
+            ],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-secondary-color has-text-color"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-secondary-color has-text-color has-lead-font-size"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-color has-lead-font-size has-text-align-center"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-secondary-color has-text-color has-lead-font-size has-text-align-center"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "secondary",
+                    "align": "center",
+                    "fontSize": "lead",
+                    "style": {
+                      "spacing": {
+                        "margin": {
+                          "top": "md",
+                          "bottom": "lg"
+                        }
+                      }
+                    },
+                    "className": "has-text-align-center"
+                  },
+                  "afterAttributes": {
+                    "align": "center",
+                    "content": "<p class=\"has-secondary-color has-text-color has-lead-font-size has-text-align-center\" style=\"margin-top:var(--wp--preset--spacing--md);margin-bottom:var(--wp--preset--spacing--lg)\">Twenty years of documentary photography from Argentina.</p>",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "secondary",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "lead",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "spacing": {
+                        "margin": {
+                          "top": "md",
+                          "bottom": "lg"
+                        }
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/wide-size.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "a881449e500551e9df95607ba088aa4c99defc59abe35f068d5f3d60b0d47a44",
+        "outputSha256": "dfe436c7dc3f4db01c0a6c1e2df8da7a00d9c4c422bb72d58f4190ee2d9dd56b",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 1,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

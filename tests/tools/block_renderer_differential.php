@@ -90,7 +90,26 @@ $cases = [
             'typography' => ['fontSize' => '21px', 'lineHeight' => '1.4', 'textAlign' => 'right'],
         ],
     ]),
+    probe('paragraph/short-spacing-slugs', 'core/paragraph', [
+        'content' => 'Short spacing', 'align' => 'center', 'fontSize' => 'lead',
+        'textColor' => 'secondary',
+        'style' => ['spacing' => ['margin' => ['top' => 'md', 'bottom' => 'lg']]],
+    ]),
     probe('group/default', 'core/group', [], [$paragraph()]),
+    probe('group/layout-wide-size', 'core/group', [
+        'layout' => ['type' => 'constrained', 'wideSize' => '1320px'],
+    ], [$paragraph('Wide size')]),
+    probe('group/layout-align-items', 'core/group', [
+        'align' => 'wide',
+        'layout' => [
+            'type' => 'flex', 'orientation' => 'vertical',
+            'justifyContent' => 'center', 'alignItems' => 'center',
+        ],
+    ], [$paragraph('Align items')]),
+    probe('group/layout-default', 'core/group', [
+        'align' => 'wide', 'className' => 'masonry-3',
+        'layout' => ['type' => 'default'],
+    ], [$paragraph('Default layout')]),
     probe('group/tag-supports', 'core/group', [
         'tagName' => 'section', 'align' => 'wide', 'anchor' => 'region', 'ariaLabel' => 'Region',
         'className' => 'featured', 'backgroundColor' => 'base', 'textColor' => 'contrast',
