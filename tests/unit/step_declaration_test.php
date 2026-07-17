@@ -33,6 +33,31 @@ test('StepDeclaration rejects absolute or parent paths', function () {
     assert_throws(fn () => new StepDeclaration('a', 'A', ['../bar'], [], false));
 });
 
+test('StepDeclaration rejects non-canonical aliases and unsupported globs', function () {
+    $invalid = [
+        './meta.json',
+        'theme/parts/./header.html',
+        'theme//parts/header.html',
+        'theme/parts/',
+        'theme\\parts\\header.html',
+        '*',
+        'theme/*/header.html',
+        'theme/parts/header*.html',
+        'theme/parts/**',
+    ];
+
+    foreach ($invalid as $path) {
+        assert_throws(
+            fn () => new StepDeclaration('a', 'A', [$path], [], false),
+            "expected invalid declaration read to be rejected: {$path}",
+        );
+        assert_throws(
+            fn () => new StepDeclaration('a', 'A', [], [$path], false),
+            "expected invalid declaration write to be rejected: {$path}",
+        );
+    }
+});
+
 test('StepDeclaration allows directory globs', function () {
     $d = new StepDeclaration('s', 'S', ['theme/parts/*'], ['theme/*'], true);
     assert_eq(['theme/parts/*'], $d->reads);

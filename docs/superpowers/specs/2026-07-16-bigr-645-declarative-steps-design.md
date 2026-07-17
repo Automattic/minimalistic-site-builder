@@ -69,7 +69,9 @@ Immutable value object in `Automattic\SiteBuild`:
 | `writes` | `list<string>` | Same |
 | `concurrent` | `bool` | Fan-out only (see below) |
 
-Constructor rejects empty `id`, empty path strings, leading `/`, and `..` segments.
+Constructor rejects empty `id` and any non-canonical path. Paths use `/`
+separators, contain no empty, `.` or `..` segments, and may use `*` only as a
+terminal directory glob (`path/*`). Seeds follow the same grammar.
 
 ### `Step` interface
 
@@ -120,7 +122,8 @@ Pure (no disk, no LLM). Called when:
 2. For each step in order:
    - For each path in `declaration()->reads`: if not **covered** by `available`, throw `InvalidArgumentException` with step id, missing path, and a short list of available paths.
    - Add `declaration()->writes` to `available`.
-3. Duplicate top-level step ids → throw.
+3. Duplicate addressable ids → throw. Top-level ids and every
+   `ConcurrentGroup` member id share one namespace, including across groups.
 4. Empty step list → throw (or allow empty only if we never need it; prefer reject empty for clarity).
 
 ### Coverage rules
@@ -133,7 +136,9 @@ Pure (no disk, no LLM). Called when:
 | any path under `theme/parts/` | `theme/parts/*` | yes (directory read once anything under the dir was written) |
 | `theme/parts/header.html` | `theme/theme.json` | no |
 
-Path rules: project-relative only; no leading `/`; no `..`.
+Path rules: canonical project-relative `/`-separated paths only; no empty, `.`
+or `..` segments, backslashes, or wildcard forms other than a terminal `/*`.
+Internal path sets preserve numeric-string filenames as strings.
 
 ### ConcurrentGroup in validation
 
@@ -226,7 +231,7 @@ Order must remain exactly the current default `stepIds()` list. Declarations mus
 | theme-json+section-plan | union of members | union of members | **yes** |
 | sections | `siteSpec.json`, `theme/theme.json`, `sections.json`, `designDirection.json` | `theme/parts/*` | **yes** |
 | section-rhythm | `sections.json`, `theme/parts/*` | `theme/parts/*` | no |
-| assemble-landing-page | `sections.json`, `theme/parts/*`, `theme/theme.json` | `theme/templates/*`, `theme/theme.json` | no |
+| assemble-landing-page | `sections.json`, `theme/parts/header.html`, `theme/parts/footer.html`, `theme/parts/*`, `theme/theme.json` | `theme/templates/front-page.html`, `theme/templates/index.html`, `theme/theme.json` | no |
 | collect-images | `theme/parts/*`, `theme/templates/*` | `images.json` | no |
 | normalize-layout | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | no |
 | contrast-fix | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | same | no |
@@ -237,6 +242,14 @@ Order must remain exactly the current default `stepIds()` list. Declarations mus
 | fonts-php | `theme/theme.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `theme/fonts.php` | no |
 | finalize-theme | `designDirection.json`, `theme/assets/motion/*` | `theme/functions.php`, `theme/assets/motion/*` | no |
 | validate-theme | `sections.json`, `theme/style.css`, `theme/theme.json`, required template/part files, `theme/parts/*`, `theme/templates/*` | — | no |
+
+Opt-in post-build steps use a distinct completion artifact so image-backed
+contrast cannot be scheduled before generation:
+
+| id | reads (primary) | writes (primary) | concurrent |
+|----|-----------------|------------------|------------|
+| generate-images | `images.json`, `siteSpec.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `images.json`, `images.generated.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | **yes** |
+| cover-contrast | `images.generated.json`, `theme/theme.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | no |
 
 `theme/*` means “the theme tree” for validation coverage: available `theme/*` covers any `theme/...` read; writing `theme/*` marks the whole tree available. Exact path strings will be confirmed against each step’s code during implementation; this table is the intent.
 
@@ -259,6 +272,9 @@ Unit tests under `tests/unit/` (existing harness):
 5. **Describe snapshot** — ordered ids + `concurrent` flags for the default graph match expectations (drift alarm).
 6. **SiteBuilder stepIds** — existing expected list in `site_builder_test.php` remains green.
 7. **Test doubles** — `RecorderStep`, `RecordingConcurrentStep` implement `declaration()`.
+8. **Identity namespace** — member ids cannot collide with top-level ids or members of another group.
+9. **Canonical paths** — aliases and unsupported globs are rejected for declarations and seeds; numeric-string paths remain strings.
+10. **Post-image ordering** — `cover-contrast` requires the completion artifact written last by `generate-images`.
 
 ## File / touch list (implementation)
 

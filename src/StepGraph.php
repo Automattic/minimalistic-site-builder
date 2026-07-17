@@ -13,6 +13,9 @@ final class StepGraph
     /** Project paths available before any step runs: meta.json from createProject(). */
     public const DEFAULT_SEEDS = ['meta.json'];
 
+    /** Prefix keeps numeric-string paths from being coerced to integer array keys. */
+    private const PATH_SET_PREFIX = "\0path:";
+
     /**
      * @param Step[]   $steps
      * @param string[] $seeds Project paths available before any step (default meta.json).
@@ -25,12 +28,11 @@ final class StepGraph
 
         $available = [];
         foreach ($seeds as $seed) {
-            if (!is_string($seed) || $seed === '') {
-                throw new \InvalidArgumentException('StepGraph: seed paths must be non-empty strings');
-            }
-            $available[$seed] = true;
+            StepDeclaration::assertValidProjectPath($seed, 'StepGraph: seed paths');
+            $available[self::pathSetKey($seed)] = true;
         }
 
+        /** @var array<string, string> $seenIds id => first owner */
         $seenIds = [];
         foreach ($steps as $i => $step) {
             if (!$step instanceof Step) {
@@ -38,23 +40,54 @@ final class StepGraph
             }
             $decl = self::declarationOf($step);
             $id = $decl->id;
-            if (isset($seenIds[$id])) {
-                throw new \InvalidArgumentException("StepGraph: duplicate step id '{$id}'");
+            self::claimId($seenIds, $id, "top-level step '{$id}'");
+            if ($step instanceof ConcurrentGroup) {
+                $members = $step->members();
+                foreach ($members as $member) {
+                    $memberId = $member->id();
+                    // A one-member group has the same composite and member id;
+                    // those are two views of one addressable node, not a clash.
+                    if (count($members) === 1 && $memberId === $id) {
+                        continue;
+                    }
+                    self::claimId(
+                        $seenIds,
+                        $memberId,
+                        "member '{$memberId}' of group '{$id}'",
+                    );
+                }
             }
-            $seenIds[$id] = true;
 
             foreach ($decl->reads as $path) {
                 if (!self::covers($available, $path)) {
-                    $have = $available === [] ? '(none)' : implode(', ', array_keys($available));
+                    $have = $available === [] ? '(none)' : implode(', ', self::pathsInSet($available));
                     throw new \InvalidArgumentException(
                         "step \"{$id}\" reads \"{$path}\" but nothing earlier writes it (available: {$have})"
                     );
                 }
             }
             foreach ($decl->writes as $path) {
-                $available[$path] = true;
+                $available[self::pathSetKey($path)] = true;
             }
         }
+    }
+
+    /**
+     * Keep every pipeline-addressable identity in one namespace. Top-level
+     * steps are addressed by stepIds(), while concurrent members are accepted
+     * by stopIds()/runThrough(); allowing either kind to collide makes the
+     * requested checkpoint ambiguous.
+     *
+     * @param array<string, string> $seenIds id => first owner
+     */
+    private static function claimId(array &$seenIds, string $id, string $owner): void
+    {
+        if (isset($seenIds[$id])) {
+            throw new \InvalidArgumentException(
+                "StepGraph: duplicate addressable step id '{$id}' ({$owner} conflicts with {$seenIds[$id]})"
+            );
+        }
+        $seenIds[$id] = $owner;
     }
 
     /**
@@ -120,11 +153,11 @@ final class StepGraph
     /**
      * Whether $needed is covered by any path in $available (exact or directory glob).
      *
-     * @param array<string, true> $available
+     * @param array<string|int, true> $available
      */
     public static function covers(array $available, string $needed): bool
     {
-        foreach (array_keys($available) as $have) {
+        foreach (self::pathsInSet($available) as $have) {
             if ($have === $needed) {
                 return true;
             }
@@ -144,5 +177,30 @@ final class StepGraph
             }
         }
         return false;
+    }
+
+    private static function pathSetKey(string $path): string
+    {
+        return self::PATH_SET_PREFIX . $path;
+    }
+
+    /**
+     * Decode internal path-set keys. Unprefixed keys remain supported for
+     * direct covers() callers, including PHP-coerced numeric-string keys.
+     *
+     * @param array<string|int, true> $paths
+     * @return list<string>
+     */
+    private static function pathsInSet(array $paths): array
+    {
+        $decoded = [];
+        foreach (array_keys($paths) as $key) {
+            if (is_string($key) && str_starts_with($key, self::PATH_SET_PREFIX)) {
+                $decoded[] = substr($key, strlen(self::PATH_SET_PREFIX));
+            } else {
+                $decoded[] = (string) $key;
+            }
+        }
+        return $decoded;
     }
 }

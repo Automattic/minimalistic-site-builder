@@ -83,6 +83,27 @@ test('ConcurrentGroup rejects overlapping member writes', function () {
     assert_throws(fn () => new ConcurrentGroup($llm, [$directoryWriter, $fileWriter]));
 });
 
+test('ConcurrentGroup rejects a path alias before it can bypass overlap checks', function () {
+    $llm = new FakeLlm();
+    $canonical = new RecordingConcurrentStep('canonical', [], [], ['theme/parts/header.html']);
+    $alias = new RecordingConcurrentStep('alias', [], [], ['theme/parts/./header.html']);
+
+    assert_throws(fn () => new ConcurrentGroup($llm, [$canonical, $alias]));
+});
+
+test('ConcurrentGroup preserves numeric-string paths while unioning declarations', function () {
+    $llm = new FakeLlm();
+    $a = new RecordingConcurrentStep('alpha', [], ['123'], ['456']);
+    $b = new RecordingConcurrentStep('beta', [], ['123'], ['789']);
+
+    $declaration = (new ConcurrentGroup($llm, [$a, $b]))->declaration();
+
+    assert_eq(['123'], $declaration->reads);
+    assert_eq(['456', '789'], $declaration->writes);
+    assert_true(is_string($declaration->reads[0]));
+    assert_true(is_string($declaration->writes[0]));
+});
+
 test('ConcurrentGroup rejects a member reading another member write', function () {
     $llm = new FakeLlm();
     $reader = new RecordingConcurrentStep('reader', [], ['theme/parts/header.html']);

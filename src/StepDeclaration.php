@@ -26,14 +26,37 @@ final class StepDeclaration
         }
         foreach (['reads' => $this->reads, 'writes' => $this->writes] as $kind => $paths) {
             foreach ($paths as $path) {
-                if (!is_string($path) || $path === '') {
-                    throw new \InvalidArgumentException("StepDeclaration {$kind} path must be a non-empty string");
-                }
-                if (str_starts_with($path, '/') || str_contains($path, '..')) {
-                    throw new \InvalidArgumentException(
-                        "StepDeclaration {$kind} path must be project-relative without '..': {$path}"
-                    );
-                }
+                self::assertValidProjectPath($path, "StepDeclaration {$kind} path");
+            }
+        }
+    }
+
+    /**
+     * Assert that a path uses the declaration grammar: canonical POSIX-style
+     * project-relative segments, optionally ending in one directory glob.
+     */
+    public static function assertValidProjectPath(mixed $path, string $subject): void
+    {
+        if (!is_string($path) || $path === '') {
+            throw new \InvalidArgumentException("{$subject} must be a non-empty string");
+        }
+
+        $segments = explode('/', $path);
+        $last = count($segments) - 1;
+        foreach ($segments as $index => $segment) {
+            $isTerminalGlob = $segment === '*' && $index === $last && $index > 0;
+            if (
+                $segment === ''
+                || $segment === '.'
+                || $segment === '..'
+                || str_contains($segment, "\0")
+                || str_contains($segment, '\\')
+                || (str_contains($segment, '*') && !$isTerminalGlob)
+            ) {
+                throw new \InvalidArgumentException(
+                    "{$subject} must be a canonical project-relative path "
+                    . "with only an optional terminal '/*' glob: {$path}"
+                );
             }
         }
     }

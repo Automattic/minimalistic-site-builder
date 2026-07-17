@@ -56,19 +56,25 @@ final class ConcurrentGroup implements Step
         foreach ($this->steps as $step) {
             $d = $step->declaration();
             foreach ($d->reads as $path) {
-                $reads[$path] = true;
+                $reads[self::pathSetKey($path)] = $path;
             }
             foreach ($d->writes as $path) {
-                $writes[$path] = true;
+                $writes[self::pathSetKey($path)] = $path;
             }
         }
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: array_keys($reads),
-            writes: array_keys($writes),
+            reads: array_values($reads),
+            writes: array_values($writes),
             concurrent: true,
         );
+    }
+
+    /** Keep numeric-string paths as strings while de-duplicating the union. */
+    private static function pathSetKey(string $path): string
+    {
+        return "\0path:" . $path;
     }
 
     /**

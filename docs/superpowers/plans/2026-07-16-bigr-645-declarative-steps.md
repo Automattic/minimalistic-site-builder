@@ -693,7 +693,7 @@ Reference declarations (copy into each class):
 | SectionPlanStep | `meta.json`, `siteSpec.json`, `designDirection.json` | `sections.json` | false |
 | SectionsStep | `siteSpec.json`, `theme/theme.json`, `sections.json`, `designDirection.json` | `theme/parts/*` | **true** |
 | SectionRhythmStep | `sections.json`, `theme/parts/*` | `theme/parts/*` | false |
-| AssembleLandingPageStep | `sections.json`, `theme/parts/*`, `theme/theme.json` | `theme/templates/*`, `theme/theme.json` | false |
+| AssembleLandingPageStep | `sections.json`, `theme/parts/header.html`, `theme/parts/footer.html`, `theme/parts/*`, `theme/theme.json` | `theme/templates/front-page.html`, `theme/templates/index.html`, `theme/theme.json` | false |
 | CollectImagesStep | `theme/parts/*`, `theme/templates/*` | `images.json` | false |
 | NormalizeLayoutStep | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
 | ContrastFixStep | `theme/theme.json`, `theme/parts/*`, `theme/templates/*` | same three | false |
@@ -704,8 +704,15 @@ Reference declarations (copy into each class):
 | FontsPhpStep | `theme/theme.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `theme/fonts.php` | false |
 | FinalizeThemeStep | `designDirection.json`, `theme/assets/motion/*` | `theme/functions.php`, `theme/assets/motion/*` | false |
 | ValidateThemeStep | `sections.json`, `theme/style.css`, `theme/theme.json`, required template/part files, `theme/parts/*`, `theme/templates/*` | `[]` | false |
-| CoverContrastStep | `theme/theme.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
-| GenerateImagesStep | `images.json`, `siteSpec.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `images.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | **true** |
+| CoverContrastStep | `images.generated.json`, `theme/theme.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | `theme/parts/*`, `theme/templates/*` | false |
+| GenerateImagesStep | `images.json`, `siteSpec.json`, `designDirection.json`, `theme/parts/*`, `theme/templates/*` | `images.json`, `images.generated.json`, `theme/assets/*`, `theme/parts/*`, `theme/templates/*` | **true** |
+
+Final hardening after implementation: declaration and seed paths use canonical
+`/`-separated project-relative syntax with only terminal `/*` globs; internal
+sets preserve numeric-string paths; and top-level plus concurrent-member ids
+share one global addressable namespace. `images.generated.json` is cleared at
+the start of generation and written only after every successful completion
+path, so `CoverContrastStep` has an unambiguous ordering dependency.
 
 Example for `ScaffoldThemeStep`:
 

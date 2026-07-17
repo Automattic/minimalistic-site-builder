@@ -44,6 +44,37 @@ function graph_fake_step(
     };
 }
 
+function graph_fake_concurrent_step(string $id): ConcurrentStep
+{
+    return new class ($id) implements ConcurrentStep {
+        public function __construct(private string $id) {}
+
+        public function id(): string
+        {
+            return $this->id;
+        }
+
+        public function label(): string
+        {
+            return $this->id;
+        }
+
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration($this->id, $this->id, [], []);
+        }
+
+        public function requests(Project $project): array
+        {
+            return [];
+        }
+
+        public function consume(Project $project, array $results): void {}
+
+        public function run(Project $project): void {}
+    };
+}
+
 test('StepGraph validates a legal chain with default meta.json seed', function () {
     StepGraph::validate([
         graph_fake_step('refine-prompt', ['meta.json'], ['meta.json']),
@@ -67,6 +98,36 @@ test('StepGraph empty seeds fails refine-prompt without meta.json', function () 
             seeds: [],
         );
     });
+});
+
+test('StepGraph applies declaration path validation to seeds', function () {
+    $invalid = [
+        '',
+        123,
+        '/meta.json',
+        './meta.json',
+        'data/../meta.json',
+        'data/./meta.json',
+        'data//meta.json',
+        'data/',
+        'data/*.json',
+        'data/*/meta.json',
+    ];
+
+    foreach ($invalid as $seed) {
+        assert_throws(
+            fn () => StepGraph::validate([graph_fake_step('noop')], seeds: [$seed]),
+            "expected invalid seed path to be rejected: {$seed}",
+        );
+    }
+});
+
+test('StepGraph preserves numeric-string seed, write, and read paths', function () {
+    StepGraph::validate([
+        graph_fake_step('seed-reader', ['123'], ['456']),
+        graph_fake_step('write-reader', ['456'], []),
+    ], seeds: ['123']);
+    assert_true(true);
 });
 
 test('StepGraph directory write covers later directory and concrete reads', function () {
@@ -101,6 +162,62 @@ test('StepGraph rejects duplicate top-level ids', function () {
             graph_fake_step('site-spec', ['meta.json'], ['siteSpec.json']),
         ]);
     });
+});
+
+test('StepGraph rejects a concurrent member id matching a top-level step', function () {
+    assert_throws(fn () => StepGraph::validate([
+        new ConcurrentGroup(new FakeLlm(), [
+            graph_fake_concurrent_step('group-member'),
+            graph_fake_concurrent_step('group-sibling'),
+        ]),
+        graph_fake_step('group-member'),
+    ], seeds: []));
+});
+
+test('StepGraph rejects the same member id across concurrent groups', function () {
+    assert_throws(fn () => StepGraph::validate([
+        new ConcurrentGroup(new FakeLlm(), [
+            graph_fake_concurrent_step('shared-member'),
+            graph_fake_concurrent_step('first-sibling'),
+        ]),
+        new ConcurrentGroup(new FakeLlm(), [
+            graph_fake_concurrent_step('shared-member'),
+            graph_fake_concurrent_step('second-sibling'),
+        ]),
+    ], seeds: []));
+});
+
+test('StepGraph rejects a leaf id matching a concurrent group composite id', function () {
+    assert_throws(fn () => StepGraph::validate([
+        new ConcurrentGroup(new FakeLlm(), [
+            graph_fake_concurrent_step('alpha'),
+            graph_fake_concurrent_step('beta'),
+        ]),
+        graph_fake_step('alpha+beta'),
+    ], seeds: []));
+});
+
+test('StepGraph allows independent member ids across concurrent groups', function () {
+    StepGraph::validate([
+        new ConcurrentGroup(new FakeLlm(), [
+            graph_fake_concurrent_step('alpha'),
+            graph_fake_concurrent_step('beta'),
+        ]),
+        new ConcurrentGroup(new FakeLlm(), [
+            graph_fake_concurrent_step('gamma'),
+            graph_fake_concurrent_step('delta'),
+        ]),
+    ], seeds: []);
+    assert_true(true);
+});
+
+test('StepGraph allows a one-member group to share its composite identity', function () {
+    StepGraph::validate([
+        new ConcurrentGroup(new FakeLlm(), [
+            graph_fake_concurrent_step('solo'),
+        ]),
+    ], seeds: []);
+    assert_true(true);
 });
 
 test('StepGraph rejects an id that differs from the declaration', function () {
