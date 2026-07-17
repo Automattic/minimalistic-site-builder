@@ -622,6 +622,7 @@ After`,
       'deprecation:columns-element-link',
       'deprecation:group-element-link',
       'deprecation:paragraph-selectorless',
+      'legacy:group-top-level-border-drop',
       'legacy:group-top-level-shadow-drop',
       'repair:nested-paragraph',
       'support:layout',
@@ -648,6 +649,9 @@ After`,
 <!-- /wp:paragraph -->`,
       'parts/legacy-shadow.html': String.raw`<!-- wp:group {"backgroundColor":"base","shadow":"var:preset|shadow|soft-settle","layout":{"type":"constrained"}} -->
 <div class="wp-block-group has-base-background-color has-background" style="box-shadow:var(--wp--preset--shadow--soft-settle)"></div>
+<!-- /wp:group -->`,
+      'parts/legacy-border.html': String.raw`<!-- wp:group {"tagName":"header","align":"wide","backgroundColor":"base","border":{"bottom":{"width":"1px","color":"var:preset|color|primary"}},"layout":{"type":"constrained"}} -->
+<header class="wp-block-group alignwide has-base-background-color has-background" style="border-bottom:1px solid var(--wp--preset--color--primary)"></header>
 <!-- /wp:group -->`,
       'parts/columns-element-link.html': String.raw`<!-- wp:columns {"align":"wide","textColor":"base","style":{"elements":{"link":{"color":{"text":"var:preset|color|base"}}}}} -->
 <div class="wp-block-columns alignwide has-base-color has-text-color"><!-- wp:column -->
@@ -678,6 +682,7 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'freeform:before-between-after',
   'missing-block:paired',
   'missing-block:void',
+  'legacy:group-top-level-border-drop',
   'legacy:group-top-level-shadow-drop',
   'delimiter:balanced',
   'delimiter:mismatched',

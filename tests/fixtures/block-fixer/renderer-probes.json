@@ -12,7 +12,7 @@
         },
         "oracleManifest": {
             "path": "tests/fixtures/block-fixer/oracle-manifest.json",
-            "sha256": "9de4c90fbd6e15845a70aaf53dfd378f6d726a47359508fc11663aa21b20f4e3"
+            "sha256": "360c17d0106da5007c005b24cf5426eeb1a957c06b1d01b9132027683ff10ca2"
         },
         "packageLock": {
             "path": "package-lock.json",

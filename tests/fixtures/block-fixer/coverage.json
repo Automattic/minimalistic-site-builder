@@ -367,6 +367,7 @@
         "deprecation:columns-element-link",
         "deprecation:group-element-link",
         "deprecation:paragraph-selectorless",
+        "legacy:group-top-level-border-drop",
         "legacy:group-top-level-shadow-drop",
         "repair:nested-paragraph",
         "support:layout",
@@ -983,6 +984,9 @@
     "deprecation:group-element-link": [
       "generated-demo-layout-and-paragraph-signatures"
     ],
+    "legacy:group-top-level-border-drop": [
+      "generated-demo-layout-and-paragraph-signatures"
+    ],
     "legacy:group-top-level-shadow-drop": [
       "generated-demo-layout-and-paragraph-signatures"
     ],
@@ -1005,6 +1009,7 @@
     "freeform:before-between-after",
     "missing-block:paired",
     "missing-block:void",
+    "legacy:group-top-level-border-drop",
     "legacy:group-top-level-shadow-drop",
     "delimiter:balanced",
     "delimiter:mismatched",
@@ -1352,7 +1357,7 @@
   },
   "rendererProbes": {
     "schemaVersion": 1,
-    "sha256": "d786c031ee2bf1e8e3cc8141830d9ea295931b03ec625b40b7733c8698157567",
+    "sha256": "078ad4468138dbc11fbadb8e60e35f50f5e0f2a5efeb83146c8f1b0df315706e",
     "oracleCases": 101,
     "staticRendererCases": 90,
     "supportedStaticBlocks": [

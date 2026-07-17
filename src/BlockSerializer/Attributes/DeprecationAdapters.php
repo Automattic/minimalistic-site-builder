@@ -23,6 +23,10 @@ final class DeprecationAdapters
      */
     private const REVIEWED_LEGACY_COMMENT_KEYS = [
         'core/group' => [
+            // AI-authored legacy top-level border support. The current schema
+            // accepts only style.border, so the pinned createBlock path drops
+            // this key and its stale saved declaration.
+            'border' => true,
             // AI-authored legacy support form observed in a generated demo.
             // The pinned current schema has no top-level shadow attribute,
             // so createBlock drops both the delimiter key and stale HTML
