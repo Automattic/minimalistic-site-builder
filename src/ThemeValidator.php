@@ -252,11 +252,13 @@ final class ThemeValidator
     {
         $warnings = [];
         $contentSize = Steps\FixBlocksStep::themeContentSize($project);
+        $spacingSlugs = Steps\FixBlocksStep::themeSpacingSlugs($project);
         foreach (Steps\FixBlocksStep::themeFiles($project) as $rel) {
             $result = LayoutFixer::fix(
                 $project->readText('theme/' . $rel),
                 LayoutFixer::roleFor($rel),
-                $contentSize
+                $contentSize,
+                $spacingSlugs
             );
             foreach ($result['notes'] as $note) {
                 $warnings[] = "{$rel}: {$note}";

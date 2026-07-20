@@ -71,7 +71,7 @@ final class LayoutFixer
      *         descriptions of each change; empty notes means markup is
      *         returned unchanged.
      */
-    public static function fix(string $markup, string $role, ?float $contentSize = null): array
+    public static function fix(string $markup, string $role, ?float $contentSize = null, array $spacingSlugs = []): array
     {
         $notes = [];
         $markup = self::repairPrematurelyClosedAttributes($markup, $notes);
@@ -83,6 +83,7 @@ final class LayoutFixer
 
         $htmlEdits = [];
         self::canonicalizeSpacingAttributes($all, $notes);
+        self::repairBareSlugSpacing($markup, $all, $notes, $spacingSlugs);
         self::mirrorHtmlOnlyVerticalSpacing($markup, $all, $notes);
         self::mirrorHtmlOnlyGap($markup, $all, $htmlEdits, $notes);
         self::addMissingRootLayout($roots, $notes);
@@ -163,6 +164,111 @@ final class LayoutFixer
                     continue;
                 }
                 $notes[] = "wp:{$node->name} declared \"{$property}\" directly under \"style\" — dropped it in favor of the existing style.spacing.{$property}";
+            }
+        }
+    }
+
+    /**
+     * Bare values that are (or could be) legitimate CSS for spacing — never
+     * treated as preset slugs even if a theme pathologically names one so.
+     */
+    private const CSS_SPACING_KEYWORDS = ['0', 'auto', 'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'none', 'normal'];
+
+    /**
+     * A spacing value holding a bare preset slug ("top":"sm") renders as the
+     * literal `padding-top:sm`, so re-serialization replaces the HTML's real
+     * var() declaration and the rhythm gate rejects the build (observed on
+     * cards, paragraphs, separators and quotes across demo builds). Rewrite
+     * to var:preset|spacing|<slug> when the theme's spacing scale defines the
+     * slug — any block type, since the model's intent is unambiguous. Without
+     * a scale, fall back to requiring the block's own inline HTML to declare
+     * exactly var(--wp--preset--spacing--<slug>) for that side, trusted only
+     * for wrapper-classed containers. Anything else stays for the gate.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     * @param string[] $spacingSlugs theme spacing-scale slugs ([] = unknown)
+     */
+    private static function repairBareSlugSpacing(string $markup, array $all, array &$notes, array $spacingSlugs = []): void
+    {
+        $slugs = array_diff($spacingSlugs, self::CSS_SPACING_KEYWORDS);
+        foreach ($all as $node) {
+            $spacing = $node->attrs->style->spacing ?? null;
+            if (!$spacing instanceof \stdClass) {
+                continue;
+            }
+
+            // HTML-confirmation fallback: only wrapper-classed containers are
+            // trusted, matching the mirror rules' guard.
+            $declared = null;
+            $trustsHtml = !$node->selfClosing
+                && (self::is($node, 'group') || self::is($node, 'columns')
+                    || self::is($node, 'column') || self::is($node, 'cover'));
+            if ($trustsHtml) {
+                $short = preg_replace('#^core/#', '', $node->name);
+                $tagHtml = self::wrapperTag($markup, $node->start + $node->len);
+                if ($tagHtml !== null && self::hasClassToken($tagHtml, "wp-block-{$short}")) {
+                    $styleAttr = self::tagAttribute($tagHtml, 'style');
+                    if ($styleAttr !== null) {
+                        $declared = [];
+                        foreach (explode(';', $styleAttr[0]) as $segment) {
+                            $colon = strpos($segment, ':');
+                            if ($colon !== false) {
+                                $declared[strtolower(trim(substr($segment, 0, $colon)))] = trim(substr($segment, $colon + 1));
+                            }
+                        }
+                    }
+                }
+            }
+
+            $bareSlug = static function (mixed $value) use ($slugs): ?string {
+                return is_string($value)
+                    && preg_match('/^[a-z0-9_-]+$/', $value) === 1
+                    && !in_array($value, self::CSS_SPACING_KEYWORDS, true)
+                    && in_array($value, $slugs, true)
+                    ? $value : null;
+            };
+
+            foreach (['padding', 'margin'] as $property) {
+                $box = $spacing->{$property} ?? null;
+                if (!$box instanceof \stdClass) {
+                    continue;
+                }
+                foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                    $value = $box->{$side} ?? null;
+                    if (!is_string($value) || preg_match('/^[a-z0-9_-]+$/', $value) !== 1) {
+                        continue;
+                    }
+                    $scaleConfirms = $bareSlug($value) !== null;
+                    $htmlConfirms = ($declared["{$property}-{$side}"] ?? null) === "var(--wp--preset--spacing--{$value})";
+                    if (!$scaleConfirms && !$htmlConfirms) {
+                        continue;
+                    }
+                    $box->{$side} = "var:preset|spacing|{$value}";
+                    $node->dirty = true;
+                    $notes[] = "wp:{$node->name} {$property}.{$side} held the bare slug \"{$value}\" ("
+                        . ($scaleConfirms ? 'defined by the theme spacing scale' : 'matching its inline HTML preset')
+                        . ") — rewrote it to var:preset|spacing|{$value} so the rendered CSS keeps the declared rhythm";
+                }
+            }
+
+            // blockGap renders through the layout stylesheet; a bare slug
+            // there becomes invisible invalid CSS rather than a gate failure,
+            // so only the scale (never HTML) can confirm it.
+            $blockGap = $spacing->blockGap ?? null;
+            if (is_string($blockGap) && $bareSlug($blockGap) !== null) {
+                $spacing->blockGap = "var:preset|spacing|{$blockGap}";
+                $node->dirty = true;
+                $notes[] = "wp:{$node->name} blockGap held the bare slug \"{$blockGap}\" (defined by the theme spacing scale) — rewrote it to var:preset|spacing|{$blockGap}";
+            } elseif ($blockGap instanceof \stdClass) {
+                foreach (['top', 'left'] as $side) {
+                    $value = $blockGap->{$side} ?? null;
+                    if (is_string($value) && $bareSlug($value) !== null) {
+                        $blockGap->{$side} = "var:preset|spacing|{$value}";
+                        $node->dirty = true;
+                        $notes[] = "wp:{$node->name} blockGap.{$side} held the bare slug \"{$value}\" (defined by the theme spacing scale) — rewrote it to var:preset|spacing|{$value}";
+                    }
+                }
             }
         }
     }
