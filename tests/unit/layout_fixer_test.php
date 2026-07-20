@@ -613,6 +613,42 @@ test('layout fixer leaves a bare slug alone when the HTML does not confirm it', 
     assert_eq($markup, $r['markup']);
 });
 
+// ── Dynamic chrome block spacing (site-title / site-tagline / site-logo) ──
+
+test('layout fixer deletes doomed inline spacing a dynamic chrome block already carries in attributes', function () {
+    // mellow-meadow footer: the model expanded site-title (a dynamic block —
+    // empty save()) into an h2 whose inline margin duplicated the attribute.
+    // Re-serialization deletes the h2, the textual drop-detector counted the
+    // inline copy as lost rhythm, and the gate failed the build even though
+    // block supports render the margin from the attribute at runtime.
+    $markup = '<!-- wp:site-title {"level":2,"style":{"spacing":{"margin":{"top":"var:preset|spacing|sm"}}}} -->'
+        . '<h2 class="wp-block-site-title" style="margin-top:var(--wp--preset--spacing--sm)"><a href="/">Hearth &amp; Crumb</a></h2>'
+        . '<!-- /wp:site-title -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
+    assert_true(!str_contains($r['markup'], 'margin-top:var(--wp--preset--spacing--sm)'), 'doomed inline margin should be deleted');
+    assert_contains('"margin":{"top":"var:preset|spacing|sm"}', $r['markup']);
+    assert_true($r['notes'] !== [], 'expected a note');
+});
+
+test('layout fixer adopts HTML-only spacing on a dynamic chrome block into its attributes', function () {
+    $markup = '<!-- wp:site-title -->'
+        . '<h2 class="wp-block-site-title" style="margin-top:var(--wp--preset--spacing--sm);letter-spacing:2px"><a href="/">X</a></h2>'
+        . '<!-- /wp:site-title -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
+    assert_contains('"margin":{"top":"var:preset|spacing|sm"}', $r['markup']);
+    assert_true(!str_contains($r['markup'], 'margin-top:'), 'adopted inline margin should be deleted');
+    assert_contains('letter-spacing:2px', $r['markup']);
+});
+
+test('layout fixer leaves a dynamic chrome block whose attribute disagrees with its inline spacing', function () {
+    $markup = '<!-- wp:site-title {"style":{"spacing":{"margin":{"top":"var:preset|spacing|lg"}}}} -->'
+        . '<h2 class="wp-block-site-title" style="margin-top:var(--wp--preset--spacing--sm)"><a href="/">X</a></h2>'
+        . '<!-- /wp:site-title -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_FOOTER, 860.0);
+    assert_eq([], $r['notes']);
+    assert_eq($markup, $r['markup']);
+});
+
 test('layout fixer does not mirror-copy over a declared attribute or into non-container blocks', function () {
     // Conflicting attribute: declared value stays authoritative and the gate
     // keeps judging the mismatch. Paragraphs are not rhythm containers here.
