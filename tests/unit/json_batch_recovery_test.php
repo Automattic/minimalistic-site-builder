@@ -207,3 +207,78 @@ test('JsonBatchRecovery classifies max_tokens output as truncated JSON', functio
     assert_contains('/tmp/long-page.log', $message);
     assert_true(!str_contains($message, $rawMarker), 'truncated output is available in the log, not the exception');
 });
+
+test('JsonBatchRecovery regenerates a truncated response with a doubled budget', function () {
+    $requests = ['plan' => ['prompt' => 'Plan the site', 'max_tokens' => 4000]];
+    $repairs = [];
+
+    $send = function (array $subset) use (&$repairs): array {
+        foreach ($subset as $key => $request) {
+            if (str_contains((string) ($request['log_label'] ?? ''), 'json-repair')) {
+                $repairs[] = $request;
+                return [$key => ['text' => '{"ok":true}', 'stop_reason' => 'end_turn']];
+            }
+        }
+        return ['plan' => ['text' => '{"sections":["cut-off-mid', 'stop_reason' => 'max_tokens']];
+    };
+
+    $out = JsonBatchRecovery::run($requests, $send);
+
+    assert_eq(true, $out['plan']['ok']);
+    assert_eq(1, count($repairs));
+    assert_eq(8000, $repairs[0]['max_tokens'], 'the repair doubles the explicit output budget');
+    assert_contains('CUT OFF BY THE OUTPUT LENGTH LIMIT', $repairs[0]['prompt']);
+    assert_true(
+        !str_contains($repairs[0]['prompt'], 'cut-off-mid'),
+        'the truncated text is not re-embedded (it cannot be repaired, only regenerated)',
+    );
+    assert_true(
+        !str_contains($repairs[0]['prompt'], 'INVALID JSON'),
+        'a truncation is not framed as a syntax error',
+    );
+});
+
+test('JsonBatchRecovery regenerates a refusal without claiming invalid JSON', function () {
+    $requests = ['page' => ['prompt' => 'Plan the page']];
+    $repairs = [];
+
+    $send = function (array $subset) use (&$repairs): array {
+        foreach ($subset as $key => $request) {
+            if (str_contains((string) ($request['log_label'] ?? ''), 'json-repair')) {
+                $repairs[] = $request;
+                return [$key => ['text' => '{"ok":true}', 'stop_reason' => 'end_turn']];
+            }
+        }
+        return ['page' => ['text' => '', 'stop_reason' => 'refusal']];
+    };
+
+    $out = JsonBatchRecovery::run($requests, $send);
+
+    assert_eq(true, $out['page']['ok']);
+    assert_eq(1, count($repairs));
+    assert_contains('NO USABLE CONTENT', $repairs[0]['prompt']);
+    assert_true(
+        !str_contains($repairs[0]['prompt'], 'INVALID JSON') && !str_contains($repairs[0]['prompt'], '<previous_response>'),
+        'a refusal repair neither claims invalid JSON nor wraps an empty previous response',
+    );
+});
+
+test('JsonBatchRecovery classifies model_context_window_exceeded as truncation', function () {
+    $requests = ['long' => ['prompt' => 'Plan']];
+    $send = fn (array $subset): array => ['long' => [
+        'text'        => '',
+        'stop_reason' => 'model_context_window_exceeded',
+    ]];
+
+    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send, 0));
+    assert_contains('truncat', strtolower($error->getMessage()));
+});
+
+test('JsonBatchRecovery rejects a non-string non-array response cleanly', function () {
+    $requests = ['a' => ['prompt' => 'A']];
+    $send = fn (array $subset): array => ['a' => null];
+
+    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send));
+    assert_contains('must be a string or a record', $error->getMessage());
+    assert_contains('null', $error->getMessage());
+});

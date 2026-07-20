@@ -35,11 +35,7 @@ final class JsonDecoder
 
         $repaired = self::stripTrailingCommas($json);
         if ($repaired !== $json) {
-            $second = self::decodeStrict($repaired);
-            if ($second['data'] !== null) {
-                return $second;
-            }
-            return $second;
+            return self::decodeStrict($repaired);
         }
 
         return $first;

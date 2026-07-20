@@ -95,11 +95,16 @@ final class JsonBatchRecovery
         return $out;
     }
 
-    /** @param array<string,mixed>|string $response @return array<string,mixed> */
-    private static function responseRecord(array|string $response, string|int $key): array
+    /** @return array<string,mixed> */
+    private static function responseRecord(mixed $response, string|int $key): array
     {
         if (is_string($response)) {
             return ['text' => $response];
+        }
+        if (!is_array($response)) {
+            throw new \RuntimeException(
+                "JSON batch response '{$key}' must be a string or a record, got " . get_debug_type($response)
+            );
         }
         if (!array_key_exists('text', $response) || !is_string($response['text'])) {
             throw new \RuntimeException("JSON batch response '{$key}' has no text");
@@ -108,6 +113,13 @@ final class JsonBatchRecovery
     }
 
     /**
+     * Build the retry request for one failed key, shaped by WHY it failed:
+     * a syntax error gets the previous text back for a targeted repair; a
+     * truncation regenerates with a doubled output budget (repairing at the
+     * same cap re-truncates by construction, and re-embedding the cut-off
+     * text only doubles the input cost); a refusal regenerates cleanly (the
+     * filter is non-deterministic; there is no previous text to repair).
+     *
      * @param array<string,mixed> $request
      * @param array<string,mixed> $response
      * @return array<string,mixed>
@@ -119,10 +131,33 @@ final class JsonBatchRecovery
         string $error,
     ): array {
         $label = (string) ($request['log_label'] ?? $key);
-        $previous = (string) $response['text'];
         $repair = $request;
         $repair['log_label'] = $label . '-json-repair';
-        $repair['prompt'] = (string) ($request['prompt'] ?? '')
+        $prompt = (string) ($request['prompt'] ?? '');
+        $reason = is_string($response['stop_reason'] ?? null) ? trim($response['stop_reason']) : '';
+
+        if (in_array($reason, self::TRUNCATION_REASONS, true)) {
+            // Twice the explicit budget, or twice the clients' 16k default
+            // when the request relied on it.
+            $repair['max_tokens'] = isset($request['max_tokens'])
+                ? ((int) $request['max_tokens']) * 2
+                : 32000;
+            $repair['prompt'] = $prompt
+                . "\n\nYOUR PREVIOUS RESPONSE WAS CUT OFF BY THE OUTPUT LENGTH LIMIT ({$error}). "
+                . "Regenerate the COMPLETE JSON value from scratch, as compactly as the schema allows, "
+                . "and return nothing else.";
+            return $repair;
+        }
+
+        if (in_array($reason, self::REFUSAL_REASONS, true)) {
+            $repair['prompt'] = $prompt
+                . "\n\nYOUR PREVIOUS ATTEMPT RETURNED NO USABLE CONTENT ({$error}). "
+                . "Answer again, returning only the JSON value the instructions above describe.";
+            return $repair;
+        }
+
+        $previous = (string) $response['text'];
+        $repair['prompt'] = $prompt
             . "\n\nYOUR PREVIOUS RESPONSE WAS INVALID JSON. Repair its syntax without changing, omitting, "
             . "or adding any substantive content. Return the complete corrected JSON value and nothing else.\n"
             . "Parser/termination error: {$error}\n"
@@ -130,14 +165,20 @@ final class JsonBatchRecovery
         return $repair;
     }
 
+    /** Stop reasons that mean the response ran out of output budget. */
+    private const TRUNCATION_REASONS = ['max_tokens', 'length', 'model_context_window_exceeded'];
+
+    /** Stop reasons that mean the provider declined to answer. */
+    private const REFUSAL_REASONS = ['refusal', 'content_filter', 'safety'];
+
     /** Classify provider stop reasons that mean a JSON response is incomplete. */
     public static function terminationError(mixed $reason): ?string
     {
         $reason = is_string($reason) ? trim($reason) : '';
-        if (in_array($reason, ['max_tokens', 'length'], true)) {
+        if (in_array($reason, self::TRUNCATION_REASONS, true)) {
             return "generation was truncated (stop reason: {$reason})";
         }
-        if (in_array($reason, ['refusal', 'content_filter', 'safety'], true)) {
+        if (in_array($reason, self::REFUSAL_REASONS, true)) {
             return "generation was refused or filtered (stop reason: {$reason})";
         }
         return null;
