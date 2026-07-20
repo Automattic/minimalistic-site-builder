@@ -73,13 +73,14 @@ final class GenerateImagesStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'plugin/images.json', 'theme/parts/*', 'theme/templates/*'],
             writes: [
                 'images.json',
                 self::COMPLETION_ARTIFACT,
                 'theme/assets/*',
                 'theme/parts/*',
                 'theme/templates/*',
+                'plugin/images/*',
             ],
             concurrent: true,
         );

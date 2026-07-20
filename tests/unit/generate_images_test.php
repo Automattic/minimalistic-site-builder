@@ -60,6 +60,7 @@ test('cover-contrast graph requires generate-images even when scaffold assets ex
         'images.json',
         'siteSpec.json',
         'designDirection.json',
+        'plugin/images.json',
     ]));
     assert_true(true);
 });

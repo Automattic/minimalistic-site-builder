@@ -51,6 +51,7 @@ final class AssemblePagesStep implements Step
             label: $this->label(),
             reads: [
                 'pages.json',
+                'images.json',
                 'theme/parts/header.html',
                 'theme/parts/footer.html',
                 'theme/parts/*',
@@ -59,6 +60,7 @@ final class AssemblePagesStep implements Step
             writes: [
                 'plugin/pages/*',
                 'plugin/pages.json',
+                'plugin/images.json',
                 'theme/templates/page.html',
                 'theme/templates/index.html',
                 'theme/theme.json',
