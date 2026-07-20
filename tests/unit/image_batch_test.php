@@ -2,10 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ImagePromptComposer;
-use Automattic\SiteBuild\WpcomImageClient;
+use Automattic\SiteBuild\Imagen;
 
 /**
- * Unit tests for the batch retry orchestration (WpcomImageClient::retryBatch).
+ * Unit tests for the batch retry orchestration (Imagen::retryBatch).
  * The transport is faked so we exercise the transient-retry accounting without
  * any network or real backoff sleeps (delays are [0, 0]).
  */
@@ -14,7 +14,7 @@ test('retryBatch returns one result per body, keyed and ordered by index', funct
     $bodies = [0 => ['b' => 0], 1 => ['b' => 1], 2 => ['b' => 2]];
     $transport = fn (array $subset) => array_map(fn () => ['ok' => true, 'bytes' => 'X'], $subset);
 
-    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0]);
+    $out = Imagen::retryBatch($bodies, $transport, [0, 0]);
 
     assert_eq([0, 1, 2], array_keys($out['results']));
     assert_eq(3, $out['succeeded']);
@@ -42,7 +42,7 @@ test('retryBatch retries only the transient failures, then succeeds', function (
         return $out;
     };
 
-    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0, 0]);
+    $out = Imagen::retryBatch($bodies, $transport, [0, 0, 0]);
 
     assert_eq([[0, 1, 2], [1]], $seenSubsets, 'second round retries only the failed index');
     assert_eq(3, $out['succeeded']);
@@ -58,7 +58,7 @@ test('retryBatch gives up after the configured retries and marks failed', functi
         return [array_key_first($subset) => ['ok' => false, 'transient' => true, 'error' => 'always down']];
     };
 
-    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0]); // 2 retries
+    $out = Imagen::retryBatch($bodies, $transport, [0, 0]); // 2 retries
 
     assert_eq(3, $calls, 'initial attempt + 2 retries');
     assert_eq(0, $out['succeeded']);
@@ -74,7 +74,7 @@ test('retryBatch does not retry permanent failures', function () {
         return [array_key_first($subset) => ['ok' => false, 'transient' => false, 'error' => 'HTTP 400']];
     };
 
-    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0]);
+    $out = Imagen::retryBatch($bodies, $transport, [0, 0]);
 
     assert_eq(1, $calls, 'permanent failure tried exactly once');
     assert_eq(false, $out['results'][0]['ok']);
@@ -94,7 +94,7 @@ test('retryBatch retries safety-filtered failures and keeps the flag on give-up'
         ]];
     };
 
-    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0, 0]); // 3 retries
+    $out = Imagen::retryBatch($bodies, $transport, [0, 0, 0]); // 3 retries
 
     assert_eq(4, $calls, 'initial attempt + 3 retries');
     assert_eq(false, $out['results'][0]['ok']);
@@ -112,7 +112,7 @@ test('retryBatch marks a filtered prompt that passes on a retry as a plain succe
             : ['ok' => true, 'bytes' => 'X']];
     };
 
-    $out = WpcomImageClient::retryBatch($bodies, $transport, [0, 0]);
+    $out = Imagen::retryBatch($bodies, $transport, [0, 0]);
 
     assert_eq(true, $out['results'][0]['ok']);
     assert_eq(1, $out['succeeded']);
@@ -122,53 +122,53 @@ test('filteredReason spots an Imagen RAI rejection, null otherwise', function ()
     // The exact shape the proxy returned for a real filtered request.
     $filtered = json_decode('{"predictions":[{"raiFilteredReason":'
         . '"Unable to show generated images. Support codes: 29578790"}]}', true);
-    assert_contains('29578790', (string) WpcomImageClient::filteredReason($filtered));
+    assert_contains('29578790', (string) Imagen::filteredReason($filtered));
 
-    assert_eq(null, WpcomImageClient::filteredReason(['predictions' => [['bytesBase64Encoded' => 'QUJD']]]));
-    assert_eq(null, WpcomImageClient::filteredReason(['predictions' => []]));
-    assert_eq(null, WpcomImageClient::filteredReason(null));
+    assert_eq(null, Imagen::filteredReason(['predictions' => [['bytesBase64Encoded' => 'QUJD']]]));
+    assert_eq(null, Imagen::filteredReason(['predictions' => []]));
+    assert_eq(null, Imagen::filteredReason(null));
 });
 
 /**
- * The 480-token input cap (WpcomImageClient::fitToTokens). ImagePromptComposer
+ * The 480-token input cap (Imagen::fitToTokens). ImagePromptComposer
  * leans on this to keep a fully-composed prompt under the model's hard limit.
  */
 
 test('fitToTokens returns the text unchanged when it is within the cap', function () {
     $text = 'A sourdough loaf on a board. Style: photorealistic';
-    assert_eq($text, WpcomImageClient::fitToTokens($text, WpcomImageClient::MAX_PROMPT_TOKENS));
+    assert_eq($text, Imagen::fitToTokens($text, Imagen::MAX_PROMPT_TOKENS));
 });
 
 test('fitToTokens trims from the end to fit the cap, keeping the lead intact', function () {
     $lead = 'A specific sourdough loaf on a floured board';
     $text = $lead . ' ' . str_repeat('trailing context word ', 2000); // far over budget
-    $out = WpcomImageClient::fitToTokens($text, WpcomImageClient::MAX_PROMPT_TOKENS);
+    $out = Imagen::fitToTokens($text, Imagen::MAX_PROMPT_TOKENS);
 
-    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_true(Imagen::estimateTokens($out) <= Imagen::MAX_PROMPT_TOKENS, 'within token cap');
     assert_contains($lead, $out);                  // the leading text survives
     assert_true($out !== '', 'still returns something');
 });
 
 test('sampleImageSize renders wide (full-bleed) images at 2K, the rest at 1K', function () {
-    assert_eq('2K', WpcomImageClient::sampleImageSize('16:9'));
-    assert_eq('1K', WpcomImageClient::sampleImageSize('1:1'));
-    assert_eq('1K', WpcomImageClient::sampleImageSize('9:16'));
+    assert_eq('2K', Imagen::sampleImageSize('16:9'));
+    assert_eq('1K', Imagen::sampleImageSize('1:1'));
+    assert_eq('1K', Imagen::sampleImageSize('9:16'));
 });
 
 test('sampleImageSize keeps transparent decoratives at 1K even when wide', function () {
-    assert_eq('1K', WpcomImageClient::sampleImageSize('16:9', true));
-    assert_eq('1K', WpcomImageClient::sampleImageSize('1:1', true));
-    assert_eq('2K', WpcomImageClient::sampleImageSize('16:9', false));
+    assert_eq('1K', Imagen::sampleImageSize('16:9', true));
+    assert_eq('1K', Imagen::sampleImageSize('1:1', true));
+    assert_eq('2K', Imagen::sampleImageSize('16:9', false));
 });
 
 test('mimeForFilename maps .png assets to PNG and everything else to JPEG', function () {
-    assert_eq('image/png', WpcomImageClient::mimeForFilename('grapevine-flourish.png'));
-    assert_eq('image/png', WpcomImageClient::mimeForFilename('ORNAMENT.PNG'));
-    assert_eq('image/jpeg', WpcomImageClient::mimeForFilename('hero-dawn.jpg'));
-    assert_eq('image/jpeg', WpcomImageClient::mimeForFilename('hero-dawn.jpeg'));
+    assert_eq('image/png', Imagen::mimeForFilename('grapevine-flourish.png'));
+    assert_eq('image/png', Imagen::mimeForFilename('ORNAMENT.PNG'));
+    assert_eq('image/jpeg', Imagen::mimeForFilename('hero-dawn.jpg'));
+    assert_eq('image/jpeg', Imagen::mimeForFilename('hero-dawn.jpeg'));
 });
 
 test('estimateTokens is conservative and grows with length', function () {
-    assert_eq(0, WpcomImageClient::estimateTokens('   '));
-    assert_true(WpcomImageClient::estimateTokens('a b c d e') >= 5, 'at least one token per short word');
+    assert_eq(0, Imagen::estimateTokens('   '));
+    assert_true(Imagen::estimateTokens('a b c d e') >= 5, 'at least one token per short word');
 });

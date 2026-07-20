@@ -38,7 +38,7 @@ namespace Automattic\SiteBuild;
  * sheddable context first and keeps the subject and grade intact.
  *
  * The aspect ratio is intentionally absent from this text — it is sent to the
- * endpoint as a structured parameter (WpcomImageClient::aspectRatio / buildBody).
+ * endpoint as a structured parameter (Imagen::aspectRatio / buildBody).
  */
 final class ImagePromptComposer
 {
@@ -130,6 +130,6 @@ final class ImagePromptComposer
         // normalise the surrounding whitespace, then cap to the model's hard input
         // limit (sheds trailing context first — see class doc).
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
-        return WpcomImageClient::fitToTokens($prompt, WpcomImageClient::MAX_PROMPT_TOKENS);
+        return Imagen::fitToTokens($prompt, Imagen::MAX_PROMPT_TOKENS);
     }
 }

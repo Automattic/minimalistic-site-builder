@@ -6,7 +6,7 @@ use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
-use Automattic\SiteBuild\WpcomImageClient;
+use Automattic\SiteBuild\Imagen;
 
 /**
  * Image-prompt debugger.
@@ -221,7 +221,7 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
             $dataUri = null;
             if (($spec['status'] ?? '') === 'completed' && $project->exists('theme/assets/' . $filename)) {
                 $bytes = $project->readText('theme/assets/' . $filename);
-                $dataUri = 'data:' . WpcomImageClient::mimeForFilename($filename) . ';base64,'
+                $dataUri = 'data:' . Imagen::mimeForFilename($filename) . ';base64,'
                     . base64_encode($bytes);
             }
             $results[] = [
@@ -235,9 +235,9 @@ function generate_images_for(array $req, ?ImageClient $client = null): array
                     (string) ($spec['style'] ?? ''),
                     $siteContext,
                     '',
-                    WpcomImageClient::mimeForFilename($filename) === 'image/png',
+                    Imagen::mimeForFilename($filename) === 'image/png',
                 ),
-                'aspectRatio' => WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
+                'aspectRatio' => Imagen::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape')),
                 'dataUri'     => $dataUri,
             ];
         }
