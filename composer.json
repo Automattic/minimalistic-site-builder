@@ -1,0 +1,30 @@
+{
+    "name": "automattic/site-build",
+    "description": "Portable, dependency-free pipeline that generates a complete WordPress block theme and companion content plugin from a one-line prompt.",
+    "type": "library",
+    "keywords": [
+        "wordpress",
+        "block-theme",
+        "theme-generation",
+        "ai",
+        "site-builder"
+    ],
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=8.1",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*"
+    },
+    "suggest": {
+        "ext-imagick": "Only for the cover-contrast image-analysis step, which is not part of the default pipeline."
+    },
+    "autoload": {
+        "psr-4": {
+            "Automattic\\SiteBuild\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
