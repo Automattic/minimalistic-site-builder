@@ -83,7 +83,14 @@ final class WpcomImageClient implements ImageClient
             ]);
         }
 
-        $out = Imagen::retryBatch($bodies, fn (array $subset): array => $this->multiRequest($subset), $this->retryDelays);
+        $out = Imagen::retryBatch(
+            $bodies,
+            fn (array $subset): array => $this->multiRequest($subset),
+            $this->retryDelays,
+            static function (int $count, int $attempt, int $wait): void {
+                fwrite(STDERR, "    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
+            }
+        );
         $this->requests += $out['succeeded'];
         return $out['results'];
     }
@@ -125,7 +132,8 @@ final class WpcomImageClient implements ImageClient
             curl_close($ch);
 
             try {
-                $out[$i] = ['ok' => true, 'bytes' => Imagen::interpret($raw, $errno, $error, (int) $httpStatus)];
+                self::throwOnTransportError($errno, $error);
+                $out[$i] = ['ok' => true, 'bytes' => Imagen::interpret($raw, (int) $httpStatus)];
             } catch (ImageFilteredException $e) {
                 // The safety filter is non-deterministic: retry like a
                 // transient failure, but keep the filtered flag so the caller
@@ -187,7 +195,27 @@ final class WpcomImageClient implements ImageClient
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        return Imagen::interpret((string) $raw, $errno, $error, (int) $status);
+        self::throwOnTransportError($errno, $error);
+        return Imagen::interpret((string) $raw, (int) $status);
+    }
+
+    /**
+     * Classify a completed cURL transfer's connection-level result — the
+     * transport-specific half interpret() must not carry. Retryable connect/
+     * timeout/stall errnos become a TransientApiException; any other non-zero
+     * errno is a permanent transport failure.
+     *
+     * @throws TransientApiException on a retryable connection failure
+     */
+    private static function throwOnTransportError(int $errno, string $error): void
+    {
+        // Connection-level failures: timeout, stall, connect/recv — retryable.
+        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
+            throw new TransientApiException("cURL ({$errno}): {$error}");
+        }
+        if ($errno !== 0) {
+            throw new \RuntimeException("cURL error ({$errno}): {$error}");
+        }
     }
 
     /**

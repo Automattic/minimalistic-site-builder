@@ -9,8 +9,9 @@ namespace Automattic\SiteBuild;
  * (direct API, a proxy, or a host's own gateway) so any ImageClient
  * implementation can build on it — the portable half of image generation.
  *
- * WpcomImageClient (and any future transport) supplies the I/O; everything
- * here is side-effect free and unit-testable with plain values.
+ * WpcomImageClient (and any future transport) supplies the I/O; the logic here
+ * is free of network and output side effects (the only exception is retryBatch's
+ * backoff sleep) and unit-testable with plain values.
  */
 final class Imagen
 {
@@ -104,6 +105,8 @@ final class Imagen
     /**
      * The Imagen predict request body for one prompt.
      *
+     * @internal Delegation seam for the transport; not part of the consumer API.
+     *
      * @param array{aspect_ratio?:string,sample_image_size?:?string,mime?:?string} $opts
      * @return array<string,mixed>
      */
@@ -133,16 +136,18 @@ final class Imagen
     /**
      * Drive a batch transport to completion, retrying ONLY the retryable
      * failures (transient transport errors and safety-filtered prompts) with
-     * backoff. Pure orchestration (the transport does the I/O, and sleep()
-     * paces the rounds) so the retry accounting is unit-testable with a fake
-     * transport and zero delays.
+     * backoff. Orchestration only: the transport does the I/O, sleep() paces the
+     * rounds, and the optional $onRetry reports each backoff (so the CLI's
+     * progress line stays in the transport, not here). Unit-testable with a
+     * fake transport and zero delays.
      *
      * @param array<int,array<string,mixed>> $bodies request bodies keyed by index
      * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,filtered?:bool}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
+     * @param callable(int,int,int):void|null $onRetry called before each backoff with (pending count, attempt #, wait seconds)
      * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>,succeeded:int}
      */
-    public static function retryBatch(array $bodies, callable $transport, array $delays): array
+    public static function retryBatch(array $bodies, callable $transport, array $delays, ?callable $onRetry = null): array
     {
         $results = [];
         $succeeded = 0;
@@ -172,8 +177,9 @@ final class Imagen
             if ($pending !== []) {
                 $wait = $delays[$attempt];
                 $attempt++;
-                fwrite(STDERR, "    (retryable image API failure on " . count($pending)
-                    . " image(s); retry {$attempt} in {$wait}s)\n");
+                if ($onRetry !== null) {
+                    $onRetry(count($pending), $attempt, $wait);
+                }
                 sleep($wait);
             }
         }
@@ -183,25 +189,22 @@ final class Imagen
     }
 
     /**
-     * Interpret a completed transfer: return decoded image bytes, or throw a
-     * TransientApiException (retryable: 429/5xx/stall), an
-     * ImageFilteredException (safety-filtered prompt — retryable AND
-     * repairable), or a RuntimeException (permanent). Pure — no I/O — so the
-     * single and batched paths share it.
+     * Interpret a completed transfer at the protocol level: HTTP-status
+     * classification + Imagen body parsing. Returns decoded image bytes, or
+     * throws TransientApiException (429/5xx), ImageFilteredException (safety
+     * filter — retryable AND repairable), or RuntimeException (permanent).
+     * Pure — no I/O — so the single and batched paths share it.
      *
-     * @throws TransientApiException on a retryable transport failure
+     * The transport classifies its own connection-level failures (e.g. cURL
+     * errnos) BEFORE calling this, so nothing transport-specific lives here.
+     *
+     * @internal Delegation seam for the transport; not part of the consumer API.
+     *
+     * @throws TransientApiException on a retryable HTTP status (429/5xx)
      * @throws ImageFilteredException when the safety filter rejected the prompt
      */
-    public static function interpret(string $raw, int $errno, string $error, int $status): string
+    public static function interpret(string $raw, int $status): string
     {
-        // Connection-level failures: timeout, stall, connect/recv — retryable.
-        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
-            throw new TransientApiException("cURL ({$errno}): {$error}");
-        }
-        if ($errno !== 0) {
-            throw new \RuntimeException("cURL error ({$errno}): {$error}");
-        }
-
         if ($status === 429 || $status >= 500) {
             throw new TransientApiException("HTTP {$status}: " . substr($raw, 0, 300));
         }
