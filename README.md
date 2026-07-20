@@ -40,6 +40,8 @@ required for a normal build — not optional.
 php bin/build.php "A cozy neighborhood bakery"
 php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate images
 php bin/build.php "A cozy neighborhood bakery" --provider=openai   # build on GPT-5.x instead of Claude
+php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site plan inner pages beyond the homepage
+php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
 ```
 
 ### Choosing the model / provider

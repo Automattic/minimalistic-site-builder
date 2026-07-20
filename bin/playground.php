@@ -79,6 +79,9 @@ if ($port !== $requestedPort) {
 // from PlaygroundArtifact::siteOptions so this local preview matches the
 // published Playground bundles.
 $steps = [
+    // Neutralize outbound HTTP — a blocked fetch (e.g. wp:embed's oEmbed
+    // discovery) would pin a wasm worker forever. See offlineGuardStep().
+    PlaygroundArtifact::offlineGuardStep(),
     ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
     ['step' => 'activateTheme', 'themeFolderName' => $slug],
 ];
@@ -95,8 +98,10 @@ $blueprint = [
     'login'        => true,
     'steps'        => $steps,
 ];
-$blueprintPath = repo_path("projects/{$slug}/.playground-blueprint.json");
+// Pid-stamped, instance-unique path — the why lives on the helper.
+$blueprintPath = playground_blueprint_path($slug, getmypid());
 file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+register_shutdown_function(static fn () => @unlink($blueprintPath));
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 $pluginMount = $hasPlugin ? $pluginDir . ':/wordpress/wp-content/plugins/' . $slug . '-content' : null;

@@ -9,6 +9,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step 2 (LLM): produce the site spec from the user's creation prompt.
@@ -28,6 +29,13 @@ use Automattic\SiteBuild\Step;
  *
  * The user prompt and this spec are the inputs the theme-json and landing-page
  * steps build the design from.
+ *
+ * The page tree is normally the model's decision (scoped by the multi_page
+ * flag), but a caller can fix it: meta.json `pages` (--pages on the runners,
+ * or pre-seeded by a host whose site spec already names its pages) makes the
+ * prompt echo that exact list — the model contributes only per-page purposes —
+ * and normalize() enforces it. Only the ABSENCE of the list lets the model
+ * invent pages.
  */
 final class SiteSpecStep implements Step
 {
@@ -57,6 +65,10 @@ final class SiteSpecStep implements Step
         . ' entry, and everything the site covers lives there. Fold what would otherwise be separate pages'
         . ' (about, menu, contact, …) into the homepage\'s `sections` list instead.';
 
+    /** {{page_tree_scope}} when the caller fixed the page list (--pages / meta `pages`). */
+    private const REQUESTED_SCOPE = 'EXACTLY the pages listed in the page-tree rule below — same order,'
+        . ' same slugs, same titles, same nesting. Do not add, drop, merge, or rename pages.';
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -74,6 +86,17 @@ final class SiteSpecStep implements Step
         return 'Generate site spec';
     }
 
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['meta.json'],
+            writes: ['siteSpec.json'],
+            concurrent: false,
+        );
+    }
+
     public function run(Project $project): void
     {
         $meta = $project->readJson('meta.json');
@@ -87,14 +110,22 @@ final class SiteSpecStep implements Step
         // landing page only.
         $multiPage = (bool) ($meta['multi_page'] ?? false);
 
+        // A caller-fixed page list takes the page-tree decision away from the
+        // model: the prompt asks it to echo the list and write purposes, and
+        // normalize() enforces it. Only honored on multi-page builds — the
+        // flag owns WHETHER inner pages exist; the list only says WHICH.
+        $requested = $multiPage ? self::requestedPages($meta['pages'] ?? null) : [];
+
         $rendered = $this->renderer->render('site-spec.md', [
             'user_prompt'     => $prompt,
-            'page_tree_scope' => $multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE,
-            'page_tree_rule'  => $multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE,
+            'page_tree_scope' => $requested !== [] ? self::REQUESTED_SCOPE
+                : ($multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE),
+            'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
+                : ($multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE),
         ]);
         $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
 
-        $spec = self::normalize($spec, $multiPage);
+        $spec = self::normalize($spec, $multiPage, $requested);
         $project->writeJson('siteSpec.json', $spec);
     }
 
@@ -129,10 +160,12 @@ final class SiteSpecStep implements Step
      * design fields are filled in: design is decided later by the theme-json
      * and landing-page steps.
      *
-     * @param array<mixed> $spec
+     * @param array<mixed>                       $spec
+     * @param array<int,array<string,mixed>>     $requested caller-fixed page
+     *        list (already normalized by requestedPages); [] = model decides
      * @return array<mixed>
      */
-    private static function normalize(array $spec, bool $multiPage): array
+    private static function normalize(array $spec, bool $multiPage, array $requested = []): array
     {
         $name = trim((string) ($spec['name'] ?? ''));
         if ($name === '') {
@@ -162,8 +195,13 @@ final class SiteSpecStep implements Step
         }
 
         // The page tree drives multi-page generation; every downstream step
-        // may rely on at least a homepage entry existing.
+        // may rely on at least a homepage entry existing. A caller-fixed list
+        // wins over whatever tree the model returned — the model's tree can
+        // contribute only per-page purposes.
         $spec['pages'] = self::normalizePages($spec['pages'] ?? null, $spec, $multiPage);
+        if ($requested !== []) {
+            $spec['pages'] = self::forcePages($requested, $spec['pages']);
+        }
 
         // `invented` lists which identity values the model made up; keep only
         // the identity keys so downstream features can trust its contents.
@@ -270,6 +308,129 @@ final class SiteSpecStep implements Step
             ];
         }
         return $out;
+    }
+
+    /**
+     * The caller-fixed page list from meta.json `pages` (--pages on the
+     * runners, or pre-seeded by a host whose site spec already names its
+     * pages). Entries are title strings ("About") or page maps
+     * ({title, slug, purpose, children}); junk is dropped. Normalized to the
+     * same shape as the spec tree — first entry is the homepage. [] means the
+     * caller fixed nothing and the model invents the tree. Pure — unit-testable.
+     *
+     * @param mixed $raw
+     * @return array<int,array<string,mixed>>
+     */
+    public static function requestedPages($raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $entries = [];
+        foreach ($raw as $page) {
+            if (is_string($page)) {
+                if (trim($page) !== '') {
+                    $entries[] = ['title' => trim($page)];
+                }
+            } elseif (is_array($page)) {
+                $entries[] = $page;
+            }
+        }
+        $seen = [];
+        return self::normalizePageList($entries, $seen);
+    }
+
+    /**
+     * Enforce the caller-fixed page list: the final tree IS $requested — pages
+     * the model added are dropped, pages it lost come back, renames don't
+     * stick. The model's only contribution is a `purpose` for each page the
+     * caller left blank (matched by slug anywhere in its tree); purposes the
+     * caller stated win. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $requested  normalized (requestedPages)
+     * @param array<int,array<string,mixed>> $modelPages normalized (normalizePages)
+     * @return array<int,array<string,mixed>>
+     */
+    public static function forcePages(array $requested, array $modelPages): array
+    {
+        $purposes = [];
+        self::collectPurposes($modelPages, $purposes);
+        return self::graftPurposes($requested, $purposes);
+    }
+
+    /**
+     * slug => purpose over a whole normalized tree (first occurrence wins).
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,string>           $purposes
+     */
+    private static function collectPurposes(array $pages, array &$purposes): void
+    {
+        foreach ($pages as $page) {
+            $purpose = (string) ($page['purpose'] ?? '');
+            if ($purpose !== '' && !isset($purposes[$page['slug']])) {
+                $purposes[$page['slug']] = $purpose;
+            }
+            self::collectPurposes($page['children'] ?? [], $purposes);
+        }
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,string>           $purposes
+     * @return array<int,array<string,mixed>>
+     */
+    private static function graftPurposes(array $pages, array $purposes): array
+    {
+        return array_map(static fn (array $page): array => [
+            'title'    => $page['title'],
+            'slug'     => $page['slug'],
+            'purpose'  => $page['purpose'] !== '' ? $page['purpose'] : ($purposes[$page['slug']] ?? ''),
+            'children' => self::graftPurposes($page['children'], $purposes),
+        ], $pages);
+    }
+
+    /**
+     * {{page_tree_rule}} when the caller fixed the page list: the tree is not
+     * the model's decision — it echoes the given pages and contributes only
+     * each page's `purpose` (forcePages() enforces the list regardless).
+     *
+     * @param array<int,array<string,mixed>> $requested
+     */
+    private static function requestedRule(array $requested): string
+    {
+        return "**The page list is already decided** — the user supplied it, so reproduce it exactly:\n\n"
+            . implode("\n", self::requestedTreeLines($requested))
+            . "\n\nOutput `pages` as exactly this tree. Where no purpose is given above, write the"
+            . ' `purpose` yourself — 1 sentence, grounded in the prompt, saying what content lives on'
+            . ' that page so no two pages overlap. Given purposes are kept verbatim. `sections` stays'
+            . " the homepage's section hint list.";
+    }
+
+    /**
+     * One markdown bullet per requested page, indented by depth, carrying the
+     * caller's purpose when stated.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @return array<int,string>
+     */
+    private static function requestedTreeLines(array $pages, int $depth = 0): array
+    {
+        $lines = [];
+        foreach ($pages as $i => $page) {
+            $line = str_repeat('  ', $depth) . "- \"{$page['title']}\" (slug: {$page['slug']})";
+            if ($depth === 0 && $i === 0) {
+                $line .= ' — the homepage';
+            }
+            if ($page['purpose'] !== '') {
+                $line .= " — purpose: {$page['purpose']}";
+            }
+            $lines[] = $line;
+            foreach (self::requestedTreeLines($page['children'], $depth + 1) as $child) {
+                $lines[] = $child;
+            }
+        }
+        return $lines;
     }
 
     /** A BCP-47-ish code ("en", "es-AR", "pt_BR") or a plain language name ("Spanish"). */

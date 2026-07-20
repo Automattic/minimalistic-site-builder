@@ -154,6 +154,36 @@ test('preset references validates plain preset-bearing block fields', function (
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('preset references rejects core default palette and font-size slugs when core defaults are disabled', function () {
+    [$project, $tmp] = preset_references_project();
+    // The flags ThemeJsonStep forces onto every generated theme. With core
+    // defaults off, a core slug produces no style at runtime, so rejecting
+    // it here matches runtime exactly.
+    $theme = $project->readJson('theme/theme.json');
+    $theme['settings']['color']['defaultPalette'] = false;
+    $theme['settings']['color']['defaultGradients'] = false;
+    $theme['settings']['color']['defaultDuotone'] = false;
+    $theme['settings']['typography']['defaultFontSizes'] = false;
+    $theme['settings']['spacing']['defaultSpacingSizes'] = false;
+    $project->writeJson('theme/theme.json', $theme);
+    $project->writeText(
+        'theme/parts/section-core.html',
+        '<!-- wp:group {"backgroundColor":"white","gradient":"vivid-cyan-blue-to-vivid-purple"} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph {"fontSize":"large","textColor":"black"} -->'
+        . '<p style="padding-top:var(--wp--preset--spacing--50)">Text</p>'
+        . '<!-- /wp:paragraph --></div><!-- /wp:group -->'
+    );
+
+    $joined = implode("\n", PresetReferences::problems($project));
+    assert_contains('preset color slug "white" from backgroundColor', $joined);
+    assert_contains('preset color slug "black" from textColor', $joined);
+    assert_contains('preset gradient slug "vivid-cyan-blue-to-vivid-purple" from gradient', $joined);
+    assert_contains('preset font-size slug "large" from fontSize', $joined);
+    assert_contains('preset spacing slug "50" is not declared', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('preset references honors disabled core shadow presets', function () {
     [$project, $tmp] = preset_references_project();
     $theme = $project->readJson('theme/theme.json');

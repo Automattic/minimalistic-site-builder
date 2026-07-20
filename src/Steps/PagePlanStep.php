@@ -9,6 +9,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM, concurrent): plan every page of the site as an ordered list of
@@ -100,6 +101,17 @@ final class PagePlanStep implements ConcurrentStep
     public function label(): string
     {
         return "Plan every page's sections";
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
+            writes: ['pages.json'],
+            concurrent: true,
+        );
     }
 
     public function requests(Project $project): array

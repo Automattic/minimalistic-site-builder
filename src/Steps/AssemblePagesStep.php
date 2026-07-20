@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (deterministic): compose the site's pages from the (already fixed)
@@ -41,6 +42,29 @@ final class AssemblePagesStep implements Step
     public function label(): string
     {
         return 'Assemble pages into the content plugin';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                'pages.json',
+                'theme/parts/header.html',
+                'theme/parts/footer.html',
+                'theme/parts/*',
+                'theme/theme.json',
+            ],
+            writes: [
+                'plugin/pages/*',
+                'plugin/pages.json',
+                'theme/templates/page.html',
+                'theme/templates/index.html',
+                'theme/theme.json',
+            ],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

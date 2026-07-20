@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Pipeline;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
@@ -24,6 +26,29 @@ function final_validation_project(): array
     $project->writeText('theme/parts/footer.html', '<!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph -->');
     return [$project, $tmp];
 }
+
+test('validate-theme declaration rejects an incomplete theme graph', function () {
+    assert_eq([
+        'pages.json',
+        'theme/style.css',
+        'theme/theme.json',
+        'theme/templates/index.html',
+        'theme/templates/page.html',
+        'theme/parts/header.html',
+        'theme/parts/footer.html',
+        'theme/parts/*',
+        'theme/templates/*',
+        'plugin/pages/*',
+    ], (new ValidateThemeStep())->declaration()->reads);
+
+    assert_throws(
+        fn () => new Pipeline(
+            [new ScaffoldThemeStep(), new ValidateThemeStep()],
+            seeds: ['pages.json'],
+        ),
+        'a scaffold alone does not provide theme.json, templates, or parts',
+    );
+});
 
 test('validate-theme passes and logs a completed contract-valid theme', function () {
     [$project, $tmp] = final_validation_project();

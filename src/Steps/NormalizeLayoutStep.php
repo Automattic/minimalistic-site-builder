@@ -1,0 +1,63 @@
+<?php
+declare(strict_types=1);
+
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
+
+/**
+ * Deterministic: run the LayoutFixer attribute repair + width/rhythm
+ * normalization BEFORE the contrast and motion policy passes.
+ *
+ * LayoutFixer can activate attributes that were previously inert — it
+ * repairs unparseable comment JSON and mirrors HTML-only declarations into
+ * attributes. If that first happened inside fix-blocks (as it used to), a
+ * malformed {"backgroundColor":...} or className:"ken-burns" would be
+ * invisible to ContrastFixStep and MotionSanityStep, then become active
+ * afterwards with no policy recheck (PR #109 review, finding 1). Running
+ * the normalization here keeps those passes fail-closed: everything the
+ * repair can activate already exists when they inspect the markup.
+ *
+ * FixBlocksStep still reruns the same (idempotent) normalization right
+ * before re-serialization, as a sync point for anything later steps edit.
+ */
+final class NormalizeLayoutStep implements Step
+{
+    private const LOG_FILE = 'normalize-layout.log';
+
+    public function id(): string
+    {
+        return 'normalize-layout';
+    }
+
+    public function label(): string
+    {
+        return 'Normalize layout attributes';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            // Templates are only scanned when they exist; in the default graph
+            // they are written by assemble-pages, which runs after this step.
+            reads: ['theme/theme.json', 'theme/parts/*'],
+            writes: ['theme/parts/*'],
+            concurrent: false,
+        );
+    }
+
+    public function run(Project $project): void
+    {
+        $notes = FixBlocksStep::normalizeLayouts($project);
+        $report = $notes === []
+            ? "No layout/rhythm normalization needed.\n"
+            : '- ' . implode("\n- ", $notes) . "\n";
+        $project->writeText('logs/' . self::LOG_FILE, $report);
+        echo '  layout: ' . count($notes) . ' attribute fix(es) before policy passes'
+            . ($notes === [] ? '' : ' (details: logs/' . self::LOG_FILE . ')') . "\n";
+    }
+}

@@ -5,6 +5,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 const COVER_WHITE = [255, 255, 255];
 const COVER_BLACK = [17, 17, 17];
@@ -14,6 +15,36 @@ function cover_candidates(): array
 {
     return ['base' => COVER_WHITE, 'contrast' => COVER_BLACK];
 }
+
+test('cover-contrast declaration does not depend on the shared contrast report', function () {
+    $fixer = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return 'block-fixer: ok';
+        }
+    };
+    $declaration = (new CoverContrastStep($fixer))->declaration();
+
+    assert_true(in_array(GenerateImagesStep::COMPLETION_ARTIFACT, $declaration->reads, true));
+    assert_true(!in_array('logs/contrast-report.txt', $declaration->reads, true));
+    assert_true(!in_array('logs/contrast-report.txt', $declaration->writes, true));
+    assert_true(!in_array('logs/cover-contrast-report.txt', $declaration->writes, true));
+});
+
+test('cover-contrast refuses to run without image-generation completion', function () {
+    $tmp = sys_get_temp_dir() . '/builder_cover_order_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $fixer = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return 'block-fixer: ok';
+        }
+    };
+
+    assert_throws(fn () => (new CoverContrastStep($fixer))->run($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
 
 test('planCover keeps a passing cover unchanged', function () {
     // White heading over a uniformly dark image with a 50% black dim.
@@ -161,6 +192,7 @@ function cover_step_project(string $markup, string $imageColor): array
         ]]],
         'styles'   => ['elements' => ['link' => ['color' => ['text' => 'var(--wp--preset--color--primary)']]]],
     ]);
+    $project->writeJson(GenerateImagesStep::COMPLETION_ARTIFACT, ['status' => 'completed']);
     $project->writeText('theme/templates/front-page.html', $markup);
     $im = new Imagick();
     $im->newImage(64, 64, new ImagickPixel($imageColor));
@@ -188,6 +220,31 @@ function cover_step_run(Project $project, bool $failFixer = false): void
     (new CoverContrastStep($fixer))->run($project);
     ob_end_clean();
 }
+
+test('cover-contrast writes its own report without changing the shared contrast report', function () {
+    $tmp = sys_get_temp_dir() . '/builder_cover_report_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson(GenerateImagesStep::COMPLETION_ARTIFACT, ['status' => 'completed']);
+    $project->writeText(
+        'theme/templates/front-page.html',
+        '<!-- wp:cover {"url":"theme:./assets/broken.png"} -->'
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Cover text</p><!-- /wp:paragraph -->'
+        . '</div></div><!-- /wp:cover -->',
+    );
+    $project->writeText('theme/assets/broken.png', 'not an image');
+    $project->writeText('logs/contrast-report.txt', "phase-one report\n");
+
+    cover_step_run($project);
+
+    assert_eq("phase-one report\n", $project->readText('logs/contrast-report.txt'));
+    assert_contains(
+        '-- cover contrast (measured against generated images) --',
+        $project->readText('logs/cover-contrast-report.txt'),
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
 
 test('cover links are checked against the real image and pinned on the cover', function () {
     if (!extension_loaded('imagick')) {
@@ -255,7 +312,7 @@ test('a fixer failure rolls the persisted cover repairs back', function () {
     cover_step_run($project, failFixer: true);
     assert_eq($markup, $project->readText('theme/templates/front-page.html'),
         'attribute edits must not ship without the fixer re-sync');
-    assert_contains('rolled back', $project->readText('logs/contrast-report.txt'));
+    assert_contains('rolled back', $project->readText('logs/cover-contrast-report.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -304,7 +361,7 @@ test('covers in the content plugin pages are verified and repaired too', functio
     cover_step_run($project);
     $out = $project->readText('plugin/pages/menu.html');
     assert_true(!str_contains($out, '"dimRatio":40'), 'a plugin-page cover must be re-checked against the real image');
-    assert_contains('plugin/pages/menu.html', $project->readText('logs/contrast-report.txt'));
+    assert_contains('plugin/pages/menu.html', $project->readText('logs/cover-contrast-report.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

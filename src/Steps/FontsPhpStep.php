@@ -9,6 +9,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM): write theme/fonts.php — the module that loads the theme's Google
@@ -64,6 +65,17 @@ final class FontsPhpStep implements Step
     public function label(): string
     {
         return 'Write fonts.php';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['theme/theme.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            writes: ['theme/fonts.php'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (deterministic): lint and auto-repair text/background contrast.
@@ -48,6 +49,19 @@ final class ContrastFixStep implements Step
     public function label(): string
     {
         return 'Contrast lint & repair';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            // Templates are only scanned when they exist; in the default graph
+            // they are written by assemble-pages, which runs after this step.
+            reads: ['theme/theme.json', 'pages.json', 'theme/parts/*'],
+            writes: ['theme/theme.json', 'theme/parts/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

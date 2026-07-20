@@ -8,6 +8,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step 1b (LLM, fast/cheap): refine the raw user prompt before anything else.
@@ -47,6 +48,17 @@ final class RefinePromptStep implements Step
     public function label(): string
     {
         return 'Refine user prompt';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['meta.json'],
+            writes: ['meta.json'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

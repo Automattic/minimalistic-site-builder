@@ -97,3 +97,71 @@ function repo_path(string $rel = ''): string
     $root = dirname(__DIR__);
     return $rel === '' ? $root : $root . '/' . ltrim($rel, '/');
 }
+
+/**
+ * Build a shell command for a PHP child with this executable and temp dir.
+ *
+ * A fresh `php` command does not inherit CLI `-d` overrides, and PATH may
+ * resolve it to a different PHP installation. Playground spawners need the
+ * same sys_temp_dir on both sides so they derive the same blueprint path.
+ * The leading `exec` also makes proc_open() report the PHP child's own pid.
+ *
+ * @param list<string> $args
+ */
+function php_child_command(string $script, array $args = []): string
+{
+    $command = 'exec ' . escapeshellarg(PHP_BINARY)
+        . ' -d ' . escapeshellarg('sys_temp_dir=' . sys_get_temp_dir())
+        . ' ' . escapeshellarg($script);
+    foreach ($args as $arg) {
+        $command .= ' ' . escapeshellarg($arg);
+    }
+    return $command;
+}
+
+/**
+ * Blueprint path for one Playground boot, unique per server instance.
+ *
+ * teardown_playground() stops the reparented node server by pkill-matching
+ * this path in its argv, so the name must identify ONE instance: a fixed
+ * per-project name would take down every running server of the project — a
+ * sibling preview included. The pid is bin/playground.php's own; its spawners
+ * (bin/screenshot.php, bin/build-demos.php) use php_child_command(), whose
+ * `exec` makes proc_open report that same pid and whose explicit sys_temp_dir
+ * keeps both processes on the same path. Living under the OS temp dir, a file
+ * leaked by a signal death (signals skip PHP shutdown handlers) is the OS's to
+ * clean, not the repo's.
+ */
+function playground_blueprint_path(string $slug, int $pid): string
+{
+    return sys_get_temp_dir() . "/playground-blueprint-{$slug}.{$pid}.json";
+}
+
+/**
+ * Stop one Playground boot: the php wrapper, its npx/node subtree, and the
+ * reparented node server (once npx exits the server reparents to init and
+ * escapes the tree walk — but it keeps the blueprint path in its argv).
+ */
+function teardown_playground($proc, int $pid, string $blueprintPath): void
+{
+    if ($pid > 0) {
+        kill_tree($pid);
+    }
+    @exec('pkill -f ' . escapeshellarg(preg_quote($blueprintPath, '~')) . ' 2>/dev/null');
+    @unlink($blueprintPath);
+    if (is_resource($proc)) {
+        proc_terminate($proc);
+        proc_close($proc);
+    }
+}
+
+/** Recursively SIGTERM a process and all its descendants (leaves first). */
+function kill_tree(int $pid): void
+{
+    $children = [];
+    @exec('pgrep -P ' . $pid . ' 2>/dev/null', $children);
+    foreach ($children as $child) {
+        kill_tree((int) $child);
+    }
+    @exec('kill -TERM ' . $pid . ' 2>/dev/null');
+}

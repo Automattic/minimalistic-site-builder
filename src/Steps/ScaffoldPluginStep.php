@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (deterministic): scaffold the companion content-seeder plugin.
@@ -39,6 +40,17 @@ final class ScaffoldPluginStep implements Step
     public function label(): string
     {
         return 'Scaffold content plugin';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [],
+            writes: [self::MAIN_FILE],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

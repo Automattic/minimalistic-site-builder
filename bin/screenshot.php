@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
@@ -86,11 +87,15 @@ $serverLog = $project->logPath('playground-screenshot.log');
 // Start Playground in the background, routing its output to a log we tail for
 // the "Ready!" line (which carries the actual port — playground.php auto-bumps
 // if the requested one is busy). `exec` makes proc_open's pid the php process
-// itself, so teardown can walk and kill its npx/node subtree.
+// itself, so teardown can walk and kill its npx/node subtree. The shared child
+// command also pins PHP_BINARY and sys_temp_dir, keeping our independently
+// derived blueprint paths identical.
 @unlink($serverLog);
-$cmd = 'exec php ' . escapeshellarg(repo_path('bin/playground.php'))
-    . ' ' . escapeshellarg($slug) . ' --port=' . (int) $port
-    . ($workers !== null ? ' --workers=' . escapeshellarg($workers) : '');
+$playgroundArgs = [$slug, '--port=' . (int) $port];
+if ($workers !== null) {
+    $playgroundArgs[] = '--workers=' . $workers;
+}
+$cmd = php_child_command(repo_path('bin/playground.php'), $playgroundArgs);
 $proc = proc_open(
     $cmd,
     [0 => ['file', '/dev/null', 'r'], 1 => ['file', $serverLog, 'w'], 2 => ['file', $serverLog, 'a']],
@@ -105,10 +110,10 @@ if (!is_resource($proc)) {
 $baseUrl = null;
 $exit = 1;
 $wrapperPid = proc_get_status($proc)['pid'] ?? 0;
-// The npx-spawned node server reparents to init once npx exits, so it escapes a
-// parent-walk kill. It carries this unique blueprint path in its argv, so match
-// on that to stop exactly this project's server (and nothing else's).
-$blueprintPath = repo_path("projects/{$slug}/.playground-blueprint.json");
+// Pid-stamped, instance-unique path (see playground_blueprint_path): thanks to
+// `exec` above, the wrapper pid IS playground.php's pid, so this is the path
+// it minted — and no sibling server's.
+$blueprintPath = playground_blueprint_path($slug, $wrapperPid);
 register_shutdown_function(static function () use ($proc, $wrapperPid, $blueprintPath) {
     teardown_playground($proc, $wrapperPid, $blueprintPath);
 });
@@ -172,52 +177,36 @@ if ($keepAlive && is_resource($proc) && $baseUrl !== null) {
 
 exit($exit);
 
-/** Stop the Playground process tree (the php wrapper, npx, and node server). */
-function teardown_playground($proc, int $pid, string $blueprintPath): void
-{
-    if ($pid > 0) {
-        kill_tree($pid);
-    }
-    // Catch the reparented node server, which the parent-walk above misses.
-    @exec('pkill -f ' . escapeshellarg(preg_quote($blueprintPath, '~')) . ' 2>/dev/null');
-    if (is_resource($proc)) {
-        proc_terminate($proc);
-        proc_close($proc);
-    }
-}
-
-/** Recursively SIGTERM a process and all its descendants (leaves first). */
-function kill_tree(int $pid): void
-{
-    $children = [];
-    @exec('pgrep -P ' . $pid . ' 2>/dev/null', $children);
-    foreach ($children as $child) {
-        kill_tree((int) $child);
-    }
-    @exec('kill -TERM ' . $pid . ' 2>/dev/null');
-}
-
 function command_exists(string $bin): bool
 {
     return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
 }
 
-/** First available Chrome/Chromium binary (CHROME_BIN wins), or null. */
+/** First working Chrome/Chromium binary (CHROME_BIN wins), or null. */
 function chrome_binary(): ?string
 {
+    // Env::get, not getenv: CHROME_BIN set in .env never reaches the real
+    // environment, only the Env map. Absolute paths come before the bare
+    // names: each name costs a `command -v` subprocess, a path just a stat.
     $candidates = array_filter([
-        getenv('CHROME_BIN') ?: null,
+        Env::get('CHROME_BIN'),
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
         'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
     ]);
     foreach ($candidates as $bin) {
-        if (str_contains($bin, '/') && is_executable($bin)) {
-            return $bin;
+        $path = str_contains($bin, '/')
+            ? $bin
+            : trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
+        if ($path === '' || !is_executable($path)) {
+            continue;
         }
-        if (!str_contains($bin, '/')) {
-            $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
-            if ($path !== '') {
-                return $path;
-            }
+        // Existing and executable isn't enough: a stale Homebrew cask wrapper
+        // execs an app bundle that may no longer exist (exit 126/127). Only
+        // trust a binary that actually runs.
+        exec(escapeshellarg($path) . ' --version 2>/dev/null', $ignored, $code);
+        if ($code === 0) {
+            return $path;
         }
     }
     return null;
