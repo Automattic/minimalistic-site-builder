@@ -64,6 +64,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
         'content_notes',
         'layout_archetype',
         'background',
+        'vertical_density',
         'handoff',
     ];
     assert_eq('object', $item['type']);
@@ -299,19 +300,19 @@ test('PagePlanStep::normalize allows a full-bleed cover opening on the front pag
     // Front page: cover opening is the point of a homepage hero.
     assert_eq(2, count(PagePlanStep::normalize([
         plan_section(),
-        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ], front: true)));
     // Interior page: a cover is only banned as the OPENING section.
     assert_eq(2, count(PagePlanStep::normalize([
         plan_section(['slug' => 'intro', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
-        plan_section(['slug' => 'gallery-band']),
+        plan_section(['slug' => 'gallery-band', 'role' => 'closing']),
     ], front: false)));
 });
 
 test('PagePlanStep::repairVariety demotes an interior page\'s leading full-bleed cover', function () {
     $sections = PagePlanStep::repairVariety([
         plan_section(),
-        plan_section(['slug' => 'cta', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+        plan_section(['slug' => 'cta', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
     ], front: false);
 
     assert_true($sections[0]['layout_archetype'] !== 'full-bleed-cover', 'leading cover reassigned');
@@ -399,10 +400,10 @@ test('PagePlanStep::repairVariety demotes spacious pauses that break the density
     // demote to 'standard'; the surviving pauses stay isolated.
     $sections = PagePlanStep::repairVariety([
         plan_section(['slug' => 'a', 'type' => 'gallery', 'layout_archetype' => 'offset-grid', 'vertical_density' => 'spacious']),
-        plan_section(['slug' => 'b', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
-        plan_section(['slug' => 'c', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
-        plan_section(['slug' => 'd', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'spacious']),
-        plan_section(['slug' => 'e', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'b', 'role' => 'content', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'c', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'd', 'role' => 'content', 'layout_archetype' => 'mixed-width-editorial', 'vertical_density' => 'spacious']),
+        plan_section(['slug' => 'e', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'vertical_density' => 'spacious']),
     ]);
 
     assert_eq('standard', $sections[0]['vertical_density'], 'dense gallery demoted');
@@ -558,7 +559,7 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     (new PagePlanStep($llm, $renderer))->run($project);
 
     $plan = $project->readJson('pages.json');
-    assert_eq('offset-grid', $plan['pages'][1]['sections'][0]['layout_archetype']);
+    assert_eq('asymmetric-split', $plan['pages'][1]['sections'][0]['layout_archetype']);
     // Batch (2 calls) + one repair; the repair prompt carries the rejected
     // plan and the specific error, labeled per page in the LLM logs.
     assert_eq(3, count($llm->calls));
@@ -622,12 +623,12 @@ test('page-plan enforces the compact interior opening through repair and mechani
     // …the interior page may not…
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'visit-hero']),
-        plan_section(['slug' => 'directions', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['slug' => 'directions', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
     ]]);
     // …and the repair insists on the cover, so the mechanical fallback demotes it.
     $llm->queueJson(['sections' => [
         plan_section(['slug' => 'visit-hero']),
-        plan_section(['slug' => 'directions', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['slug' => 'directions', 'role' => 'closing', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 

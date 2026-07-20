@@ -85,6 +85,7 @@ final class SectionUnit extends AbstractMarkupUnit
             'page_path'         => $this->pageString($input, 'path', '/'),
             'section_title'     => $this->sectionString($section, 'title'),
             'section_slug'      => $slug,
+            'section_role'      => $this->sectionString($section, 'role', 'content'),
             'section_type'      => $this->sectionString($section, 'type', 'content'),
             'section_purpose'   => $this->sectionString($section, 'purpose'),
             'content_notes'     => $this->sectionString($section, 'content_notes'),
