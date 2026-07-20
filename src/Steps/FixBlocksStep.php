@@ -198,6 +198,14 @@ final class FixBlocksStep implements Step
             if (!in_array($property, $rhythmProperties, true)) {
                 continue;
             }
+            // A bare identifier that isn't a CSS keyword (e.g. a preset slug
+            // the model left unexpanded, `margin-top:sm`) never rendered in
+            // the first place — losing it cannot change the page's rhythm.
+            $value = trim((string) substr($declaration, (int) strpos($declaration, ':') + 1));
+            if (preg_match('/^[a-z][a-z0-9_-]*$/i', $value) === 1
+                && !in_array(strtolower($value), ['auto', 'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'none', 'normal'], true)) {
+                continue;
+            }
             $declaration = trim($declaration);
             if (!in_array($declaration, $dropped, true)) {
                 $dropped[] = $declaration;

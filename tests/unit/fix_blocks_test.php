@@ -84,6 +84,22 @@ test('FixBlocksStep classifies only dropped styles that affect vertical rhythm',
     ], FixBlocksStep::droppedVerticalRhythmStyles($report));
 });
 
+test('the rhythm gate ignores dropped declarations whose value was never valid CSS', function () {
+    // A bare preset slug (`margin-top:sm`) renders as nothing in a browser, so
+    // dropping it loses no rendered rhythm. CSS-wide keywords and real lengths
+    // still count.
+    $report = implode("\n", [
+        '         ! DROPPED style `margin-top:sm` — not mirrored',
+        '         ! DROPPED style `padding-bottom:md` — not mirrored',
+        '         ! DROPPED style `margin-bottom:auto` — not mirrored',
+        '         ! DROPPED style `padding-top:2rem` — not mirrored',
+    ]);
+    assert_eq([
+        'margin-bottom:auto',
+        'padding-top:2rem',
+    ], FixBlocksStep::droppedVerticalRhythmStyles($report));
+});
+
 test('FixBlocksStep logs and fails when block repair drops vertical rhythm CSS', function () {
     $fake = new class implements BlockFixer {
         public function fix(string $themeDir): string
