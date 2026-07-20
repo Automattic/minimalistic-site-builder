@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageLogger;
+use Automattic\SiteBuild\Imagen;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
@@ -13,7 +14,6 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
-use Automattic\SiteBuild\WpcomImageClient;
 
 /**
  * Step (opt-in, networked): generate the images collected by CollectImagesStep
@@ -262,11 +262,11 @@ final class GenerateImagesStep implements Step
      */
     private static function generationSpec(array $spec, string $siteContext, string $imageGrade, ?string $subject = null): array
     {
-        $ratio = WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
+        $ratio = Imagen::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
         // A .png placeholder is a transparent-background asset: request PNG
         // bytes, prompt for a flat white background (Imagen cannot render
         // alpha), and key that background out after generation.
-        $mime = WpcomImageClient::mimeForFilename((string) ($spec['filename'] ?? ''));
+        $mime = Imagen::mimeForFilename((string) ($spec['filename'] ?? ''));
         return [
             'prompt'            => ImagePromptComposer::compose(
                 $subject ?? (string) ($spec['subject'] ?? ''),
@@ -281,7 +281,7 @@ final class GenerateImagesStep implements Step
             // those at 2K so they stay sharp past ~1366px. Transparent
             // decoratives render small on the page and stay at 1K whatever
             // their ratio.
-            'sample_image_size' => WpcomImageClient::sampleImageSize($ratio, $mime === 'image/png'),
+            'sample_image_size' => Imagen::sampleImageSize($ratio, $mime === 'image/png'),
             'mime'              => $mime,
         ];
     }

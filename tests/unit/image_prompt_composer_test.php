@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ImagePromptComposer;
-use Automattic\SiteBuild\WpcomImageClient;
+use Automattic\SiteBuild\Imagen;
 
 /**
  * ImagePromptComposer turns the structured AI_IMAGE fields (subject | page-context
@@ -60,7 +60,7 @@ test('compose keeps the subject in full when the site context is huge', function
     $subject = 'A specific sourdough loaf on a floured board, warm side light';
     $out = ImagePromptComposer::compose($subject, 'menu item card', 'photorealistic', str_repeat('context word ', 2000));
 
-    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_true(Imagen::estimateTokens($out) <= Imagen::MAX_PROMPT_TOKENS, 'within token cap');
     assert_contains("{$subject}. Style: photorealistic", $out);
 });
 
@@ -140,7 +140,7 @@ test('compose sheds the site context under token pressure but keeps transparency
         true
     );
 
-    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_true(Imagen::estimateTokens($out) <= Imagen::MAX_PROMPT_TOKENS, 'within token cap');
     assert_contains('solid pure white background', $out);
 });
 
@@ -155,7 +155,7 @@ test('compose sheds the site context under token pressure but keeps the grade', 
         $grade
     );
 
-    assert_true(WpcomImageClient::estimateTokens($out) <= WpcomImageClient::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_true(Imagen::estimateTokens($out) <= Imagen::MAX_PROMPT_TOKENS, 'within token cap');
     assert_contains("{$subject}. Style: photorealistic", $out);
     assert_contains("Art direction for all site imagery: {$grade}.", $out);
 });
