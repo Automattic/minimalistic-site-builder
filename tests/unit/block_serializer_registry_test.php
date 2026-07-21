@@ -88,6 +88,17 @@ test('reviewed legacy button width migrates to current dimensions support', func
     assert_true(!str_contains($result, 'wp-block-button__width-100'));
 });
 
+test('reviewed button href alias is sourced from saved HTML then dropped', function () {
+    $button = '<!-- wp:button {"href":"#contact"} -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" '
+        . 'href="#contact">Start an inquiry</a></div><!-- /wp:button -->';
+
+    $result = (new Serializer())->transform($button)->html;
+    assert_true(!str_contains($result, '"href"'));
+    assert_true(!str_contains($result, '"url"'));
+    assert_contains('href="#contact"', $result);
+});
+
 test('reviewed legacy image shadow follows the pinned lossy migration', function () {
     $image = '<!-- wp:image {"sizeSlug":"large","className":"reveal-scale",'
         . '"style":{"border":{"color":"var:preset|color|secondary","width":"1px"}},'

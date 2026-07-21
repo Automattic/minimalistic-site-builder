@@ -26,6 +26,10 @@ final class DeprecationAdapters
             // Button deprecation index 3 stored percentage widths as a
             // number and migrated them to style.dimensions.width.
             'width' => true,
+            // AI-authored alias. The registered url attribute is sourced
+            // from the saved <a href>, while this unregistered delimiter key
+            // is discarded by the pinned createBlock path.
+            'href' => true,
         ],
         'core/group' => [
             // AI-authored legacy top-level border support. The current schema
