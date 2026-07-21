@@ -67,6 +67,12 @@ final class SupportDomainGuard
             'offset' => true,
             'width' => true,
         ],
+        // Registered core/group support. The pinned save probe confirms this
+        // remains comment state and adds no wrapper CSS in the frozen runtime.
+        'position' => [
+            'type' => ['@values' => ['sticky']],
+            'top' => true,
+        ],
         'shadow' => true,
         'spacing' => [
             'margin' => [

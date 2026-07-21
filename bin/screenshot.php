@@ -27,7 +27,7 @@ use Automattic\SiteBuild\ProjectStore;
  *                  foreground (don't tear it down) so the site can be inspected
  *                  in a browser. Ctrl-C to stop the server.
  *
- * Requires Node.js (npx, for Playground) and a Chrome/Chromium binary. Override
+ * Requires Node.js, the lockfile-pinned Playground CLI, and a Chrome/Chromium binary. Override
  * the browser with CHROME_BIN; width with SHOT_WIDTH.
  */
 
@@ -67,10 +67,6 @@ if (!is_file($project->themePath('style.css'))) {
     exit(1);
 }
 
-if (!command_exists('npx')) {
-    fwrite(STDERR, "npx (Node.js) is required to run WordPress Playground.\n");
-    exit(1);
-}
 if (!command_exists('node')) {
     fwrite(STDERR, "node is required to capture screenshots.\n");
     exit(1);
@@ -87,7 +83,7 @@ $serverLog = $project->logPath('playground-screenshot.log');
 // Start Playground in the background, routing its output to a log we tail for
 // the "Ready!" line (which carries the actual port — playground.php auto-bumps
 // if the requested one is busy). `exec` makes proc_open's pid the php process
-// itself, so teardown can walk and kill its npx/node subtree. The shared child
+// itself, so teardown can walk and kill its Playground/node subtree. The shared child
 // command also pins PHP_BINARY and sys_temp_dir, keeping our independently
 // derived blueprint paths identical.
 @unlink($serverLog);
@@ -121,7 +117,7 @@ register_shutdown_function(static function () use ($proc, $wrapperPid, $blueprin
 echo "Booting Playground for '{$slug}' (first run downloads WordPress)…\n";
 $deadline = time() + $timeout;
 while (time() < $deadline) {
-    // Did playground.php die before serving? (bad theme, npx error, …)
+    // Did playground.php die before serving? (bad theme, CLI error, …)
     if (!proc_get_status($proc)['running']) {
         fwrite(STDERR, "Playground exited before it was ready. See {$serverLog}\n");
         echo @file_get_contents($serverLog);

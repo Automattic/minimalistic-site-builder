@@ -199,6 +199,54 @@ HTML;
     assert_contains('0 style/class value(s) dropped', $stdout);
 });
 
+test('FixBlocksStep preserves rhythm from attrs missing only their final root closer', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['layout' => ['contentSize' => '860px']],
+    ]);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:heading {"textAlign":"center","level":2,"fontFamily":"heading","fontSize":"section-title","style":{"typography":{"fontWeight":"400"},"spacing":{"margin":{"top":"var:preset|spacing|sm"}}} -->'
+        . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family has-section-title-font-size" style="margin-top:var(--wp--preset--spacing--sm);font-weight:400">Title</h2>'
+        . '<!-- /wp:heading -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+        $fixed = $project->readText('theme/parts/section.html');
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('margin-top:var(--wp--preset--spacing--sm)', $fixed);
+        assert_contains('font-weight:400', $fixed);
+        assert_true(!str_contains($log, 'DROPPED style `margin-top'), $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep canonicalizes matching malformed rendered preset variables before drop detection', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:columns {"style":{"spacing":{"margin":{"top":"var:preset|spacing|lg"}}}} -->'
+        . '<div class="wp-block-columns" style="margin-top:var(--wp--spacing--lg)"></div>'
+        . '<!-- /wp:columns -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+        $fixed = $project->readText('theme/parts/section.html');
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('margin-top:var(--wp--preset--spacing--lg)', $fixed);
+        assert_true(!str_contains($log, 'DROPPED style `margin-top'), $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('block fixer reports inline styles it drops during re-serialization', function () {
     $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
     $theme = $tmp . '/theme';

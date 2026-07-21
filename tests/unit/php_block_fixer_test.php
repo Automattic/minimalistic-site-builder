@@ -482,7 +482,7 @@ test('PhpBlockFixer rejects a current-key historical style signature before stag
 });
 
 test('PhpBlockFixer rejects an unsupported block-support family before staging', function () {
-    $original = '<!-- wp:group {"style":{"position":{"type":"sticky","top":"0px"}}} -->'
+    $original = '<!-- wp:group {"style":{"filter":{"blur":"2px"}}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
     $writer = new PhpBlockFixerTestWriter();
@@ -493,7 +493,7 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
         );
 
         assert_contains(
-            "Unsupported block-support path 'style.position' for core/group at 0",
+            "Unsupported block-support path 'style.filter' for core/group at 0",
             $error->getMessage(),
         );
         assert_eq(0, $writer->stageCalls);

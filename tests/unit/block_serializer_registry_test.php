@@ -74,6 +74,73 @@ test('reviewed navigation font-family deprecation supplies pinned defaults', fun
     assert_contains('"layout":{"type":"flex","orientation":"horizontal"}', $result);
 });
 
+test('reviewed legacy button width migrates to current dimensions support', function () {
+    $button = '<!-- wp:button {"backgroundColor":"accent","textColor":"base","width":100} -->'
+        . '<div class="wp-block-button has-custom-width wp-block-button__width-100">'
+        . '<a class="wp-block-button__link has-base-color has-accent-background-color has-text-color '
+        . 'has-background wp-element-button" href="#map">Map</a></div><!-- /wp:button -->';
+
+    $result = (new Serializer())->transform($button)->html;
+    assert_contains('<!-- wp:button {"backgroundColor":"accent","textColor":"base",'
+        . '"style":{"dimensions":{"width":"100%"}}} -->', $result);
+    assert_contains('<div class="wp-block-button">', $result);
+    assert_true(!str_contains($result, 'has-custom-width'));
+    assert_true(!str_contains($result, 'wp-block-button__width-100'));
+});
+
+test('reviewed legacy image shadow follows the pinned lossy migration', function () {
+    $image = '<!-- wp:image {"sizeSlug":"large","className":"reveal-scale",'
+        . '"style":{"border":{"color":"var:preset|color|secondary","width":"1px"}},'
+        . '"shadow":"var:preset|shadow|plate"} -->'
+        . '<figure class="wp-block-image size-large has-border-color reveal-scale" '
+        . 'style="border-color:var(--wp--preset--color--secondary);border-width:1px;'
+        . 'box-shadow:var(--wp--preset--shadow--plate)"><img src="photo.jpg" alt="Photo"/></figure>'
+        . '<!-- /wp:image -->';
+
+    $result = (new Serializer())->transform($image)->html;
+    assert_true(!str_contains($result, '"shadow"'));
+    assert_true(!str_contains($result, 'box-shadow'));
+    assert_contains('"border":{"color":"var:preset|color|secondary","width":"1px"}', $result);
+});
+
+test('reviewed selector-less paragraph carries authored typography past align migration', function () {
+    $paragraph = '<!-- wp:paragraph {"align":"center","textColor":"secondary",'
+        . '"fontFamily":"heading","fontSize":"caption","className":"reveal-fade"} -->'
+        . '<p class="has-text-align-center has-secondary-color has-text-color has-heading-font-family '
+        . 'has-caption-font-size reveal-fade" style="letter-spacing:0.2em;text-transform:uppercase">'
+        . 'Our Table</p><!-- /wp:paragraph -->';
+
+    $result = (new Serializer())->transform($paragraph)->html;
+    assert_contains('"align":"center"', $result);
+    assert_contains('style="letter-spacing:0.2em;text-transform:uppercase"', $result);
+});
+
+test('reviewed selector-less paragraph matches the pinned inert let-spacing carryover', function () {
+    $paragraph = '<!-- wp:paragraph {"align":"center","textColor":"accent","fontSize":"caption",'
+        . '"style":{"typography":{"textTransform":"uppercase","letterSpacing":"0.18em",'
+        . '"fontWeight":"600"}}} -->'
+        . '<p class="has-text-align-center has-accent-color has-text-color has-caption-font-size" '
+        . 'style="font-weight:600;let-spacing:0.18em;text-transform:uppercase;letter-spacing:0.18em">'
+        . 'Visit Us</p><!-- /wp:paragraph -->';
+
+    $result = (new Serializer())->transform($paragraph)->html;
+    assert_contains('let-spacing:0.18em', $result);
+    assert_contains('letter-spacing:0.18em', $result);
+});
+
+test('reviewed paragraph container layout follows the pinned drop', function () {
+    $paragraph = '<!-- wp:paragraph {"align":"center","textColor":"base",'
+        . '"style":{"spacing":{"margin":{"top":"var:preset|spacing|md"}}},'
+        . '"layout":{"type":"constrained","contentSize":"600px"}} -->'
+        . '<p class="has-text-align-center has-base-color has-text-color" '
+        . 'style="margin-top:var(--wp--preset--spacing--md)">Details</p><!-- /wp:paragraph -->';
+
+    $result = (new Serializer())->transform($paragraph)->html;
+    assert_true(!str_contains($result, '"layout"'));
+    assert_contains('"margin":{"top":"var:preset|spacing|md"}', $result);
+    assert_contains('margin-top:var(--wp--preset--spacing--md)', $result);
+});
+
 test('reviewed site-title deprecations migrate legacy align and font family', function () {
     $align = (new Serializer())->transform(
         '<!-- wp:site-title {"textAlign":"center"} /-->'

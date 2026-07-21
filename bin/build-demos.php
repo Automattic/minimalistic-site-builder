@@ -374,7 +374,7 @@ function pump_children(array &$running, callable $emit): void
  * parent AND all servers: the SIGINT handler turns the signal into a normal
  * exit so the registered teardown runs (SIGINT also reaches the children
  * directly — they share the foreground process group — but the pkill catches
- * the npx-spawned node servers that reparent to init and escape both).
+ * the Playground-spawned node servers that reparent to init and escape both).
  *
  * @param list<string> $slugs
  */

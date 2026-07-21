@@ -22,6 +22,11 @@ final class DeprecationAdapters
      * adapter has admitted the signature.
      */
     private const REVIEWED_LEGACY_COMMENT_KEYS = [
+        'core/button' => [
+            // Button deprecation index 3 stored percentage widths as a
+            // number and migrated them to style.dimensions.width.
+            'width' => true,
+        ],
         'core/group' => [
             // AI-authored legacy top-level border support. The current schema
             // accepts only style.border, so the pinned createBlock path drops
@@ -38,6 +43,18 @@ final class DeprecationAdapters
             // The pinned migration reads the recovered has-text-align-* class,
             // not this comment key, so the key is dropped either way.
             'textAlign' => true,
+        ],
+        'core/image' => [
+            // AI-authored legacy support form observed in tbilisi35. The
+            // pinned registry drops the top-level key and its stale wrapper
+            // box-shadow while retaining current style.border support.
+            'shadow' => true,
+        ],
+        'core/paragraph' => [
+            // AI-authored container layout on a leaf paragraph. The pinned
+            // createBlock path drops it while retaining the paragraph's
+            // current spacing and typography attributes.
+            'layout' => true,
         ],
         'core/site-title' => [
             // Deprecated version 0; exercised by tbilisi25-footer-fixed-point.
@@ -107,6 +124,13 @@ final class DeprecationAdapters
             if ($matched && is_string($attributes['content'] ?? null)) {
                 $attributes['content'] = RichText::fromHtmlString($attributes['content']);
             }
+        } elseif ($name === 'core/button') {
+            $attributes = $this->button(
+                $attributes,
+                $originalContent,
+                $rawCommentAttributes,
+                $matched,
+            );
         } elseif ($name === 'core/columns') {
             $attributes = $this->columns(
                 $attributes,
@@ -129,6 +153,61 @@ final class DeprecationAdapters
             $attributes = $this->siteTitle($attributes, $rawCommentAttributes, $matched);
         }
         return ['attributes' => $attributes, 'repairs' => [], 'matched' => $matched];
+    }
+
+    /**
+     * Reviewed button deprecation index 3. Its numeric width and matching
+     * wrapper classes migrate to the current dimensions support.
+     *
+     * @param array<string,mixed> $attributes
+     * @param array<string,mixed> $rawCommentAttributes
+     * @return array<string,mixed>
+     */
+    private function button(
+        array $attributes,
+        string $originalContent,
+        array $rawCommentAttributes,
+        bool &$matched,
+    ): array {
+        $width = $rawCommentAttributes['width'] ?? null;
+        if ((!is_int($width) && !is_float($width)) || !is_finite((float) $width) || $width <= 0) {
+            return $attributes;
+        }
+        $renderedWidth = rtrim(rtrim(sprintf('%.14F', (float) $width), '0'), '.');
+        $root = HtmlFragment::parse($originalContent)->root()->elementChildren()[0] ?? null;
+        if ($root === null || $root->tagName() !== 'div') {
+            return $attributes;
+        }
+        $classes = preg_split(
+            '/\s+/',
+            trim((string) ($root->attribute('class') ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
+        if (!in_array('has-custom-width', $classes, true)
+            || !in_array('wp-block-button__width-' . $renderedWidth, $classes, true)) {
+            return $attributes;
+        }
+
+        $style = is_array($attributes['style'] ?? null) ? $attributes['style'] : [];
+        $dimensions = is_array($style['dimensions'] ?? null) ? $style['dimensions'] : [];
+        $dimensions['width'] = $renderedWidth . '%';
+        $style['dimensions'] = $dimensions;
+        $attributes['style'] = $style;
+        if (is_string($attributes['className'] ?? null)) {
+            $custom = array_values(array_filter(
+                preg_split('/\s+/', trim($attributes['className']), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                static fn (string $class): bool => $class !== 'has-custom-width'
+                    && $class !== 'wp-block-button__width-' . $renderedWidth,
+            ));
+            if ($custom === []) {
+                unset($attributes['className']);
+            } else {
+                $attributes['className'] = implode(' ', $custom);
+            }
+        }
+        $matched = true;
+        return $attributes;
     }
 
     /**
@@ -376,7 +455,8 @@ final class DeprecationAdapters
 
         if (is_string($align) && $align !== ''
             && in_array('has-text-align-' . $align, $classes, true)
-            && !$this->hasShortSpacingPresetSignature($attributes, $originalContent)) {
+            && !$this->hasShortSpacingPresetSignature($attributes, $originalContent)
+            && !$this->hasAuthoredTypographyCarryoverSignature($attributes, $originalContent)) {
             $matched = true;
             if ($fontClass !== null && !in_array($fontClass, $classes, true)) {
                 // The earlier align deprecations cannot validate when their
@@ -470,6 +550,38 @@ final class DeprecationAdapters
             unset($attributes['className']);
         }
         return $attributes;
+    }
+
+    /**
+     * Selector-less paragraph deprecations preserve authored typography that
+     * is absent from the comment. Do not let the earlier align migration win
+     * when it would discard one of these reviewed generated-theme properties.
+     * The final signature guard still rejects any other unmirrored style.
+     *
+     * @param array<string,mixed> $attributes
+     */
+    private function hasAuthoredTypographyCarryoverSignature(
+        array $attributes,
+        string $originalContent,
+    ): bool {
+        $actual = $this->rootStyles($originalContent);
+        $typography = $attributes['style']['typography'] ?? [];
+        $typography = is_array($typography) ? $typography : [];
+        foreach ([
+            'letter-spacing' => 'letterSpacing',
+            'text-transform' => 'textTransform',
+            // Exact model typo observed in naturaleza31. The pinned Node
+            // selector-less deprecation preserves this inert declaration.
+            'let-spacing' => null,
+        ] as $css => $key) {
+            if (array_key_exists($css, $actual)
+                && ($key === null
+                    || !array_key_exists($key, $typography)
+                    || (string) $typography[$key] !== $actual[$css])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

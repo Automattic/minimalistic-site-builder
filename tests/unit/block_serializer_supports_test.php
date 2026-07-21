@@ -143,9 +143,14 @@ test('SupportDomainGuard rejects style families outside the reviewed PHP pipelin
         'layout' => ['type' => 'default'],
     ], '0');
 
+    $guard->assertSupported(
+        'core/group',
+        ['style' => ['position' => ['type' => 'sticky', 'top' => '0px']]],
+        '0',
+    );
     assert_throws(static fn () => $guard->assertSupported(
         'core/group',
-        ['style' => ['position' => ['type' => 'sticky']]],
+        ['style' => ['position' => ['type' => 'fixed', 'top' => '0px']]],
         '0',
     ));
     assert_throws(static fn () => $guard->assertSupported(

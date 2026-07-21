@@ -22,7 +22,7 @@ cp .env.example .env
 # Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
-npm ci   # optional; installs screenshot helpers
+npm ci   # optional; installs local Playground and screenshot helpers
 ```
 
 Theme generation and block fixing require PHP 8.1+ only. No Composer is needed:
