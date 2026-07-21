@@ -41,6 +41,7 @@ final class CoreBlockRenderer
             'core/list' => $this->list($attrs, $innerHtml),
             'core/list-item' => $this->listItem($attrs, $innerHtml),
             'core/cover' => $this->cover($attrs, $innerHtml),
+            'core/details' => $this->details($attrs, $innerHtml),
             'core/media-text' => $this->mediaText($attrs, $innerHtml),
             'core/quote' => $this->quote($attrs, $innerHtml),
             'core/pullquote' => $this->pullquote($attrs),
@@ -67,11 +68,18 @@ final class CoreBlockRenderer
     /** @param array<string,mixed> $attrs */
     private function group(array $attrs, string $inner): ElementNode
     {
-        $initial = !array_key_exists('anchor', $attrs)
-            && !array_key_exists('ariaLabel', $attrs)
-            && !array_key_exists('className', $attrs)
-            ? ['className' => '']
-            : [];
+        $initial = [];
+        if (!array_key_exists('className', $attrs)) {
+            if (array_key_exists('anchor', $attrs)) {
+                $initial['id'] = $attrs['anchor'] === '' ? null : $attrs['anchor'];
+            }
+            if (array_key_exists('ariaLabel', $attrs)) {
+                $initial['aria-label'] = $attrs['ariaLabel'] === '' ? null : $attrs['ariaLabel'];
+            }
+            // Reserve the generated class slot after authored HTML attrs but
+            // before support styles, matching React prop insertion order.
+            $initial['className'] = '';
+        }
         return new ElementNode(
             (string) ($attrs['tagName'] ?? 'div'),
             $this->props('core/group', $attrs, $initial),
@@ -111,6 +119,19 @@ final class CoreBlockRenderer
             $classes[] = 'is-not-stacked-on-mobile';
         }
         return new ElementNode('div', $this->props('core/columns', $attrs, ['className' => implode(' ', $classes)]), [new RawNode($inner)]);
+    }
+
+    /** @param array<string,mixed> $attrs */
+    private function details(array $attrs, string $inner): ElementNode
+    {
+        return new ElementNode('details', $this->props('core/details', $attrs, [
+            'className' => 'wp-block-details',
+            'open' => !empty($attrs['showContent']),
+            'name' => $attrs['name'] ?? null,
+        ]), [
+            new ElementNode('summary', [], [new RawNode(is_string($attrs['summary'] ?? null) ? $attrs['summary'] : '')]),
+            new RawNode($inner),
+        ]);
     }
 
     /** @param array<string,mixed> $attrs */

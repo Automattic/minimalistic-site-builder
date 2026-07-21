@@ -15,7 +15,16 @@ final class SupportDomainGuard
      */
     private const STYLE_PATHS = [
         'background' => [
-            'backgroundImage' => ['@leaf' => true, 'url' => true],
+            'backgroundImage' => [
+                '@leaf' => true,
+                'url' => true,
+                // Generated no-image sentinel retained in the delimiter by
+                // the pinned registry; group save emits no CSS for it.
+                'ref' => [
+                    '@values' => ['none'],
+                    '@pattern' => '/^var:preset\|gradient\|[a-z0-9][a-z0-9_-]*$/',
+                ],
+            ],
             'gradient' => true,
             'backgroundPosition' => true,
             'backgroundRepeat' => true,
@@ -33,10 +42,13 @@ final class SupportDomainGuard
                 'bottomLeft' => true,
                 'bottomRight' => true,
             ],
-            'top' => ['color' => true, 'style' => true, 'width' => true],
-            'right' => ['color' => true, 'style' => true, 'width' => true],
-            'bottom' => ['color' => true, 'style' => true, 'width' => true],
-            'left' => ['color' => true, 'style' => true, 'width' => true],
+            // A generated separator signature uses scalar "0" edge values.
+            // The pinned style engine treats them as inert comment state;
+            // all non-zero scalar edge spellings remain fail-closed.
+            'top' => ['@values' => ['0'], 'color' => true, 'style' => true, 'width' => true],
+            'right' => ['@values' => ['0'], 'color' => true, 'style' => true, 'width' => true],
+            'bottom' => ['@values' => ['0'], 'color' => true, 'style' => true, 'width' => true],
+            'left' => ['@values' => ['0'], 'color' => true, 'style' => true, 'width' => true],
         ],
         'color' => [
             'text' => true,
@@ -51,6 +63,9 @@ final class SupportDomainGuard
             'width' => true,
             'objectFit' => true,
         ],
+        // Generated layout hint retained as inert delimiter state; the
+        // top-level layout attribute remains the save implementation owner.
+        'display' => ['@values' => ['flex']],
         'elements' => [
             'link' => [
                 'color' => ['text' => true],
@@ -65,6 +80,10 @@ final class SupportDomainGuard
                 ],
             ],
         ],
+        // Legacy generated typography spelling. The pinned current save does
+        // not consume it, while validation's custom-class recovery preserves
+        // the matching authored has-<slug>-font-family class.
+        'fontFamily' => ['@pattern' => '/^[a-z0-9][a-z0-9-]*$/'],
         'layout' => [
             'selfStretch' => ['@values' => ['fill', 'fit', 'fixed']],
             'flexSize' => true,
@@ -84,6 +103,10 @@ final class SupportDomainGuard
             'type' => ['@values' => ['sticky']],
             'top' => true,
         ],
+        // Legacy generated group signature. The pinned registry preserves
+        // this value in the delimiter but does not emit wrapper CSS (unlike
+        // style.border.radius). Keep the reviewed domain deliberately narrow.
+        'radius' => ['@values' => ['12px']],
         'shadow' => true,
         'spacing' => [
             'margin' => [
@@ -205,8 +228,17 @@ final class SupportDomainGuard
             return;
         }
         if (!is_array($value)) {
-            if (isset($rule['@values']) && is_array($rule['@values'])) {
-                if (!is_string($value) || !in_array($value, $rule['@values'], true)) {
+            if ((isset($rule['@values']) && is_array($rule['@values']))
+                || isset($rule['@pattern'])) {
+                $matchesValue = is_string($value)
+                    && isset($rule['@values'])
+                    && is_array($rule['@values'])
+                    && in_array($value, $rule['@values'], true);
+                $matchesPattern = is_string($value)
+                    && isset($rule['@pattern'])
+                    && is_string($rule['@pattern'])
+                    && preg_match($rule['@pattern'], $value) === 1;
+                if (!$matchesValue && !$matchesPattern) {
                     $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
                     throw new \RuntimeException(
                         "Unsupported block-support value '{$encoded}' at {$name} {$blockPath} {$valuePath}"

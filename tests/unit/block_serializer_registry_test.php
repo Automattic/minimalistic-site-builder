@@ -88,6 +88,79 @@ test('reviewed legacy button width migrates to current dimensions support', func
     assert_true(!str_contains($result, 'wp-block-button__width-100'));
 });
 
+test('reviewed generated support deprecations follow the pinned branch selection', function () {
+    $group = '<!-- wp:group {"align":"full","backgroundColor":"contrast","textColor":"base",'
+        . '"style":{"elements":{"link":{"color":{"text":"var:preset|color|base"},'
+        . '":hover":{"color":{"text":"var:preset|color|accent"}}}}}} -->'
+        . '<div class="wp-block-group alignfull has-base-color has-contrast-background-color '
+        . 'has-text-color has-background"></div><!-- /wp:group -->';
+    $groupResult = (new Serializer())->transform($group)->html;
+    assert_contains('"className":"has-base-color has-text-color"', $groupResult);
+    assert_contains('has-link-color', $groupResult);
+
+    $separator = '<!-- wp:separator {"backgroundColor":"accent","className":"is-style-wide",'
+        . '"style":{"color":{"background":"var:preset|color|accent"}}} -->'
+        . '<hr class="wp-block-separator has-text-color has-accent-color has-css-opacity '
+        . 'has-accent-background-color has-background is-style-wide" '
+        . 'style="background-color:var(--wp--preset--color--accent)"/><!-- /wp:separator -->';
+    $separatorResult = (new Serializer())->transform($separator)->html;
+    assert_contains('"opacity":"css"', $separatorResult);
+    assert_contains('has-css-opacity', $separatorResult);
+    assert_true(!str_contains($separatorResult, 'has-alpha-channel-opacity'));
+
+    $alphaSeparator = '<!-- wp:separator {"backgroundColor":"primary",'
+        . '"style":{"spacing":{"margin":{"top":"var:preset|spacing|sm"}}}} -->'
+        . '<hr class="wp-block-separator has-text-color has-primary-color '
+        . 'has-alpha-channel-opacity has-primary-background-color has-background"/>'
+        . '<!-- /wp:separator -->';
+    $alphaResult = (new Serializer())->transform($alphaSeparator)->html;
+    assert_contains('"opacity":"css"', $alphaResult);
+    assert_contains('"className":"has-text-color has-primary-color has-alpha-channel-opacity has-primary-background-color has-background"', $alphaResult);
+
+    $width = '<!-- wp:button {"backgroundColor":"accent","textColor":"base","width":100,'
+        . '"fontSize":"body"} --><div class="wp-block-button has-custom-width '
+        . 'wp-block-button__width-100 has-custom-font-size has-body-font-size">'
+        . '<a class="wp-block-button__link has-base-color has-accent-background-color has-text-color '
+        . 'has-background wp-element-button" href="#tickets">Tickets</a></div><!-- /wp:button -->';
+    $widthResult = (new Serializer())->transform($width)->html;
+    assert_contains('"fontSize":"body","style":{"dimensions":{"width":"100%"}}', $widthResult);
+    assert_true(!str_contains($widthResult, '"className"'));
+    assert_contains('has-body-font-size has-custom-font-size wp-element-button', $widthResult);
+
+    $olderWidth = '<!-- wp:button {"textColor":"secondary","width":100,"fontSize":"body",'
+        . '"style":{"color":{"background":"transparent"}}} -->'
+        . '<div class="wp-block-button has-custom-width wp-block-button__width-100 '
+        . 'has-custom-font-size has-body-font-size"><a class="wp-block-button__link '
+        . 'has-secondary-color has-text-color wp-element-button" href="#groups">Groups</a></div>'
+        . '<!-- /wp:button -->';
+    $olderWidthResult = (new Serializer())->transform($olderWidth)->html;
+    assert_contains('"className":"has-custom-width wp-block-button__width-100 has-custom-font-size has-body-font-size"', $olderWidthResult);
+    assert_true(!str_contains($olderWidthResult, '"dimensions"'));
+
+    $paragraph = '<!-- wp:paragraph {"textColor":"accent","fontFamily":"heading",'
+        . '"fontSize":"caption","style":{"border":{"radius":"999px","width":"1px",'
+        . '"color":"#2DE2E6"}}} --><p class="has-accent-color has-text-color '
+        . 'has-heading-font-family has-caption-font-size" style="border-color:#2DE2E6;'
+        . 'border-width:1px;border-radius:999px">Ages 7–10</p><!-- /wp:paragraph -->';
+    $paragraphResult = (new Serializer())->transform($paragraph)->html;
+    assert_contains('"className":"has-accent-color has-text-color has-heading-font-family"', $paragraphResult);
+    assert_contains('has-border-color has-caption-font-size', $paragraphResult);
+
+    $lineHeight = '<!-- wp:paragraph {"textColor":"base","fontFamily":"body",'
+        . '"fontSize":"body","style":{"typography":{"lineHeight":"1.6"}}} -->'
+        . '<p class="has-base-color has-text-color has-body-font-family has-body-font-size">Open</p>'
+        . '<!-- /wp:paragraph -->';
+    $lineHeightResult = (new Serializer())->transform($lineHeight)->html;
+    assert_contains('"className":"has-base-color has-text-color has-body-font-family has-body-font-size"', $lineHeightResult);
+    assert_contains('style="line-height:1.6"', $lineHeightResult);
+
+    $image = '<!-- wp:image {"sizeSlug":"large","style":{"border":{"radius":"24px"}}} -->'
+        . '<figure class="wp-block-image size-large has-custom-border"><img src="photo.jpg" '
+        . 'alt="Photo"/></figure><!-- /wp:image -->';
+    $imageResult = (new Serializer())->transform($image)->html;
+    assert_contains('"className":"has-custom-border"', $imageResult);
+});
+
 test('reviewed button href alias is sourced from saved HTML then dropped', function () {
     $button = '<!-- wp:button {"href":"#contact"} -->'
         . '<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" '

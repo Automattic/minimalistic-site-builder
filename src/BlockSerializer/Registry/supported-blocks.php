@@ -21,6 +21,7 @@ return [
     'core/list' => SaveStrategy::STATIC_RENDERER,
     'core/list-item' => SaveStrategy::STATIC_RENDERER,
     'core/cover' => SaveStrategy::STATIC_RENDERER,
+    'core/details' => SaveStrategy::STATIC_RENDERER,
     'core/media-text' => SaveStrategy::STATIC_RENDERER,
     'core/quote' => SaveStrategy::STATIC_RENDERER,
     'core/pullquote' => SaveStrategy::STATIC_RENDERER,

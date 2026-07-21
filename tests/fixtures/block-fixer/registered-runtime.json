@@ -55,9 +55,9 @@
   "schemaVersion": 1,
   "counts": {
     "registered": 106,
-    "supported": 30,
-    "observed": 31,
-    "observedRegistered": 30,
+    "supported": 31,
+    "observed": 32,
+    "observedRegistered": 31,
     "observedUnregistered": 1
   },
   "registeredUniverse": [
@@ -222,6 +222,10 @@
       "strategy": "STATIC_RENDERER"
     },
     {
+      "name": "core/details",
+      "strategy": "STATIC_RENDERER"
+    },
+    {
       "name": "core/media-text",
       "strategy": "STATIC_RENDERER"
     },
@@ -296,6 +300,7 @@
     "core/column",
     "core/columns",
     "core/cover",
+    "core/details",
     "core/embed",
     "core/figure",
     "core/gallery",
@@ -329,6 +334,7 @@
     "core/column",
     "core/columns",
     "core/cover",
+    "core/details",
     "core/embed",
     "core/gallery",
     "core/group",

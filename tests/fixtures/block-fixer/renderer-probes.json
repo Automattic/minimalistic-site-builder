@@ -20,15 +20,15 @@
         },
         "supportedBlocks": {
             "path": "src/BlockSerializer/Registry/supported-blocks.php",
-            "sha256": "37c96f4cdb0493db459b4fe0019b8f6516b19a27c1afc9430948fb6bbcff03f4"
+            "sha256": "1b573d133ef7dd5a76af3d5fcfa9fb8571d917ed84ef88e69de83e17ffa052f3"
         },
         "registeredRuntime": {
             "path": "tests/fixtures/block-fixer/registered-runtime.json",
-            "sha256": "3384dbf56db0506bbacd2e496db982b76354b02540c796f6704633157c5fcb3a"
+            "sha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716"
         },
         "generatedRegistry": {
             "path": "src/BlockSerializer/Registry/generated-registry.php",
-            "sha256": "3539f97fccf128399113284177cebba75349b9993b5727d8011ad4548e015cee"
+            "sha256": "ed3710cf608f7575ba138ef1e825bf093f6f535f453dd9ba936a291382d3a3a6"
         },
         "runtime": {
             "version": "v22.19.0",
@@ -88,14 +88,15 @@
         }
     },
     "coverage": {
-        "oracleCases": 101,
-        "staticRendererCases": 90,
+        "oracleCases": 102,
+        "staticRendererCases": 91,
         "supportedStaticBlocks": [
             "core/button",
             "core/buttons",
             "core/column",
             "core/columns",
             "core/cover",
+            "core/details",
             "core/embed",
             "core/gallery",
             "core/group",
@@ -118,6 +119,7 @@
             "core/column",
             "core/columns",
             "core/cover",
+            "core/details",
             "core/embed",
             "core/gallery",
             "core/group",
@@ -1016,6 +1018,17 @@
             "innerSerialized": "<!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph -->",
             "saveKind": "element",
             "expected": "<div class=\"wp-block-cover alignfull has-border-color has-base-border-color\" style=\"border-color:#123;border-width:1px;border-radius:8px;padding:2rem\" id=\"cover\"><img class=\"wp-block-cover__image-background\" alt=\"\" src=\"/cover.jpg\" data-object-fit=\"cover\"/><span aria-hidden=\"true\" class=\"wp-block-cover__background has-background-dim-100 has-background-dim\"></span><div class=\"wp-block-cover__inner-container\"><!-- wp:paragraph -->\n<p>Inner</p>\n<!-- /wp:paragraph --></div></div>"
+        },
+        {
+            "id": "details/inner-blocks",
+            "name": "core/details",
+            "attributes": {
+                "showContent": false,
+                "summary": []
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<details class=\"wp-block-details\"><summary></summary><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></details>"
         },
         {
             "id": "media-text/image-left",

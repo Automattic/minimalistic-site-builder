@@ -153,6 +153,20 @@ final class DeprecationAdapters
                 $matched,
                 $currentCandidateValid,
             );
+        } elseif ($name === 'core/separator') {
+            $attributes = $this->separator(
+                $attributes,
+                $originalContent,
+                $matched,
+                $currentCandidateValid,
+            );
+        } elseif ($name === 'core/image') {
+            $attributes = $this->image(
+                $attributes,
+                $originalContent,
+                $matched,
+                $currentCandidateValid,
+            );
         } elseif ($name === 'core/heading') {
             $attributes = $this->heading($attributes, $rawCommentAttributes, $matched);
         } elseif ($name === 'core/navigation') {
@@ -203,6 +217,21 @@ final class DeprecationAdapters
             || !in_array('wp-block-button__width-' . $renderedWidth, $classes, true)) {
             return $attributes;
         }
+        $link = $root->elementChildren()[0] ?? null;
+        $linkClasses = preg_split(
+            '/\s+/',
+            trim((string) ($link?->attribute('class') ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
+        $hasBackground = !empty($attributes['backgroundColor'])
+            || !empty($attributes['style']['color']['background']);
+        if ($hasBackground && !in_array('has-background', $linkClasses, true)) {
+            // The pinned width deprecation cannot validate this older save;
+            // Gutenberg drops the legacy key but retains wrapper classes via
+            // its preliminary custom-class recovery instead.
+            return $attributes;
+        }
 
         $style = is_array($attributes['style'] ?? null) ? $attributes['style'] : [];
         $dimensions = is_array($style['dimensions'] ?? null) ? $style['dimensions'] : [];
@@ -213,7 +242,10 @@ final class DeprecationAdapters
             $custom = array_values(array_filter(
                 preg_split('/\s+/', trim($attributes['className']), -1, PREG_SPLIT_NO_EMPTY) ?: [],
                 static fn (string $class): bool => $class !== 'has-custom-width'
-                    && $class !== 'wp-block-button__width-' . $renderedWidth,
+                    && $class !== 'wp-block-button__width-' . $renderedWidth
+                    && $class !== 'has-custom-font-size'
+                    && (!is_string($attributes['fontSize'] ?? null)
+                        || $class !== 'has-' . SupportEngine::slug($attributes['fontSize']) . '-font-size'),
             ));
             if ($custom === []) {
                 unset($attributes['className']);
@@ -265,6 +297,93 @@ final class DeprecationAdapters
         }
         $matched = true;
         $attributes['className'] = implode(' ', $recovered);
+        return $attributes;
+    }
+
+    /**
+     * Reviewed separator opacity recovery: older generated markup carries
+     * has-css-opacity in saved HTML without the current comment attribute.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function separator(
+        array $attributes,
+        string $originalContent,
+        bool &$matched,
+        bool $currentCandidateValid,
+    ): array
+    {
+        $root = HtmlFragment::parse($originalContent)->root()->elementChildren()[0] ?? null;
+        $classes = preg_split(
+            '/\s+/',
+            trim((string) ($root?->attribute('class') ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
+        $hasCss = in_array('has-css-opacity', $classes, true);
+        $hasAlpha = in_array('has-alpha-channel-opacity', $classes, true);
+        if (!$hasCss && ($currentCandidateValid || !$hasAlpha)) {
+            return $attributes;
+        }
+        $matched = true;
+        $attributes['opacity'] = 'css';
+        if (!$hasCss) {
+            $attributes['className'] = implode(' ', array_values(array_filter(
+                $classes,
+                static fn (string $class): bool => $class !== 'wp-block-separator',
+            )));
+            return $attributes;
+        }
+        if (is_string($attributes['className'] ?? null)) {
+            $custom = array_values(array_filter(
+                preg_split('/\s+/', trim($attributes['className']), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                static fn (string $class): bool => $class !== 'has-css-opacity'
+                    && $class !== 'has-alpha-channel-opacity',
+            ));
+            if ($custom === []) {
+                unset($attributes['className']);
+            } else {
+                $attributes['className'] = implode(' ', $custom);
+            }
+        }
+        return $attributes;
+    }
+
+    /**
+     * Reviewed pre-border image save: a failed current candidate recovers the
+     * authored has-custom-border wrapper class before current attrs overlay.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function image(
+        array $attributes,
+        string $originalContent,
+        bool &$matched,
+        bool $currentCandidateValid,
+    ): array {
+        if ($currentCandidateValid || !is_array($attributes['style']['border'] ?? null)) {
+            return $attributes;
+        }
+        $root = HtmlFragment::parse($originalContent)->root()->elementChildren()[0] ?? null;
+        $classes = preg_split(
+            '/\s+/',
+            trim((string) ($root?->attribute('class') ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
+        if (!in_array('has-custom-border', $classes, true)) {
+            return $attributes;
+        }
+        $matched = true;
+        $custom = is_string($attributes['className'] ?? null)
+            ? preg_split('/\s+/', trim($attributes['className']), -1, PREG_SPLIT_NO_EMPTY) ?: []
+            : [];
+        if (!in_array('has-custom-border', $custom, true)) {
+            $custom[] = 'has-custom-border';
+        }
+        $attributes['className'] = implode(' ', $custom);
         return $attributes;
     }
 
@@ -467,6 +586,41 @@ final class DeprecationAdapters
         $fontClass = is_string($fontSize) && $fontSize !== ''
             ? 'has-' . SupportEngine::slug($fontSize) . '-font-size'
             : null;
+
+        // A pinned paragraph version predates border support. When generated
+        // HTML carries the authored color/font classes but not the current
+        // has-border-color class, its deprecation-phase class recovery keeps
+        // those existing classes in className before raw current attrs overlay.
+        if (!$currentCandidateValid
+            && is_array($attributes['style']['border'] ?? null)
+            && !in_array('has-border-color', $classes, true)) {
+            $matched = true;
+            $recovered = array_values(array_filter(
+                $classes,
+                static fn (string $class): bool => $fontClass === null || $class !== $fontClass,
+            ));
+            if ($recovered === []) {
+                unset($attributes['className']);
+            } else {
+                $attributes['className'] = implode(' ', $recovered);
+            }
+            return $attributes;
+        }
+
+        $typography = $attributes['style']['typography'] ?? null;
+        $authoredStyles = $this->rootStyles($originalContent);
+        if (!$currentCandidateValid
+            && is_array($typography)
+            && array_key_exists('lineHeight', $typography)
+            && !array_key_exists('line-height', $authoredStyles)) {
+            $matched = true;
+            if ($classes === []) {
+                unset($attributes['className']);
+            } else {
+                $attributes['className'] = implode(' ', $classes);
+            }
+            return $attributes;
+        }
 
         if (is_string($align) && $align !== ''
             && in_array('has-text-align-' . $align, $classes, true)

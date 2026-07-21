@@ -25987,6 +25987,10 @@ https://example.invalid/
             'strategy' => 'STATIC_RENDERER',
         ],
         [
+            'name' => 'core/details',
+            'strategy' => 'STATIC_RENDERER',
+        ],
+        [
             'name' => 'core/media-text',
             'strategy' => 'STATIC_RENDERER',
         ],
@@ -26061,6 +26065,7 @@ https://example.invalid/
         'core/column',
         'core/columns',
         'core/cover',
+        'core/details',
         'core/embed',
         'core/figure',
         'core/gallery',

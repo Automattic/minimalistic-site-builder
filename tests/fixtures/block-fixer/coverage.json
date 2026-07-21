@@ -1298,6 +1298,7 @@
     "core/column",
     "core/columns",
     "core/cover",
+    "core/details",
     "core/embed",
     "core/figure",
     "core/gallery",
@@ -1357,15 +1358,16 @@
   },
   "rendererProbes": {
     "schemaVersion": 1,
-    "sha256": "078ad4468138dbc11fbadb8e60e35f50f5e0f2a5efeb83146c8f1b0df315706e",
-    "oracleCases": 101,
-    "staticRendererCases": 90,
+    "sha256": "1c7073744e1197aabeedefbb6b93fbb5dd1b23f4a27f56a5d0635f2496dd6b71",
+    "oracleCases": 102,
+    "staticRendererCases": 91,
     "supportedStaticBlocks": [
       "core/button",
       "core/buttons",
       "core/column",
       "core/columns",
       "core/cover",
+      "core/details",
       "core/embed",
       "core/gallery",
       "core/group",
@@ -1388,6 +1390,7 @@
       "core/column",
       "core/columns",
       "core/cover",
+      "core/details",
       "core/embed",
       "core/gallery",
       "core/group",
@@ -1409,6 +1412,6 @@
   "uncoveredSupportedBlocks": [],
   "registeredSnapshot": {
     "count": 106,
-    "sha256": "3384dbf56db0506bbacd2e496db982b76354b02540c796f6704633157c5fcb3a"
+    "sha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716"
   }
 }

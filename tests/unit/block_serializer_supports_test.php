@@ -148,6 +148,58 @@ test('SupportDomainGuard rejects style families outside the reviewed PHP pipelin
         ['style' => ['position' => ['type' => 'sticky', 'top' => '0px']]],
         '0',
     );
+    $guard->assertSupported(
+        'core/group',
+        ['style' => ['radius' => '12px']],
+        '0',
+    );
+    $guard->assertSupported(
+        'core/separator',
+        ['style' => ['border' => ['top' => '0', 'left' => '0', 'right' => '0']]],
+        '0',
+    );
+    $guard->assertSupported(
+        'core/group',
+        ['style' => ['background' => ['backgroundImage' => ['ref' => 'none']]]],
+        '0',
+    );
+    $guard->assertSupported(
+        'core/group',
+        ['style' => ['background' => ['backgroundImage' => ['ref' => 'var:preset|gradient|plum-teal-tile']]]],
+        '0',
+    );
+    $guard->assertSupported('core/paragraph', ['style' => ['fontFamily' => 'heading']], '0');
+    $guard->assertSupported('core/group', ['style' => ['display' => 'flex']], '0');
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        ['style' => ['display' => 'block']],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/paragraph',
+        ['style' => ['fontFamily' => 'heading family']],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        ['style' => ['background' => ['backgroundImage' => ['ref' => 'featured']]]],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/separator',
+        ['style' => ['border' => ['top' => '1px']]],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        ['style' => ['radius' => '8px']],
+        '0',
+    ));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        ['style' => ['radius' => ['topLeft' => '12px']]],
+        '0',
+    ));
     assert_throws(static fn () => $guard->assertSupported(
         'core/group',
         ['style' => ['position' => ['type' => 'fixed', 'top' => '0px']]],
