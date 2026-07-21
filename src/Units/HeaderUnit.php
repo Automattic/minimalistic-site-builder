@@ -5,7 +5,9 @@ namespace Automattic\SiteBuild\Units;
 
 /**
  * Generate the site header from self-contained site/theme/direction/outline
- * context plus the planned hero brief. Reads and writes no Project state.
+ * context plus the planned hero brief, the site's page list, and the
+ * navigation rule that fits the site's shape. Reads and writes no Project
+ * state.
  */
 final class HeaderUnit extends AbstractMarkupUnit
 {
@@ -17,13 +19,16 @@ final class HeaderUnit extends AbstractMarkupUnit
     /**
      * @param array{
      *   site_spec:string|array<mixed>,language:string,theme_json:string|array<mixed>,
-     *   design_direction:string,outline:string,hero_brief:string
+     *   design_direction:string,outline:string,hero_brief:string,
+     *   site_pages:string,nav_rule:string
      * } $input
      */
     public function request(array $input): array
     {
         return $this->renderedRequest('header.md', $this->commonVars($input) + [
             'hero_brief' => $this->inputString($input, 'hero_brief'),
+            'site_pages' => $this->inputString($input, 'site_pages'),
+            'nav_rule'   => $this->inputString($input, 'nav_rule'),
         ]);
     }
 

@@ -15,6 +15,7 @@ function template_part_unit_input(): array
         'theme_json'       => '{"part-theme-sentinel":true}',
         'design_direction' => 'PART-DIRECTION-SENTINEL',
         'outline'          => '1. PART-OUTLINE-SENTINEL (hero)',
+        'site_pages'       => '- "Home" — / (front page): PART-PAGES-SENTINEL',
     ];
 }
 
@@ -25,10 +26,11 @@ test('HeaderUnit generates a constrained header from self-contained input', func
 
     $markup = $unit->generate(template_part_unit_input() + [
         'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule'   => '- PART-NAV-SENTINEL',
     ]);
 
     $prompt = $llm->calls[0]['prompt'];
-    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL'] as $sentinel) {
+    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL'] as $sentinel) {
         assert_contains($sentinel, $prompt);
     }
     assert_eq('header', $llm->calls[0]['opts']['log_label'] ?? null);
@@ -43,7 +45,7 @@ test('FooterUnit generates a constrained footer from self-contained input', func
     $markup = $unit->generate(template_part_unit_input());
 
     $prompt = $llm->calls[0]['prompt'];
-    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL'] as $sentinel) {
+    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-PAGES-SENTINEL'] as $sentinel) {
         assert_contains($sentinel, $prompt);
     }
     assert_eq('footer', $llm->calls[0]['opts']['log_label'] ?? null);

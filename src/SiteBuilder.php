@@ -3,33 +3,16 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
-use Automattic\SiteBuild\Steps\ApplyIdentityStep;
-use Automattic\SiteBuild\Steps\AssembleLandingPageStep;
-use Automattic\SiteBuild\Steps\CollectImagesStep;
-use Automattic\SiteBuild\Steps\ContrastFixStep;
-use Automattic\SiteBuild\Steps\CustomMotionStep;
-use Automattic\SiteBuild\Steps\DesignDirectionStep;
-use Automattic\SiteBuild\Steps\FinalizeThemeStep;
-use Automattic\SiteBuild\Steps\FixBlocksStep;
-use Automattic\SiteBuild\Steps\FontsPhpStep;
-use Automattic\SiteBuild\Steps\MotionSanityStep;
-use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
-use Automattic\SiteBuild\Steps\PageStylesStep;
-use Automattic\SiteBuild\Steps\RefinePromptStep;
-use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
-use Automattic\SiteBuild\Steps\SectionPlanStep;
-use Automattic\SiteBuild\Steps\SectionRhythmStep;
-use Automattic\SiteBuild\Steps\SectionsStep;
-use Automattic\SiteBuild\Steps\SiteSpecStep;
-use Automattic\SiteBuild\Steps\ThemeJsonStep;
-use Automattic\SiteBuild\Steps\ValidateThemeStep;
-
 /**
  * Consumer-facing entry point for the default site-creation pipeline.
  *
  * Construct with an Llm transport, prompts dir, output root, and BlockFixer;
  * then createProject() and pipeline()->runThrough(). Replaces the procedural
  * build_pipeline() bootstrap so embedding hosts inject their own dependencies.
+ *
+ * The default step list lives in StepComposition::default() so hosts can
+ * extend or slim it without forking this facade. Pipeline construction
+ * validates the graph via StepGraph (seed: meta.json from createProject()).
  *
  * Run at most one build per process: LlmLogger is process-global and
  * Pipeline::runThrough() points it at the current project's logs/.
@@ -55,86 +38,19 @@ final class SiteBuilder
 
     /**
      * Assemble the full site-creation pipeline in order. Fresh Pipeline each
-     * call. Models and temperatures are package defaults (StepDefaults)
-     * overlaid with constructor overrides.
+     * call. Pass a custom StepComposition to use a host-tuned graph.
      */
-    public function pipeline(): Pipeline
+    public function pipeline(?StepComposition $composition = null): Pipeline
     {
-        $renderer = new PromptRenderer($this->promptsDir);
-        $models = array_merge(StepDefaults::models(), $this->models);
-        $temps = array_merge(StepDefaults::temperatures(), $this->temperatures);
+        $composition ??= StepComposition::default(
+            llm: $this->llm,
+            renderer: new PromptRenderer($this->promptsDir),
+            models: $this->models,
+            temperatures: $this->temperatures,
+            blockFixer: $this->blockFixer,
+        );
 
-        return new Pipeline([
-            new ScaffoldThemeStep(),
-            // Cheap, fast first pass on a small model: expand short/vague prompts and
-            // normalize the brief before any expensive step reads it. Rewrites the
-            // `prompt` in meta.json (original kept as `original_prompt`), so every
-            // step below benefits with no further wiring.
-            new RefinePromptStep($this->llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
-            new SiteSpecStep($this->llm, $renderer, $models['site-spec'], $temps['site-spec']),
-            new ApplyIdentityStep(),
-            // Commit to ONE creative concept BEFORE theme.json / the section plan, so
-            // both derive from a strong, specific direction instead of converging on
-            // safe defaults. Writes designDirection.json, read by the steps below.
-            // Tradeoff: this is an extra serial LLM round-trip on the critical path
-            // (the concurrent group now depends on its output) — a deliberate cost
-            // we pay for design variety; tune via LLM_MODEL_DESIGN_DIRECTION.
-            new DesignDirectionStep($this->llm, $renderer, $models['design-direction'], $temps['design-direction'], $models['design-direction-seeds']),
-            // theme.json and the section plan both derive from the prompt + siteSpec +
-            // the design direction, so run them concurrently. Design decisions are
-            // made inline, steered by designDirection.json.
-            new ConcurrentGroup($this->llm, [
-                new ThemeJsonStep($this->llm, $renderer, $models['theme-json'], $temps['theme-json']),
-                new SectionPlanStep($this->llm, $renderer, $models['section-plan'], $temps['section-plan']),
-            ]),
-            // Generate the header, footer, and every section part in one concurrent
-            // batch. Resolve page-level vertical seams while the parts are still
-            // ordered by the plan, then stitch them into the page deterministically.
-            new SectionsStep($this->llm, $renderer, $models['sections'], $temps['sections']),
-            new SectionRhythmStep(),
-            new AssembleLandingPageStep(),
-            // Collect image placeholders BEFORE fix-blocks: the block re-serializer
-            // strips the alt from wp:cover background images (core cover save()
-            // resets it to ""), which would lose every hero's AI_IMAGE spec.
-            new CollectImagesStep(),
-            // Attribute repair + layout/rhythm normalization BEFORE the
-            // contrast/motion policy passes: LayoutFixer can activate
-            // previously-inert attributes (unparseable JSON, HTML-only
-            // declarations), and those must exist when the policies run or
-            // repaired markup would bypass them unchecked.
-            new NormalizeLayoutStep(),
-            // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
-            // repairs rewrite only the block-comment JSON attributes, and the
-            // fix-blocks re-serialization below regenerates the saved HTML
-            // from those attributes, keeping markup and attributes in sync.
-            new ContrastFixStep(),
-            // Deterministic backstop for the motion-class budget the section
-            // prompts are asked to respect (independent concurrent calls can't
-            // coordinate it). Also BEFORE fix-blocks: it edits block-comment
-            // JSON attributes and the re-serialization syncs the HTML.
-            new MotionSanityStep(),
-            new FixBlocksStep($this->blockFixer),
-            // AFTER fix-blocks: reads the final (re-serialized) markup for which
-            // layout utility classes survived, and appends their CSS to style.css —
-            // a file the fixer never touches, so nothing here can be stripped.
-            new PageStylesStep($this->llm, $renderer, $models['page-styles'], $temps['page-styles']),
-            // Escape hatch: one scoped CSS-generation call, made ONLY when the
-            // user explicitly requested a specific animation (site-spec captured
-            // it verbatim) AND a section tagged its target. Default path: no-op,
-            // zero LLM calls.
-            new CustomMotionStep($this->llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
-            // Also after fix-blocks: writes fonts.php from the design direction,
-            // validated against a deterministic scan of the final theme.json +
-            // markup (every family/weight/italic the build uses MUST be requested;
-            // scan-built fallback otherwise).
-            new FontsPhpStep($this->llm, $renderer, $models['fonts-php'], $temps['fonts-php']),
-            // Sole owner of functions.php: the deterministic loader that enqueues
-            // style.css and require_once's the generated fonts.php.
-            new FinalizeThemeStep(),
-            // Last chance to catch contract drift introduced by serialization or
-            // later append-only steps before the project is reported as complete.
-            new ValidateThemeStep(),
-        ]);
+        return new Pipeline($composition->steps(), $composition->seeds());
     }
 
     public function store(): ProjectStore
@@ -146,20 +62,39 @@ final class SiteBuilder
      * Create a project directory and seed meta.json. Null slug → free random
      * adjective-noun name (claimed atomically). Explicit slug is used as-is
      * (re-runs can target the same folder). Merges over any pre-seeded meta.
+     *
+     * $multiPage lets the site-spec step plan inner pages; the default builds
+     * ONLY the landing page. Recorded in meta.json as `multi_page` so the
+     * pipeline needs no further wiring.
+     *
+     * $pages (multi-page builds only) fixes the page list instead of letting
+     * the site-spec step invent one via LLM: entries are title strings or page
+     * maps ({title, slug, purpose, children}), first entry = the homepage.
+     * Recorded in meta.json as `pages`; [] records nothing, so a pre-seeded
+     * `pages` (a host whose site spec already names its pages) survives the
+     * merge and behaves exactly like the argument.
+     *
+     * @param array<int,string|array<string,mixed>> $pages
      */
-    public function createProject(string $prompt, ?string $slug = null): Project
+    public function createProject(string $prompt, ?string $slug = null, bool $multiPage = false, array $pages = []): Project
     {
         $store = $this->store();
         $project = $slug === null
             ? $store->claimNew(ProjectStore::randomSlug())
             : $store->create($slug);
 
-        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
-        $project->writeJson('meta.json', array_merge($meta, [
+        $seed = [
             'prompt'           => $prompt,
             'provisional_slug' => $project->slug(),
             'created_at'       => gmdate('c'),
-        ]));
+            'multi_page'       => $multiPage,
+        ];
+        if ($pages !== []) {
+            $seed['pages'] = array_values($pages);
+        }
+
+        $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];
+        $project->writeJson('meta.json', array_merge($meta, $seed));
 
         return $project;
     }

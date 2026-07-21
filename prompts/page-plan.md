@@ -1,4 +1,4 @@
-You are the content strategist and design lead for a new website's landing page. Plan the landing page as an ordered list of distinct sections that, together, tell a complete and compelling story for this site. Do NOT write block markup — only plan the sections.
+You are the content strategist and design lead for ONE page of a new multi-page website. Plan THIS page as an ordered list of distinct sections that, together, do this page's job completely. Do NOT write block markup — only plan the sections.
 
 USER PROMPT:
 "{{user_prompt}}"
@@ -9,15 +9,23 @@ SITE SPEC (JSON):
 DESIGN DIRECTION (the committed creative concept for THIS site — let it shape the section ideas and flow):
 {{design_direction}}
 
-This single landing page is the site's centerpiece — give it the most creative energy: a strong hero, at least 3 unique, image-rich content sections, and a compelling closing CTA. Use the spec's "sections" list as a starting point, but improve it: add, reorder, split, or rename sections so the page is richer and flows well. Let the design direction's signature device and mood inform which sections you choose and how they're framed. Aim for 5 to 8 sections.
+SITE PAGES (every page of the site; plan ONLY the one marked below):
+{{site_pages}}
 
-Tailor the section choice to the site's `site_type` / `area`, for example:
+THIS PAGE:
+  Title:   {{page_title}}
+  Slug:    {{page_slug}}
+  Purpose: {{page_purpose}}
+
+{{page_emphasis}}
+
+Tailor the section choice to the site's `site_type` / `area` and THIS page's purpose, for example:
 - portfolio → project or photo gallery, selected work, about the maker
 - SaaS / product → feature grids, how-it-works, pricing tiers
 - restaurant → menu highlights, about/story, reservations or visit
 - agency → case-study cards, services grid, client logos
 - blog / news → latest posts, categories, featured story
-Pick what genuinely fits THIS site rather than a rigid template.
+Pick what genuinely fits THIS page rather than a rigid template.
 
 You are also the page's art director: each section will be built independently and concurrently by a different author who sees only its own brief, so YOU own the page-level visual rhythm. Assign every section a layout archetype and a background treatment, and describe its seams, so adjacent sections never repeat compositions and the background bands pace the page deliberately.
 
@@ -66,6 +74,7 @@ author improvises:
 Rules:
 - LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" stays lowercase a-z ASCII regardless (transliterate).
 - IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly, and any planned email uses the spec's `email_domain` — never invent alternates.
+- THIS PAGE ONLY: plan only content that belongs here per this page's purpose and the SITE PAGES list. Content that lives on a sibling page gets, at most, a teaser that links onward — "content_notes" may reference another page by its path (e.g. "closes with a link to /menu/").
 - The FIRST section must be a "hero" and the LAST should be a strong call-to-action ("cta" or "contact").
 - "slug" is lowercase a-z, 0-9 and hyphens only, unique across the list, and descriptive (e.g. "hero", "menu-highlights", "meet-the-team").
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.

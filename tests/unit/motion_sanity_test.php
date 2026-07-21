@@ -211,28 +211,30 @@ test('motion-sanity step visits sections in plan order so the hero wins page bud
     $tmp = sys_get_temp_dir() . '/builder_motion_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'dramatic']);
-    $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
-        ['slug' => 'about', 'title' => 'About', 'type' => 'content'],
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+            ['slug' => 'about', 'title' => 'About', 'type' => 'content'],
+        ]],
     ]]);
     // 'about' globs before 'hero' alphabetically — plan order must win.
     $project->writeText(
-        'theme/parts/section-about.html',
+        'theme/parts/page-home--about.html',
         motion_group('gradient-shift') . "\n" . motion_group('hero-entrance') . "\n"
     );
-    $project->writeText('theme/parts/section-hero.html', motion_group('ken-burns') . "\n");
+    $project->writeText('theme/parts/page-home--hero.html', motion_group('ken-burns') . "\n");
 
     ob_start();
     (new MotionSanityStep())->run($project);
     ob_end_clean();
 
-    assert_contains('ken-burns', $project->readText('theme/parts/section-hero.html'));
-    assert_true(!str_contains($project->readText('theme/parts/section-about.html'), 'gradient-shift'));
+    assert_contains('ken-burns', $project->readText('theme/parts/page-home--hero.html'));
+    assert_true(!str_contains($project->readText('theme/parts/page-home--about.html'), 'gradient-shift'));
     assert_true(
-        !str_contains($project->readText('theme/parts/section-about.html'), 'hero-entrance'),
+        !str_contains($project->readText('theme/parts/page-home--about.html'), 'hero-entrance'),
         'a later section cannot claim hero-entrance when the hero omitted it'
     );
-    assert_contains('section-about', $project->readText('logs/motion-sanity.txt'));
+    assert_contains('page-home--about', $project->readText('logs/motion-sanity.txt'));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

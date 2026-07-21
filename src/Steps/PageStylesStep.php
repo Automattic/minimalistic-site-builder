@@ -8,6 +8,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM): generate the CSS for the layout utility classes the sections used.
@@ -110,6 +111,23 @@ final class PageStylesStep implements Step
         return 'Generate page styles';
     }
 
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                'theme/theme.json',
+                'theme/style.css',
+                'designDirection.json',
+                'theme/parts/*',
+                'theme/templates/*',
+            ],
+            writes: ['theme/style.css'],
+            concurrent: false,
+        );
+    }
+
     public function run(Project $project): void
     {
         $used = self::usedClasses($project);
@@ -163,18 +181,18 @@ final class PageStylesStep implements Step
     }
 
     /**
-     * Which documented utility classes the built theme actually references,
-     * scanning the final parts and templates.
+     * Which documented utility classes the built site actually references,
+     * scanning the final theme parts/templates AND the content plugin's pages
+     * — content markup renders with the theme stylesheet, so a class used
+     * only in a seeded page still needs its CSS here.
      *
      * @return string[]
      */
     public static function usedClasses(Project $project): array
     {
         $markup = '';
-        foreach (['parts', 'templates'] as $dir) {
-            foreach (glob($project->themePath($dir) . '/*.html') ?: [] as $file) {
-                $markup .= "\n" . (string) file_get_contents($file);
-            }
+        foreach ($project->markupFiles() as $file) {
+            $markup .= "\n" . (string) file_get_contents($file);
         }
         return self::classesIn($markup);
     }

@@ -7,11 +7,14 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
- * Step (deterministic): enforce the motion-class budget across the whole page.
+ * Step (deterministic): enforce the motion-class budget across every rendered
+ * page (each page in pages.json gets its own page-level budgets; the chrome
+ * shares the front page's).
  *
- * Input:  designDirection.json (the committed motion profile) +
+ * Input:  designDirection.json (the committed motion profile) + pages.json +
  *         theme/parts/*.html + theme/templates/*.html
  * Output: the same files with over-budget motion classes removed, plus
  *         logs/motion-sanity.txt listing every removal.
@@ -57,22 +60,35 @@ final class MotionSanityStep implements Step
         return 'Motion sanity pass';
     }
 
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            // Templates are only scanned when they exist; in the default graph
+            // they are written by assemble-pages, which runs after this step.
+            reads: ['designDirection.json', 'pages.json', 'theme/parts/*'],
+            writes: ['theme/parts/*'],
+            concurrent: false,
+        );
+    }
+
     public function run(Project $project): void
     {
         $profile = DesignDirectionStep::motionProfileFor($project);
-        $budget = self::newBudget();
         $report = [];
-        $files = self::filesInPageOrder($project);
-        $heroFile = self::firstSectionFile($project, $files);
 
-        foreach ($files as $rel) {
-            $markup = $project->readText('theme/' . $rel);
-            $result = self::sanitize($markup, $profile, $budget, $rel === $heroFile);
-            if ($result['markup'] !== $markup) {
-                $project->writeText('theme/' . $rel, $result['markup']);
-            }
-            foreach ($result['notes'] as $note) {
-                $report[] = "[{$rel}] {$note}";
+        foreach (self::fileGroups($project) as $group) {
+            $budget = self::newBudget();
+            foreach ($group['files'] as $rel) {
+                $markup = $project->readText('theme/' . $rel);
+                $result = self::sanitize($markup, $profile, $budget, $rel === $group['hero']);
+                if ($result['markup'] !== $markup) {
+                    $project->writeText('theme/' . $rel, $result['markup']);
+                }
+                foreach ($result['notes'] as $note) {
+                    $report[] = "[{$rel}] {$note}";
+                }
             }
         }
 
@@ -100,64 +116,66 @@ final class MotionSanityStep implements Step
     }
 
     /**
-     * Section parts in plan order first (the page-level "first ambient wins"
-     * budget should favor the hero, not whichever filename globs first), then
-     * the chrome parts and any remaining files.
+     * Theme files grouped per rendered page, so the page-level budgets
+     * (one ambient signature, one hero-entrance) apply to each page of a
+     * multi-page site independently. Within a group the page's section parts
+     * come first in plan order (the "first ambient wins" budget should favor
+     * the hero, not whichever filename globs first); the chrome parts,
+     * templates, and any unplanned files join the FRONT page's group — the
+     * site's centerpiece, and the page whose first section the header sits
+     * on. Each group's 'hero' is the one file allowed to carry
+     * hero-entrance: the page's first planned section part (a hero's slug
+     * need not literally be "hero"), the conventional filename for plan-less
+     * projects.
      *
-     * @return string[] theme-relative paths
+     * @return list<array{files:string[], hero:?string}>
      */
-    public static function filesInPageOrder(Project $project): array
+    public static function fileGroups(Project $project): array
     {
         $all = FixBlocksStep::themeFiles($project);
 
-        $planned = [];
-        if ($project->exists('sections.json')) {
-            foreach (($project->readJson('sections.json')['sections'] ?? []) as $section) {
+        $pages = $project->exists('pages.json')
+            ? (array) ($project->readJson('pages.json')['pages'] ?? [])
+            : [];
+        $pages = array_values(array_filter($pages, 'is_array'));
+        if ($pages === []) {
+            $conventional = 'parts/' . SectionsStep::PART_PREFIX . 'hero.html';
+            return [[
+                'files' => $all,
+                'hero'  => in_array($conventional, $all, true) ? $conventional : null,
+            ]];
+        }
+
+        $groups = [];
+        $frontIndex = null;
+        $used = [];
+        foreach ($pages as $page) {
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            $files = [];
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
                 $slug = trim((string) ($section['slug'] ?? ''));
-                if ($slug !== '') {
-                    $planned[] = 'parts/' . SectionsStep::SECTION_PREFIX . $slug . '.html';
+                $rel = 'parts/' . SectionsStep::partSlug($pageSlug, $slug) . '.html';
+                if ($slug !== '' && in_array($rel, $all, true)) {
+                    $files[] = $rel;
+                    $used[$rel] = true;
                 }
             }
+            if ($frontIndex === null && !empty($page['front'])) {
+                $frontIndex = count($groups);
+            }
+            $groups[] = ['files' => $files, 'hero' => $files[0] ?? null];
         }
+        $frontIndex ??= 0;
 
-        $ordered = array_values(array_intersect($planned, $all));
         foreach ($all as $rel) {
-            if (!in_array($rel, $ordered, true)) {
-                $ordered[] = $rel;
+            if (!isset($used[$rel])) {
+                $groups[$frontIndex]['files'][] = $rel;
             }
         }
-        return $ordered;
-    }
-
-    /**
-     * The only file allowed to carry hero-entrance. Prefer the committed plan
-     * because a hero section's slug need not literally be "hero"; fall back
-     * to the conventional filename only for plan-less callers.
-     *
-     * @param string[] $ordered
-     */
-    private static function firstSectionFile(Project $project, array $ordered): ?string
-    {
-        if ($project->exists('sections.json')) {
-            $sections = $project->readJson('sections.json')['sections'] ?? [];
-            if (is_array($sections) && isset($sections[0]) && is_array($sections[0])) {
-                $slug = trim((string) ($sections[0]['slug'] ?? ''));
-                $planned = 'parts/' . SectionsStep::SECTION_PREFIX . $slug . '.html';
-                return $slug !== '' && in_array($planned, $ordered, true) ? $planned : null;
-            }
-            return null;
-        }
-
-        $conventional = 'parts/' . SectionsStep::SECTION_PREFIX . 'hero.html';
-        if (in_array($conventional, $ordered, true)) {
-            return $conventional;
-        }
-        foreach ($ordered as $rel) {
-            if (str_starts_with($rel, 'parts/' . SectionsStep::SECTION_PREFIX)) {
-                return $rel;
-            }
-        }
-        return null;
+        return $groups;
     }
 
     /**

@@ -31,3 +31,40 @@ test('apply-identity replaces all theme placeholders', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('apply-identity keeps a hostile site name inert in the plugin PHP header', function () {
+    $tmp = sys_get_temp_dir() . '/builder_identity_inj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    (new ScaffoldThemeStep())->run($project);
+    (new \Automattic\SiteBuild\Steps\ScaffoldPluginStep())->run($project);
+    $project->writeJson('siteSpec.json', [
+        // A name that tries to close the docblock and run PHP before the
+        // ABSPATH guard — including a split terminator that a naive
+        // single-pass replace would let reassemble.
+        'name'        => "Evil **//*/ */ Bakery\n * Plugin Name: forged",
+        'slug'        => 'evil-bakery',
+        'description' => "line one\r\nline two */ echo 'pwned';",
+    ]);
+
+    (new ApplyIdentityStep())->run($project);
+
+    $php = $project->readText(\Automattic\SiteBuild\Steps\ScaffoldPluginStep::MAIN_FILE);
+    assert_true(!str_contains($php, '{{'), 'no unfilled placeholders');
+    // Newlines collapsed — the hostile name can't forge its own header line.
+    assert_eq(1, preg_match_all('/^\s*\*\s*Plugin Name:/m', $php), 'exactly one Plugin Name header line');
+    exec(PHP_BINARY . ' -l ' . escapeshellarg($project->pluginPath('site-content.php')) . ' 2>&1', $out, $rc);
+    assert_eq(0, $rc, 'php -l: ' . implode("\n", $out));
+    // Nothing may run before the ABSPATH guard: after the open tag, comments,
+    // and whitespace, the first real token must still be the guard's `if`.
+    foreach (token_get_all($php) as $token) {
+        $id = is_array($token) ? $token[0] : null;
+        if (in_array($id, [T_OPEN_TAG, T_DOC_COMMENT, T_COMMENT, T_WHITESPACE], true)) {
+            continue;
+        }
+        assert_eq(T_IF, $id, 'executable code injected before the ABSPATH guard');
+        break;
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

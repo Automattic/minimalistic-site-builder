@@ -1,8 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\StepGraph;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\Tests\FakeImageClient;
 use Automattic\SiteBuild\Tests\FakeLlm;
@@ -14,7 +17,7 @@ function generate_fixture(): array
 {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeText('theme/templates/front-page.html',
+    $project->writeText('theme/templates/page.html',
         '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div class="wp-block-cover">'
         . '<img class="wp-block-cover__image-background" src="theme:./assets/hero.jpg" '
         . 'alt="AI_IMAGE: A bakery at dawn | full-bleed hero with text overlay | photorealistic | landscape"/></div><!-- /wp:cover -->'
@@ -22,6 +25,45 @@ function generate_fixture(): array
     (new CollectImagesStep())->run($project);
     return [$project, $tmp];
 }
+
+test('generate-images declaration marks its batched work as concurrent', function () {
+    $declaration = (new GenerateImagesStep(new FakeImageClient()))->declaration();
+
+    assert_eq(true, $declaration->concurrent);
+    assert_true(in_array(GenerateImagesStep::COMPLETION_ARTIFACT, $declaration->writes, true));
+});
+
+test('cover-contrast graph requires generate-images even when scaffold assets exist', function () {
+    $cover = new CoverContrastStep(new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return 'block-fixer: ok';
+        }
+    });
+    $scaffolded = [
+        'theme/theme.json',
+        'theme/assets/motion/runtime.js',
+        'theme/parts/header.html',
+        'theme/templates/page.html',
+        'plugin/pages/*',
+    ];
+
+    assert_throws(
+        fn () => StepGraph::validate([$cover], seeds: $scaffolded),
+        'motion assets must not satisfy the image-generation dependency',
+    );
+
+    StepGraph::validate([
+        new GenerateImagesStep(new FakeImageClient()),
+        $cover,
+    ], seeds: array_merge($scaffolded, [
+        'images.json',
+        'siteSpec.json',
+        'designDirection.json',
+        'plugin/images.json',
+    ]));
+    assert_true(true);
+});
 
 test('generate-images writes assets, rewrites src/url, and marks completed', function () {
     [$project, $tmp] = generate_fixture();
@@ -38,7 +80,7 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
 
     // Both the cover url and the img src are rewritten to the served path; no
     // theme: placeholder remains.
-    $markup = $project->readText('theme/templates/front-page.html');
+    $markup = $project->readText('theme/templates/page.html');
     assert_contains('/wp-content/themes/demo/assets/hero.jpg', $markup);
     assert_true(!str_contains($markup, 'theme:./assets/hero.jpg'), 'no theme: placeholder left');
 
@@ -46,6 +88,10 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
     $specs = $project->readJson('images.json');
     assert_eq('completed', $specs[0]['status']);
     assert_eq('/wp-content/themes/demo/assets/hero.jpg', $specs[0]['url']);
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -227,7 +273,7 @@ test('generate-images marks failed and leaves the placeholder on error', functio
     (new GenerateImagesStep($images))->run($project);
 
     assert_true(!$project->exists('theme/assets/hero.jpg'), 'no asset on failure');
-    $markup = $project->readText('theme/templates/front-page.html');
+    $markup = $project->readText('theme/templates/page.html');
     assert_contains('theme:./assets/hero.jpg', $markup); // placeholder untouched
 
     $specs = $project->readJson('images.json');
@@ -292,6 +338,11 @@ test('generate-images tolerates a partial failure within a batch', function () {
     assert_true($project->exists('theme/assets/img-0.jpg'));
     assert_true(!$project->exists('theme/assets/img-1.jpg'), 'no asset for failed image');
     assert_true($project->exists('theme/assets/img-2.jpg'));
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+        'the step completed even though one image failed softly',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -407,6 +458,80 @@ test('generate-images is a no-op when there are no placeholders', function () {
     (new GenerateImagesStep($images))->run($project);
 
     assert_eq([], $images->calls);
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images publishes completion when the image manifest is absent', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $images = new FakeImageClient();
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq([], $images->calls);
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images clears a stale completion artifact before a failed re-run', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson(GenerateImagesStep::COMPLETION_ARTIFACT, ['status' => 'completed']);
+    $project->writeText('images.json', '{invalid');
+
+    assert_throws(fn () => (new GenerateImagesStep(new FakeImageClient()))->run($project));
+    assert_true(!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images ships manifest-listed content images with the plugin', function () {
+    [$project, $tmp] = generate_fixture();
+    // The hero is referenced by page content (in the plugin manifest); a
+    // second, chrome-only image is not.
+    $project->writeText('theme/parts/header.html',
+        '<img src="theme:./assets/wordmark.png" alt="AI_IMAGE: wordmark | header | flat | square">');
+    (new CollectImagesStep())->run($project);
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+    ]]);
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    // Content image: generated into the theme AND copied into the plugin.
+    assert_true($project->exists('plugin/images/hero.jpg'), 'content image shipped with the plugin');
+    assert_eq('JPEGDATA', $project->readText('plugin/images/hero.jpg'));
+    // Chrome-only image stays theme-only.
+    assert_true(!$project->exists('plugin/images/wordmark.png'), 'chrome image not shipped with the plugin');
+    assert_true($project->exists('theme/assets/wordmark.png'), 'chrome image in the theme');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images re-run copies an already-completed content image to the plugin', function () {
+    [$project, $tmp] = generate_fixture();
+    $images = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($images))->run($project); // completes hero.jpg, no manifest yet
+
+    // The manifest appears later (e.g. assemble ran in a newer build) — a
+    // re-run must ship the completed asset without regenerating it.
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
+    ]]);
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls), 'completed image not regenerated');
+    assert_true($project->exists('plugin/images/hero.jpg'), 'completed content image shipped');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

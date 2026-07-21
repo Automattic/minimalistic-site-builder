@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Final step (deterministic): write theme/functions.php.
@@ -42,6 +43,17 @@ final class FinalizeThemeStep implements Step
     public function label(): string
     {
         return 'Finalize theme (functions.php)';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['designDirection.json', 'theme/assets/motion/*'],
+            writes: ['theme/functions.php', 'theme/assets/motion/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

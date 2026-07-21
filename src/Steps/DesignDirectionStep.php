@@ -10,6 +10,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM): commit to ONE distinctive creative concept for the site BEFORE any
@@ -34,7 +35,7 @@ use Automattic\SiteBuild\Step;
  * call degrades to a built-in "invent one bold concept" seed instead of
  * aborting the build.
  *
- * This is the single source of design intent. The theme-json, section-plan and
+ * This is the single source of design intent. The theme-json, page-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
  * the structured fields into the injected brief), so two sites diverge in
  * concept — not just in hex values.
@@ -85,6 +86,17 @@ final class DesignDirectionStep implements Step
     public function label(): string
     {
         return 'Choose design direction';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['meta.json', 'siteSpec.json'],
+            writes: ['designDirection.json'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

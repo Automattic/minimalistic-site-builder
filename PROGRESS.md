@@ -66,14 +66,13 @@ This overlaps theme-json beside the section plan, and generates every landing-pa
 part (header, footer, each section) at once — replacing the old single
 landing-page mega-call that dominated build time.
 
-**Block validation fixer** (`bin/block-fixer/`, step 8): a verbatim copy of telex's
-`server/scripts/block-fixer` lib (`blockFixer.js` + `paragraphFixer.js`) plus a
-one-shot CLI (`fix-templates.js`). AI-generated block markup often carries
-style/attribute/element-order mismatches that trigger "unexpected or invalid
-content" in the editor/Playground; the fixer parses each `templates/*.html` and
-`parts/*.html` with `@wordpress/blocks` and re-serializes it to match WordPress
-`save()` exactly. `FixBlocksStep` shells out to Node (`node_modules` is gitignored;
-telex runs the same lib as a warm HTTP sidecar). Re-serialization is idempotent.
+**Block validation fixer** (`PhpBlockFixer`, step 8): a dependency-free PHP 8.1
+parser and serializer canonicalizes AI-generated block markup so its saved HTML
+matches the registered WordPress block contracts. The implementation preserves
+JavaScript JSON/comment semantics, applies reviewed block supports and
+deprecations, fails closed for unsupported registered inputs, and stages all
+files before committing changes. A public invocation runs to a fixed point and
+is idempotent; production builds require neither Node nor `node_modules`.
 
 **Tests: 62 unit + 2 integration = 64 passing.** Run with
 `php tests/run.php` and `php tests/run-integration.php`. The integration test
@@ -212,3 +211,57 @@ php bin/eval.php                   # regenerate the 5 eval sites
 19,068 in + 24,505 out = 43,573 tokens** on claude-opus-4-8, served at the
 printed URL with the theme active and fonts loaded. Flags: `--slug=`, `--port=`,
 `--no-serve` (build + metrics only).
+
+---
+
+## Phase 5 — multi-page generation + content plugin (2026-07-10)
+
+The builder now produces a whole site, not a single landing page:
+
+- **siteSpec.json carries a page tree** (`pages`, first entry = homepage;
+  slugs unique across the tree, max depth 2). One-page sites degrade to just
+  the homepage entry.
+- **page-plan** (replaces section-plan) plans EVERY page's sections — one
+  request per page, batched, still concurrent with theme-json. Output is
+  `pages.json` (flat entries: slug/title/path/front/parent/menu_order +
+  validated section briefs; per-page one-shot repair).
+- **sections** generates header + footer + every page's section parts in one
+  batch (`parts/page-<page>--<section>.html`, transient). Sections know their
+  own page's outline plus the site page list, and link across pages with real
+  paths.
+- **assemble-pages** (replaces assemble-landing-page; runs AFTER fix-blocks)
+  inlines the fixed markup into `plugin/pages/<slug>.html`, writes the seeder
+  manifest and the deterministic `page.html`/`index.html` templates, keeps
+  header/footer as the only theme parts, and deletes the transient parts.
+  `front-page.html` is gone — the seeded homepage + `page_on_front` owns the
+  front.
+- **scaffold-plugin** writes the deterministic companion plugin
+  (`plugin/site-content.php`, identity filled by apply-identity): activation
+  seeds the pages (kses bypassed for the trusted markup, `theme:./assets/`
+  resolved against the active theme, front page pointed, state recorded in
+  one option), deactivation deletes exactly those pages and restores the
+  options.
+- **Scanners follow the content**: page-styles, fonts-php, and the validator
+  read theme parts/templates AND `plugin/pages/*` via
+  `Project::markupFiles()`.
+- **Playground blueprint** installs the plugin next to the theme, activates
+  it after the theme, and sets pretty permalinks so the page paths resolve.
+- Nav is automatic: the header's `wp:navigation` + `wp:page-list` reflects the
+  seeded pages in `menu_order` (children nest as submenus).
+
+### Phase 5.1 — content images live in the media library (2026-07-10)
+
+Content images are now treated as content, not theme assets:
+
+- **assemble-pages** writes `plugin/images.json` — every asset the page
+  markup references, titled from the collected spec's subject.
+- **generate-images** copies those files into `plugin/images/` (the theme
+  keeps its copy: chrome may share it, and it's the fallback).
+- **The seeder imports them on activation** — `wp_upload_bits` +
+  `wp_insert_attachment` + generated metadata — and resolves the page
+  markup against the import: `wp:image` blocks get the real attachment id
+  (unknowable at build time) injected into their attributes plus the
+  paired `wp-image-<id>` class, so core srcset/lightbox engage; cover urls
+  and inline backgrounds get a plain URL swap; unshipped files fall back
+  to the theme's assets. Deactivation deletes the imported attachments
+  with the pages.

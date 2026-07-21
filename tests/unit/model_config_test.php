@@ -52,7 +52,7 @@ test('StepDefaults default (anthropic) reproduces the historical model mapping',
     assert_eq('claude-haiku-4-5', $models['refine-prompt']);
     assert_eq('claude-haiku-4-5', $models['site-spec']);
     assert_eq('claude-haiku-4-5', $models['design-direction-seeds']);
-    assert_eq('claude-haiku-4-5', $models['section-plan']);
+    assert_eq('claude-haiku-4-5', $models['page-plan']);
     assert_eq('claude-opus-4-8', $models['design-direction']);
     assert_eq('claude-opus-4-8', $models['theme-json']);
     assert_eq('claude-opus-4-8', $models['sections']);
@@ -68,7 +68,7 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
         // small tier → gpt-5.4-mini
         assert_eq('gpt-5.4-mini', $models['site-spec']);
         assert_eq('gpt-5.4-mini', $models['refine-prompt']);
-        assert_eq('gpt-5.4-mini', $models['section-plan']);
+        assert_eq('gpt-5.4-mini', $models['page-plan']);
         // large tier → gpt-5.5
         assert_eq('gpt-5.5', $models['design-direction']);
         assert_eq('gpt-5.5', $models['sections']);

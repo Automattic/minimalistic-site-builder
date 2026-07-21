@@ -10,8 +10,14 @@ namespace Automattic\SiteBuild;
  */
 final class Pipeline
 {
-    /** @param Step[] $steps */
-    public function __construct(private array $steps) {}
+    /**
+     * @param Step[]       $steps Validated immediately via StepGraph.
+     * @param list<string> $seeds Project paths available before any step.
+     */
+    public function __construct(private array $steps, array $seeds = StepGraph::DEFAULT_SEEDS)
+    {
+        StepGraph::validate($this->steps, $seeds);
+    }
 
     /** @return string[] ordered step ids */
     public function stepIds(): array
@@ -23,7 +29,7 @@ final class Pipeline
      * Every id `--until` accepts: each step id, plus each member id of a
      * concurrent group (whose own id is its members joined by '+'). So
      * `--until=theme-json` is a valid stop even though it runs inside the
-     * `theme-json+section-plan` group.
+     * `theme-json+page-plan` group.
      *
      * @return string[]
      */

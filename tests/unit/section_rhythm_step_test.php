@@ -14,12 +14,14 @@ function rhythm_step_part(): string
 test('section rhythm step rewrites every planned part atomically in page order', function () {
     $tmp = sys_get_temp_dir() . '/builder_rhythm_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'one', 'background' => 'base', 'vertical_density' => 'compact'],
-        ['slug' => 'two', 'background' => 'base', 'vertical_density' => 'standard'],
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'one', 'background' => 'base', 'vertical_density' => 'compact'],
+            ['slug' => 'two', 'background' => 'base', 'vertical_density' => 'standard'],
+        ]],
     ]]);
-    $project->writeText('theme/parts/section-one.html', rhythm_step_part());
-    $project->writeText('theme/parts/section-two.html', rhythm_step_part());
+    $project->writeText('theme/parts/page-home--one.html', rhythm_step_part());
+    $project->writeText('theme/parts/page-home--two.html', rhythm_step_part());
     $project->writeText(
         'theme/parts/footer.html',
         '<!-- wp:group {"backgroundColor":"base","style":{"spacing":{"padding":{"top":"var:preset|spacing|lg"}}},"layout":{"type":"constrained"}} -->'
@@ -28,8 +30,8 @@ test('section rhythm step rewrites every planned part atomically in page order',
 
     (new SectionRhythmStep())->run($project);
 
-    $one = BlockMarkup::parse($project->readText('theme/parts/section-one.html'));
-    $two = BlockMarkup::parse($project->readText('theme/parts/section-two.html'));
+    $one = BlockMarkup::parse($project->readText('theme/parts/page-home--one.html'));
+    $two = BlockMarkup::parse($project->readText('theme/parts/page-home--two.html'));
     $oneAttrs = $one->attrs($one->indices()[0]);
     $twoAttrs = $two->attrs($two->indices()[0]);
     assert_eq('var:preset|spacing|lg', $oneAttrs['style']['spacing']['padding']['top']);
@@ -44,15 +46,19 @@ test('section rhythm step writes nothing when one section root is invalid', func
     $tmp = sys_get_temp_dir() . '/builder_rhythm_bad_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $original = rhythm_step_part();
-    $project->writeJson('sections.json', ['sections' => [
-        ['slug' => 'good', 'background' => 'base', 'vertical_density' => 'standard'],
-        ['slug' => 'bad', 'background' => 'contrast', 'vertical_density' => 'compact'],
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'good', 'background' => 'base', 'vertical_density' => 'standard'],
+        ]],
+        ['slug' => 'visit', 'front' => false, 'sections' => [
+            ['slug' => 'bad', 'background' => 'contrast', 'vertical_density' => 'compact'],
+        ]],
     ]]);
-    $project->writeText('theme/parts/section-good.html', $original);
-    $project->writeText('theme/parts/section-bad.html', '<!-- wp:heading --><h2>Bad</h2><!-- /wp:heading -->');
+    $project->writeText('theme/parts/page-home--good.html', $original);
+    $project->writeText('theme/parts/page-visit--bad.html', '<!-- wp:heading --><h2>Bad</h2><!-- /wp:heading -->');
 
     assert_throws(static fn () => (new SectionRhythmStep())->run($project));
-    assert_eq($original, $project->readText('theme/parts/section-good.html'));
+    assert_eq($original, $project->readText('theme/parts/page-home--good.html'), 'no page written when a sibling page is invalid');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

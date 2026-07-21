@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageLogger;
+use Automattic\SiteBuild\Imagen;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
@@ -12,7 +13,7 @@ use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
-use Automattic\SiteBuild\WpcomImageClient;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (opt-in, networked): generate the images collected by CollectImagesStep
@@ -21,8 +22,9 @@ use Automattic\SiteBuild\WpcomImageClient;
  * Input:  images.json + theme/parts/*.html + theme/templates/*.html
  * Output: theme/assets/<filename> for each generated image, the theme markup
  *         rewritten so "theme:./assets/<file>" becomes a URL WordPress can serve
- *         ("/wp-content/themes/<slug>/assets/<file>"), and images.json updated
- *         with per-image status.
+ *         ("/wp-content/themes/<slug>/assets/<file>"), images.json updated
+ *         with per-image status, and images.generated.json written last as the
+ *         completion artifact consumed by post-image steps.
  *
  * This is gated behind `--with-images` (or bin/images.php) because it is slow
  * (~30-60s/image) and hits the network — unlike the rest of the deterministic
@@ -38,6 +40,9 @@ use Automattic\SiteBuild\WpcomImageClient;
  */
 final class GenerateImagesStep implements Step
 {
+    /** Written only once this step has completed all generation and rewrites. */
+    public const COMPLETION_ARTIFACT = 'images.generated.json';
+
     /** How many images to generate concurrently per batch. */
     private const BATCH_SIZE = 10;
 
@@ -63,14 +68,36 @@ final class GenerateImagesStep implements Step
         return 'Generate AI images';
     }
 
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'plugin/images.json', 'theme/parts/*', 'theme/templates/*'],
+            writes: [
+                'images.json',
+                self::COMPLETION_ARTIFACT,
+                'theme/assets/*',
+                'theme/parts/*',
+                'theme/templates/*',
+                'plugin/images/*',
+            ],
+            concurrent: true,
+        );
+    }
+
     public function run(Project $project): void
     {
+        $this->clearCompletion($project);
+
         if (!$project->exists('images.json')) {
+            $this->markComplete($project);
             return; // collect-images never ran or wrote nothing
         }
 
         $specs = $project->readJson('images.json');
         if ($specs === []) {
+            $this->markComplete($project);
             return;
         }
 
@@ -162,6 +189,50 @@ final class GenerateImagesStep implements Step
         if ($resolved !== []) {
             $this->rewriteMarkup($project, $resolved);
         }
+
+        $this->shipPluginImages($project);
+        $this->markComplete($project);
+    }
+
+    /**
+     * Copy every generated asset the content plugin's manifest lists into
+     * plugin/images/, so the seeder can import them into the media library at
+     * activation. Content images stay in theme/assets/ too: chrome may share
+     * them, and the seeder falls back to the theme copy for any file it
+     * cannot import.
+     */
+    private function shipPluginImages(Project $project): void
+    {
+        if (!$project->exists('plugin/images.json')) {
+            return; // theme-only composition, or assemble-pages never ran
+        }
+        $manifest = $project->readJson('plugin/images.json');
+        foreach ((array) ($manifest['images'] ?? []) as $image) {
+            $filename = is_array($image) ? (string) ($image['filename'] ?? '') : '';
+            if ($filename === '' || !$project->exists('theme/assets/' . $filename)) {
+                continue;
+            }
+            $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
+        }
+    }
+
+    /** Publish the dependency stamp only after every required operation succeeds. */
+    private function markComplete(Project $project): void
+    {
+        $project->writeJson(self::COMPLETION_ARTIFACT, ['status' => 'completed']);
+    }
+
+    /** A failed re-run must not leave a previous run's success stamp behind. */
+    private function clearCompletion(Project $project): void
+    {
+        if (!$project->exists(self::COMPLETION_ARTIFACT)) {
+            return;
+        }
+
+        $path = $project->path(self::COMPLETION_ARTIFACT);
+        if (!is_file($path) || !unlink($path)) {
+            throw new \RuntimeException("Could not clear image-generation completion artifact: {$path}");
+        }
     }
 
     /**
@@ -215,11 +286,11 @@ final class GenerateImagesStep implements Step
      */
     private static function generationSpec(array $spec, string $siteContext, string $imageGrade, ?string $subject = null): array
     {
-        $ratio = WpcomImageClient::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
+        $ratio = Imagen::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
         // A .png placeholder is a transparent-background asset: request PNG
         // bytes, prompt for a flat white background (Imagen cannot render
         // alpha), and key that background out after generation.
-        $mime = WpcomImageClient::mimeForFilename((string) ($spec['filename'] ?? ''));
+        $mime = Imagen::mimeForFilename((string) ($spec['filename'] ?? ''));
         return [
             'prompt'            => ImagePromptComposer::compose(
                 $subject ?? (string) ($spec['subject'] ?? ''),
@@ -234,7 +305,7 @@ final class GenerateImagesStep implements Step
             // those at 2K so they stay sharp past ~1366px. Transparent
             // decoratives render small on the page and stay at 1K whatever
             // their ratio.
-            'sample_image_size' => WpcomImageClient::sampleImageSize($ratio, $mime === 'image/png'),
+            'sample_image_size' => Imagen::sampleImageSize($ratio, $mime === 'image/png'),
             'mime'              => $mime,
         ];
     }

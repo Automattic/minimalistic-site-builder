@@ -76,7 +76,7 @@ foreach (SITES as $slug => $prompt) {
 
     $problems = $error === null ? ThemeValidator::validate($project) : ['build failed before validation'];
     $warnings = $error === null
-        ? array_merge(ThemeValidator::typographyWarnings($project), ThemeValidator::layoutWarnings($project))
+        ? array_merge(ThemeValidator::typographyWarnings($project), ThemeValidator::layoutWarnings($project), ThemeValidator::planWarnings($project))
         : [];
     $metrics = collect_metrics($project);
 
@@ -127,7 +127,7 @@ function rebuild_report(): void
             'total'    => array_sum($timings),
             'error'    => null,
             'problems' => ThemeValidator::validate($project),
-            'warnings' => array_merge(ThemeValidator::typographyWarnings($project), ThemeValidator::layoutWarnings($project)),
+            'warnings' => array_merge(ThemeValidator::typographyWarnings($project), ThemeValidator::layoutWarnings($project), ThemeValidator::planWarnings($project)),
             'metrics'  => collect_metrics($project),
         ];
     }
@@ -137,7 +137,7 @@ function rebuild_report(): void
 /** @return array<string,mixed> */
 function collect_metrics(Project $project): array
 {
-    $m = ['name' => null, 'fonts' => null, 'fonts_loaded' => false, 'front_page_blocks' => 0, 'sections' => 0, 'theme_bytes' => 0];
+    $m = ['name' => null, 'fonts' => null, 'fonts_loaded' => false, 'pages' => 0, 'content_blocks' => 0, 'sections' => 0, 'theme_bytes' => 0];
     if ($project->exists('theme/functions.php')) {
         $m['fonts_loaded'] = str_contains($project->readText('theme/functions.php'), 'fonts.googleapis.com');
     }
@@ -155,10 +155,20 @@ function collect_metrics(Project $project): array
             return $primary !== '' ? $primary : ($f['name'] ?? '?');
         }, $fams));
     }
-    if ($project->exists('theme/templates/front-page.html')) {
-        $m['front_page_blocks'] = preg_match_all('/<!--\s*wp:/', $project->readText('theme/templates/front-page.html'));
+    if ($project->exists('plugin/pages.json')) {
+        $manifest = $project->readJson('plugin/pages.json');
+        foreach ($manifest['pages'] ?? [] as $page) {
+            $m['pages']++;
+            $rel = 'plugin/pages/' . (string) ($page['slug'] ?? '') . '.html';
+            if ($project->exists($rel)) {
+                $m['content_blocks'] += preg_match_all('/<!--\s*wp:/', $project->readText($rel));
+            }
+        }
     }
     foreach (glob($project->themePath('') . '/{,*/}*.{html,json,css,txt}', GLOB_BRACE) ?: [] as $f) {
+        $m['theme_bytes'] += filesize($f);
+    }
+    foreach (glob($project->pluginPath('') . '/{,*/}*.{html,json,php}', GLOB_BRACE) ?: [] as $f) {
         $m['theme_bytes'] += filesize($f);
     }
     return $m;
@@ -167,7 +177,7 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    $stepIds = ['scaffold-theme', 'site-spec', 'apply-identity', 'design-direction', 'theme-json+section-plan', 'sections', 'assemble-landing-page', 'collect-images', 'fix-blocks', 'finalize-theme'];
+    $stepIds = ['scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction', 'theme-json+page-plan', 'sections', 'collect-images', 'fix-blocks', 'assemble-pages', 'finalize-theme'];
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
     $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . Env::get('LLM_MODEL', 'claude-opus-4-8') . "\n\n";
@@ -187,7 +197,7 @@ function write_report(array $results): void
 
     // Quality table.
     $md .= "\n## Quality (structural)\n\n";
-    $md .= "| Site | Name | Fonts | Fonts load | Sections | Front-page blocks | Theme KB | Validation |\n";
+    $md .= "| Site | Name | Fonts | Fonts load | Pages | Content blocks | Site KB | Validation |\n";
     $md .= "|---|---|---|---|---|---|---|---|\n";
     foreach ($results as $slug => $r) {
         $m = $r['metrics'];
@@ -195,8 +205,8 @@ function write_report(array $results): void
         $md .= sprintf(
             "| `%s` | %s | %s | %s | %d | %d | %.1f | %s |\n",
             $slug, $m['name'] ?? '–', $m['fonts'] ?? '–',
-            ($m['fonts_loaded'] ?? false) ? '✅' : '—', $m['sections'],
-            $m['front_page_blocks'], ($m['theme_bytes'] ?? 0) / 1024, $val
+            ($m['fonts_loaded'] ?? false) ? '✅' : '—', $m['pages'],
+            $m['content_blocks'], ($m['theme_bytes'] ?? 0) / 1024, $val
         );
     }
 
@@ -231,8 +241,8 @@ function write_report(array $results): void
 function short(string $stepId): string
 {
     return match ($stepId) {
-        'scaffold-theme' => 'scaf', 'site-spec' => 'spec', 'apply-identity' => 'ident', 'design-direction' => 'dir',
-        'theme-json+section-plan' => 'tjson+plan', 'sections' => 'sect', 'assemble-landing-page' => 'asm',
+        'scaffold-theme' => 'scaf', 'scaffold-plugin' => 'plug', 'site-spec' => 'spec', 'apply-identity' => 'ident', 'design-direction' => 'dir',
+        'theme-json+page-plan' => 'tjson+plan', 'sections' => 'sect', 'assemble-pages' => 'asm',
         'collect-images' => 'imgs', 'fix-blocks' => 'fix', 'finalize-theme' => 'fin', default => $stepId,
     };
 }

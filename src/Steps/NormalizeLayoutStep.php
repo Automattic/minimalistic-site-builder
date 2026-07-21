@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Deterministic: run the LayoutFixer attribute repair + width/rhythm
@@ -34,6 +35,19 @@ final class NormalizeLayoutStep implements Step
     public function label(): string
     {
         return 'Normalize layout attributes';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            // Templates are only scanned when they exist; in the default graph
+            // they are written by assemble-pages, which runs after this step.
+            reads: ['theme/theme.json', 'theme/parts/*'],
+            writes: ['theme/parts/*'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void
