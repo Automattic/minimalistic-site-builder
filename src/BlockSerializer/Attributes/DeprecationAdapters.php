@@ -30,6 +30,10 @@ final class DeprecationAdapters
             // from the saved <a href>, while this unregistered delimiter key
             // is discarded by the pinned createBlock path.
             'href' => true,
+            // AI-authored legacy alignment paired with the old generated
+            // has-text-align-center link class. The pinned current block
+            // drops both rather than migrating them to typography support.
+            'textAlign' => true,
         ],
         'core/group' => [
             // AI-authored legacy top-level border support. The current schema
@@ -173,6 +177,13 @@ final class DeprecationAdapters
         array $rawCommentAttributes,
         bool &$matched,
     ): array {
+        if (array_key_exists('textAlign', $rawCommentAttributes)
+            && $rawCommentAttributes['textAlign'] !== 'center') {
+            throw new \RuntimeException(
+                'Unsupported legacy core/button textAlign value; '
+                . 'a reviewed deprecation adapter is required'
+            );
+        }
         $width = $rawCommentAttributes['width'] ?? null;
         if ((!is_int($width) && !is_float($width)) || !is_finite((float) $width) || $width <= 0) {
             return $attributes;

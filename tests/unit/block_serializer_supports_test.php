@@ -179,3 +179,30 @@ test('SupportDomainGuard rejects style families outside the reviewed PHP pipelin
         '0',
     ));
 });
+
+test('SupportDomainGuard admits pinned comment-only group layout and link typography', function () {
+    $attrs = [
+        'style' => [
+            'layout' => ['type' => 'constrained'],
+            'elements' => [
+                'link' => [
+                    'typography' => ['textDecoration' => 'none'],
+                    ':hover' => ['typography' => ['textDecoration' => 'underline']],
+                ],
+            ],
+        ],
+        'layout' => ['type' => 'constrained'],
+    ];
+
+    (new SupportDomainGuard())->assertSupported('core/group', $attrs, '0');
+    assert_throws(static fn () => (new SupportDomainGuard())->assertSupported(
+        'core/group',
+        ['style' => ['layout' => ['type' => 'flex']]],
+        '0',
+    ));
+    assert_throws(static fn () => (new SupportDomainGuard())->assertSupported(
+        'core/group',
+        ['style' => ['elements' => ['link' => ['typography' => ['textDecoration' => 'overline']]]]],
+        '0',
+    ));
+});

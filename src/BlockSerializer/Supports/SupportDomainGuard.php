@@ -54,12 +54,23 @@ final class SupportDomainGuard
         'elements' => [
             'link' => [
                 'color' => ['text' => true],
-                ':hover' => ['color' => ['text' => true]],
+                'typography' => [
+                    'textDecoration' => ['@values' => ['none', 'underline']],
+                ],
+                ':hover' => [
+                    'color' => ['text' => true],
+                    'typography' => [
+                        'textDecoration' => ['@values' => ['none', 'underline']],
+                    ],
+                ],
             ],
         ],
         'layout' => [
             'selfStretch' => ['@values' => ['fill', 'fit', 'fixed']],
             'flexSize' => true,
+            // Pinned generated footer signature. This is retained comment
+            // state; core/group save() reads the top-level layout attribute.
+            'type' => ['@values' => ['constrained']],
         ],
         'outline' => [
             'color' => true,

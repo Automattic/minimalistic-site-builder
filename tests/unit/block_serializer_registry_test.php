@@ -99,6 +99,25 @@ test('reviewed button href alias is sourced from saved HTML then dropped', funct
     assert_contains('href="#contact"', $result);
 });
 
+test('reviewed legacy button textAlign follows the pinned drop', function () {
+    $button = '<!-- wp:button {"textAlign":"center","backgroundColor":"accent",'
+        . '"textColor":"base","style":{"border":{"radius":"2px"}}} -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link has-base-color '
+        . 'has-accent-background-color has-text-color has-background has-text-align-center '
+        . 'wp-element-button" href="#contact" style="border-radius:2px">Contact</a></div>'
+        . '<!-- /wp:button -->';
+
+    $result = (new Serializer())->transform($button)->html;
+    assert_true(!str_contains($result, '"textAlign"'));
+    assert_true(!str_contains($result, 'has-text-align-center'));
+    assert_contains('href="#contact"', $result);
+    assert_throws(static fn () => (new Serializer())->transform(str_replace(
+        '"textAlign":"center"',
+        '"textAlign":"justify"',
+        $button,
+    )));
+});
+
 test('reviewed legacy image shadow follows the pinned lossy migration', function () {
     $image = '<!-- wp:image {"sizeSlug":"large","className":"reveal-scale",'
         . '"style":{"border":{"color":"var:preset|color|secondary","width":"1px"}},'
