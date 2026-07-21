@@ -116,6 +116,46 @@ test('assemble-pages writes the page and index templates and registers the chrom
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('assemble-pages writes the plugin image manifest for content-referenced assets', function () {
+    [$project, $tmp] = assemble_fixture();
+    // The hero part references two assets; one has a collected spec (subject
+    // becomes the media title), the other doesn't (title falls back to the
+    // filename). Chrome-only assets must NOT land in the manifest.
+    $project->writeText(
+        'theme/parts/page-home--hero.html',
+        '<!-- wp:cover {"url":"theme:./assets/hero-loaves.jpg"} --><div>'
+        . '<img src="theme:./assets/crumb-detail.jpg" alt="AI_IMAGE: crumb | hero | photo | landscape">'
+        . '</div><!-- /wp:cover -->' . "\n"
+    );
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group --><img src="theme:./assets/wordmark.png" alt="AI_IMAGE: wordmark | header | flat | square"><!-- /wp:group -->' . "\n"
+    );
+    $project->writeJson('images.json', [
+        ['filename' => 'hero-loaves.jpg', 'src' => 'theme:./assets/hero-loaves.jpg', 'subject' => 'Golden sourdough loaves on a rack'],
+        ['filename' => 'wordmark.png', 'src' => 'theme:./assets/wordmark.png', 'subject' => 'Bakery wordmark'],
+    ]);
+
+    (new AssemblePagesStep())->run($project);
+
+    $manifest = $project->readJson('plugin/images.json');
+    assert_eq([
+        ['filename' => 'hero-loaves.jpg', 'title' => 'Golden sourdough loaves on a rack'],
+        ['filename' => 'crumb-detail.jpg', 'title' => 'Crumb Detail'],
+    ], $manifest['images']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages writes an empty image manifest when pages reference no assets', function () {
+    [$project, $tmp] = assemble_fixture();
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_eq(['images' => []], $project->readJson('plugin/images.json'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('assemble-pages throws when a section part is missing', function () {
     [$project, $tmp] = assemble_fixture();
     unlink($project->themePath('parts/page-menu--breads.html'));

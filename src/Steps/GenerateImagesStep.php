@@ -73,13 +73,14 @@ final class GenerateImagesStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'plugin/images.json', 'theme/parts/*', 'theme/templates/*'],
             writes: [
                 'images.json',
                 self::COMPLETION_ARTIFACT,
                 'theme/assets/*',
                 'theme/parts/*',
                 'theme/templates/*',
+                'plugin/images/*',
             ],
             concurrent: true,
         );
@@ -189,7 +190,30 @@ final class GenerateImagesStep implements Step
             $this->rewriteMarkup($project, $resolved);
         }
 
+        $this->shipPluginImages($project);
         $this->markComplete($project);
+    }
+
+    /**
+     * Copy every generated asset the content plugin's manifest lists into
+     * plugin/images/, so the seeder can import them into the media library at
+     * activation. Content images stay in theme/assets/ too: chrome may share
+     * them, and the seeder falls back to the theme copy for any file it
+     * cannot import.
+     */
+    private function shipPluginImages(Project $project): void
+    {
+        if (!$project->exists('plugin/images.json')) {
+            return; // theme-only composition, or assemble-pages never ran
+        }
+        $manifest = $project->readJson('plugin/images.json');
+        foreach ((array) ($manifest['images'] ?? []) as $image) {
+            $filename = is_array($image) ? (string) ($image['filename'] ?? '') : '';
+            if ($filename === '' || !$project->exists('theme/assets/' . $filename)) {
+                continue;
+            }
+            $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
+        }
     }
 
     /** Publish the dependency stamp only after every required operation succeeds. */

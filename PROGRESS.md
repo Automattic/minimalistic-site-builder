@@ -249,3 +249,20 @@ The builder now produces a whole site, not a single landing page:
   it after the theme, and sets pretty permalinks so the page paths resolve.
 - Nav is automatic: the header's `wp:navigation` + `wp:page-list` reflects the
   seeded pages in `menu_order` (children nest as submenus).
+
+### Phase 5.1 — content images live in the media library (2026-07-10)
+
+Content images are now treated as content, not theme assets:
+
+- **assemble-pages** writes `plugin/images.json` — every asset the page
+  markup references, titled from the collected spec's subject.
+- **generate-images** copies those files into `plugin/images/` (the theme
+  keeps its copy: chrome may share it, and it's the fallback).
+- **The seeder imports them on activation** — `wp_upload_bits` +
+  `wp_insert_attachment` + generated metadata — and resolves the page
+  markup against the import: `wp:image` blocks get the real attachment id
+  (unknowable at build time) injected into their attributes plus the
+  paired `wp-image-<id>` class, so core srcset/lightbox engage; cover urls
+  and inline backgrounds get a plain URL swap; unshipped files fall back
+  to the theme's assets. Deactivation deletes the imported attachments
+  with the pages.
