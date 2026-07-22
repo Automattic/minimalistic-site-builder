@@ -83,6 +83,9 @@ final class SectionsStep implements Step
     /** Floats transparently over the hero, so it needs an image-led hero under it. */
     private const OVERLAY_ARCHETYPE = 'minimal-overlay';
 
+    /** Splits the site's pages across two navs, so it needs pages to split. */
+    private const SPLIT_NAV_ARCHETYPE = 'split-nav';
+
     public function __construct(
         private Llm $llm,
         PromptRenderer $renderer,
@@ -187,7 +190,7 @@ final class SectionsStep implements Step
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
                     'nav_rule'   => count($pages) > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE,
-                    'archetype_assignment' => self::headerAssignment($frontSections, DesignDirectionStep::canvasFor($project)),
+                    'archetype_assignment' => self::headerAssignment($frontSections, DesignDirectionStep::canvasFor($project), count($pages)),
                 ],
                 'file'  => 'parts/header.html',
             ],
@@ -370,25 +373,33 @@ final class SectionsStep implements Step
     }
 
     /**
-     * The header archetypes compatible with the planned hero and the direction's
-     * canvas: minimal-overlay floats transparently over the first section, so it
-     * is only offered when the hero is an image-led cover it can read against —
-     * and never on a "framed" canvas, whose mat of page background would sit
-     * under the overlay instead of the image. Pure — unit-testable.
+     * The header archetypes compatible with the planned hero, the direction's
+     * canvas, and the site's shape: minimal-overlay floats transparently over
+     * the first section, so it is only offered when the hero is an image-led
+     * cover it can read against — and never on a "framed" canvas, whose mat of
+     * page background would sit under the overlay instead of the image.
+     * split-nav splits the site's pages across two navs, so a one-page site
+     * (where the nav rule prescribes section anchors instead) drops it.
+     * Pure — unit-testable.
      *
      * @param array<int,array<string,mixed>> $sections
      * @return string[]
      */
-    public static function headerArchetypePool(array $sections, string $canvas = ''): array
+    public static function headerArchetypePool(array $sections, string $canvas = '', int $pageCount = 2): array
     {
         $hero = self::heroSection($sections);
         $imageLed = is_array($hero) && (
             (string) ($hero['layout_archetype'] ?? '') === 'full-bleed-cover'
             || (string) ($hero['background'] ?? '') === 'image'
         );
-        return $imageLed && $canvas !== 'framed'
-            ? self::HEADER_ARCHETYPES
-            : array_values(array_diff(self::HEADER_ARCHETYPES, [self::OVERLAY_ARCHETYPE]));
+        $excluded = [];
+        if (!$imageLed || $canvas === 'framed') {
+            $excluded[] = self::OVERLAY_ARCHETYPE;
+        }
+        if ($pageCount <= 1) {
+            $excluded[] = self::SPLIT_NAV_ARCHETYPE;
+        }
+        return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
 
     /**
@@ -400,7 +411,7 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $sections
      */
-    public static function headerAssignment(array $sections, string $canvas = ''): string
+    public static function headerAssignment(array $sections, string $canvas = '', int $pageCount = 2): string
     {
         $forced = Env::get(self::ARCHETYPE_ENV);
         if ($forced !== null && $forced !== '') {
@@ -415,7 +426,7 @@ final class SectionsStep implements Step
             return "ASSIGNED HEADER ARCHETYPE for this build: **{$forced}**. Build exactly this one.";
         }
 
-        $pool = self::headerArchetypePool($sections, $canvas);
+        $pool = self::headerArchetypePool($sections, $canvas, $pageCount);
         $first = array_splice($pool, random_int(0, count($pool) - 1), 1)[0];
         $second = $pool[random_int(0, count($pool) - 1)];
         return "ASSIGNED HEADER ARCHETYPES for this build: **{$first}** or **{$second}**. "

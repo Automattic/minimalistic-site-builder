@@ -212,9 +212,15 @@ test('header archetype pool offers minimal-overlay only for image-led heroes', f
     // over an image-led cover.
     $framed = SectionsStep::headerArchetypePool($imageHero, 'framed');
     assert_true(!in_array('minimal-overlay', $framed, true), 'framed canvas excludes overlay');
+
+    // A one-page site has no pages to split across split-nav's two navs.
+    $single = SectionsStep::headerArchetypePool($imageHero, '', 1);
+    assert_true(!in_array('split-nav', $single, true), 'single-page site excludes split-nav');
+    assert_true(in_array('minimal-overlay', $single, true), 'overlay gating is independent of page count');
 });
 
 test('header assignment offers two distinct archetypes from the pool', function () {
+    putenv(SectionsStep::ARCHETYPE_ENV); // a forced archetype in the caller's env would skip the two-pick branch
     $sections = [['slug' => 'hero', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']];
     for ($i = 0; $i < 10; $i++) {
         $assignment = SectionsStep::headerAssignment($sections);
@@ -251,6 +257,7 @@ test('an unknown HEADER_ARCHETYPE aborts instead of silently generating', functi
 });
 
 test('the header prompt carries an archetype assignment and the full catalog', function () {
+    putenv(SectionsStep::ARCHETYPE_ENV); // a forced archetype in the caller's env would skip the two-pick branch
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);

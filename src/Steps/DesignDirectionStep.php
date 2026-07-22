@@ -379,7 +379,7 @@ final class DesignDirectionStep implements Step
         if (!$project->exists(self::FILE)) {
             return '';
         }
-        return trim((string) ($project->readJson(self::FILE)['canvas'] ?? ''));
+        return strtolower(trim((string) ($project->readJson(self::FILE)['canvas'] ?? '')));
     }
 
     /**
