@@ -163,6 +163,8 @@ final class SectionsStep implements Step
             $opts = $request;
             unset($opts['prompt']);
             $opts['max_tokens'] = 1;
+            $opts['tolerate_empty'] = true;
+            $opts['log_label'] = 'section-cache-warm';
 
             try {
                 $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);

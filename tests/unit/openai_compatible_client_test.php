@@ -74,6 +74,20 @@ test('bodyFor prepends cached prefixes to the OpenAI user content without cache 
     assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'OpenAI body has no explicit cache marker');
 });
 
+test('retrySingleRequest tolerates an empty probe response without retrying', function () {
+    $body = ['messages' => []];
+    $calls = 0;
+    $transport = function (array $requestBody) use (&$calls): array {
+        $calls++;
+        return ['text' => " \n\t", 'input' => 100, 'output' => 1, 'time' => 0.25];
+    };
+
+    $result = OpenAiCompatibleClient::retrySingleRequest($body, $transport, [0, 0, 0], true);
+
+    assert_eq(1, $calls, 'successful empty probe makes exactly one transport attempt');
+    assert_eq('', $result['text'], 'tolerated whitespace is normalized to the empty-string contract');
+});
+
 test('maxTokensParam picks the right token key per provider and model', function () {
     // OpenAI reasoning / gpt-5+ → max_completion_tokens.
     assert_eq(['max_completion_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-5.5', 100));

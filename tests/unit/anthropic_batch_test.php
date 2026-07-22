@@ -31,6 +31,27 @@ test('retryTextBatch returns text + usage per request, keyed as input', function
     assert_eq(7, $out['page-plan']['output']);
 });
 
+test('retrySingleRequest tolerates an empty probe response without retrying', function () {
+    $body = ['messages' => []];
+    $calls = 0;
+    $transport = function (array $requestBody) use (&$calls): array {
+        $calls++;
+        return [
+            'text' => " \n\t",
+            'input' => 100,
+            'output' => 1,
+            'cache_read_input_tokens' => 0,
+            'cache_creation_input_tokens' => 100,
+            'time' => 0.25,
+        ];
+    };
+
+    $result = AnthropicClient::retrySingleRequest($body, $transport, [0, 0, 0], true);
+
+    assert_eq(1, $calls, 'successful empty probe makes exactly one transport attempt');
+    assert_eq('', $result['text'], 'tolerated whitespace is normalized to the empty-string contract');
+});
+
 test('retryTextBatch retries only the transient failures, then succeeds', function () {
     $bodies = ['a' => [], 'b' => [], 'c' => []];
     $round = 0;

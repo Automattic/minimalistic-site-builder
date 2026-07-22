@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
@@ -128,8 +130,30 @@ test('section request contract exposes two stable cached prefixes and a varying 
     assert_contains('CACHE-DIRECTION-SENTINEL', $hero['cached_prefixes'][0]);
     assert_contains('FULL PAGE OUTLINE', $hero['cached_prefixes'][1]);
     assert_contains('SECTION TO BUILD', $hero['prompt']);
+    foreach ($hero['cached_prefixes'] as $prefix) {
+        assert_true(str_ends_with($prefix, "\n\n"), 'every cached prefix carries its explicit separator');
+        assert_true(!str_ends_with($prefix, "\n\n\n"), 'cached prefix separator is exactly two newlines');
+    }
     assert_true(!str_contains(implode('', $hero['cached_prefixes']), '<!-- section-cache-layer:'));
     assert_true(!str_contains($hero['prompt'], '<!-- section-cache-layer:'));
+});
+
+test('section cached prefixes assemble byte-equally across Anthropic and OpenAI', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_cache_input());
+
+    $anthropic = AnthropicClient::bodyFor($request, 'claude-sonnet-4-6', 16000);
+    $anthropicText = implode('', array_map(
+        static fn (array $block): string => (string) $block['text'],
+        $anthropic['messages'][0]['content'],
+    ));
+    $openAi = OpenAiCompatibleClient::bodyFor($request, 'gpt-4o', 16000);
+    $openAiText = (string) $openAi['messages'][1]['content'];
+
+    assert_eq(implode('', $request['cached_prefixes']) . $request['prompt'], $anthropicText);
+    assert_eq($anthropicText, $openAiText, 'providers receive byte-identical assembled user prompts');
 });
 
 test('sections warms the exact first section prefixes before the concurrent fan-out', function () {
@@ -145,6 +169,8 @@ test('sections warms the exact first section prefixes before the concurrent fan-
     assert_eq(1, $llm->completeBatchCalls);
     assert_eq(SECTION_CACHE_PROBE_PROMPT, $llm->calls[0]['prompt']);
     assert_eq(1, $llm->calls[0]['opts']['max_tokens'] ?? null);
+    assert_eq(true, $llm->calls[0]['opts']['tolerate_empty'] ?? null);
+    assert_eq('section-cache-warm', $llm->calls[0]['opts']['log_label'] ?? null);
     assert_eq('cache-model', $llm->calls[0]['opts']['model'] ?? null);
     assert_eq(
         $requests['page-home--hero']['cached_prefixes'],

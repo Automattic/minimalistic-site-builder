@@ -177,14 +177,12 @@ final class SectionUnit extends AbstractMarkupUnit
 
         // Remove only newlines belonging to the marker separators. Preserve
         // every other byte of each rendered layer, including indentation.
-        $layers = [
-            trim($buildLayer, "\r\n"),
-            trim($pageLayer, "\r\n"),
-            trim($brief, "\r\n"),
-        ];
-        if (in_array('', $layers, true)) {
+        $buildLayer = rtrim(ltrim($buildLayer, "\r\n"), "\r\n");
+        $pageLayer = rtrim(ltrim($pageLayer, "\r\n"), "\r\n");
+        $brief = trim($brief, "\r\n");
+        if (in_array('', [$buildLayer, $pageLayer, $brief], true)) {
             throw new \RuntimeException('section prompt cache layers must not be empty');
         }
-        return $layers;
+        return [$buildLayer . "\n\n", $pageLayer . "\n\n", $brief];
     }
 }

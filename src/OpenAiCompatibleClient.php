@@ -99,8 +99,9 @@ final class OpenAiCompatibleClient implements Llm
         $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens, $this->provider);
 
         $label = (string) ($opts['log_label'] ?? 'request');
+        $tolerateEmpty = ($opts['tolerate_empty'] ?? false) === true;
         try {
-            $res = $this->requestWithRetry($body);
+            $res = $this->requestWithRetry($body, $tolerateEmpty);
         } catch (\Throwable $e) {
             LlmLogger::log($label, $body, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
             throw $e;
@@ -112,7 +113,7 @@ final class OpenAiCompatibleClient implements Llm
 
         LlmLogger::log($label, $body, $res, $res['time']);
 
-        if (trim($res['text']) === '') {
+        if (!$tolerateEmpty && trim($res['text']) === '') {
             throw new \RuntimeException('No text content in streamed response');
         }
         return $res['text'];
@@ -240,17 +241,17 @@ final class OpenAiCompatibleClient implements Llm
             $system .= "\n\n" . $req['system'];
         }
 
-        $promptParts = [];
+        $userPrompt = '';
         foreach ($req['cached_prefixes'] ?? [] as $prefix) {
             if (trim($prefix) !== '') {
-                $promptParts[] = $prefix;
+                $userPrompt .= rtrim($prefix, "\r\n") . "\n\n";
             }
         }
-        $promptParts[] = (string) $req['prompt'];
+        $userPrompt .= (string) $req['prompt'];
 
         $messages = [
             ['role' => 'system', 'content' => $system],
-            ['role' => 'user', 'content' => implode("\n\n", $promptParts)],
+            ['role' => 'user', 'content' => $userPrompt],
         ];
 
         $maxTokens = (int) ($req['max_tokens'] ?? $defaultMaxTokens);
@@ -416,13 +417,43 @@ final class OpenAiCompatibleClient implements Llm
      * @param array<string,mixed> $body
      * @return array{text:string,input:int,output:int,time:float}
      */
-    private function requestWithRetry(array &$body): array
+    private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
     {
-        $delays = [2, 5, 12];
+        return self::retrySingleRequest(
+            $body,
+            fn (array $requestBody): array => $this->streamRequest($requestBody),
+            [2, 5, 12],
+            $tolerateEmpty,
+        );
+    }
+
+    /**
+     * Drive one request to completion with a fakeable transport seam. A
+     * successful empty response is transient unless tolerate_empty is set.
+     *
+     * @param array<string,mixed> $body
+     * @param callable(array<string,mixed>):array{text:string,input:int,output:int,time:float} $transport
+     * @param list<int> $delays
+     * @return array{text:string,input:int,output:int,time:float}
+     */
+    public static function retrySingleRequest(
+        array &$body,
+        callable $transport,
+        array $delays,
+        bool $tolerateEmpty = false,
+    ): array
+    {
         $attempt = 0;
         while (true) {
             try {
-                return $this->streamRequest($body);
+                $result = $transport($body);
+                if (trim($result['text']) === '') {
+                    if (!$tolerateEmpty) {
+                        throw new TransientApiException('no text content in streamed response');
+                    }
+                    $result['text'] = '';
+                }
+                return $result;
             } catch (TransientApiException $e) {
                 if ($attempt >= count($delays)) {
                     throw new \RuntimeException('OpenAI-compatible API failed after retries: ' . $e->getMessage(), 0, $e);
@@ -494,10 +525,6 @@ final class OpenAiCompatibleClient implements Llm
             }
             throw new \RuntimeException($msg);
         }
-        if (trim($parsed['text']) === '') {
-            throw new TransientApiException('no text content in streamed response');
-        }
-
         return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output'], 'time' => $time];
     }
 

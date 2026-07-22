@@ -46,9 +46,7 @@ function sections_fixture(): array
 /** Reconstruct the logical prompt text from a possibly layered request. */
 function sections_request_text(array $request): string
 {
-    $parts = $request['cached_prefixes'] ?? [];
-    $parts[] = $request['prompt'];
-    return implode("\n\n", $parts);
+    return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
 
 test('sections requests one part per header/footer/page-section', function () {
@@ -81,6 +79,11 @@ test('sections fans out across every page and gives each section its own page co
         ['header', 'footer', 'page-home--hero', 'page-menu--menu-hero', 'page-menu--breads'],
         array_keys($reqs)
     );
+
+    $homePrefixes = $reqs['page-home--hero']['cached_prefixes'] ?? [];
+    $menuPrefixes = $reqs['page-menu--menu-hero']['cached_prefixes'] ?? [];
+    assert_eq($homePrefixes[0] ?? null, $menuPrefixes[0] ?? null, 'build layer is byte-identical across pages');
+    assert_true(($homePrefixes[1] ?? null) !== ($menuPrefixes[1] ?? null), 'page layer differs across pages');
 
     // Each section sees ITS page's outline, not another page's.
     $menuBreads = sections_request_text($reqs['page-menu--breads']);

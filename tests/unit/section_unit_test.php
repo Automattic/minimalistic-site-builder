@@ -39,9 +39,7 @@ function section_unit_input(): array
 /** Reconstruct the logical prompt text from a layered LLM request. */
 function section_unit_request_text(array $request): string
 {
-    $parts = $request['cached_prefixes'] ?? [];
-    $parts[] = $request['prompt'];
-    return implode("\n\n", $parts);
+    return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
 
 test('SectionUnit generates normalized markup from self-contained input', function () {

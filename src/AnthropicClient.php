@@ -124,8 +124,9 @@ final class AnthropicClient implements Llm
         $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens);
 
         $label = (string) ($opts['log_label'] ?? 'request');
+        $tolerateEmpty = ($opts['tolerate_empty'] ?? false) === true;
         try {
-            $res = $this->requestWithRetry($body);
+            $res = $this->requestWithRetry($body, $tolerateEmpty);
         } catch (\Throwable $e) {
             // Log the failed call too, so an aborted build is still inspectable.
             LlmLogger::log($label, $body, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
@@ -140,7 +141,7 @@ final class AnthropicClient implements Llm
 
         LlmLogger::log($label, $body, $res, $res['time']);
 
-        if (trim($res['text']) === '') {
+        if (!$tolerateEmpty && trim($res['text']) === '') {
             throw new \RuntimeException('No text content in streamed response');
         }
         return $res['text'];
@@ -651,13 +652,44 @@ final class AnthropicClient implements Llm
      * @param array<string,mixed> $body
      * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float}
      */
-    private function requestWithRetry(array &$body): array
+    private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
     {
-        $delays = [2, 5, 12]; // seconds before retries 1, 2, 3
+        return self::retrySingleRequest(
+            $body,
+            fn (array $requestBody): array => $this->streamRequest($requestBody),
+            [2, 5, 12],
+            $tolerateEmpty,
+        );
+    }
+
+    /**
+     * Drive one request to completion, retrying transient failures with the
+     * supplied backoff. A successful empty response is transient by default;
+     * tolerate_empty converts it to an immediate empty-string success.
+     *
+     * @param array<string,mixed> $body
+     * @param callable(array<string,mixed>):array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float} $transport
+     * @param list<int> $delays
+     * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float}
+     */
+    public static function retrySingleRequest(
+        array &$body,
+        callable $transport,
+        array $delays,
+        bool $tolerateEmpty = false,
+    ): array
+    {
         $attempt = 0;
         while (true) {
             try {
-                return $this->streamRequest($body);
+                $result = $transport($body);
+                if (trim($result['text']) === '') {
+                    if (!$tolerateEmpty) {
+                        throw new TransientApiException('no text content in streamed response');
+                    }
+                    $result['text'] = '';
+                }
+                return $result;
             } catch (RejectedApiParameterException $e) {
                 $param = $e->parameter;
                 if (!self::stripRejectedParam($body, $param)) {
@@ -747,12 +779,6 @@ final class AnthropicClient implements Llm
             }
             throw new \RuntimeException("stream error: {$parsed['error']}");
         }
-        // An empty body is usually a transient hiccup (a stop with no content),
-        // so retry it — matching the batch path's interpretStream().
-        if (trim($parsed['text']) === '') {
-            throw new TransientApiException('no text content in streamed response');
-        }
-
         return [
             'text' => $parsed['text'],
             'input' => $parsed['input'],

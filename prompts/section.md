@@ -123,7 +123,7 @@ DESIGN DIRECTION (the committed creative concept for THIS site — honor its sha
 {{design_direction}}
 
 <!-- section-cache-layer:page -->
-THIS SECTION'S PAGE: "{{page_title}}" — one page of a multi-page site. The outline in this page-context layer is THIS page's outline.
+THIS SECTION'S PAGE: "{{page_title}}" — one page of a multi-page site. The outline under THE FULL PAGE OUTLINE is THIS page's outline.
 
 THE FULL PAGE OUTLINE (for context — build ONLY the section named in the final brief):
 {{outline}}
@@ -142,4 +142,4 @@ SECTION TO BUILD:
 {{composition}}
 
 - Wrap the whole section in a single top-level <!-- wp:group --> that ALWAYS declares `"layout":{"type":"constrained"}` — including when the band is `"align":"full"` (a full-bleed band is align:full PLUS constrained layout). A top-level group with no "layout" attribute is flow layout: its children render edge-to-edge at the viewport with no page gutter, which reads as broken. Give that group the section's anchor — `"anchor":"{{section_slug}}"` in its JSON attributes and the matching `id="{{section_slug}}"` on its opening tag — so navigation and buttons can deep-link it (href="#{{section_slug}}" within the page, href="{{page_path}}#{{section_slug}}" from other pages — a deep link always carries the owning page's path, since a bare "#anchor" only resolves on the page that renders it).
-- Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS in the rules layer. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
+- Where imagery genuinely strengthens this section, emit generatable AI image placeholders following the IMAGE INSTRUCTIONS above. This is the "{{section_title}}" section ({{section_purpose}}) — let that steer each image's page-context and subject.
