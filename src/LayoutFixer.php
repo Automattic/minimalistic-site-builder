@@ -71,7 +71,7 @@ final class LayoutFixer
      *         descriptions of each change; empty notes means markup is
      *         returned unchanged.
      */
-    public static function fix(string $markup, string $role, ?float $contentSize = null): array
+    public static function fix(string $markup, string $role, ?float $contentSize = null, array $spacingSlugs = []): array
     {
         $notes = [];
         $markup = self::repairMalformedAttributes($markup, $notes);
@@ -93,9 +93,11 @@ final class LayoutFixer
 
         $htmlEdits = [];
         self::canonicalizeSpacingAttributes($all, $notes);
+        self::repairBareSlugSpacing($markup, $all, $notes, $spacingSlugs);
         self::canonicalizeLayoutVocabulary($all, $notes);
         self::mirrorHtmlOnlyVerticalSpacing($markup, $all, $notes);
         self::mirrorHtmlOnlyGap($markup, $all, $htmlEdits, $notes);
+        self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
         self::addMissingRootLayout($roots, $notes);
         self::promoteAlignClassNames($all, $notes);
 
@@ -267,6 +269,219 @@ final class LayoutFixer
                 }
                 $notes[] = "wp:{$node->name} declared \"{$property}\" directly under \"style\" — dropped it in favor of the existing style.spacing.{$property}";
             }
+        }
+    }
+
+    /**
+     * Bare values that are (or could be) legitimate CSS for spacing — never
+     * treated as preset slugs even if a theme pathologically names one so.
+     */
+    private const CSS_SPACING_KEYWORDS = ['0', 'auto', 'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'none', 'normal'];
+
+    /**
+     * A spacing value holding a bare preset slug ("top":"sm") renders as the
+     * literal `padding-top:sm`, so re-serialization replaces the HTML's real
+     * var() declaration and the rhythm gate rejects the build (observed on
+     * cards, paragraphs, separators and quotes across demo builds). Rewrite
+     * to var:preset|spacing|<slug> when the theme's spacing scale defines the
+     * slug — any block type, since the model's intent is unambiguous. Without
+     * a scale, fall back to requiring the block's own inline HTML to declare
+     * exactly var(--wp--preset--spacing--<slug>) for that side, trusted only
+     * for wrapper-classed containers. Anything else stays for the gate.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     * @param string[] $spacingSlugs theme spacing-scale slugs ([] = unknown)
+     */
+    private static function repairBareSlugSpacing(string $markup, array $all, array &$notes, array $spacingSlugs = []): void
+    {
+        $slugs = array_diff($spacingSlugs, self::CSS_SPACING_KEYWORDS);
+        foreach ($all as $node) {
+            $spacing = $node->attrs->style->spacing ?? null;
+            if (!$spacing instanceof \stdClass) {
+                continue;
+            }
+
+            // HTML-confirmation fallback: only wrapper-classed containers are
+            // trusted, matching the mirror rules' guard.
+            $declared = null;
+            $trustsHtml = !$node->selfClosing
+                && (self::is($node, 'group') || self::is($node, 'columns')
+                    || self::is($node, 'column') || self::is($node, 'cover'));
+            if ($trustsHtml) {
+                $short = preg_replace('#^core/#', '', $node->name);
+                $tagHtml = self::wrapperTag($markup, $node->start + $node->len);
+                if ($tagHtml !== null && self::hasClassToken($tagHtml, "wp-block-{$short}")) {
+                    $styleAttr = self::tagAttribute($tagHtml, 'style');
+                    if ($styleAttr !== null) {
+                        $declared = [];
+                        foreach (explode(';', $styleAttr[0]) as $segment) {
+                            $colon = strpos($segment, ':');
+                            if ($colon !== false) {
+                                $declared[strtolower(trim(substr($segment, 0, $colon)))] = trim(substr($segment, $colon + 1));
+                            }
+                        }
+                    }
+                }
+            }
+
+            $bareSlug = static function (mixed $value) use ($slugs): ?string {
+                return is_string($value)
+                    && preg_match('/^[a-z0-9_-]+$/', $value) === 1
+                    && !in_array($value, self::CSS_SPACING_KEYWORDS, true)
+                    && in_array($value, $slugs, true)
+                    ? $value : null;
+            };
+
+            foreach (['padding', 'margin'] as $property) {
+                $box = $spacing->{$property} ?? null;
+                if (!$box instanceof \stdClass) {
+                    continue;
+                }
+                foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                    $value = $box->{$side} ?? null;
+                    if (!is_string($value) || preg_match('/^[a-z0-9_-]+$/', $value) !== 1) {
+                        continue;
+                    }
+                    $scaleConfirms = $bareSlug($value) !== null;
+                    $htmlConfirms = ($declared["{$property}-{$side}"] ?? null) === "var(--wp--preset--spacing--{$value})";
+                    if (!$scaleConfirms && !$htmlConfirms) {
+                        continue;
+                    }
+                    $box->{$side} = "var:preset|spacing|{$value}";
+                    $node->dirty = true;
+                    $notes[] = "wp:{$node->name} {$property}.{$side} held the bare slug \"{$value}\" ("
+                        . ($scaleConfirms ? 'defined by the theme spacing scale' : 'matching its inline HTML preset')
+                        . ") — rewrote it to var:preset|spacing|{$value} so the rendered CSS keeps the declared rhythm";
+                }
+            }
+
+            // blockGap renders through the layout stylesheet; a bare slug
+            // there becomes invisible invalid CSS rather than a gate failure,
+            // so only the scale (never HTML) can confirm it.
+            $blockGap = $spacing->blockGap ?? null;
+            if (is_string($blockGap) && $bareSlug($blockGap) !== null) {
+                $spacing->blockGap = "var:preset|spacing|{$blockGap}";
+                $node->dirty = true;
+                $notes[] = "wp:{$node->name} blockGap held the bare slug \"{$blockGap}\" (defined by the theme spacing scale) — rewrote it to var:preset|spacing|{$blockGap}";
+            } elseif ($blockGap instanceof \stdClass) {
+                foreach (['top', 'left'] as $side) {
+                    $value = $blockGap->{$side} ?? null;
+                    if (is_string($value) && $bareSlug($value) !== null) {
+                        $blockGap->{$side} = "var:preset|spacing|{$value}";
+                        $node->dirty = true;
+                        $notes[] = "wp:{$node->name} blockGap.{$side} held the bare slug \"{$value}\" (defined by the theme spacing scale) — rewrote it to var:preset|spacing|{$value}";
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Dynamic chrome leaf blocks: empty save(), so authored HTML never
+     * survives re-serialization. All three support spacing block supports,
+     * which render style.spacing.* at runtime.
+     */
+    private const DYNAMIC_CHROME_BLOCKS = ['site-title', 'site-tagline', 'site-logo'];
+
+    /**
+     * A dynamic chrome block the model expanded into HTML loses that HTML
+     * wholesale at re-serialization, and inline spacing on it trips the
+     * rhythm gate even when the attribute already carries the value (block
+     * supports render it at runtime). Move inline padding/margin longhands
+     * into style.spacing.* and delete the inline copies; a disagreeing
+     * attribute is ambiguous and stays for the gate to judge.
+     *
+     * @param object[] $all
+     * @param array{int,int,string}[] $htmlEdits splices for render(): offset, length, replacement
+     * @param string[] $notes
+     */
+    private static function mirrorDynamicChromeSpacing(string $markup, array $all, array &$htmlEdits, array &$notes): void
+    {
+        foreach ($all as $node) {
+            $short = preg_replace('#^core/#', '', $node->name);
+            if ($node->selfClosing || !in_array($short, self::DYNAMIC_CHROME_BLOCKS, true)) {
+                continue;
+            }
+            $tagStart = $node->start + $node->len;
+            $tagHtml = self::wrapperTag($markup, $tagStart);
+            if ($tagHtml === null || !self::hasClassToken($tagHtml, "wp-block-{$short}")) {
+                continue;
+            }
+            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            if ($styleAttr === null) {
+                continue;
+            }
+            $style = $node->attrs->style ?? null;
+            if ($style !== null && !$style instanceof \stdClass) {
+                continue;
+            }
+            $spacing = $style?->spacing ?? null;
+            if ($spacing !== null && !$spacing instanceof \stdClass) {
+                continue;
+            }
+
+            $kept = [];
+            $declared = [];
+            $unmirrorable = false;
+            foreach (explode(';', $styleAttr[0]) as $segment) {
+                if (trim($segment) === '') {
+                    continue;
+                }
+                $colon = strpos($segment, ':');
+                $prop = $colon === false ? '' : strtolower(trim(substr($segment, 0, $colon)));
+                if (preg_match('/\A(padding|margin)-(top|right|bottom|left)\z/', $prop, $m) !== 1) {
+                    $kept[] = trim($segment);
+                    continue;
+                }
+                $value = trim(substr($segment, $colon + 1));
+                if ($value === '' || self::referencesNonPresetVar($value)) {
+                    $unmirrorable = true;
+                    break;
+                }
+                $declared[$m[1]][$m[2]] = self::blockSpacingValue($value);
+            }
+            if ($unmirrorable || $declared === []) {
+                continue;
+            }
+
+            $adopt = [];
+            $conflict = false;
+            foreach ($declared as $property => $sides) {
+                $box = $spacing?->{$property} ?? null;
+                if ($box !== null && !$box instanceof \stdClass) {
+                    $conflict = true; // string shorthand attribute — ambiguous
+                    break;
+                }
+                foreach ($sides as $side => $value) {
+                    $current = $box !== null && property_exists($box, $side) ? $box->{$side} : null;
+                    if ($current === null) {
+                        $adopt[$property][$side] = $value;
+                    } elseif ($current !== $value) {
+                        $conflict = true;
+                        break 2;
+                    }
+                }
+            }
+            if ($conflict) {
+                continue;
+            }
+
+            if ($adopt !== []) {
+                $style ??= $node->attrs->style = new \stdClass();
+                $spacing ??= $style->spacing = new \stdClass();
+                foreach ($adopt as $property => $sides) {
+                    $box = $spacing->{$property} ??= new \stdClass();
+                    foreach ($sides as $side => $value) {
+                        $box->{$side} = $value;
+                    }
+                }
+                $node->dirty = true;
+            }
+            $htmlEdits[] = [$tagStart + $styleAttr[1], strlen($styleAttr[0]), implode(';', $kept)];
+            $notes[] = $adopt !== []
+                ? "wp:{$node->name} declared spacing only in HTML that re-serialization deletes (dynamic block, empty save) — moved it into style.spacing so block supports render it"
+                : "wp:{$node->name} duplicated its spacing attributes as inline CSS that re-serialization deletes — removed the doomed inline copy";
         }
     }
 
