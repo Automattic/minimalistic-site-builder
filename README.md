@@ -33,6 +33,14 @@ The block fixer is implemented entirely in PHP and needs neither Node nor
 `node_modules`. WordPress Playground previews and screenshot tooling still use
 Node. Use `php bin/build.php "…" --no-serve` for a PHP-only build.
 
+> **Breaking change for downstream consumers:** the Node block fixer is gone —
+> `NodeBlockFixer` and `Package::blockFixerScript()` no longer exist. Any host
+> that vendors this package and wrapped the Node script in a sandbox or adapter
+> must delete or rewire that adapter in the same change as the re-vendor.
+> `PhpBlockFixer` runs in-process with zero runtime dependencies; the frozen
+> compatibility artifacts and their regeneration path are documented in
+> `docs/block-fixer-oracle.md`.
+
 ## Build a site
 
 ```bash

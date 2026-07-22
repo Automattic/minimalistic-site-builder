@@ -692,6 +692,35 @@ decide separately whether Node dependencies remain in development artifacts or
 move to a dedicated oracle package. They are removed from production artifacts
 at cutover.
 
+### M4 outcome addendum (July 2026)
+
+What actually happened diverged from the gate above, and the divergence is a
+decision, not an accident:
+
+- The oracle, its regeneration tooling, and the differential CI were removed in
+  `619b8c9` **without** the observation period. The frozen-domain parity
+  evidence (byte-identical goldens, second-invocation no-ops, fail-closed
+  guards) was judged sufficient, and every consumer sheds the Node runtime
+  immediately. The path back to the oracle is documented in
+  `docs/block-fixer-oracle.md`.
+- Post-cutover extensions of the compatibility domain (`1eacd4a`, `4210065`,
+  `a269765`, `b580c20`) are recorded as `amendments` in
+  `tests/fixtures/block-fixer/oracle-manifest.json`.
+  `tests/unit/oracle_manifest_consistency_test.php` now fails when a frozen
+  registry artifact changes without a manifest re-freeze, and every domain
+  extension must ship an end-to-end golden case
+  (`cases/details-static-renderer` is the post-oracle template). Hand-written
+  save output diverged from Gutenberg once (`core/details` attribute ordering);
+  the manifest test plus mandatory goldens exist to catch the next one.
+- `DeprecationAdapters::assertNoUnknownSignature()` deliberately guards only
+  `core/paragraph`. For other blocks, a legacy signature that fails validation
+  and matches no reviewed adapter is re-rendered from sourced attributes and
+  surfaces as DROPPED rows in the report rather than an error. Accepted
+  because the input domain is closed to markup this pipeline generates, and
+  paragraph is the only block whose reviewed adapters admit authored styles.
+  Any future ingestion of non-generated (authored) markup must extend the
+  guard to the affected blocks first.
+
 ---
 
 ## Estimate

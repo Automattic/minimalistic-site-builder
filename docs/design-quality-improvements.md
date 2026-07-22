@@ -60,7 +60,7 @@ step once before failing.
 ### B1. FixBlocksStep strips the inline styles the prompts mandate — P0
 
 The section prompt *requires* card images to carry `style="height:200px;object-fit:cover;width:100%"`, but the
-Node block fixer re-serializes to canonical `save()` output and drops any style not declared in the block-comment
+block fixer re-serializes to canonical `save()` output and drops any style not declared in the block-comment
 attributes. Evidence in both builds:
 
 - `portfolio14/logs/fix-blocks.log`: `core/image: Expected attribute 'style' of value 'border-radius:0px', saw 'border-radius:0px;height:200px;object-fit:cover;width:100%'` (×6) — card grids ship with uneven, uncropped images.
