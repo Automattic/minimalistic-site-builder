@@ -258,3 +258,48 @@ test('SupportDomainGuard admits pinned comment-only group layout and link typogr
         '0',
     ));
 });
+
+test('SupportDomainGuard admits only the exact reviewed inert AI style signatures', function () {
+    $guard = new SupportDomainGuard();
+    $guard->assertSupported(
+        'core/navigation',
+        ['style' => ['fontSize' => 'caption']],
+        '0',
+    );
+    $guard->assertSupported(
+        'core/paragraph',
+        ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => false]]],
+        '0',
+    );
+    $guard->assertSupported(
+        'core/paragraph',
+        ['style' => ['elements' => [
+            'caption' => ['typography' => ['fontStyle' => 'italic']],
+        ]]],
+        '0',
+    );
+
+    foreach ([
+        ['core/navigation', ['style' => ['fontSize' => 'body']]],
+        ['core/navigation', ['style' => ['fontSize' => '0.875rem']]],
+        ['core/group', ['style' => ['fontSize' => 'caption']]],
+        ['core/paragraph', ['style' => ['typography' => ['fontStyleNormal' => false]]]],
+        ['core/paragraph', ['style' => ['typography' => ['fontStyle' => 'normal', 'fontStyleNormal' => false]]]],
+        ['core/paragraph', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => true]]]],
+        ['core/paragraph', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => 0]]]],
+        ['core/paragraph', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => null]]]],
+        ['core/paragraph', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => 'false']]]],
+        ['core/group', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => false]]]],
+        ['core/paragraph', ['style' => ['elements' => [
+            'caption' => ['typography' => ['fontStyle' => 'normal']],
+        ]]]],
+        ['core/paragraph', ['style' => ['elements' => [
+            'caption' => ['typography' => ['fontStyle' => 'italic'], 'extra' => false],
+        ]]]],
+        ['core/group', ['style' => ['elements' => [
+            'caption' => ['typography' => ['fontStyle' => 'italic']],
+        ]]]],
+    ] as [$name, $attributes]) {
+        assert_throws(static fn () => $guard->assertSupported($name, $attributes, '0'));
+    }
+});

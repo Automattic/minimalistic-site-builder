@@ -625,7 +625,7 @@ final class DeprecationAdapters
         if (is_string($align) && $align !== ''
             && in_array('has-text-align-' . $align, $classes, true)
             && !$this->hasShortSpacingPresetSignature($attributes, $originalContent)
-            && !$this->hasAuthoredTypographyCarryoverSignature($attributes, $originalContent)) {
+            && !$this->hasAuthoredStyleCarryoverSignature($attributes, $originalContent)) {
             $matched = true;
             if ($fontClass !== null && !in_array($fontClass, $classes, true)) {
                 // The earlier align deprecations cannot validate when their
@@ -659,8 +659,10 @@ final class DeprecationAdapters
         // that newer support is the reason the current candidate is invalid,
         // the old save validates and Gutenberg's deprecation-phase class
         // recovery carries the authored root classes into className.
+        $elements = $attributes['style']['elements'] ?? null;
         if (!$currentCandidateValid
-            && is_array($attributes['style']['elements'] ?? null)) {
+            && is_array($elements)
+            && is_array($elements['link'] ?? null)) {
             $matched = true;
             $recovered = array_values(array_filter(
                 $classes,
@@ -722,20 +724,32 @@ final class DeprecationAdapters
     }
 
     /**
-     * Selector-less paragraph deprecations preserve authored typography that
-     * is absent from the comment. Do not let the earlier align migration win
+     * Selector-less paragraph deprecations preserve authored styles that are
+     * absent from the comment. Do not let the earlier align migration win
      * when it would discard one of these reviewed generated-theme properties.
      * The final signature guard still rejects any other unmirrored style.
      *
      * @param array<string,mixed> $attributes
      */
-    private function hasAuthoredTypographyCarryoverSignature(
+    private function hasAuthoredStyleCarryoverSignature(
         array $attributes,
         string $originalContent,
     ): bool {
         $actual = $this->rootStyles($originalContent);
         $typography = $attributes['style']['typography'] ?? [];
         $typography = is_array($typography) ? $typography : [];
+
+        // ContrastFix swaps style.color.text for a preset textColor while
+        // intentionally leaving the saved HTML stale for this serializer.
+        // The unmirrored inline color prevents paragraph deprecation index 0
+        // from validating, so the pinned parser reaches selector-less index 6.
+        $authoredColor = $actual['color'] ?? null;
+        $commentColor = $attributes['style']['color']['text'] ?? null;
+        if ($authoredColor !== null
+            && (!is_string($commentColor) || $commentColor !== $authoredColor)) {
+            return true;
+        }
+
         foreach ([
             'letter-spacing' => 'letterSpacing',
             'text-transform' => 'textTransform',

@@ -231,6 +231,115 @@ test('reviewed selector-less paragraph matches the pinned inert let-spacing carr
     assert_contains('letter-spacing:0.18em', $result);
 });
 
+test('reviewed selector-less paragraph carries contrast-repair inline color past align migration', function () {
+    $paragraph = '<!-- wp:paragraph {"align":"center","fontFamily":"body",'
+        . '"fontSize":"caption","style":{"typography":{"fontStyle":"italic",'
+        . '"fontWeight":"400"}},"textColor":"contrast"} -->' . "\n"
+        . '<p class="has-text-align-center has-body-font-family has-caption-font-size" '
+        . 'style="color:#7C7B54;font-style:italic;font-weight:400">Our philosophy</p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($paragraph)->html;
+    assert_eq(
+        '<!-- wp:paragraph {"textColor":"contrast","align":"center",'
+            . '"fontFamily":"body","fontSize":"caption","style":{"typography":{'
+            . '"fontStyle":"italic","fontWeight":"400"}}} -->' . "\n"
+            . '<p class="has-contrast-color has-text-color has-body-font-family '
+            . 'has-caption-font-size has-text-align-center" '
+            . 'style="font-style:italic;font-weight:400;color:#7C7B54">Our philosophy</p>' . "\n"
+            . '<!-- /wp:paragraph -->',
+        $result,
+    );
+    assert_eq($result, $serializer->transform($result)->html);
+});
+
+test('reviewed inert paragraph fontStyleNormal state is retained without rendering CSS', function () {
+    $paragraph = '<!-- wp:paragraph {"fontSize":"caption","textColor":"secondary",'
+        . '"fontFamily":"body","style":{"typography":{"fontStyle":"italic",'
+        . '"fontStyleNormal":false}}} -->' . "\n"
+        . '<p class="has-secondary-color has-text-color has-body-font-family '
+        . 'has-caption-font-size" style="font-style:italic">Closed</p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($paragraph)->html;
+    assert_eq(
+        '<!-- wp:paragraph {"textColor":"secondary","fontFamily":"body",'
+            . '"fontSize":"caption","style":{"typography":{"fontStyle":"italic",'
+            . '"fontStyleNormal":false}}} -->' . "\n"
+            . '<p class="has-secondary-color has-text-color has-body-font-family '
+            . 'has-caption-font-size" style="font-style:italic">Closed</p>' . "\n"
+            . '<!-- /wp:paragraph -->',
+        $result,
+    );
+    assert_eq($result, $serializer->transform($result)->html);
+    assert_true(!str_contains($result, 'font-style-normal'));
+});
+
+test('reviewed inert paragraph caption element state preserves authored italic style', function () {
+    $paragraph = '<!-- wp:paragraph {"fontSize":"caption","style":{"elements":{'
+        . '"caption":{"typography":{"fontStyle":"italic"}}}},"textColor":"base"} -->' . "\n"
+        . '<p class="has-caption-font-size" style="font-style:italic;color:#6E6552">'
+        . 'Plaza de Mayo at nightfall, Buenos Aires — 2008.</p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($paragraph)->html;
+    assert_eq(
+        '<!-- wp:paragraph {"textColor":"base","fontSize":"caption","style":{"elements":{'
+            . '"caption":{"typography":{"fontStyle":"italic"}}}}} -->' . "\n"
+            . '<p class="has-base-color has-text-color has-caption-font-size" '
+            . 'style="font-style:italic;color:#6E6552">'
+            . 'Plaza de Mayo at nightfall, Buenos Aires — 2008.</p>' . "\n"
+            . '<!-- /wp:paragraph -->',
+        $result,
+    );
+    assert_eq($result, $serializer->transform($result)->html);
+});
+
+test('paragraph element-link deprecation still recovers the pinned link class', function () {
+    $paragraph = '<!-- wp:paragraph {"fontSize":"caption","style":{"elements":{'
+        . '"link":{"color":{"text":"var:preset|color|base"}}}}} -->' . "\n"
+        . '<p class="has-caption-font-size"><a href="#">Link</a></p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($paragraph)->html;
+    assert_eq(
+        '<!-- wp:paragraph {"fontSize":"caption","style":{"elements":{'
+            . '"link":{"color":{"text":"var:preset|color|base"}}}}} -->' . "\n"
+            . '<p class="has-link-color has-caption-font-size"><a href="#">Link</a></p>' . "\n"
+            . '<!-- /wp:paragraph -->',
+        $result,
+    );
+    assert_eq($result, $serializer->transform($result)->html);
+});
+
+test('reviewed inert navigation style fontSize remains comment state', function () {
+    $navigation = '<!-- wp:navigation {"textColor":"primary","overlayMenu":"never",'
+        . '"layout":{"type":"flex","justifyContent":"center","flexWrap":"wrap"},'
+        . '"style":{"typography":{"textTransform":"uppercase","letterSpacing":"0.08em"},'
+        . '"spacing":{"blockGap":"var:preset|spacing|md"},"fontSize":"caption"}} -->'
+        . '<!-- wp:navigation-link {"label":"Statement","url":"#artist-statement",'
+        . '"kind":"custom"} /--><!-- /wp:navigation -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($navigation)->html;
+    assert_eq(
+        '<!-- wp:navigation {"textColor":"primary","overlayMenu":"never",'
+            . '"style":{"typography":{"textTransform":"uppercase","letterSpacing":"0.08em"},'
+            . '"spacing":{"blockGap":"var:preset|spacing|md"},"fontSize":"caption"},'
+            . '"layout":{"type":"flex","justifyContent":"center","flexWrap":"wrap"}} -->' . "\n"
+            . '<!-- wp:navigation-link {"label":"Statement","url":"#artist-statement",'
+            . '"kind":"custom"} /-->' . "\n"
+            . '<!-- /wp:navigation -->',
+        $result,
+    );
+    assert_eq($result, $serializer->transform($result)->html);
+    assert_true(!str_contains($result, '"fontSize":"caption","layout"'));
+});
+
 test('reviewed paragraph container layout follows the pinned drop', function () {
     $paragraph = '<!-- wp:paragraph {"align":"center","textColor":"base",'
         . '"style":{"spacing":{"margin":{"top":"var:preset|spacing|md"}}},'

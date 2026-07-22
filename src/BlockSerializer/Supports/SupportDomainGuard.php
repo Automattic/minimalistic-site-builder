@@ -173,7 +173,7 @@ final class SupportDomainGuard
     {
         if (array_key_exists('style', $attributes)) {
             $this->assertPathValue(
-                $attributes['style'],
+                $this->withoutReviewedInertStyleState($name, $attributes['style']),
                 self::STYLE_PATHS,
                 $name,
                 $blockPath,
@@ -268,5 +268,55 @@ final class SupportDomainGuard
                 $valuePath . '.' . $key,
             );
         }
+    }
+
+    /**
+     * Remove exact AI-authored style signatures which the pinned registry
+     * retains in the comment delimiter but never hands to its style engine.
+     * This operates on a validation copy only; the raw authored state remains
+     * available to the normalizer and comment serializer.
+     */
+    private function withoutReviewedInertStyleState(string $name, mixed $style): mixed
+    {
+        if (!is_array($style)) {
+            return $style;
+        }
+
+        // core/navigation consumes preset sizes from top-level fontSize. The
+        // generated bare style.fontSize="caption" spelling is inert.
+        if ($name === 'core/navigation' && ($style['fontSize'] ?? null) === 'caption') {
+            unset($style['fontSize']);
+        }
+
+        // One generated italic paragraph pairs a made-up boolean companion
+        // with the real fontStyle value. The false companion is inert.
+        $typography = $style['typography'] ?? null;
+        if ($name === 'core/paragraph'
+            && is_array($typography)
+            && ($typography['fontStyle'] ?? null) === 'italic'
+            && array_key_exists('fontStyleNormal', $typography)
+            && $typography['fontStyleNormal'] === false) {
+            unset($typography['fontStyleNormal']);
+            $style['typography'] = $typography;
+        }
+
+        // Generated gallery captions copied a theme.json element selector
+        // into paragraph block state. The pinned registry retains this exact
+        // object in the delimiter; the authored root carries the actual CSS.
+        $elements = $style['elements'] ?? null;
+        if ($name === 'core/paragraph'
+            && is_array($elements)
+            && ($elements['caption'] ?? null) === [
+                'typography' => ['fontStyle' => 'italic'],
+            ]) {
+            unset($elements['caption']);
+            if ($elements === []) {
+                unset($style['elements']);
+            } else {
+                $style['elements'] = $elements;
+            }
+        }
+
+        return $style;
     }
 }

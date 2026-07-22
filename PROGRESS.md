@@ -74,7 +74,7 @@ deprecations, fails closed for unsupported registered inputs, and stages all
 files before committing changes. A public invocation runs to a fixed point and
 is idempotent; production builds require neither Node nor `node_modules`.
 
-**Tests: 712 unit + 2 integration = 714 passing.** Run with
+**Tests: 720 unit + 2 integration = 722 passing.** Run with
 `php tests/run.php` and `php tests/run-integration.php`. The integration test
 runs the real `Pipeline` with a `FakeLlm` and asserts the output passes
 `ThemeValidator` (files present, theme.json v3, balanced block grammar, no
