@@ -116,7 +116,8 @@ test('sections passes the configured model into every part request', function ()
         ],
     ]]]);
     $llm = new FakeLlm();
-    // header, footer, one section — in requests() order.
+    // Cache probe, then header, footer, one section in requests() order.
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -124,7 +125,7 @@ test('sections passes the configured model into every part request', function ()
 
     (new SectionsStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
 
-    assert_true(count($llm->calls) === 3, 'one request per part');
+    assert_true(count($llm->calls) === 4, 'one cache probe plus one request per part');
     foreach ($llm->calls as $call) {
         assert_eq('claude-opus-4-8', $call['opts']['model'] ?? null);
     }
@@ -142,6 +143,7 @@ test('sections sends no model key when none is configured', function () {
         ],
     ]]]);
     $llm = new FakeLlm();
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -194,6 +196,7 @@ test('sections passes the configured temperature into every part request', funct
         ],
     ]]]);
     $llm = new FakeLlm();
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -201,7 +204,7 @@ test('sections passes the configured temperature into every part request', funct
 
     (new SectionsStep($llm, $renderer, null, 0.9))->run($project);
 
-    assert_true(count($llm->calls) === 3, 'one request per part');
+    assert_true(count($llm->calls) === 4, 'one cache probe plus one request per part');
     foreach ($llm->calls as $call) {
         assert_eq(0.9, $call['opts']['temperature'] ?? null);
     }

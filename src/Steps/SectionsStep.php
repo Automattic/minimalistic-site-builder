@@ -40,6 +40,8 @@ use Automattic\SiteBuild\Units\SectionUnit;
  */
 final class SectionsStep implements Step
 {
+    private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
+
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
 
@@ -110,7 +112,9 @@ final class SectionsStep implements Step
     public function run(Project $project): void
     {
         $jobs = $this->jobs($project);
-        $parts = $this->llm->completeBatch(self::requestsFor($jobs));
+        $requests = self::requestsFor($jobs);
+        $this->warmSectionCache($requests);
+        $parts = $this->llm->completeBatch($requests);
 
         // Validate EVERY part before writing any, so one bad part doesn't leave
         // a half-written set of files on disk (the build aborts either way).
@@ -131,7 +135,7 @@ final class SectionsStep implements Step
      * Ask each job's unit to render its self-contained LLM request.
      *
      * @param array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}> $jobs
-     * @return array<string,array{prompt:string,model?:string,temperature?:float}>
+     * @return array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}>
      */
     private static function requestsFor(array $jobs): array
     {
@@ -140,6 +144,33 @@ final class SectionsStep implements Step
             $requests[$key] = $job['unit']->request($job['input']);
         }
         return $requests;
+    }
+
+    /**
+     * Warm the exact cached context used by the deterministic first section.
+     * A failed probe only forfeits first-window cache hits; it must not abort
+     * the build or change the subsequent concurrent fan-out.
+     *
+     * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
+     */
+    private function warmSectionCache(array $requests): void
+    {
+        foreach ($requests as $request) {
+            if (!isset($request['cached_prefixes'])) {
+                continue;
+            }
+
+            $opts = $request;
+            unset($opts['prompt']);
+            $opts['max_tokens'] = 1;
+
+            try {
+                $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
+            } catch (\Throwable $e) {
+                fwrite(STDERR, "    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+            }
+            return;
+        }
     }
 
     /**
