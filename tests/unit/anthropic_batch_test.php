@@ -203,6 +203,69 @@ test('bodyFor sends temperature only when set and supported, and applies model/t
     assert_true(!array_key_exists('temperature', $body), 'temperature omitted on a sampling-less model');
 });
 
+test('bodyFor keeps the uncached request body byte-identical to the original string-content shape', function () {
+    $expected = [
+        'model'      => 'claude-sonnet-4-6',
+        'max_tokens' => 16000,
+        'stream'     => true,
+        'messages'   => [
+            ['role' => 'user', 'content' => 'Build a hero section'],
+        ],
+        'system'     => AnthropicClient::systemPreamble(),
+    ];
+
+    $body = AnthropicClient::bodyFor(
+        ['prompt' => 'Build a hero section'],
+        'claude-sonnet-4-6',
+        16000,
+    );
+
+    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+    assert_eq(json_encode($expected, $flags), json_encode($body, $flags));
+    assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'uncached body has no cache marker');
+});
+
+test('bodyFor renders cached prefixes as marked leading text blocks before the varying prompt', function () {
+    $body = AnthropicClient::bodyFor(
+        [
+            'prompt' => 'Build this section.',
+            'cached_prefixes' => ['Shared build context.', 'Shared page context.'],
+        ],
+        'claude-sonnet-4-6',
+        16000,
+    );
+
+    assert_eq([
+        [
+            'type' => 'text',
+            'text' => 'Shared build context.',
+            'cache_control' => ['type' => 'ephemeral'],
+        ],
+        [
+            'type' => 'text',
+            'text' => 'Shared page context.',
+            'cache_control' => ['type' => 'ephemeral'],
+        ],
+        [
+            'type' => 'text',
+            'text' => 'Build this section.',
+        ],
+    ], $body['messages'][0]['content']);
+});
+
+test('bodyFor rejects more than three cached prefixes', function () {
+    assert_throws(function () {
+        AnthropicClient::bodyFor(
+            [
+                'prompt' => 'Build this section.',
+                'cached_prefixes' => ['one', 'two', 'three', 'four'],
+            ],
+            'claude-sonnet-4-6',
+            16000,
+        );
+    });
+});
+
 test('bodyFor puts the language preamble on every request, before any per-request system', function () {
     // The respect-the-prompt-language rule must ride on EVERY call — even a
     // step that sets no system prompt of its own.

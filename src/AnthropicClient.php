@@ -199,7 +199,7 @@ final class AnthropicClient implements Llm
      * concurrently retrying only transient failures, accrues token usage, and
      * returns each request's raw assistant text keyed as the input.
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
      * @return array<array-key,string> raw text keyed as the input
      */
     private function textBatch(array $requests, bool $json): array
@@ -253,8 +253,14 @@ final class AnthropicClient implements Llm
     /**
      * Build one streaming Messages API request body from a request spec — the
      * single place the optional per-request knobs (model, max_tokens,
-     * temperature, system) are mapped onto the wire format, shared by the
-     * single-call and batch paths. Every body carries the system preamble (the
+     * temperature, system, cached_prefixes) are mapped onto the wire format,
+     * shared by the single-call and batch paths. Every cached_prefixes entry is
+     * an ordered reusable prompt layer and becomes a leading text content block
+     * with `cache_control: {"type":"ephemeral"}`; the varying prompt is the
+     * final unmarked text block. At most three cache layers are accepted, keeping
+     * one of Anthropic's four request breakpoints in reserve. With no
+     * cached_prefixes, message content remains the original prompt string.
+     * Every body carries the system preamble (the
      * respect-the-prompt-language rule from prompts/system-preamble.md) as its
      * system prompt, with any per-request system text appended after it.
      * Temperature is only sent when the caller
@@ -263,7 +269,7 @@ final class AnthropicClient implements Llm
      * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure apart from the
      * cached preamble read — unit-testable.
      *
-     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $req
      * @return array<string,mixed>
      */
     public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array

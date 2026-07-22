@@ -14,7 +14,10 @@ interface Llm
     /**
      * Send one prompt, return the assistant's text.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $opts
+     *        cached_prefixes are ordered reusable prompt layers. Supporting
+     *        clients place each before the varying prompt at its own cache
+     *        breakpoint; callers may provide at most three layers.
      */
     public function complete(string $prompt, array $opts = []): string;
 
@@ -22,7 +25,10 @@ interface Llm
      * Send one prompt that must return a JSON value, decode and return it.
      * Tolerates ```json fenced blocks.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $opts
+     *        cached_prefixes are ordered reusable prompt layers. Supporting
+     *        clients place each before the varying prompt at its own cache
+     *        breakpoint; callers may provide at most three layers.
      * @return array<mixed>
      */
     public function completeJson(string $prompt, array $opts = []): array;
@@ -34,7 +40,10 @@ interface Llm
      * is how the pipeline parallelises independent LLM work (theme.json beside
      * the section plan; every landing-page section at once).
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
+     *        cached_prefixes are ordered reusable prompt layers. Supporting
+     *        clients place each before the varying prompt at its own cache
+     *        breakpoint; callers may provide at most three layers per request.
      * @return array<array-key,array<mixed>> decoded JSON keyed as the input
      */
     public function completeJsonBatch(array $requests): array;
@@ -46,7 +55,10 @@ interface Llm
      * markup), so the model returns it verbatim instead of escaping it inside a
      * JSON string (which is brittle and wastes tokens).
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
+     *        cached_prefixes are ordered reusable prompt layers. Supporting
+     *        clients place each before the varying prompt at its own cache
+     *        breakpoint; callers may provide at most three layers per request.
      * @return array<array-key,string> raw assistant text keyed as the input
      */
     public function completeBatch(array $requests): array;
