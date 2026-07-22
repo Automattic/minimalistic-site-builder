@@ -335,3 +335,129 @@ test('retryTextBatch fails loud when the rejected parameter is not in the body',
         AnthropicClient::retryTextBatch($bodies, $transport, []);
     });
 });
+
+test('rejectedParam detects a cache_control rejection', function () {
+    $apiError = 'HTTP 400: {"type":"error","error":{"type":"invalid_request_error",'
+        . '"message":"messages.0.content.0.cache_control: Extra inputs are not permitted"}}';
+    assert_eq('cache_control', AnthropicClient::rejectedParam($apiError));
+});
+
+test('retryTextBatch strips every cache marker and retries exactly once', function () {
+    $bodies = [
+        'section' => [
+            'messages' => [[
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'text', 'text' => 'build', 'cache_control' => ['type' => 'ephemeral']],
+                    ['type' => 'text', 'text' => 'page', 'cache_control' => ['type' => 'ephemeral']],
+                    ['type' => 'text', 'text' => 'section'],
+                ],
+            ]],
+        ],
+    ];
+    $sent = [];
+    $transport = function (array $subset) use (&$sent): array {
+        $sent[] = $subset;
+        $encoded = (string) json_encode($subset['section']);
+        if (str_contains($encoded, 'cache_control')) {
+            return ['section' => [
+                'ok' => false,
+                'transient' => false,
+                'error' => 'HTTP 400: cache_control is not supported',
+                'retry_without' => 'cache_control',
+            ]];
+        }
+        return ['section' => [
+            'ok' => true,
+            'text' => 'done',
+            'input' => 12,
+            'output' => 3,
+            'cache_read_input_tokens' => 8,
+            'cache_creation_input_tokens' => 2,
+        ]];
+    };
+
+    $out = AnthropicClient::retryTextBatch($bodies, $transport, []);
+
+    assert_eq('done', $out['section']['text']);
+    assert_eq(8, $out['section']['cache_read_input_tokens']);
+    assert_eq(2, $out['section']['cache_creation_input_tokens']);
+    assert_eq(2, count($sent), 'one rejected request followed by one immediate retry');
+    assert_true(!str_contains((string) json_encode($bodies), 'cache_control'), 'all nested cache markers were stripped');
+});
+
+test('retryTextBatch does not recur when cache_control is rejected after stripping', function () {
+    $bodies = [
+        'section' => [
+            'messages' => [[
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'text', 'text' => 'shared', 'cache_control' => ['type' => 'ephemeral']],
+                    ['type' => 'text', 'text' => 'varying'],
+                ],
+            ]],
+        ],
+    ];
+    $calls = 0;
+    $transport = function (array $subset) use (&$calls): array {
+        $calls++;
+        return ['section' => [
+            'ok' => false,
+            'transient' => false,
+            'error' => 'HTTP 400: cache_control is not supported',
+            'retry_without' => 'cache_control',
+        ]];
+    };
+
+    assert_throws(function () use (&$bodies, $transport) {
+        AnthropicClient::retryTextBatch($bodies, $transport, []);
+    });
+    assert_eq(2, $calls, 'the rejection is retried once and cannot recur');
+});
+
+test('retryTextBatch completes a strip retry before backing off a transient sibling', function () {
+    $bodies = [
+        'cached' => [
+            'messages' => [[
+                'role' => 'user',
+                'content' => [[
+                    'type' => 'text',
+                    'text' => 'shared',
+                    'cache_control' => ['type' => 'ephemeral'],
+                ]],
+            ]],
+        ],
+        'transient' => ['messages' => []],
+    ];
+    $seen = [];
+    $transientFailures = 0;
+    $transport = function (array $subset) use (&$seen, &$transientFailures): array {
+        $seen[] = array_keys($subset);
+        $out = [];
+        foreach ($subset as $key => $body) {
+            if ($key === 'cached' && str_contains((string) json_encode($body), 'cache_control')) {
+                $out[$key] = [
+                    'ok' => false,
+                    'transient' => false,
+                    'error' => 'HTTP 400: cache_control is not supported',
+                    'retry_without' => 'cache_control',
+                ];
+            } elseif ($key === 'transient' && $transientFailures++ === 0) {
+                $out[$key] = ['ok' => false, 'transient' => true, 'error' => 'temporary'];
+            } else {
+                $out[$key] = ['ok' => true, 'text' => "T:{$key}", 'input' => 0, 'output' => 0];
+            }
+        }
+        return $out;
+    };
+
+    $out = AnthropicClient::retryTextBatch($bodies, $transport, [0]);
+
+    assert_eq([
+        ['cached', 'transient'],
+        ['cached'],
+        ['transient'],
+    ], $seen, 'the stripped key retries immediately before the transient retry round');
+    assert_eq('T:cached', $out['cached']['text']);
+    assert_eq('T:transient', $out['transient']['text']);
+});
