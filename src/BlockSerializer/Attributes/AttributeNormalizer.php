@@ -36,6 +36,21 @@ final class AttributeNormalizer
     {
         $definition = $this->registry->block($node->name);
         $schemas = $this->registry->attributes($node->name);
+        $repairRows = [];
+
+        // Invented style keys — authored paths that exist neither in the
+        // reviewed tree nor in the pinned runtime — are deleted from the raw
+        // comment state before sourcing and validation, so the serialized
+        // output drops the same bytes. Pinned-but-unimplemented families and
+        // value-level mismatches still fail closed in assertSupported().
+        if ($node->attributes !== null) {
+            foreach ($this->supportDomain->pruneInventedStylePaths($node->name, $node->attributes) as $prunedPath) {
+                $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                    'invented-style-pruned:' . $prunedPath,
+                    $blockPath,
+                );
+            }
+        }
 
         // Keep stdClass identity at the sourcing boundary. Rendering receives
         // arrays only after the typed recreation below.
@@ -69,7 +84,6 @@ final class AttributeNormalizer
         // validation, deprecation matching, and originalContent assignment.
         $originalContent = $this->jsTrim($node->innerHTML);
         $attributes = $this->sourcer->source($schemas, $comment, $originalContent);
-        $repairRows = [];
 
         $render = fn (array $candidate): string => $this->saves->save(
             $node->name,

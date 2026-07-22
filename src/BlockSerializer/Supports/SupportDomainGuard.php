@@ -3,9 +3,36 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Supports;
 
+use Automattic\SiteBuild\BlockSerializer\Json\JsonNative;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+
 /** Fail-closed boundary for the reviewed block-support compatibility domain. */
 final class SupportDomainGuard
 {
+    /**
+     * Style families (or family members) that the pinned runtime implements
+     * but this PHP pipeline does not. An unknown authored key at or under one
+     * of these paths may carry real styling or editor metadata, so it is
+     * never pruned as invented state; it stays fail-closed instead. Matching
+     * is by exact path or by `<entry>.` prefix.
+     *
+     * @var list<string>
+     */
+    private const PINNED_UNIMPLEMENTED_STYLE_PATHS = [
+        // Per-block custom CSS and duotone filters render real styles.
+        'css',
+        'filter',
+        'color.duotone',
+        // Section style variations resolve against theme.json at render time.
+        'variation',
+        // Families whose pinned schema is wider than the reviewed tree:
+        // element selectors, grid child placement, position offsets, and
+        // background attachment metadata.
+        'elements',
+        'layout',
+        'position',
+        'background',
+    ];
     /**
      * Closed style path tree implemented by StyleEngine, SupportEngine, and
      * the explicit renderers. `@leaf` means the node may itself be a scalar as
@@ -208,6 +235,100 @@ final class SupportDomainGuard
                     );
                 }
             }
+        }
+    }
+
+    /**
+     * Delete invented style keys — authored paths that exist neither in the
+     * reviewed tree nor in the pinned runtime — from the raw comment state,
+     * and return each pruned dotted path for repair reporting. Mutates
+     * $attributes so the serialized output drops the same bytes.
+     *
+     * Only whole unknown keys are pruned. Value-level mismatches on known
+     * paths, authored objects where the reviewed rule expects a scalar, and
+     * anything at or under a pinned-but-unimplemented family are left for
+     * assertSupported() to fail closed.
+     *
+     * @return list<string>
+     */
+    public function pruneInventedStylePaths(string $name, JsonObject $attributes): array
+    {
+        $style = $attributes->get('style');
+        if (!$style instanceof JsonObject) {
+            return [];
+        }
+        $view = $this->withoutReviewedInertStyleState($name, JsonNative::value($style));
+        if (!is_array($view)) {
+            return [];
+        }
+        $pruned = [];
+        $this->collectInventedPaths($view, self::STYLE_PATHS, '', $pruned);
+        foreach ($pruned as $path) {
+            $this->removeStylePath($style, explode('.', $path));
+        }
+        if ($pruned !== [] && count($style) === 0) {
+            $attributes->remove('style');
+        }
+        return $pruned;
+    }
+
+    /**
+     * @param array<string,mixed> $view
+     * @param array<string,mixed>|true $rule
+     * @param list<string> $pruned
+     */
+    private function collectInventedPaths(array $view, array|bool $rule, string $prefix, array &$pruned): void
+    {
+        if (!is_array($rule)) {
+            return;
+        }
+        foreach ($view as $key => $child) {
+            if (!is_string($key)) {
+                // List shapes are never valid authored style state.
+                continue;
+            }
+            $path = $prefix === '' ? $key : $prefix . '.' . $key;
+            if (in_array($key, ['@leaf', '@values', '@pattern'], true)
+                || !array_key_exists($key, $rule)) {
+                if (!$this->isPinnedUnimplementedStylePath($path)) {
+                    $pruned[] = $path;
+                }
+                continue;
+            }
+            if (is_array($child)) {
+                $this->collectInventedPaths($child, $rule[$key], $path, $pruned);
+            }
+        }
+    }
+
+    private function isPinnedUnimplementedStylePath(string $path): bool
+    {
+        foreach (self::PINNED_UNIMPLEMENTED_STYLE_PATHS as $entry) {
+            if ($path === $entry || str_starts_with($path, $entry . '.')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param list<string> $segments */
+    private function removeStylePath(JsonObject $style, array $segments): void
+    {
+        $key = array_shift($segments);
+        if ($key === null) {
+            return;
+        }
+        if ($segments === []) {
+            $style->remove($key);
+            return;
+        }
+        $child = $style->get($key);
+        if (!$child instanceof JsonObject) {
+            return;
+        }
+        $this->removeStylePath($child, $segments);
+        if (count($child) === 0) {
+            $style->remove($key);
         }
     }
 

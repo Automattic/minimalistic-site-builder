@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonNative;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Supports\StyleEngine;
 use Automattic\SiteBuild\BlockSerializer\Supports\SupportDomainGuard;
 use Automattic\SiteBuild\BlockSerializer\Supports\SupportEngine;
@@ -257,6 +260,100 @@ test('SupportDomainGuard admits pinned comment-only group layout and link typogr
         ['style' => ['elements' => ['link' => ['typography' => ['textDecoration' => 'overline']]]]],
         '0',
     ));
+});
+
+/** @return JsonObject */
+function supports_test_attributes(string $json): JsonObject
+{
+    $decoded = (new JsonDecoder($json))->decode();
+    if (!$decoded instanceof JsonObject) {
+        throw new RuntimeException('supports test attributes fixture must be a JSON object');
+    }
+    return $decoded;
+}
+
+test('SupportDomainGuard prunes invented style keys and keeps reviewed state', function () {
+    $guard = new SupportDomainGuard();
+
+    $attributes = supports_test_attributes('{"style":{"spacing":'
+        . '{"mediaPadding":{"top":"0","right":"0"},"margin":{"top":"1rem"}},'
+        . '"typography":{"fontStretch":"75%","fontWeight":"600"}}}');
+    assert_eq(
+        ['spacing.mediaPadding', 'typography.fontStretch'],
+        $guard->pruneInventedStylePaths('core/media-text', $attributes),
+    );
+    assert_eq(
+        ['style' => [
+            'spacing' => ['margin' => ['top' => '1rem']],
+            'typography' => ['fontWeight' => '600'],
+        ]],
+        JsonNative::objectToArray($attributes),
+    );
+    $guard->assertSupported('core/media-text', JsonNative::objectToArray($attributes), '0');
+
+    // A style object left with no keys is removed entirely.
+    $emptied = supports_test_attributes('{"style":{"spacing":{"mediaPadding":{"top":"0"}}},"align":"wide"}');
+    assert_eq(['spacing.mediaPadding'], $guard->pruneInventedStylePaths('core/media-text', $emptied));
+    assert_eq(['align' => 'wide'], JsonNative::objectToArray($emptied));
+});
+
+test('SupportDomainGuard never prunes pinned-but-unimplemented style families', function () {
+    $guard = new SupportDomainGuard();
+    foreach ([
+        '{"style":{"css":"color:red"}}',
+        '{"style":{"filter":{"blur":"2px"}}}',
+        '{"style":{"variation":"section-1"}}',
+        '{"style":{"color":{"duotone":"var:preset|duotone|dark"}}}',
+        '{"style":{"elements":{"heading":{"color":{"text":"#112233"}}}}}',
+        '{"style":{"layout":{"columnSpan":2}}}',
+        '{"style":{"position":{"bottom":"0"}}}',
+        '{"style":{"background":{"backgroundImage":{"id":42}}}}',
+    ] as $json) {
+        $attributes = supports_test_attributes($json);
+        $before = JsonNative::objectToArray($attributes);
+        assert_eq([], $guard->pruneInventedStylePaths('core/group', $attributes));
+        assert_eq($before, JsonNative::objectToArray($attributes), 'pinned families keep authored bytes');
+        assert_throws(static fn () => $guard->assertSupported('core/group', $before, '0'));
+    }
+});
+
+test('SupportDomainGuard pruning leaves value mismatches and reviewed signatures alone', function () {
+    $guard = new SupportDomainGuard();
+
+    // Value-level mismatches on known paths are not pruned; they fail closed.
+    $badValue = supports_test_attributes('{"style":{"radius":"8px","display":"block"}}');
+    assert_eq([], $guard->pruneInventedStylePaths('core/group', $badValue));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        JsonNative::objectToArray($badValue),
+        '0',
+    ));
+
+    // An authored object where the reviewed rule expects a scalar stays.
+    $badShape = supports_test_attributes('{"style":{"shadow":{"blur":"2px"}}}');
+    assert_eq([], $guard->pruneInventedStylePaths('core/group', $badShape));
+    assert_throws(static fn () => $guard->assertSupported(
+        'core/group',
+        JsonNative::objectToArray($badShape),
+        '0',
+    ));
+
+    // The reviewed inert AI signatures remain retained delimiter state.
+    foreach ([
+        ['core/navigation', '{"style":{"fontSize":"caption"}}'],
+        ['core/paragraph', '{"style":{"typography":{"fontStyle":"italic","fontStyleNormal":false}}}'],
+        ['core/paragraph', '{"style":{"elements":{"caption":{"typography":{"fontStyle":"italic"}}}}}'],
+    ] as [$name, $json]) {
+        $attributes = supports_test_attributes($json);
+        $before = JsonNative::objectToArray($attributes);
+        assert_eq([], $guard->pruneInventedStylePaths($name, $attributes));
+        assert_eq($before, JsonNative::objectToArray($attributes));
+    }
+
+    // Outside its reviewed block, the same spelling is invented and pruned.
+    $inventedElsewhere = supports_test_attributes('{"style":{"fontSize":"caption"}}');
+    assert_eq(['fontSize'], $guard->pruneInventedStylePaths('core/group', $inventedElsewhere));
+    assert_eq([], JsonNative::objectToArray($inventedElsewhere)['style'] ?? []);
 });
 
 test('SupportDomainGuard admits only the exact reviewed inert AI style signatures', function () {

@@ -506,7 +506,11 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
 
 test('PhpBlockFixer rejects nested style and layout variants before staging', function () {
     $cases = [
-        '<!-- wp:group {"style":{"spacing":{"unsupported":"1rem"}}} -->'
+        // color.duotone is a real pinned support this pipeline does not
+        // implement, so it must fail closed rather than be pruned.
+        '<!-- wp:group {"style":{"color":{"duotone":"var:preset|duotone|dark"}}} -->'
+            . '<div class="wp-block-group"></div><!-- /wp:group -->',
+        '<!-- wp:group {"style":{"elements":{"heading":{"color":{"text":"#112233"}}}}} -->'
             . '<div class="wp-block-group"></div><!-- /wp:group -->',
         '<!-- wp:group {"layout":{"type":"grid"}} -->'
             . '<div class="wp-block-group"></div><!-- /wp:group -->',
@@ -525,6 +529,50 @@ test('PhpBlockFixer rejects nested style and layout variants before staging', fu
         } finally {
             php_block_fixer_test_remove(dirname($theme));
         }
+    }
+});
+
+test('PhpBlockFixer prunes invented style keys, reports each removal, and converges', function () {
+    $original = '<!-- wp:group {"style":{"spacing":'
+        . '{"mediaPadding":{"top":"0","right":"0","bottom":"0","left":"0"},"margin":{"top":"2rem"}},'
+        . '"glow":"6px"}} -->'
+        . '<div class="wp-block-group" style="margin-top:2rem"></div><!-- /wp:group -->';
+    $theme = php_block_fixer_test_theme(['parts/invented.html' => $original]);
+    $writer = new PhpBlockFixerTestWriter();
+
+    try {
+        $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/invented.html');
+
+        assert_true(is_string($fixed));
+        assert_true(!str_contains($fixed, 'mediaPadding'), 'the invented spacing key is removed from output');
+        assert_true(!str_contains($fixed, 'glow'), 'the invented root key is removed from output');
+        assert_contains('"margin":{"top":"2rem"}', $fixed, 'known sibling style state survives pruning');
+        assert_contains('  FIXED  parts/invented.html', $report);
+        assert_contains('REPAIR invented-style-pruned:spacing.mediaPadding at 0', $report);
+        assert_contains('REPAIR invented-style-pruned:glow at 0', $report);
+
+        $second = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
+        assert_contains('  ok     parts/invented.html', $second, 'pruned output is a fixed point');
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer removes an entirely invented style attribute and its empty parents', function () {
+    $original = '<!-- wp:group {"style":{"spacing":{"mediaPadding":{"top":"0"}}}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->';
+    $theme = php_block_fixer_test_theme(['parts/invented.html' => $original]);
+
+    try {
+        $report = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/invented.html');
+
+        assert_true(is_string($fixed));
+        assert_true(!str_contains($fixed, '"style"'), 'an emptied style object is not serialized');
+        assert_contains('REPAIR invented-style-pruned:spacing.mediaPadding at 0', $report);
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
     }
 });
 
