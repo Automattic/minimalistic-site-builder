@@ -86,6 +86,7 @@ final class LayoutFixer
         self::repairBareSlugSpacing($markup, $all, $notes, $spacingSlugs);
         self::mirrorHtmlOnlyVerticalSpacing($markup, $all, $notes);
         self::mirrorHtmlOnlyGap($markup, $all, $htmlEdits, $notes);
+        self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
         self::addMissingRootLayout($roots, $notes);
         self::promoteAlignClassNames($all, $notes);
 
@@ -270,6 +271,114 @@ final class LayoutFixer
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Dynamic chrome leaf blocks: empty save(), so authored HTML never
+     * survives re-serialization. All three support spacing block supports,
+     * which render style.spacing.* at runtime.
+     */
+    private const DYNAMIC_CHROME_BLOCKS = ['site-title', 'site-tagline', 'site-logo'];
+
+    /**
+     * A dynamic chrome block the model expanded into HTML loses that HTML
+     * wholesale at re-serialization, and inline spacing on it trips the
+     * rhythm gate even when the attribute already carries the value (block
+     * supports render it at runtime). Move inline padding/margin longhands
+     * into style.spacing.* and delete the inline copies; a disagreeing
+     * attribute is ambiguous and stays for the gate to judge.
+     *
+     * @param object[] $all
+     * @param array{int,int,string}[] $htmlEdits splices for render(): offset, length, replacement
+     * @param string[] $notes
+     */
+    private static function mirrorDynamicChromeSpacing(string $markup, array $all, array &$htmlEdits, array &$notes): void
+    {
+        foreach ($all as $node) {
+            $short = preg_replace('#^core/#', '', $node->name);
+            if ($node->selfClosing || !in_array($short, self::DYNAMIC_CHROME_BLOCKS, true)) {
+                continue;
+            }
+            $tagStart = $node->start + $node->len;
+            $tagHtml = self::wrapperTag($markup, $tagStart);
+            if ($tagHtml === null || !self::hasClassToken($tagHtml, "wp-block-{$short}")) {
+                continue;
+            }
+            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            if ($styleAttr === null) {
+                continue;
+            }
+            $style = $node->attrs->style ?? null;
+            if ($style !== null && !$style instanceof \stdClass) {
+                continue;
+            }
+            $spacing = $style?->spacing ?? null;
+            if ($spacing !== null && !$spacing instanceof \stdClass) {
+                continue;
+            }
+
+            $kept = [];
+            $declared = [];
+            $unmirrorable = false;
+            foreach (explode(';', $styleAttr[0]) as $segment) {
+                if (trim($segment) === '') {
+                    continue;
+                }
+                $colon = strpos($segment, ':');
+                $prop = $colon === false ? '' : strtolower(trim(substr($segment, 0, $colon)));
+                if (preg_match('/\A(padding|margin)-(top|right|bottom|left)\z/', $prop, $m) !== 1) {
+                    $kept[] = trim($segment);
+                    continue;
+                }
+                $value = trim(substr($segment, $colon + 1));
+                if ($value === '' || self::referencesNonPresetVar($value)) {
+                    $unmirrorable = true;
+                    break;
+                }
+                $declared[$m[1]][$m[2]] = self::blockSpacingValue($value);
+            }
+            if ($unmirrorable || $declared === []) {
+                continue;
+            }
+
+            $adopt = [];
+            $conflict = false;
+            foreach ($declared as $property => $sides) {
+                $box = $spacing?->{$property} ?? null;
+                if ($box !== null && !$box instanceof \stdClass) {
+                    $conflict = true; // string shorthand attribute — ambiguous
+                    break;
+                }
+                foreach ($sides as $side => $value) {
+                    $current = $box !== null && property_exists($box, $side) ? $box->{$side} : null;
+                    if ($current === null) {
+                        $adopt[$property][$side] = $value;
+                    } elseif ($current !== $value) {
+                        $conflict = true;
+                        break 2;
+                    }
+                }
+            }
+            if ($conflict) {
+                continue;
+            }
+
+            if ($adopt !== []) {
+                $style ??= $node->attrs->style = new \stdClass();
+                $spacing ??= $style->spacing = new \stdClass();
+                foreach ($adopt as $property => $sides) {
+                    $box = $spacing->{$property} ??= new \stdClass();
+                    foreach ($sides as $side => $value) {
+                        $box->{$side} = $value;
+                    }
+                }
+                $node->dirty = true;
+            }
+            $htmlEdits[] = [$tagStart + $styleAttr[1], strlen($styleAttr[0]), implode(';', $kept)];
+            $notes[] = $adopt !== []
+                ? "wp:{$node->name} declared spacing only in HTML that re-serialization deletes (dynamic block, empty save) — moved it into style.spacing so block supports render it"
+                : "wp:{$node->name} duplicated its spacing attributes as inline CSS that re-serialization deletes — removed the doomed inline copy";
         }
     }
 
