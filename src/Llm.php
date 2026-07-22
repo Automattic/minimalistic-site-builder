@@ -15,9 +15,15 @@ interface Llm
      * Send one prompt, return the assistant's text.
      *
      * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $opts
-     *        cached_prefixes are ordered reusable prompt layers. Supporting
-     *        clients place each before the varying prompt at its own cache
-     *        breakpoint; callers may provide at most three layers.
+     *        cached_prefixes are ordered reusable text layers prepended before
+     *        the varying prompt; blank layers are ignored and callers may
+     *        provide at most three non-blank layers. Anthropic clients mark each
+     *        layer as an explicit ephemeral cache breakpoint; OpenAI-compatible
+     *        clients join the layers and rely on provider-managed prefix caching.
+     *        Cache reuse requires the same model and an identical prefix,
+     *        including tools, system content, and all preceding message content,
+     *        through the reused boundary. On Anthropic Sonnet, the cumulative
+     *        prefix through a breakpoint must be approximately 1,024 tokens.
      */
     public function complete(string $prompt, array $opts = []): string;
 
@@ -26,9 +32,15 @@ interface Llm
      * Tolerates ```json fenced blocks.
      *
      * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $opts
-     *        cached_prefixes are ordered reusable prompt layers. Supporting
-     *        clients place each before the varying prompt at its own cache
-     *        breakpoint; callers may provide at most three layers.
+     *        cached_prefixes are ordered reusable text layers prepended before
+     *        the varying prompt; blank layers are ignored and callers may
+     *        provide at most three non-blank layers. Anthropic clients mark each
+     *        layer as an explicit ephemeral cache breakpoint; OpenAI-compatible
+     *        clients join the layers and rely on provider-managed prefix caching.
+     *        Cache reuse requires the same model and an identical prefix,
+     *        including tools, system content, and all preceding message content,
+     *        through the reused boundary. On Anthropic Sonnet, the cumulative
+     *        prefix through a breakpoint must be approximately 1,024 tokens.
      * @return array<mixed>
      */
     public function completeJson(string $prompt, array $opts = []): array;
@@ -41,9 +53,16 @@ interface Llm
      * the section plan; every landing-page section at once).
      *
      * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
-     *        cached_prefixes are ordered reusable prompt layers. Supporting
-     *        clients place each before the varying prompt at its own cache
-     *        breakpoint; callers may provide at most three layers per request.
+     *        cached_prefixes are ordered reusable text layers prepended before
+     *        the varying prompt; blank layers are ignored and callers may
+     *        provide at most three non-blank layers per request. Anthropic
+     *        clients mark each layer as an explicit ephemeral cache breakpoint;
+     *        OpenAI-compatible clients join the layers and rely on
+     *        provider-managed prefix caching. Cache reuse requires the same
+     *        model and an identical prefix, including tools, system content, and
+     *        all preceding message content, through the reused boundary. On
+     *        Anthropic Sonnet, the cumulative prefix through a breakpoint must
+     *        be approximately 1,024 tokens.
      * @return array<array-key,array<mixed>> decoded JSON keyed as the input
      */
     public function completeJsonBatch(array $requests): array;
@@ -56,9 +75,16 @@ interface Llm
      * JSON string (which is brittle and wastes tokens).
      *
      * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
-     *        cached_prefixes are ordered reusable prompt layers. Supporting
-     *        clients place each before the varying prompt at its own cache
-     *        breakpoint; callers may provide at most three layers per request.
+     *        cached_prefixes are ordered reusable text layers prepended before
+     *        the varying prompt; blank layers are ignored and callers may
+     *        provide at most three non-blank layers per request. Anthropic
+     *        clients mark each layer as an explicit ephemeral cache breakpoint;
+     *        OpenAI-compatible clients join the layers and rely on
+     *        provider-managed prefix caching. Cache reuse requires the same
+     *        model and an identical prefix, including tools, system content, and
+     *        all preceding message content, through the reused boundary. On
+     *        Anthropic Sonnet, the cumulative prefix through a breakpoint must
+     *        be approximately 1,024 tokens.
      * @return array<array-key,string> raw assistant text keyed as the input
      */
     public function completeBatch(array $requests): array;
