@@ -12,6 +12,10 @@ final class NativeStagedFileWriter implements StagedFileWriter
         if ($temporary === false) {
             throw new \RuntimeException("Could not create staged file beside {$target}");
         }
+        // tempnam creates 0600 files and rename keeps that mode; match the
+        // target so replaced theme files stay as readable as the originals.
+        $mode = is_file($target) ? (fileperms($target) & 0777) : (0666 & ~umask());
+        @chmod($temporary, $mode);
         $handle = @fopen($temporary, 'wb');
         if ($handle === false) {
             @unlink($temporary);
