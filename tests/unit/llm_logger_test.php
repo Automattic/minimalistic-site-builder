@@ -94,7 +94,7 @@ test('format shows cache-write tokens and orders both cache components determini
     assert_contains('Tokens       : 25,000 in (18,000 cache-read, 2,048 cache-write) + 5,000 out = 30,000 total', $both);
 });
 
-test('format preserves the legacy token line when cache tokens are explicitly zero', function () {
+test('format uses thousands separators when cache tokens are explicitly zero', function () {
     $response = [
         'text' => 'ok',
         'input' => 19339,
@@ -105,7 +105,7 @@ test('format preserves the legacy token line when cache tokens are explicitly ze
 
     $out = LlmLogger::format('section-hero', ['model' => 'm'], $response, 1.0);
 
-    assert_contains('Tokens       : 19339 in + 16000 out = 35339 total', $out);
+    assert_contains('Tokens       : 19,339 in + 16,000 out = 35,339 total', $out);
     assert_true(strpos($out, 'cache-read') === false, 'zero cache-read tokens are omitted');
     assert_true(strpos($out, 'cache-write') === false, 'zero cache-write tokens are omitted');
 });
@@ -124,18 +124,33 @@ test('format renders message content as readable multi-line text, not escaped JS
     assert_contains('"model": "claude-opus-4-8"', $out, 'scalar params still shown as JSON');
 });
 
-test('renderContent flattens content blocks (text, tool_use, image)', function () {
+test('renderContent marks every content block boundary and cached prefixes', function () {
     $content = [
-        ['type' => 'text', 'text' => 'hello'],
+        ['type' => 'text', 'text' => 'hello', 'cache_control' => ['type' => 'ephemeral']],
         ['type' => 'tool_use', 'name' => 'get_theme', 'input' => ['slug' => 'x']],
         ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => 'image/png']],
     ];
     $out = LlmLogger::renderContent($content);
 
+    assert_contains("--- CONTENT BLOCK 1 [TEXT] ---\n[cached prefix]\nhello", $out);
+    assert_contains('--- CONTENT BLOCK 2 [TOOL_USE] ---', $out);
+    assert_contains('--- CONTENT BLOCK 3 [IMAGE] ---', $out);
     assert_contains('hello', $out);
     assert_contains('[tool_use: get_theme]', $out);
     assert_contains('"slug": "x"', $out);
     assert_contains('[image: image/png]', $out);
+});
+
+test('renderContent keeps boundaries after cache markers are stripped and leaves strings plain', function () {
+    $stripped = LlmLogger::renderContent([
+        ['type' => 'text', 'text' => 'shared'],
+        ['type' => 'text', 'text' => 'varying'],
+    ]);
+
+    assert_contains("--- CONTENT BLOCK 1 [TEXT] ---\nshared", $stripped);
+    assert_contains("--- CONTENT BLOCK 2 [TEXT] ---\nvarying", $stripped);
+    assert_true(!str_contains($stripped, '[cached prefix]'), 'stripped content has no cache marker');
+    assert_eq("plain\nstring", LlmLogger::renderContent("plain\nstring"));
 });
 
 test('log writes a file to the configured directory and is reversible', function () {

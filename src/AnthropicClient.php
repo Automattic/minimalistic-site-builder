@@ -36,7 +36,7 @@ final class AnthropicClient implements Llm
             $file = dirname(__DIR__) . '/prompts/system-preamble.md';
             $text = is_file($file) ? (string) file_get_contents($file) : '';
             if (trim($text) === '') {
-                throw new RuntimeException("Missing prompt template: {$file}");
+                throw new \RuntimeException("Missing prompt template: {$file}");
             }
             $preamble = PromptRenderer::fill(trim($text), ['current_date' => gmdate('j F Y')]);
         }
@@ -153,8 +153,9 @@ final class AnthropicClient implements Llm
             // decode failure as its own FAILED entry so the transcript reflects
             // that the build died on THIS call, not somewhere downstream. The
             // body is rebuilt through bodyFor so the log carries the request as
-            // built (system preamble included) — a sampling parameter stripped
-            // mid-retry is the one divergence it can't see.
+            // built (system preamble included). Sampling parameters or
+            // cache_control markers stripped mid-retry are the divergences it
+            // can't see.
             $error = "Expected JSON, got: {$text}";
             LlmLogger::log(
                 (string) ($opts['log_label'] ?? 'request'),
@@ -177,8 +178,8 @@ final class AnthropicClient implements Llm
                 // Same as completeJson: the transport entry was logged OK, so
                 // log the decode failure as its own FAILED entry too, with the
                 // body rebuilt as textBatch built it (preamble + JSON steer
-                // included; a sampling parameter stripped mid-retry is the one
-                // divergence it can't see).
+                // included). Sampling parameters or cache_control markers
+                // stripped mid-retry are the divergences it can't see.
                 $error = "batch request '{$key}': expected JSON, got: {$text}";
                 $req = $requests[$key];
                 LlmLogger::log(
@@ -270,9 +271,10 @@ final class AnthropicClient implements Llm
      * shared by the single-call and batch paths. Every cached_prefixes entry is
      * an ordered reusable prompt layer and becomes a leading text content block
      * with `cache_control: {"type":"ephemeral"}`; the varying prompt is the
-     * final unmarked text block. At most three cache layers are accepted, keeping
-     * one of Anthropic's four request breakpoints in reserve. With no
-     * cached_prefixes, message content remains the original prompt string.
+     * final unmarked text block. Blank layers are ignored. At most three
+     * nonblank cache layers are accepted, keeping one of Anthropic's four
+     * request breakpoints in reserve. With no effective cached_prefixes,
+     * message content remains the original prompt string.
      * Every body carries the system preamble (the
      * respect-the-prompt-language rule from prompts/system-preamble.md) as its
      * system prompt, with any per-request system text appended after it.
@@ -288,7 +290,21 @@ final class AnthropicClient implements Llm
     public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array
     {
         $model = (string) ($req['model'] ?? $defaultModel);
-        $cachedPrefixes = $req['cached_prefixes'] ?? [];
+        $cachedPrefixes = [];
+        if (array_key_exists('cached_prefixes', $req)) {
+            $providedPrefixes = $req['cached_prefixes'];
+            if (!is_array($providedPrefixes) || !array_is_list($providedPrefixes)) {
+                throw new \RuntimeException('cached_prefixes must be a list of strings');
+            }
+            foreach ($providedPrefixes as $index => $prefix) {
+                if (!is_string($prefix)) {
+                    throw new \RuntimeException("cached_prefixes[{$index}] must be a string");
+                }
+                if (trim($prefix) !== '') {
+                    $cachedPrefixes[] = $prefix;
+                }
+            }
+        }
         if (count($cachedPrefixes) > 3) {
             throw new \RuntimeException('Anthropic requests support at most three cached_prefixes');
         }
@@ -347,10 +363,22 @@ final class AnthropicClient implements Llm
         if (preg_match('/`(temperature|top_p|top_k)` is (?:deprecated|not supported)/', $error, $m) === 1) {
             return $m[1];
         }
+        // Deliberately recovery-biased: a false positive only strips caching
+        // and retries uncached, which is safer than aborting the build.
         if (str_contains($error, 'cache_control')) {
             return 'cache_control';
         }
         return null;
+    }
+
+    /**
+     * Classify recoverable parameter rejections from a complete HTTP response.
+     * Only 400 responses qualify; callers must pass the full, untruncated body.
+     * Pure.
+     */
+    public static function rejectedParamForHttpError(int $status, string $raw): ?string
+    {
+        return $status === 400 ? self::rejectedParam($raw) : null;
     }
 
     /**
@@ -558,10 +586,11 @@ final class AnthropicClient implements Llm
             return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}"];
         }
         if ($status < 200 || $status >= 300) {
+            $param = self::rejectedParamForHttpError($status, $raw);
             $out = ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw)];
-            // A rejected sampling parameter is recoverable: the orchestrator
-            // strips it from the body and retries (see retryTextBatch).
-            if ($status === 400 && ($param = self::rejectedParam($raw)) !== null) {
+            // A rejected recoverable parameter is stripped from the body before
+            // the orchestrator retries (see retryTextBatch).
+            if ($param !== null) {
                 $out['retry_without'] = $param;
             }
             return $out;
@@ -610,9 +639,9 @@ final class AnthropicClient implements Llm
 
     /**
      * Run a streaming request, retrying transient failures with backoff. A
-     * 400 for a sampling parameter the model no longer supports is retried
-     * immediately with that parameter stripped (can't recur — the key is
-     * gone). $body is by-reference so the caller logs what was actually sent.
+     * 400 for a recoverable parameter the model rejects is retried immediately
+     * with that parameter stripped (can't recur — the key is gone). $body is
+     * by-reference so the caller logs what was actually sent.
      *
      * @param array<string,mixed> $body
      * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float}
@@ -624,6 +653,12 @@ final class AnthropicClient implements Llm
         while (true) {
             try {
                 return $this->streamRequest($body);
+            } catch (RejectedApiParameterException $e) {
+                $param = $e->parameter;
+                if (!self::stripRejectedParam($body, $param)) {
+                    throw $e;
+                }
+                fwrite(STDERR, "    (model rejected '{$param}'; retrying without it)\n");
             } catch (TransientApiException $e) {
                 if ($attempt >= count($delays)) {
                     throw new \RuntimeException('Anthropic API failed after retries: ' . $e->getMessage(), 0, $e);
@@ -632,13 +667,6 @@ final class AnthropicClient implements Llm
                 $attempt++;
                 fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
-            } catch (\RuntimeException $e) {
-                $param = self::rejectedParam($e->getMessage());
-                if ($param === null || ($param === 'cache_control' && !str_contains($e->getMessage(), 'HTTP 400'))
-                    || !self::stripRejectedParam($body, $param)) {
-                    throw $e;
-                }
-                fwrite(STDERR, "    (model rejected '{$param}'; retrying without it)\n");
             }
         }
     }
@@ -699,7 +727,12 @@ final class AnthropicClient implements Llm
             if (self::isTransientStatus($status)) {
                 throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
             }
-            throw new \RuntimeException("Anthropic API HTTP {$status}: " . self::truncate($raw));
+            $rejectedParam = self::rejectedParamForHttpError($status, $raw);
+            $message = "Anthropic API HTTP {$status}: " . self::truncate($raw);
+            if ($rejectedParam !== null) {
+                throw new RejectedApiParameterException($message, $rejectedParam);
+            }
+            throw new \RuntimeException($message);
         }
 
         $parsed = self::parseSse($raw);

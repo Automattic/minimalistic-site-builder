@@ -213,16 +213,18 @@ final class OpenAiCompatibleClient implements Llm
 
     /**
      * Build one streaming Chat Completions request body. System text (preamble
-     * + optional per-request system) becomes a system message; the user prompt
-     * is the user message. stream_options.include_usage asks the provider to
-     * attach token usage on the final SSE chunk.
+     * + optional per-request system) becomes a system message. Reusable cached
+     * prefixes are joined ahead of the varying user prompt as plain text;
+     * OpenAI-compatible providers apply automatic server-side prefix caching,
+     * so no cache_control markers are sent. stream_options.include_usage asks
+     * the provider to attach token usage on the final SSE chunk.
      *
      * The token-limit key and whether a custom temperature is sent both depend
      * on $provider + model: OpenAI's o-series / gpt-5+ reasoning models want
      * max_completion_tokens and only accept the default temperature. See
      * maxTokensParam() and restrictsTemperature().
      *
-     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $req
      * @return array<string,mixed>
      */
     public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens, string $provider = 'openai'): array
@@ -233,9 +235,17 @@ final class OpenAiCompatibleClient implements Llm
             $system .= "\n\n" . $req['system'];
         }
 
+        $promptParts = [];
+        foreach ($req['cached_prefixes'] ?? [] as $prefix) {
+            if (trim($prefix) !== '') {
+                $promptParts[] = $prefix;
+            }
+        }
+        $promptParts[] = (string) $req['prompt'];
+
         $messages = [
             ['role' => 'system', 'content' => $system],
-            ['role' => 'user', 'content' => (string) $req['prompt']],
+            ['role' => 'user', 'content' => implode("\n\n", $promptParts)],
         ];
 
         $maxTokens = (int) ($req['max_tokens'] ?? $defaultMaxTokens);

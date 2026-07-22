@@ -141,7 +141,12 @@ final class LlmLogger
         $cacheWrite = (int) ($response['cache_creation_input_tokens'] ?? 0);
         $model = (string) ($request['model'] ?? 'unknown');
 
-        $tokens = sprintf('%d in + %d out = %d total', $input, $output, $input + $output);
+        $tokens = sprintf(
+            '%s in + %s out = %s total',
+            number_format($input),
+            number_format($output),
+            number_format($input + $output)
+        );
         if ($cacheRead !== 0 || $cacheWrite !== 0) {
             $cacheParts = [];
             if ($cacheRead !== 0) {
@@ -240,7 +245,9 @@ final class LlmLogger
     /**
      * Render a message/system `content` value as readable text. A plain string
      * comes through verbatim (real newlines intact); the content-block array
-     * form (text / tool_use / tool_result / image) is flattened block by block.
+     * form (text / tool_use / tool_result / image) has an explicit numbered,
+     * typed boundary for every block. Cache-marked blocks are labelled so a
+     * cached request remains distinguishable from its marker-stripped retry.
      * Pure.
      *
      * @param mixed $content
@@ -255,36 +262,43 @@ final class LlmLogger
         }
 
         $blocks = [];
-        foreach ($content as $block) {
+        foreach ($content as $index => $block) {
+            $type = is_array($block)
+                ? (string) ($block['type'] ?? 'unknown')
+                : (is_string($block) ? 'text' : get_debug_type($block));
+            $rendered = '';
             if (is_string($block)) {
-                $blocks[] = $block;
-                continue;
+                $rendered = $block;
+            } elseif (!is_array($block)) {
+                $rendered = (string) json_encode($block, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            } else {
+                switch ($type) {
+                    case 'text':
+                        $rendered = (string) ($block['text'] ?? '');
+                        break;
+                    case 'image':
+                        $src = $block['source'] ?? [];
+                        $kind = is_array($src) ? (string) ($src['media_type'] ?? $src['type'] ?? 'image') : 'image';
+                        $rendered = "[image: {$kind}]";
+                        break;
+                    case 'tool_use':
+                        $name = (string) ($block['name'] ?? '');
+                        $input = json_encode($block['input'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                        $rendered = "[tool_use: {$name}]\n" . ($input === false ? '' : $input);
+                        break;
+                    case 'tool_result':
+                        $rendered = "[tool_result]\n" . self::renderContent($block['content'] ?? '');
+                        break;
+                    default:
+                        $rendered = (string) json_encode($block, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                }
             }
-            if (!is_array($block)) {
-                $blocks[] = (string) json_encode($block, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                continue;
-            }
-            $type = (string) ($block['type'] ?? '');
-            switch ($type) {
-                case 'text':
-                    $blocks[] = (string) ($block['text'] ?? '');
-                    break;
-                case 'image':
-                    $src = $block['source'] ?? [];
-                    $kind = is_array($src) ? (string) ($src['media_type'] ?? $src['type'] ?? 'image') : 'image';
-                    $blocks[] = "[image: {$kind}]";
-                    break;
-                case 'tool_use':
-                    $name = (string) ($block['name'] ?? '');
-                    $input = json_encode($block['input'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                    $blocks[] = "[tool_use: {$name}]\n" . ($input === false ? '' : $input);
-                    break;
-                case 'tool_result':
-                    $blocks[] = "[tool_result]\n" . self::renderContent($block['content'] ?? '');
-                    break;
-                default:
-                    $blocks[] = (string) json_encode($block, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            }
+
+            $boundary = sprintf('--- CONTENT BLOCK %d [%s] ---', $index + 1, strtoupper($type));
+            $cacheMarker = is_array($block) && array_key_exists('cache_control', $block)
+                ? "\n[cached prefix]"
+                : '';
+            $blocks[] = $boundary . $cacheMarker . "\n" . $rendered;
         }
         return implode("\n", $blocks);
     }

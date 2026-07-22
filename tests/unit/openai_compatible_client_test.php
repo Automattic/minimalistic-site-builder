@@ -56,6 +56,24 @@ test('bodyFor applies per-request model/max_tokens and omits temperature when un
     assert_eq(AnthropicClient::systemPreamble(), $body['messages'][0]['content']);
 });
 
+test('bodyFor prepends cached prefixes to the OpenAI user content without cache markers', function () {
+    $body = OpenAiCompatibleClient::bodyFor(
+        [
+            'prompt' => 'Varying section prompt.',
+            'cached_prefixes' => ['Build context.', '  ', 'Page context.'],
+        ],
+        'gpt-4o',
+        16000,
+        'openai',
+    );
+
+    assert_eq(
+        "Build context.\n\nPage context.\n\nVarying section prompt.",
+        $body['messages'][1]['content'],
+    );
+    assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'OpenAI body has no explicit cache marker');
+});
+
 test('maxTokensParam picks the right token key per provider and model', function () {
     // OpenAI reasoning / gpt-5+ → max_completion_tokens.
     assert_eq(['max_completion_tokens' => 100], OpenAiCompatibleClient::maxTokensParam('openai', 'gpt-5.5', 100));
