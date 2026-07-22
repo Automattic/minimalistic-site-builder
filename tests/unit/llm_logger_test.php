@@ -61,6 +61,55 @@ test('format renders summary header, request, and response', function () {
     assert_contains('<!-- wp:group -->', $out, 'full response text is included');
 });
 
+test('format shows cache-read tokens with thousands separators', function () {
+    $response = [
+        'text' => 'ok',
+        'input' => 19339,
+        'output' => 16000,
+        'cache_read_input_tokens' => 18102,
+        'cache_creation_input_tokens' => 0,
+    ];
+
+    $out = LlmLogger::format('section-hero', ['model' => 'm'], $response, 1.0);
+
+    assert_contains('Tokens       : 19,339 in (18,102 cache-read) + 16,000 out = 35,339 total', $out);
+});
+
+test('format shows cache-write tokens and orders both cache components deterministically', function () {
+    $writeOnly = LlmLogger::format('section-hero', ['model' => 'm'], [
+        'text' => 'ok',
+        'input' => 2345,
+        'output' => 6789,
+        'cache_creation_input_tokens' => 1234,
+    ], 1.0);
+    assert_contains('Tokens       : 2,345 in (1,234 cache-write) + 6,789 out = 9,134 total', $writeOnly);
+
+    $both = LlmLogger::format('section-hero', ['model' => 'm'], [
+        'text' => 'ok',
+        'input' => 25000,
+        'output' => 5000,
+        'cache_read_input_tokens' => 18000,
+        'cache_creation_input_tokens' => 2048,
+    ], 1.0);
+    assert_contains('Tokens       : 25,000 in (18,000 cache-read, 2,048 cache-write) + 5,000 out = 30,000 total', $both);
+});
+
+test('format preserves the legacy token line when cache tokens are explicitly zero', function () {
+    $response = [
+        'text' => 'ok',
+        'input' => 19339,
+        'output' => 16000,
+        'cache_read_input_tokens' => 0,
+        'cache_creation_input_tokens' => 0,
+    ];
+
+    $out = LlmLogger::format('section-hero', ['model' => 'm'], $response, 1.0);
+
+    assert_contains('Tokens       : 19339 in + 16000 out = 35339 total', $out);
+    assert_true(strpos($out, 'cache-read') === false, 'zero cache-read tokens are omitted');
+    assert_true(strpos($out, 'cache-write') === false, 'zero cache-write tokens are omitted');
+});
+
 test('format renders message content as readable multi-line text, not escaped JSON', function () {
     $request = [
         'model'    => 'claude-opus-4-8',

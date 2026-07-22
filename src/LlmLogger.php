@@ -63,7 +63,7 @@ final class LlmLogger
      *
      * @param string $label             call identity (step + variable), e.g. "section-hero"
      * @param array<string,mixed> $request  the Messages API request body that was sent
-     * @param array{text:string,input:int,output:int} $response
+     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int} $response
      * @param float $seconds            wall-clock time the call took
      * @param ?string $error            failure message, or null for a successful call
      */
@@ -127,7 +127,7 @@ final class LlmLogger
      * (or, for a failed call, the error). Pure — unit-testable.
      *
      * @param array<string,mixed> $request
-     * @param array{text:string,input:int,output:int} $response
+     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int} $response
      * @param ?string $error  failure message, or null for a successful call
      */
     public static function format(string $label, array $request, array $response, float $seconds, ?string $error = null): string
@@ -137,7 +137,27 @@ final class LlmLogger
 
         $input = (int) ($response['input'] ?? 0);
         $output = (int) ($response['output'] ?? 0);
+        $cacheRead = (int) ($response['cache_read_input_tokens'] ?? 0);
+        $cacheWrite = (int) ($response['cache_creation_input_tokens'] ?? 0);
         $model = (string) ($request['model'] ?? 'unknown');
+
+        $tokens = sprintf('%d in + %d out = %d total', $input, $output, $input + $output);
+        if ($cacheRead !== 0 || $cacheWrite !== 0) {
+            $cacheParts = [];
+            if ($cacheRead !== 0) {
+                $cacheParts[] = number_format($cacheRead) . ' cache-read';
+            }
+            if ($cacheWrite !== 0) {
+                $cacheParts[] = number_format($cacheWrite) . ' cache-write';
+            }
+            $tokens = sprintf(
+                '%s in (%s) + %s out = %s total',
+                number_format($input),
+                implode(', ', $cacheParts),
+                number_format($output),
+                number_format($input + $output)
+            );
+        }
 
         $header = implode("\n", [
             $rule,
@@ -148,7 +168,7 @@ final class LlmLogger
             'Status       : ' . ($error !== null ? 'FAILED' : 'OK'),
             'Logged at    : ' . date('Y-m-d H:i:s'),
             'Time         : ' . sprintf('%.2fs', $seconds),
-            'Tokens       : ' . sprintf('%d in + %d out = %d total', $input, $output, $input + $output),
+            'Tokens       : ' . $tokens,
         ]);
 
         $body = self::renderRequest($request);
