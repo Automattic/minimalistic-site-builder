@@ -124,11 +124,19 @@ final class CoreBlockRenderer
     /** @param array<string,mixed> $attrs */
     private function details(array $attrs, string $inner): ElementNode
     {
-        return new ElementNode('details', $this->props('core/details', $attrs, [
-            'className' => 'wp-block-details',
-            'open' => !empty($attrs['showContent']),
-            'name' => $attrs['name'] ?? null,
-        ]), [
+        // Gutenberg's save spreads blockProps first, then name={name || undefined}
+        // and open={showContent}: the anchor id and support classes/styles land
+        // before both attributes, and an empty name is omitted entirely.
+        $initial = [];
+        if (array_key_exists('anchor', $attrs)) {
+            $initial['id'] = $attrs['anchor'] === '' ? null : $attrs['anchor'];
+        }
+        $initial['className'] = 'wp-block-details';
+        $props = $this->props('core/details', $attrs, $initial);
+        $name = $attrs['name'] ?? null;
+        $props['name'] = is_string($name) && $name !== '' ? $name : null;
+        $props['open'] = !empty($attrs['showContent']);
+        return new ElementNode('details', $props, [
             new ElementNode('summary', [], [new RawNode(is_string($attrs['summary'] ?? null) ? $attrs['summary'] : '')]),
             new RawNode($inner),
         ]);
