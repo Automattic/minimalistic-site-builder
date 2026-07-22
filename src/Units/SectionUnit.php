@@ -145,6 +145,10 @@ final class SectionUnit extends AbstractMarkupUnit
 
     /**
      * Split the rendered section template at its frozen cache-layer markers.
+     * Cached build/page prefixes are returned with trailing newlines removed
+     * and exactly "\n\n" appended; the varying brief is newline-trimmed and
+     * unsuffixed. The explicit prefix separators are part of the wire contract,
+     * so adjacent Anthropic blocks and OpenAI-compatible text assemble equally.
      *
      * @return array{0:string,1:string,2:string} build layer, page layer, brief
      */

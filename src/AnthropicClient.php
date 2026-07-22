@@ -110,6 +110,11 @@ final class AnthropicClient implements Llm
         ];
     }
 
+    /**
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>,tolerate_empty?:bool,log_label?:string} $opts
+     *        tolerate_empty accepts a successful whitespace-only response as ''
+     *        without retrying; it is intended only for cache-warm probes.
+     */
     public function complete(string $prompt, array $opts = []): string
     {
         // Stream the response: bytes arrive incrementally, so a stalled
