@@ -8,8 +8,15 @@ final class NativeStagedFileWriter implements StagedFileWriter
 {
     public function stage(string $target, string $content): string
     {
-        $temporary = tempnam(dirname($target), '.block-fixer-');
+        $temporary = @tempnam(dirname($target), '.block-fixer-');
         if ($temporary === false) {
+            throw new \RuntimeException("Could not create staged file beside {$target}");
+        }
+        // tempnam silently falls back to the system tmp dir when the requested
+        // directory is not writable; rename() from there may cross filesystems
+        // and degrade to a non-atomic copy. Refuse rather than stage unsafely.
+        if (realpath(dirname($temporary)) !== realpath(dirname($target))) {
+            @unlink($temporary);
             throw new \RuntimeException("Could not create staged file beside {$target}");
         }
         // tempnam creates 0600 files and rename keeps that mode; match the
