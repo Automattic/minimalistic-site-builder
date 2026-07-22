@@ -12,8 +12,11 @@ DESIGN DIRECTION (the committed creative concept for THIS site — the header mu
 PLANNED HERO SECTION (what the header will sit directly above — or float on top of):
 {{hero_brief}}
 
-PAGE OUTLINE (the sections the nav may link to):
+HOMEPAGE OUTLINE (what the header sits above — or floats on — on the front page):
 {{outline}}
+
+SITE PAGES (the whole site — the navigation rule below says how the nav reflects them):
+{{site_pages}}
 
 {{archetype_assignment}}
 
@@ -21,7 +24,7 @@ Header archetype catalog (how to build each):
 
 1. **standard-row** — site title (wp:site-title) or logo on one side, primary wp:navigation on the other, in a single top-level wp:group with a row/flex layout and space-between justification. The conventional choice — lean on the direction's typography and spacing so it doesn't read as a default.
 2. **centered-masthead** — stacked and centered: the wordmark (wp:site-title, generous size, "fontFamily":"heading") on its own centered line, a centered wp:navigation beneath it — e.g. a top-level group holding two inner rows, each with `"layout":{"type":"flex","justifyContent":"center"}`. Suits editorial, broadsheet, and classical directions; a hairline bottom border (`"style":{"border":{"bottom":{"width":"1px","color":"..."}}}`) often completes it.
-3. **minimal-overlay** — the header floats transparently over a full-bleed hero: top-level wp:group with `"className":"header-overlay"`, NO "backgroundColor" at all, and a light "textColor" that reads against the hero image (e.g. `"textColor":"base"` when base is light — pick from the palette). NEVER sticky, no buttons, no clutter — a small site title and a quiet nav at most. The `.header-overlay` CSS (absolute positioning over the first section) already ships in the theme's style.css — just add the class hook; do NOT add `<style>` tags. Only ever assigned when the hero is an image-led, full-bleed cover it can float over — never when the DESIGN DIRECTION's **Canvas** is `framed`: the overlay spans the full viewport while a framed hero keeps a mat of page background around it, so the header would hang over the mat instead of the image.
+3. **minimal-overlay** — the header floats transparently over a full-bleed hero: top-level wp:group with `"className":"header-overlay"`, NO "backgroundColor" at all, and a light "textColor" that reads against the hero image (e.g. `"textColor":"base"` when base is light — pick from the palette). NEVER sticky, no buttons, no clutter — a small site title and a quiet nav at most. The `.header-overlay` CSS (absolute positioning over the first section) already ships in the theme's style.css — just add the class hook; do NOT add `<style>` tags. Only ever assigned when the hero is an image-led, full-bleed cover it can float over — never when the DESIGN DIRECTION's **Canvas** is `framed`: the overlay spans the full viewport while a framed hero keeps a mat of page background around it, so the header would hang over the mat instead of the image. And remember the header renders on EVERY page, floating over each page's opening section — commit to minimal-overlay only when the direction keeps opening imagery consistently dark (or consistently light) site-wide, so the one textColor you pick reads everywhere.
 4. **oversized-wordmark** — the site name is the dominant visual element: wp:site-title at display scale (`"fontSize":"display"` or `"section-title"`, "fontFamily":"heading"), with a small, quiet wp:navigation tucked beside or beneath it. Suits type-driven, brutalist, and studio directions.
 5. **branded-lockup** — a logo-led brand lockup on one side, navigation on the other: wp:site-logo (small — e.g. `{"width":48,"shouldSyncIcon":true}`, optionally `"className":"is-style-rounded"`) beside a tight vertical stack of wp:site-title (compact size, e.g. "fontSize":"medium") over wp:site-tagline (a step smaller, quieter color); put the title+tagline stack in its own inner wp:group with `"style":{"spacing":{"blockGap":"0"}}` so it reads as one unit. Suits friendly, product, boutique, and small-business directions.
 6. **double-decker** — two stacked bars: a slim top strip (wp:site-tagline or a short authored line, small fontSize, quieter or inverted color) above the main row of wp:site-title + wp:navigation, with a hairline border separating the two rows. Suits editorial, news, and commerce directions.
@@ -30,7 +33,7 @@ Header archetype catalog (how to build each):
 Rules:
 - The top-level wp:group MUST declare `"layout":{"type":"constrained"}` (add `"wideSize"` when the direction wants a wider bar) and the title/nav row goes in an inner group with `"align":"wide"`. A top-level group with no "layout" attribute renders its content edge-to-edge at the viewport — broken on wide screens.
 - Give the top-level group vertical breathing room: `"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}}` or more — for minimal-overlay a small base padding already ships in `.header-overlay`, but the other archetypes bring none of their own.
-- Navigation default: the `wp:navigation` should contain `<!-- wp:page-list /-->` so it auto-reflects the site's pages — do NOT hand-author `wp:navigation-link` entries unless a curated menu is clearly wanted (split-nav is the exception: it requires hand-authored links).
+{{nav_rule}}
 - `wp:site-logo` renders NOTHING until the site owner uploads a logo in the editor — that is expected and fine: include it where the archetype calls for it so the slot is ready, keep its declared width modest (40-64), and make sure the header still reads as complete without it (the wp:site-title always carries the identity). NEVER fake a logo with a wp:image or an emoji/character.
 - Sticky is archetype-dependent, NOT a default: NEVER sticky for minimal-overlay; for the other archetypes use `"style":{"position":{"type":"sticky","top":"0px"}}` on the top-level group only when it suits the direction, and give a sticky header an explicit "backgroundColor" so content doesn't show through it.
 - A CTA button (accent color) is allowed only when the archetype and direction call for one — never in minimal-overlay.
@@ -39,6 +42,7 @@ Rules:
 - Keep it self-contained: no header/footer template-part references, no <html>/<body>.
 - Any inline `style` or extra class you write in the HTML MUST be mirrored in the block comment's JSON attributes (supported paths like `"style":{"spacing":{...},"border":{...}}`, `"className"`) — a later build step re-serializes blocks from their attributes and silently deletes styles that exist only in the HTML.
 - Every block comment must be correctly closed and HTML class names must match the block.
+- If the SITE SPEC carries a non-empty `animation_request` AND the element it describes lives in the header (the logo, the site title, the nav — e.g. "the logo should spin on hover"), add `"className":"custom-motion"` to that ONE block; a later build step generates the CSS implementing the request for exactly that class. On dynamic blocks (wp:site-logo, wp:site-title) the comment attribute alone is enough. Do NOT write the animation CSS yourself, and do not use the class anywhere else.
 - LANGUAGE: write any user-facing text you author (nav labels, a CTA button, a tagline) in {{language}} — do not mix languages. Proper nouns and the spec's identity values stay verbatim.
 - IDENTITY: the masthead is the spec's `name`, exactly — prefer wp:site-title (the site title is set from the spec); if you hand-author a wordmark, use `name` verbatim, never a longer descriptor or an invented alternate.
 

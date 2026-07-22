@@ -8,11 +8,15 @@ use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /** @return array{0:Project,1:FakeLlm,2:string} */
-function make_sitespec_fixture(): array
+function make_sitespec_fixture(bool $multiPage = false, ?array $pages = null): array
 {
     $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $meta = ['prompt' => 'A cozy neighborhood bakery', 'multi_page' => $multiPage];
+    if ($pages !== null) {
+        $meta['pages'] = $pages;
+    }
+    $project->writeJson('meta.json', $meta);
     return [$project, new FakeLlm(), $tmp];
 }
 
@@ -140,6 +144,196 @@ test('site-spec throws when language missing or implausible', function () {
     });
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec normalizes the pages tree: slugs slugified and globally unique', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Our Menu', 'purpose' => 'The menu', 'children' => [
+                ['title' => 'Breads', 'slug' => 'Our Menu', 'purpose' => 'Bread list'], // slugifies to our-menu -> collides
+            ]],
+            ['title' => 'Visit', 'slug' => 'visit', 'purpose' => 'Hours and address', 'children' => 'nope'],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq('home', $pages[0]['slug']);
+    assert_eq('our-menu', $pages[1]['slug']);                 // derived from title
+    assert_eq('our-menu-2', $pages[1]['children'][0]['slug']); // deduped across the whole tree
+    assert_eq('Breads', $pages[1]['children'][0]['title']);
+    assert_eq([], $pages[2]['children']);                      // non-array children dropped
+    assert_eq('Hours and address', $pages[2]['purpose']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec without multi_page cuts the tree to the homepage and asks for one page', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(); // multi_page defaults to false
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        // The model disobeyed the one-page instruction — the flag must win.
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => [
+                ['title' => 'News', 'slug' => 'news', 'purpose' => 'Updates'],
+            ]],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'The menu', 'children' => []],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(1, count($pages));
+    assert_eq('home', $pages[0]['slug']);
+    assert_eq([], $pages[0]['children']);
+
+    // The rendered prompt must carry the one-page instruction, not the tree menu.
+    assert_contains('one-page site', $llm->calls[0]['prompt']);
+    assert_true(!str_contains($llm->calls[0]['prompt'], '1-6 top-level pages'), 'no multi-page scope in prompt');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec with multi_page keeps the tree and asks for it', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'The menu', 'children' => []],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(2, count($pages));
+    assert_eq('menu', $pages[1]['slug']);
+    assert_contains('1-6 top-level pages', $llm->calls[0]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec with requested pages fixes the tree — the model contributes only purposes', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, pages: ['Home', 'Menu', 'Contact']);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        // The model added a page, dropped one, and renamed another — none of it sticks.
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Full Menu', 'slug' => 'menu', 'purpose' => 'The menu', 'children' => []],
+            ['title' => 'Gallery', 'slug' => 'gallery', 'purpose' => 'Photos', 'children' => []],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(['home', 'menu', 'contact'], array_column($pages, 'slug'));   // added page gone, dropped page back
+    assert_eq(['Home', 'Menu', 'Contact'], array_column($pages, 'title'));  // rename didn't stick
+    assert_eq('Welcome visitors', $pages[0]['purpose']);  // model purposes kept (matched by slug)
+    assert_eq('The menu', $pages[1]['purpose']);
+    assert_eq('', $pages[2]['purpose']);                  // model dropped it -> synthesized, no purpose
+
+    // The rendered prompt carries the fixed list, not the invent-a-tree scope.
+    assert_contains('"Contact" (slug: contact)', $llm->calls[0]['prompt']);
+    assert_contains('already decided', $llm->calls[0]['prompt']);
+    assert_true(!str_contains($llm->calls[0]['prompt'], '1-6 top-level pages'), 'no invent-scope in prompt');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec requested pages: caller-stated purposes win over the model\'s', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, pages: [
+        ['title' => 'Home', 'slug' => 'home'],
+        ['title' => 'Our Menu', 'purpose' => 'Breads and pastries, with prices'],
+    ]);
+    $llm->queueJson([
+        'name' => 'Hearth & Crumb', 'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Our Menu', 'slug' => 'our-menu', 'purpose' => 'Something else', 'children' => []],
+        ],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq('Breads and pastries, with prices', $pages[1]['purpose']); // caller's wins
+    assert_eq('Welcome visitors', $pages[0]['purpose']);                 // caller left blank -> model's
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec ignores requested pages without multi_page — the flag owns the decision', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(pages: ['Home', 'Menu', 'Contact']); // multi_page false
+    $llm->queueJson(['name' => 'Hearth & Crumb', 'language' => 'en']);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(1, count($pages));
+    assert_eq('home', $pages[0]['slug']);
+    assert_contains('one-page site', $llm->calls[0]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec requestedPages accepts titles and page maps, drops junk', function () {
+    $requested = SiteSpecStep::requestedPages([
+        'Home',
+        '  ',                                                       // blank -> dropped
+        ['title' => 'Our Menu', 'purpose' => 'The menu'],
+        42,                                                         // junk -> dropped
+        ['title' => 'Visit', 'children' => [['title' => 'Directions']]],
+    ]);
+
+    assert_eq(['home', 'our-menu', 'visit'], array_column($requested, 'slug'));
+    assert_eq('The menu', $requested[1]['purpose']);
+    assert_eq('directions', $requested[2]['children'][0]['slug']);
+    assert_eq([], SiteSpecStep::requestedPages(null));
+    assert_eq([], SiteSpecStep::requestedPages('Home, Menu'));      // a bare string is not a list
+
+    exec('true');
+});
+
+test('site-spec defaults pages to a single homepage when the model omits them', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'Solo', 'language' => 'en',
+        'description' => 'A one-page site about one thing.',
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $pages = $project->readJson('siteSpec.json')['pages'];
+    assert_eq(1, count($pages));
+    assert_eq('home', $pages[0]['slug']);
+    assert_eq('Home', $pages[0]['title']);
+    assert_eq('A one-page site about one thing.', $pages[0]['purpose']);
+    assert_eq([], $pages[0]['children']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec pages entries get title fallback from slug and drop junk entries', function () {
+    $pages = SiteSpecStep::normalizePages([
+        ['slug' => 'about-us'],           // no title -> Ucwords from slug
+        'not-a-page',                     // junk entry dropped
+        ['purpose' => 'no slug, no title'], // unsluggable -> page-N fallback
+    ], ['description' => '']);
+
+    assert_eq('About Us', $pages[0]['title']);
+    assert_eq('about-us', $pages[0]['slug']);
+    assert_eq(2, count($pages));
+    assert_true($pages[1]['slug'] !== '', 'fallback slug non-empty');
+
+    exec('true');
 });
 
 test('site-spec throws when meta prompt missing', function () {

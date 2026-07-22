@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (deterministic): collect the AI image placeholders the sections step
@@ -37,6 +38,19 @@ final class CollectImagesStep implements Step
     public function label(): string
     {
         return 'Collect AI image placeholders';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            // Templates are only scanned when they exist; in the default graph
+            // they are written by assemble-pages, which runs after this step.
+            reads: ['theme/parts/*'],
+            writes: ['images.json'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void

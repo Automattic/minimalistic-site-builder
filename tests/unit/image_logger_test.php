@@ -37,16 +37,19 @@ test('image-logger format renders the full prompt, model and params on success',
     assert_contains('A bakery at dawn. Style: photorealistic', $out); // full prompt
 });
 
-/** A failed request is tagged FAILED and shows the error in place of the prompt. */
-test('image-logger format shows the error and status FAILED on failure', function () {
+/** A failed request is tagged FAILED and still logs the full prompt, then the error. */
+test('image-logger format shows the prompt and the error on failure', function () {
     $out = ImageLogger::format('hero.jpg', [
         'model'  => 'imagen-4.0-generate-001',
         'prompt' => 'A bakery at dawn',
     ], [], 'Image proxy HTTP 500: boom');
 
     assert_contains('Status       : FAILED', $out);
+    assert_contains('PROMPT', $out);
+    assert_contains('A bakery at dawn', $out);
     assert_contains('ERROR', $out);
     assert_contains('Image proxy HTTP 500: boom', $out);
+    assert_true(strpos($out, 'PROMPT') < strpos($out, 'ERROR'), 'prompt section precedes the error');
     assert_true(!str_contains($out, 'Output       :'), 'no output line on failure');
 });
 

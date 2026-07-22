@@ -7,7 +7,7 @@ namespace Automattic\SiteBuild;
  * Transport-agnostic LLM interface. Implementations call a single prompt and
  * return the model's text. Keeping this an interface lets steps depend on the
  * contract while tests inject a fake and production injects the real transport
- * (today Anthropic-direct; a wpcom-proxy transport could be swapped in later).
+ * (AnthropicClient or OpenAiCompatibleClient via make_llm() / LLM_PROVIDER).
  */
 interface Llm
 {
@@ -34,8 +34,8 @@ interface Llm
      * is how the pipeline parallelises independent LLM work (theme.json beside
      * the section plan; every landing-page section at once).
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
-     * @return array<string,array<mixed>> decoded JSON keyed as the input
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
+     * @return array<array-key,array<mixed>> decoded JSON keyed as the input
      */
     public function completeJsonBatch(array $requests): array;
 
@@ -46,8 +46,8 @@ interface Llm
      * markup), so the model returns it verbatim instead of escaping it inside a
      * JSON string (which is brittle and wastes tokens).
      *
-     * @param array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
-     * @return array<string,string> raw assistant text keyed as the input
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
+     * @return array<array-key,string> raw assistant text keyed as the input
      */
     public function completeBatch(array $requests): array;
 }

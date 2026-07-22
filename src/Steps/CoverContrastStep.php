@@ -1,0 +1,833 @@
+<?php
+declare(strict_types=1);
+
+namespace Automattic\SiteBuild\Steps;
+
+use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\ContrastFix;
+use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
+
+/**
+ * Step (post-images, deterministic): verify cover text against the REAL image.
+ *
+ * Input:  images.generated.json (generation completion) + theme/assets/*
+ *         (generated images) + theme/parts|templates/*.html
+ *         + plugin/pages/*.html (the seeded page content, where every page's
+ *         section covers live once assemble-pages has run)
+ * Output: covers rewritten (higher dimRatio and/or flipped text colors) so
+ *         their inner text reaches WCAG contrast against the dimmed image;
+ *         findings written to logs/cover-contrast-report.txt.
+ *
+ * ContrastFixStep runs in the pipeline before any image exists, so covers
+ * are only floored to dimRatio 40 there — the LLM picked the text color
+ * against an image it had never seen. Once GenerateImagesStep has produced
+ * the actual pixels this step stops guessing: it measures the average color
+ * of the image region behind the content (by contentPosition), composites
+ * the overlay math on top (dimRatio N = N%-opacity overlay), and if the text
+ * still misses its threshold bumps dimRatio in +10 steps (up to 80) or flips
+ * the text to whichever of base/contrast reads, whichever is reached first.
+ *
+ * Mutations rewrite the block-comment JSON only, then the injected
+ * BlockFixer re-serializes the saved HTML from those attributes (the same
+ * contract as ContrastFixStep). A missing or invalid generation-completion
+ * artifact is a phase-order violation and fails hard. Once that contract is
+ * satisfied, image-analysis problems fail soft: no imagick, unreadable images,
+ * or unparsable covers are skipped with a report line — a build must never die
+ * on a readability polish.
+ */
+final class CoverContrastStep implements Step
+{
+    private const REPORT_FILE = 'cover-contrast-report.txt';
+
+    /** Above this the image is more curtain than picture. */
+    public const MAX_DIM = 80;
+
+    /**
+     * A region whose interquartile luminance spread exceeds this is "busy"
+     * (sky + buildings + crowd in one area): flat-sample ratios can pass
+     * while the texture still defeats the text, so busy regions additionally
+     * require a real overlay behind the content (BUSY_MIN_ALPHA effective
+     * opacity) before any ratio is trusted.
+     */
+    public const BUSY_SPREAD = 0.25;
+
+    /** Minimum effective overlay opacity (stop alpha × dim) behind text on a busy region. */
+    public const BUSY_MIN_ALPHA = 0.35;
+
+    public function __construct(private BlockFixer $fixer) {}
+
+    public function id(): string
+    {
+        return 'cover-contrast';
+    }
+
+    public function label(): string
+    {
+        return 'Cover contrast vs real images';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [
+                GenerateImagesStep::COMPLETION_ARTIFACT,
+                'theme/theme.json',
+                'theme/assets/*',
+                'theme/parts/*',
+                'theme/templates/*',
+                'plugin/pages/*',
+            ],
+            writes: ['theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
+            concurrent: false,
+        );
+    }
+
+    public function run(Project $project): void
+    {
+        if (!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT)) {
+            throw new \RuntimeException('cover-contrast: image generation has not completed');
+        }
+        $completion = $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT);
+        if (($completion['status'] ?? null) !== 'completed') {
+            throw new \RuntimeException('cover-contrast: image generation completion artifact is invalid');
+        }
+
+        if (!$project->exists('theme/theme.json')) {
+            return;
+        }
+        $themeJson = $project->readJson('theme/theme.json');
+        $palette = ContrastFixStep::paletteMap($themeJson);
+        $gradients = ContrastFixStep::gradientMap($themeJson);
+        $globalLink = $themeJson['styles']['elements']['link']['color']['text'] ?? null;
+        $helper = new ContrastFix($palette, $gradients, fontSizes: ContrastFixStep::fontSizeMap($themeJson));
+        $linkDefault = is_string($globalLink) ? $helper->resolveColorValue($globalLink) : null;
+
+        $report = [];
+        $repaired = 0;
+        $written = []; // rel => original markup, for rollback on fixer failure
+
+        if (!extension_loaded('imagick')) {
+            $report[] = 'cover-contrast: imagick not available — covers not verified against images';
+        } else {
+            // The theme's chrome/templates AND the content plugin's pages: by
+            // the time this step runs, assemble-pages has moved every page's
+            // sections (the covers that matter most) into plugin/pages/*.
+            foreach (['theme/parts', 'theme/templates', 'plugin/pages'] as $dir) {
+                foreach (glob($project->path($dir . '/*.html')) ?: [] as $abs) {
+                    $rel = $dir . '/' . basename($abs);
+                    $original = $project->readText($rel);
+                    $doc = BlockMarkup::parse($original);
+                    $fileRepairs = $this->fixCovers($project, $doc, $helper, $linkDefault, $rel, $report);
+                    if ($fileRepairs > 0) {
+                        $project->writeText($rel, $doc->render());
+                        $written[$rel] = $original;
+                        $repaired += $fileRepairs;
+                    }
+                }
+            }
+        }
+
+        // Re-sync the saved HTML with the rewritten attributes, and re-assert
+        // the header/footer layout contract the fixer can migrate away
+        // (same follow-up FixBlocksStep does). The fixer scans a directory's
+        // templates/, parts/, and pages/ subdirs, so the plugin dir (markup in
+        // pages/) goes through the same entry point as the theme.
+        if ($written !== []) {
+            try {
+                if (self::anyUnder($written, 'theme/')) {
+                    $this->fixer->fix($project->themePath());
+                }
+                if (self::anyUnder($written, 'plugin/')) {
+                    $this->fixer->fix($project->pluginPath());
+                }
+                foreach (['theme/parts/header.html', 'theme/parts/footer.html'] as $rel) {
+                    if (!$project->exists($rel)) {
+                        continue;
+                    }
+                    $markup = $project->readText($rel);
+                    $constrained = GeneratedMarkup::constrainedPart($markup);
+                    if ($constrained !== $markup) {
+                        $project->writeText($rel, $constrained);
+                    }
+                }
+            } catch (\RuntimeException $e) {
+                // The repaired attributes were already persisted with the OLD
+                // saved HTML — without the fixer's re-serialization that drift
+                // would ship. Restore the originals instead of keeping it.
+                foreach ($written as $rel => $original) {
+                    $project->writeText($rel, $original);
+                }
+                $repaired = 0;
+                $report[] = 'cover-contrast: block re-serialization failed, cover repairs rolled back: '
+                    . $e->getMessage();
+            }
+        }
+
+        if ($report !== []) {
+            $project->writeText(
+                'logs/' . self::REPORT_FILE,
+                "-- cover contrast (measured against generated images) --\n"
+                . implode("\n", $report) . "\n"
+            );
+        }
+
+        echo sprintf(
+            "  cover-contrast: %d cover(s) adjusted (details: logs/%s)\n",
+            $repaired, self::REPORT_FILE
+        );
+    }
+
+    /**
+     * Whether any written file lives under the given project-relative prefix.
+     *
+     * @param array<string,string> $written rel => original markup
+     */
+    private static function anyUnder(array $written, string $prefix): bool
+    {
+        foreach (array_keys($written) as $rel) {
+            if (str_starts_with($rel, $prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Find every image-backed cover with inner text in a parsed document and
+     * repair the failing ones in place. Returns how many covers changed.
+     *
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string}|null $linkDefault
+     * @param list<string> $report
+     */
+    private function fixCovers(Project $project, BlockMarkup $doc, ContrastFix $helper, ?array $linkDefault, string $rel, array &$report): int
+    {
+        $repairs = 0;
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'cover') {
+                continue;
+            }
+            $attrs = $doc->attrs($i) ?? [];
+            $url = $attrs['url'] ?? null;
+            if (!is_string($url) || ($path = $this->assetPath($project, $url)) === null) {
+                continue;
+            }
+            // Core renders unstyled cover text white (black with is-light) —
+            // not the theme's contrast default.
+            $coverDefault = ($attrs['isDark'] ?? true) === false ? [0, 0, 0] : [255, 255, 255];
+            $texts = $this->coverTexts($doc, $i, $helper, $coverDefault);
+            if ($texts === []) {
+                continue;
+            }
+
+            $position = is_string($attrs['contentPosition'] ?? null) ? $attrs['contentPosition'] : '';
+            $image = self::regionStats($path, $position);
+            if ($image === null) {
+                $report[] = "[{$rel}] cover image unreadable, skipped: " . basename($path);
+                continue;
+            }
+
+            $overlay = self::overlayForPosition(
+                $helper->coverOverlayColors($attrs),
+                $position,
+                $helper->coverGradientCss($attrs)
+            );
+            $dim = (int) ($attrs['dimRatio'] ?? 100);
+            $candidates = array_filter([
+                'base'     => $helper->rgbFor('base'),
+                'contrast' => $helper->rgbFor('contrast'),
+            ]);
+
+            $plan = self::planCover($texts, $overlay, $dim, $image, $candidates);
+            $luma = sprintf(
+                'image luminance %.2f–%.2f',
+                ContrastMath::luminance($image[0]),
+                ContrastMath::luminance($image[count($image) - 1])
+            );
+
+            // Anchors inside the cover follow elements.link, not textColor —
+            // phase one deferred them because the background was unknown, so
+            // they must be checked here, against the plan's final state.
+            $finalOverlay = $plan['overlay'] !== null
+                ? [['rgb' => $candidates[$plan['overlay']], 'alpha' => 1.0]]
+                : $overlay;
+            $linkFixes = $this->planCoverLinks(
+                $doc, $i, $helper, $texts, $linkDefault,
+                $finalOverlay, $plan['dim'], $image, $candidates, $rel, $report
+            );
+
+            if ($plan['dim'] === $dim && $plan['swaps'] === [] && $plan['overlay'] === null
+                && $linkFixes === []) {
+                $report[] = "[{$rel}] cover ok at dimRatio {$dim} ({$luma})";
+                continue;
+            }
+
+            if ($plan['overlay'] !== null) {
+                // The designed overlay can't make any text color read (busy
+                // image, or a gradient with ~zero alpha behind the content):
+                // replace it with a solid palette overlay. Strip the stale
+                // gradient/overlay class tokens so the fixer's custom-class
+                // rescue can't keep the old span styling around.
+                $oldOverlaySlug = is_string($attrs['overlayColor'] ?? null) ? $attrs['overlayColor'] : null;
+                $gradientSlug = is_string($attrs['gradient'] ?? null) ? $attrs['gradient'] : null;
+                unset($attrs['gradient'], $attrs['customGradient']);
+                $attrs['overlayColor'] = $plan['overlay'];
+                foreach (array_filter([
+                    $gradientSlug !== null ? "has-{$gradientSlug}-gradient-background" : null,
+                    'wp-block-cover__gradient-background',
+                    'has-background-gradient',
+                    $oldOverlaySlug !== null ? "has-{$oldOverlaySlug}-background-color" : null,
+                ]) as $stale) {
+                    $doc->replaceInOwnHtml($i, ' ' . $stale, '');
+                }
+            }
+            if ($plan['dim'] !== $dim || $plan['overlay'] !== null) {
+                $attrs['dimRatio'] = $plan['dim'];
+                $doc->setAttrs($i, $attrs);
+                ContrastFix::swapDimClass($doc, $i, $dim, $plan['dim']);
+            }
+            $ownSlugs = array_column($texts, 'ownSlug', 'index');
+            foreach ($plan['swaps'] as $textIndex => $slug) {
+                $textAttrs = $doc->attrs($textIndex) ?? [];
+                if (($textAttrs['textColor'] ?? null) === $slug) {
+                    continue;
+                }
+                $textAttrs['textColor'] = $slug;
+                unset($textAttrs['style']['color']['text']);
+                ContrastFix::pruneEmpty($textAttrs);
+                $doc->setAttrs($textIndex, $textAttrs);
+                $oldSlug = $ownSlugs[$textIndex] ?? null;
+                if ($oldSlug !== null && $oldSlug !== $slug) {
+                    $doc->replaceInOwnHtml($textIndex, "has-{$oldSlug}-color", "has-{$slug}-color");
+                }
+            }
+            foreach ($linkFixes as $target => $slug) {
+                $this->pinLinkColor($doc, $target, $helper, $slug, $finalOverlay, $plan['dim'], $image);
+            }
+            $repairs++;
+
+            $report[] = sprintf(
+                '[%s] cover repaired: dimRatio %d → %d%s%s%s (%s)%s',
+                $rel, $dim, $plan['dim'],
+                $plan['overlay'] === null ? '' : ", overlay → solid {$plan['overlay']} (designed overlay ineffective behind the content)",
+                $plan['swaps'] === [] ? '' : ', text → ' . implode(', ', array_unique($plan['swaps'])),
+                $linkFixes === [] ? '' : ', links → ' . implode(', ', array_unique($linkFixes)),
+                $luma,
+                $plan['pass'] ? '' : ' — still below threshold at max dim, best effort'
+            );
+        }
+        return $repairs;
+    }
+
+    /**
+     * Decide how to make a cover's text readable against the measured image:
+     * first try raising dimRatio alone (keeping the design's colors), then
+     * dimRatio plus swapping failing texts to a candidate palette color.
+     *
+     * When neither works the overlay itself is the problem — a busy image
+     * whose dark and bright areas defeat every text color, or a gradient
+     * whose stop behind the content has ~zero alpha (gradient darkening the
+     * bottom, contentPosition at the top), which makes raising dimRatio a
+     * no-op. Escalation: replace the overlay with a SOLID palette color at
+     * the lowest dim that makes a candidate text color read everywhere
+     * ('overlay' in the result). Last resort: max dim + best candidate.
+     *
+     * Pure — unit-testable without imagick or files.
+     *
+     * @param list<array{index:int, rgb: array{0:int,1:int,2:int}, threshold: float}> $texts
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @param list<array{0:int,1:int,2:int}> $image region samples behind the
+     *        content (see regionStats) — every one must pass
+     * @param array<string, array{0:int,1:int,2:int}> $candidates slug => rgb
+     * @return array{dim:int, swaps: array<int,string>, overlay: ?string, pass: bool}
+     */
+    public static function planCover(array $texts, array $overlay, int $dim, array $image, array $candidates): array
+    {
+        $start = max($dim, ContrastFix::COVER_DIM_FLOOR);
+        $steps = [];
+        for ($d = $start; $d <= self::MAX_DIM; $d += 10) {
+            $steps[] = $d;
+        }
+        if ($steps === []) {
+            $steps = [$dim]; // already dimmed past the cap — evaluate as-is
+        }
+
+        // On a busy region, ratios against flat samples aren't enough — the
+        // texture itself defeats text without a real veil behind it. Only
+        // trust dim steps whose effective overlay opacity reaches the busy
+        // minimum; a zero-alpha gradient stop can never qualify, which is
+        // what pushes misaligned gradients into the solid-overlay escalation.
+        $busy = ContrastMath::luminance($image[count($image) - 1]) - ContrastMath::luminance($image[0])
+            > self::BUSY_SPREAD;
+        $maxStopAlpha = array_reduce($overlay, static fn (float $m, array $s) => max($m, $s['alpha']), 0.0);
+        $trusted = array_values(array_filter(
+            $steps,
+            fn (int $d) => !$busy || $maxStopAlpha * $d / 100 >= self::BUSY_MIN_ALPHA
+        ));
+
+        // Keep the designed text colors if any trusted dim step lets them all pass.
+        foreach ($trusted as $d) {
+            if (self::failing($texts, $overlay, $d, $image) === []) {
+                return ['dim' => $d, 'swaps' => [], 'overlay' => null, 'pass' => true];
+            }
+        }
+
+        // Otherwise the smallest trusted dim where a candidate color rescues
+        // the failing texts (texts that already pass keep their color).
+        foreach ($trusted as $d) {
+            foreach ($candidates as $slug => $rgb) {
+                $failing = self::failing($texts, $overlay, $d, $image);
+                $rescued = array_filter(
+                    $failing,
+                    fn (array $t) => self::minRatio($rgb, $overlay, $d, $image) >= $t['threshold']
+                );
+                if (count($rescued) === count($failing)) {
+                    $swaps = [];
+                    foreach ($failing as $t) {
+                        $swaps[$t['index']] = $slug;
+                    }
+                    return ['dim' => $d, 'swaps' => $swaps, 'overlay' => null, 'pass' => true];
+                }
+            }
+        }
+
+        // Escalation: solid overlay + matching text. Try the darker overlay
+        // with the lighter text first (the common photographic treatment).
+        $ordered = $candidates;
+        uasort($ordered, static fn (array $a, array $b) => ContrastMath::luminance($a) <=> ContrastMath::luminance($b));
+        $slugs = array_keys($ordered);
+        $pairs = [];
+        for ($i = 0; $i < count($slugs); $i++) {
+            for ($j = count($slugs) - 1; $j >= 0; $j--) {
+                if ($i !== $j) {
+                    $pairs[] = [$slugs[$i], $slugs[$j]]; // [overlay, text]
+                }
+            }
+        }
+        foreach ($pairs as [$overlaySlug, $textSlug]) {
+            foreach ([50, 60, 70, self::MAX_DIM] as $d) {
+                $solid = [['rgb' => $candidates[$overlaySlug], 'alpha' => 1.0]];
+                $ok = true;
+                foreach ($texts as $t) {
+                    if (self::minRatio($candidates[$textSlug], $solid, $d, $image) < $t['threshold']) {
+                        $ok = false;
+                        break;
+                    }
+                }
+                if ($ok) {
+                    $swaps = [];
+                    foreach ($texts as $t) {
+                        $swaps[$t['index']] = $textSlug;
+                    }
+                    return ['dim' => $d, 'swaps' => $swaps, 'overlay' => $overlaySlug, 'pass' => true];
+                }
+            }
+        }
+
+        // Best effort: max dim, best candidate for every failing text.
+        $d = $steps[count($steps) - 1];
+        $swaps = [];
+        foreach (self::failing($texts, $overlay, $d, $image) as $t) {
+            $bestSlug = null;
+            $bestRatio = self::minRatio($t['rgb'], $overlay, $d, $image);
+            foreach ($candidates as $slug => $rgb) {
+                $r = self::minRatio($rgb, $overlay, $d, $image);
+                if ($r > $bestRatio) {
+                    $bestRatio = $r;
+                    $bestSlug = $slug;
+                }
+            }
+            if ($bestSlug !== null) {
+                $swaps[$t['index']] = $bestSlug;
+            }
+        }
+        return ['dim' => $d, 'swaps' => $swaps, 'overlay' => null, 'pass' => false];
+    }
+
+    /**
+     * @param list<array{index:int, rgb: array{0:int,1:int,2:int}, threshold: float}> $texts
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @param list<array{0:int,1:int,2:int}> $image
+     * @return list<array{index:int, rgb: array{0:int,1:int,2:int}, threshold: float}>
+     */
+    private static function failing(array $texts, array $overlay, int $dim, array $image): array
+    {
+        return array_values(array_filter(
+            $texts,
+            fn (array $t) => self::minRatio($t['rgb'], $overlay, $dim, $image) < $t['threshold']
+        ));
+    }
+
+    /**
+     * Worst-case ratio of a text color against the overlay-dimmed image:
+     * the minimum across every overlay stop × every image sample.
+     *
+     * @param array{0:int,1:int,2:int} $fg
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @param list<array{0:int,1:int,2:int}> $image
+     */
+    private static function minRatio(array $fg, array $overlay, int $dim, array $image): float
+    {
+        $min = PHP_FLOAT_MAX;
+        foreach ($overlay as $stop) {
+            foreach ($image as $sample) {
+                $bg = ContrastMath::compositeOver($stop['rgb'], $stop['alpha'] * $dim / 100, $sample);
+                $min = min($min, ContrastMath::ratio($fg, $bg));
+            }
+        }
+        return $min;
+    }
+
+    /**
+     * The text rows inside one cover: every text-bearing leaf with its
+     * effective color (explicit, inherited within the cover, or core's
+     * white/black cover default) and WCAG threshold. Descendants that paint
+     * their own background (an opaque group inside the cover) are skipped
+     * entirely: their text does not sit on the photograph — phase one
+     * already judged it against the real background, and "repairing" it
+     * against the image would break a correct result.
+     *
+     * @param array{0:int,1:int,2:int} $inherited effective inherited color
+     * @return list<array{index:int, rgb: array{0:int,1:int,2:int}, ownSlug: ?string,
+     *                    threshold: float, hasAnchor: bool}>
+     */
+    private function coverTexts(BlockMarkup $doc, int $cover, ContrastFix $helper, array $inherited): array
+    {
+        $attrs = $doc->attrs($cover) ?? [];
+        $own = null;
+        if (is_string($attrs['textColor'] ?? null)) {
+            $own = $helper->rgbFor($attrs['textColor']);
+        } elseif (is_string($attrs['style']['color']['text'] ?? null)) {
+            $own = $helper->resolveColorValue($attrs['style']['color']['text'])['rgb'] ?? null;
+        }
+        $inherited = $own ?? $inherited;
+
+        $rows = [];
+        foreach ($doc->children($cover) as $child) {
+            $childAttrs = $doc->attrs($child) ?? [];
+            // Nested covers own their background; so does anything painting
+            // its own — stop at both boundaries.
+            if ($doc->name($child) === 'cover' || self::paintsOwnBackground($childAttrs)) {
+                continue;
+            }
+            $name = $doc->name($child);
+            if (in_array($name, ['paragraph', 'heading', 'list', 'quote', 'pullquote', 'verse', 'site-title'], true)
+                && ContrastFix::visibleText($doc->innerHtml($child)) !== '') {
+                $ownSlug = is_string($childAttrs['textColor'] ?? null)
+                    && $helper->rgbFor($childAttrs['textColor']) !== null
+                    ? $childAttrs['textColor'] : null;
+                $rows[] = [
+                    'index'     => $child,
+                    'rgb'       => $this->coverTextColor($doc, $child, $helper, $inherited),
+                    'ownSlug'   => $ownSlug,
+                    'threshold' => $helper->textThreshold($name, $childAttrs),
+                    'hasAnchor' => stripos($doc->innerHtml($child), '<a ') !== false,
+                ];
+            }
+            $rows = array_merge($rows, $this->coverTexts($doc, $child, $helper, $inherited));
+        }
+        return $rows;
+    }
+
+    /** Whether a block paints its own background (color or gradient). */
+    private static function paintsOwnBackground(array $attrs): bool
+    {
+        return is_string($attrs['backgroundColor'] ?? null)
+            || is_string($attrs['style']['color']['background'] ?? null)
+            || is_string($attrs['gradient'] ?? null)
+            || is_string($attrs['style']['color']['gradient'] ?? null);
+    }
+
+    /** @param array{0:int,1:int,2:int} $inherited @return array{0:int,1:int,2:int} */
+    private function coverTextColor(BlockMarkup $doc, int $i, ContrastFix $helper, array $inherited): array
+    {
+        $attrs = $doc->attrs($i) ?? [];
+        if (is_string($attrs['textColor'] ?? null) && ($rgb = $helper->rgbFor($attrs['textColor'])) !== null) {
+            return $rgb;
+        }
+        if (is_string($attrs['style']['color']['text'] ?? null)
+            && ($resolved = $helper->resolveColorValue($attrs['style']['color']['text'])) !== null) {
+            return $resolved['rgb'];
+        }
+        return $inherited;
+    }
+
+    /**
+     * Check every distinct link-color source among the cover's anchor-bearing
+     * texts against the final overlay state, and decide the repairs: node
+     * (authoring block, or the cover for inherited colors) => passing slug.
+     * Failures nothing rescues are reported as warnings.
+     *
+     * @param list<array{index:int, rgb: array{0:int,1:int,2:int}, ownSlug: ?string,
+     *                    threshold: float, hasAnchor: bool}> $texts
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string}|null $linkDefault
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @param list<array{0:int,1:int,2:int}> $image
+     * @param array<string, array{0:int,1:int,2:int}> $candidates
+     * @param list<string> $report
+     * @return array<int,string> node index => link color slug
+     */
+    private function planCoverLinks(
+        BlockMarkup $doc,
+        int $cover,
+        ContrastFix $helper,
+        array $texts,
+        ?array $linkDefault,
+        array $overlay,
+        int $dim,
+        array $image,
+        array $candidates,
+        string $rel,
+        array &$report,
+    ): array {
+        $sources = []; // fromNode key => {rgb, label, fromNode}
+        foreach ($texts as $row) {
+            if (!$row['hasAnchor']) {
+                continue;
+            }
+            $ctx = $this->linkContextFor($doc, $row['index'], $helper, $linkDefault);
+            if ($ctx !== null) {
+                $sources[$ctx['fromNode'] ?? -1] ??= $ctx;
+            }
+        }
+
+        $fixes = [];
+        foreach ($sources as $ctx) {
+            $ratio = self::minRatio($ctx['rgb'], $overlay, $dim, $image);
+            if ($ratio >= ContrastMath::NORMAL_TEXT) {
+                continue;
+            }
+            $bestSlug = null;
+            $bestRatio = 0.0;
+            foreach ($candidates as $slug => $rgb) {
+                $r = self::minRatio($rgb, $overlay, $dim, $image);
+                if ($r > $bestRatio) {
+                    $bestRatio = $r;
+                    $bestSlug = $slug;
+                }
+            }
+            if ($bestSlug === null || $bestRatio < ContrastMath::NORMAL_TEXT) {
+                $report[] = sprintf(
+                    '[%s] cover links %s: %.2f < %.1f against the image and no candidate passes (warning)',
+                    $rel, $ctx['label'], $ratio, ContrastMath::NORMAL_TEXT
+                );
+                continue;
+            }
+            // Repair where the failing color was authored when that block is
+            // inside the cover; inherited/global colors are pinned on the cover.
+            $target = $ctx['fromNode'];
+            $fixes[$target !== null && $this->isWithin($doc, $target, $cover) ? $target : $cover] = $bestSlug;
+        }
+        return $fixes;
+    }
+
+    /**
+     * The link color anchors under $node render: the nearest authored
+     * elements.link on it or an ancestor, else the theme's global default.
+     *
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string}|null $linkDefault
+     * @return array{rgb: array{0:int,1:int,2:int}, label: string, fromNode: ?int}|null
+     */
+    private function linkContextFor(BlockMarkup $doc, int $node, ContrastFix $helper, ?array $linkDefault): ?array
+    {
+        for ($i = $node; $i !== null; $i = $doc->parent($i)) {
+            $value = ($doc->attrs($i) ?? [])['style']['elements']['link']['color']['text'] ?? null;
+            if (is_string($value) && ($resolved = $helper->resolveColorValue($value)) !== null) {
+                return ['rgb' => $resolved['rgb'], 'label' => $resolved['label'], 'fromNode' => $i];
+            }
+        }
+        if ($linkDefault !== null) {
+            return ['rgb' => $linkDefault['rgb'], 'label' => $linkDefault['label'] . ' (theme default)', 'fromNode' => null];
+        }
+        $primary = $helper->rgbFor('primary');
+        return $primary === null ? null
+            : ['rgb' => $primary, 'label' => 'primary (theme default)', 'fromNode' => null];
+    }
+
+    private function isWithin(BlockMarkup $doc, int $node, int $ancestor): bool
+    {
+        for ($i = $node; $i !== null; $i = $doc->parent($i)) {
+            if ($i === $ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Set elements.link (and a readable hover) on a node. An authored hover
+     * that reads against the final overlay state is preserved.
+     *
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @param list<array{0:int,1:int,2:int}> $image
+     */
+    private function pinLinkColor(BlockMarkup $doc, int $i, ContrastFix $helper, string $slug, array $overlay, int $dim, array $image): void
+    {
+        $attrs = $doc->attrs($i) ?? [];
+        $attrs['style']['elements']['link']['color']['text'] = 'var:preset|color|' . $slug;
+        $authored = $attrs['style']['elements']['link'][':hover']['color']['text'] ?? null;
+        $authoredPasses = is_string($authored)
+            && ($resolved = $helper->resolveColorValue($authored)) !== null
+            && self::minRatio($resolved['rgb'], $overlay, $dim, $image) >= ContrastMath::NORMAL_TEXT;
+        if (!$authoredPasses) {
+            $attrs['style']['elements']['link'][':hover']['color']['text'] = 'var:preset|color|' . $slug;
+        }
+        $doc->setAttrs($i, $attrs);
+    }
+
+    /**
+     * Map a cover url ("theme:./assets/x.jpg" or the Playground-served
+     * "/wp-content/themes/<slug>/assets/x.jpg") to the on-disk asset, if it
+     * exists.
+     */
+    private function assetPath(Project $project, string $url): ?string
+    {
+        $file = null;
+        if (preg_match('~^theme:\./assets/([a-z0-9._-]+)$~i', $url, $m)) {
+            $file = $m[1];
+        } elseif (preg_match('~/assets/([a-z0-9._-]+)$~i', $url, $m)) {
+            $file = $m[1];
+        }
+        if ($file === null) {
+            return null;
+        }
+        $path = $project->themePath('assets/' . $file);
+        return is_file($path) ? $path : null;
+    }
+
+    /**
+     * Luminance statistics of the image region behind the cover content. The
+     * content sits where contentPosition says (default: center), so sample
+     * that half of the image instead of averaging light and dark areas the
+     * text never touches.
+     *
+     * Returns three representative colors — the pixels at the 25th and 75th
+     * luminance percentiles plus the mean — because a busy photo (crowds,
+     * architecture) has no single background color: text must read against
+     * the region's typical dark AND bright areas, and an average of the two
+     * is a color that exists nowhere in the image. The interquartile ends
+     * (not the extremes) keep small specks from vetoing every color.
+     *
+     * Null when the image can't be read.
+     *
+     * @return list<array{0:int,1:int,2:int}>|null [low, mean, high]
+     */
+    public static function regionStats(string $path, string $contentPosition): ?array
+    {
+        if (!extension_loaded('imagick')) {
+            return null;
+        }
+        try {
+            $im = new \Imagick($path);
+            $w = $im->getImageWidth();
+            $h = $im->getImageHeight();
+            if ($w < 2 || $h < 2) {
+                return null;
+            }
+
+            $pos = strtolower($contentPosition);
+            $x = str_contains($pos, 'left') ? 0 : (str_contains($pos, 'right') ? intdiv($w, 2) : intdiv($w, 4));
+            $y = str_contains($pos, 'top') ? 0 : (str_contains($pos, 'bottom') ? intdiv($h, 2) : intdiv($h, 4));
+            $im->cropImage(intdiv($w, 2), intdiv($h, 2), $x, $y);
+
+            $im->resizeImage(24, 24, \Imagick::FILTER_BOX, 1);
+            $pixels = [];
+            $sum = [0, 0, 0];
+            foreach ($im->getPixelIterator() as $row) {
+                foreach ($row as $px) {
+                    $c = $px->getColor();
+                    $rgb = [(int) $c['r'], (int) $c['g'], (int) $c['b']];
+                    $pixels[] = ['rgb' => $rgb, 'lum' => ContrastMath::luminance($rgb)];
+                    $sum[0] += $rgb[0];
+                    $sum[1] += $rgb[1];
+                    $sum[2] += $rgb[2];
+                }
+            }
+            if ($pixels === []) {
+                return null;
+            }
+            usort($pixels, static fn (array $a, array $b) => $a['lum'] <=> $b['lum']);
+            $n = count($pixels);
+            $mean = [
+                (int) round($sum[0] / $n), (int) round($sum[1] / $n), (int) round($sum[2] / $n),
+            ];
+            return [
+                $pixels[(int) floor($n * 0.25)]['rgb'],
+                $mean,
+                $pixels[min($n - 1, (int) floor($n * 0.75))]['rgb'],
+            ];
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The overlay stop(s) the content actually sits on. Picking a single
+     * stop by contentPosition is only sound for a plain vertical gradient
+     * whose direction is known: CSS `0deg` runs bottom→top, so its FIRST
+     * stop is the bottom. Angled/horizontal/radial gradients, and centered
+     * content, are evaluated against every stop (worst case).
+     *
+     * @param list<array{rgb: array{0:int,1:int,2:int}, alpha: float}> $overlay
+     * @return list<array{rgb: array{0:int,1:int,2:int}, alpha: float}>
+     */
+    public static function overlayForPosition(array $overlay, string $contentPosition, ?string $gradientCss = null): array
+    {
+        if (count($overlay) <= 1) {
+            return $overlay;
+        }
+        $pos = strtolower($contentPosition);
+        if (!str_contains($pos, 'top') && !str_contains($pos, 'bottom')) {
+            return $overlay;
+        }
+        $direction = self::gradientVerticalDirection($gradientCss);
+        if ($direction === null) {
+            return $overlay;
+        }
+        $first = $overlay[0];
+        $last = $overlay[count($overlay) - 1];
+        [$top, $bottom] = $direction === 'down' ? [$first, $last] : [$last, $first];
+        return [str_contains($pos, 'top') ? $top : $bottom];
+    }
+
+    /**
+     * 'down' when the gradient runs top→bottom (the CSS default), 'up' for
+     * the reverse (`0deg` / `to top`), null when it isn't a plain vertical
+     * linear gradient. A null css keeps the legacy top→bottom assumption
+     * (callers that never had the gradient source).
+     */
+    private static function gradientVerticalDirection(?string $gradientCss): ?string
+    {
+        if ($gradientCss === null || trim($gradientCss) === '') {
+            return 'down';
+        }
+        $css = strtolower($gradientCss);
+        $at = strpos($css, 'linear-gradient(');
+        if ($at === false) {
+            return null; // radial/conic — no vertical stop order to trust
+        }
+        $inner = substr($css, $at + strlen('linear-gradient('));
+        if (preg_match('/^\s*(-?\d+(?:\.\d+)?)(deg|grad|rad|turn)\s*,/', $inner, $m)) {
+            if ($m[2] !== 'deg') {
+                return null;
+            }
+            $deg = fmod(fmod((float) $m[1], 360.0) + 360.0, 360.0);
+            return $deg === 180.0 ? 'down' : ($deg === 0.0 ? 'up' : null);
+        }
+        if (preg_match('/^\s*to\s+([a-z][a-z ]*?)\s*,/', $inner, $m)) {
+            $sides = preg_split('/\s+/', trim($m[1])) ?: [];
+            if (in_array('left', $sides, true) || in_array('right', $sides, true)) {
+                return null;
+            }
+            return in_array('top', $sides, true) ? 'up'
+                : (in_array('bottom', $sides, true) ? 'down' : null);
+        }
+        return 'down'; // no direction token = CSS default, "to bottom"
+    }
+}

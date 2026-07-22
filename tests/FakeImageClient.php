@@ -25,6 +25,9 @@ final class FakeImageClient implements ImageClient
     /** Prompt substrings that should fail generation (for partial-failure tests). */
     public array $failPromptSubstrings = [];
 
+    /** Prompt substrings the fake safety filter rejects (`filtered` failures). */
+    public array $filterPromptSubstrings = [];
+
     public function model(): string
     {
         return 'fake-image-model';
@@ -51,16 +54,21 @@ final class FakeImageClient implements ImageClient
                 'sample_image_size' => $spec['sample_image_size'] ?? null,
                 'mime'              => $spec['mime'] ?? null,
             ]];
-            $results[$i] = ($this->fail || $this->shouldFail((string) $spec['prompt']))
-                ? ['ok' => false, 'error' => 'fake image failure']
-                : ['ok' => true, 'bytes' => $this->bytes];
+            $prompt = (string) $spec['prompt'];
+            if ($this->fail || $this->matches($prompt, $this->failPromptSubstrings)) {
+                $results[$i] = ['ok' => false, 'error' => 'fake image failure'];
+            } elseif ($this->matches($prompt, $this->filterPromptSubstrings)) {
+                $results[$i] = ['ok' => false, 'error' => 'Image safety filter rejected the prompt: fake rai', 'filtered' => true];
+            } else {
+                $results[$i] = ['ok' => true, 'bytes' => $this->bytes];
+            }
         }
         return $results;
     }
 
-    private function shouldFail(string $prompt): bool
+    private function matches(string $prompt, array $needles): bool
     {
-        foreach ($this->failPromptSubstrings as $needle) {
+        foreach ($needles as $needle) {
             if (str_contains($prompt, $needle)) {
                 return true;
             }

@@ -3,15 +3,21 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step 1 (deterministic): scaffold a new block theme.
  *
  * Input:  none
  * Output: theme/style.css and theme/readme.txt with {{placeholders}} that the
- *         ApplyIdentityStep fills once the site name/slug are known.
+ *         ApplyIdentityStep fills once the site name/slug are known, plus the
+ *         static motion kit copied verbatim into theme/assets/motion/ (all
+ *         four profiles — the design direction hasn't been chosen yet; the
+ *         finalize-theme step later prunes to the committed profile and
+ *         enqueues the kit).
  */
 final class ScaffoldThemeStep implements Step
 {
@@ -25,10 +31,41 @@ final class ScaffoldThemeStep implements Step
         return 'Scaffold theme';
     }
 
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: [],
+            writes: [
+                'theme/style.css',
+                'theme/readme.txt',
+                'theme/assets/motion/*',
+            ],
+            concurrent: false,
+        );
+    }
+
     public function run(Project $project): void
     {
         $project->writeText('theme/style.css', self::STYLE_CSS);
         $project->writeText('theme/readme.txt', self::README);
+        self::copyMotionKit($project);
+    }
+
+    /** Copy the hand-written motion kit into the theme, byte-for-byte. */
+    private static function copyMotionKit(Project $project): void
+    {
+        $kit = Package::motionDir();
+        foreach (['motion.css', 'motion.js'] as $file) {
+            $project->writeText('theme/assets/motion/' . $file, (string) file_get_contents("{$kit}/{$file}"));
+        }
+        foreach (glob("{$kit}/profiles/*.css") ?: [] as $profile) {
+            $project->writeText(
+                'theme/assets/motion/profiles/' . basename($profile),
+                (string) file_get_contents($profile)
+            );
+        }
     }
 
     private const STYLE_CSS = <<<CSS
@@ -78,6 +115,15 @@ final class ScaffoldThemeStep implements Step
             justify-content: center;
         }
 
+        /* Core gives pullquotes a font-relative 4em vertical pad and a trailing
+           margin, which silently multiplies the whitespace around fluid display
+           quotes. Keep the editorial emphasis on the shared spacing scale so it
+           composes predictably with the section rhythm. */
+        .wp-site-blocks .wp-block-pullquote {
+            margin-block: 0;
+            padding-block: var(--wp--preset--spacing--lg);
+        }
+
         /* Chrome-less overlay header (the header part opts in via className="header-overlay"):
            floats transparently over the full-bleed hero instead of stacking above it. The
            absolute positioning resolves against the viewport, not the padded body, so the
@@ -106,6 +152,13 @@ final class ScaffoldThemeStep implements Step
            padding by design, so the root flow gap is never wanted: kill it on every
            top-level child. */
         .wp-site-blocks > * {
+            margin-block-start: 0;
+        }
+
+        /* Page content is the same stack of self-padded section bands, seeded by
+           the companion content plugin into post content — kill the flow gap
+           there too, or a page-background stripe opens between adjacent bands. */
+        .wp-block-post-content > * {
             margin-block-start: 0;
         }
 

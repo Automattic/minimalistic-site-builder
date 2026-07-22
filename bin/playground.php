@@ -5,11 +5,12 @@ use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
- * Start a local WordPress Playground instance with a generated theme activated.
+ * Start a local WordPress Playground instance with a generated theme activated
+ * (plus the companion content plugin, when the project has one).
  *
  *   php bin/playground.php <slug> [--port=9400] [--workers=2]
  *
- * Mounts projects/<slug>/theme into wp-content/themes/<slug> and activates it
+ * Mounts projects/<slug>/theme (and plugin) into wp-content and activates them
  * via a Blueprint, then boots Playground (downloads WordPress on first run).
  * Requires Node.js (uses `npx @wp-playground/cli`). Runs in the foreground;
  * Ctrl-C to stop.
@@ -73,22 +74,37 @@ if ($port !== $requestedPort) {
     fwrite(STDERR, "Port {$requestedPort} is in use — using {$port} instead.\n");
 }
 
-// Blueprint: set the site identity, activate the mounted theme, log in. The
-// identity comes from PlaygroundArtifact::siteOptions so this local preview
-// matches the published Playground bundles.
+// Blueprint: set the site identity, activate the mounted theme (and the
+// mounted content plugin, which seeds the pages), log in. The identity comes
+// from PlaygroundArtifact::siteOptions so this local preview matches the
+// published Playground bundles.
+$steps = [
+    // Neutralize outbound HTTP — a blocked fetch (e.g. wp:embed's oEmbed
+    // discovery) would pin a wasm worker forever. See offlineGuardStep().
+    PlaygroundArtifact::offlineGuardStep(),
+    ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
+    ['step' => 'activateTheme', 'themeFolderName' => $slug],
+];
+$pluginDir = repo_path("projects/{$slug}/plugin");
+$hasPlugin = is_file($pluginDir . '/site-content.php');
+if ($hasPlugin) {
+    // AFTER the theme: the seeder resolves asset URLs against the active
+    // stylesheet when it creates the pages.
+    $steps[] = ['step' => 'activatePlugin', 'pluginPath' => "{$slug}-content/site-content.php"];
+}
 $blueprint = [
     '$schema'      => 'https://playground.wordpress.net/blueprint-schema.json',
     'landingPage'  => '/',
     'login'        => true,
-    'steps'        => [
-        ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
-        ['step' => 'activateTheme', 'themeFolderName' => $slug],
-    ],
+    'steps'        => $steps,
 ];
-$blueprintPath = repo_path("projects/{$slug}/.playground-blueprint.json");
+// Pid-stamped, instance-unique path — the why lives on the helper.
+$blueprintPath = playground_blueprint_path($slug, getmypid());
 file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+register_shutdown_function(static fn () => @unlink($blueprintPath));
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
+$pluginMount = $hasPlugin ? $pluginDir . ':/wordpress/wp-content/plugins/' . $slug . '-content' : null;
 
 // `server` (not `start`) because it accepts --workers, which caps the
 // request-handling worker threads — each one holds a full PHP wasm runtime, so
@@ -107,10 +123,11 @@ $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
 // only mount is the one we pass. Booting from scratch costs no extra time
 // versus the old `start --reset`, which wiped the site every run anyway.
 $cmd = sprintf(
-    'npx --yes @wp-playground/cli@latest server --login --workers=%s --port=%d --mount=%s --blueprint=%s',
+    'npx --yes @wp-playground/cli@latest server --login --workers=%s --port=%d --mount=%s%s --blueprint=%s',
     escapeshellarg($workers),
     $port,
     escapeshellarg($mount),
+    $pluginMount !== null ? ' --mount=' . escapeshellarg($pluginMount) : '',
     escapeshellarg($blueprintPath)
 );
 

@@ -31,6 +31,8 @@ Because the boundary between steps is **files, not in-memory objects**, anything
 
 1. **Declarative steps.** Each step declares `id` + `reads[]` + `writes[]` + concurrency. The ordered array becomes *derived* data. Any host's composition is then **validated** — a step whose inputs aren't yet produced is a construction-time error, not a runtime one. The graph is data, not hand-assembled code.
 
+   As of BIGR-645, steps implement `declaration(): StepDeclaration`, lists are validated by `StepGraph` at assembly time (default seed `meta.json`), the CLI default graph lives in `StepComposition::default()`, and hosts can export order via `StepGraph::describe()` (portable data only — no host tool names). See `docs/superpowers/specs/2026-07-16-bigr-645-declarative-steps-design.md`.
+
 2. **Portable `Unit` type.** Fan-out units are `generate(array $input): output` with **no `Project`**. `ConcurrentStep` becomes a thin `Project`-adapter over units. Statelessness is *structural* (the type can't touch disk), units are reusable across a lean composition and a richer one, and the wpcom ability body *is* `Unit::generate($input)`.
 
 Together these make host composition safe and step reuse provable.

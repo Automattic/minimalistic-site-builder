@@ -9,6 +9,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM): write theme/fonts.php — the module that loads the theme's Google
@@ -64,6 +65,17 @@ final class FontsPhpStep implements Step
     public function label(): string
     {
         return 'Write fonts.php';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['theme/theme.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            writes: ['theme/fonts.php'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void
@@ -699,14 +711,16 @@ final class FontsPhpStep implements Step
         }
     }
 
-    /** All generated parts + templates concatenated, for the usage scan. */
+    /**
+     * All generated markup concatenated for the usage scan: theme parts +
+     * templates + the content plugin's pages (a font style used only in
+     * seeded content must still be loaded by the theme).
+     */
     private static function themeMarkup(Project $project): string
     {
         $markup = '';
-        foreach (['parts', 'templates'] as $dir) {
-            foreach (glob($project->themePath($dir) . '/*.html') ?: [] as $file) {
-                $markup .= "\n" . (string) file_get_contents($file);
-            }
+        foreach ($project->markupFiles() as $file) {
+            $markup .= "\n" . (string) file_get_contents($file);
         }
         return $markup;
     }

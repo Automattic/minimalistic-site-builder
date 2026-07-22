@@ -5,10 +5,12 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDeclaration;
 
 /**
  * Step (LLM): commit to ONE distinctive creative concept for the site BEFORE any
@@ -33,7 +35,7 @@ use Automattic\SiteBuild\Step;
  * call degrades to a built-in "invent one bold concept" seed instead of
  * aborting the build.
  *
- * This is the single source of design intent. The theme-json, section-plan and
+ * This is the single source of design intent. The theme-json, page-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
  * the structured fields into the injected brief), so two sites diverge in
  * concept — not just in hex values.
@@ -84,6 +86,17 @@ final class DesignDirectionStep implements Step
     public function label(): string
     {
         return 'Choose design direction';
+    }
+
+    public function declaration(): StepDeclaration
+    {
+        return new StepDeclaration(
+            id: $this->id(),
+            label: $this->label(),
+            reads: ['meta.json', 'siteSpec.json'],
+            writes: ['designDirection.json'],
+            concurrent: false,
+        );
     }
 
     public function run(Project $project): void
@@ -204,7 +217,7 @@ final class DesignDirectionStep implements Step
      * what is present. Pure — unit-testable.
      *
      * @param mixed $raw
-     * @return ?array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,signature_device:string,hero_composition:string}
+     * @return ?array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string}
      */
     public static function normalize($raw): ?array
     {
@@ -239,6 +252,11 @@ final class DesignDirectionStep implements Step
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => strtolower(trim((string) ($raw['canvas'] ?? ''))) === 'framed' ? 'framed' : 'full-bleed',
+            // The motion profile is a fixed list (the kit ships exactly these);
+            // anything unrecognized falls back to the default so every build
+            // commits to ONE profile the downstream steps can gate on.
+            'motion'           => self::motionProfile($raw['motion'] ?? null),
+            'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
             'signature_device' => trim((string) ($raw['signature_device'] ?? '')),
             'hero_composition' => trim((string) ($raw['hero_composition'] ?? '')),
         ];
@@ -289,6 +307,23 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band; cap bands at `"align":"wide"`, never `"align":"full"`.';
         } elseif ($canvas !== '') {
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
+        }
+
+        // Render the motion commitment with its executable meaning: the
+        // section prompts gate their motion-class placement on this line.
+        $motion = strtolower(trim((string) ($direction['motion'] ?? '')));
+        if (in_array($motion, Motion::PROFILES, true)) {
+            $meaning = match ($motion) {
+                'none'    => 'the site is completely static; use NO motion classes',
+                'minimal' => 'hover micro-interactions only; `hover-lift`/`hover-reveal` are the ONLY motion classes allowed',
+                default   => [
+                    'calm'      => 'soft fades and gentle settling',
+                    'energetic' => 'quick diagonal arrivals with spring overshoot',
+                    'dramatic'  => 'long directional masks and a cinematic hero focus pull',
+                ][$motion] . ' — place motion classes sparingly, per their budget rules',
+            };
+            $note = trim((string) ($direction['motion_note'] ?? ''));
+            $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
         foreach ([
@@ -345,5 +380,27 @@ final class DesignDirectionStep implements Step
             return '';
         }
         return trim((string) ($project->readJson(self::FILE)['canvas'] ?? ''));
+    }
+
+    /**
+     * The committed motion profile, gating the motion-sanity strip and the
+     * finalize-theme kit wiring. Fails closed: no direction, or one that
+     * predates/garbled the field, means `none` — a step run in isolation must
+     * not surprise-animate a site whose direction never committed to motion.
+     */
+    public static function motionProfileFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return 'none';
+        }
+        $motion = strtolower(trim((string) ($project->readJson(self::FILE)['motion'] ?? '')));
+        return in_array($motion, Motion::PROFILES, true) ? $motion : 'none';
+    }
+
+    /** Coerce a raw motion value onto the fixed profile list. */
+    private static function motionProfile(mixed $raw): string
+    {
+        $motion = strtolower(trim((string) (is_string($raw) ? $raw : '')));
+        return in_array($motion, Motion::PROFILES, true) ? $motion : Motion::DEFAULT_PROFILE;
     }
 }

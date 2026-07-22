@@ -47,12 +47,18 @@ When creating multiple images that will be displayed together in a row or grid (
 - `watercolor` — Watercolor painting style
 
 **Transparent backgrounds (`.png`):**
-An image whose extension is `.png` is generated with a TRANSPARENT background, so it sits directly on whatever the page background is. Use `.png` only for assets that need this: small decorative ornaments, flourishes, dividers, accent motifs and logo marks — typically `illustration`, `minimalist` or `flat-design` style. Everything photographic or full-bleed stays `.jpg` (photos have no transparency to preserve, and JPEG is much smaller).
+An image whose extension is `.png` is generated with a TRANSPARENT background, so it sits directly on whatever the page background is. Use `.png` only for assets that need this: small decorative ornaments, accent motifs and pictorial logo marks (an emblem or symbol — never lettering; see the no-rendered-text rule under Subject guidelines) — typically `illustration`, `minimalist` or `flat-design` style. Everything photographic or full-bleed stays `.jpg` (photos have no transparency to preserve, and JPEG is much smaller).
 
-For a `.png` image, describe ONLY the subject itself — never a backdrop. Do not write "centered on empty dark space", "on a white field" or any background color into the subject: the background is transparent, and describing one would get it painted into the image. Example: `theme:./assets/grapevine-flourish.png` with alt `AI_IMAGE: A small symmetrical grapevine flourish with a single grape cluster and two curling tendrils, thin gold linework | decorative accent beneath a section subheading | illustration | landscape`
+Decorative ornaments are a scarce garnish, not a layout tool — ration them hard:
+- Most sections need NO decorative image. Emit one only where the design direction's signature device genuinely calls for a drawn motif, and never more than ONE decorative image per section.
+- REUSE, don't multiply: when the page repeats an ornament, reference the SAME `theme:./assets/<name>.png` path (with the same alt) everywhere it appears. Repeated references to one filename produce one shared asset; minting near-identical variants (`leaf-sprig-2.png`, `leaf-sprig-menu.png`, …) wastes generations and makes the page look cluttered.
+- NEVER generate a plain rule, hairline, straight underline or simple divider as an image — build those with a `wp:separator`, a border style, or spacing. A generated `.png` is only justified for a genuinely pictorial motif (a leaf sprig, a knot, a crest, a stamp); a straight line rendered as AI imagery reads as noise and often fails to isolate cleanly.
+
+For a `.png` image, describe ONLY the subject itself — never a backdrop. Do not write "centered on empty dark space", "on a white field" or any background color into the subject: the background is transparent, and describing one would get it painted into the image. Give the motif clearly visible stroke weight — ultra-thin hairline linework tends to vanish when the background is keyed out. Example: `theme:./assets/grapevine-flourish.png` with alt `AI_IMAGE: A small symmetrical grapevine flourish with a single grape cluster and two curling tendrils, thin gold linework | decorative accent beneath a section subheading | illustration | landscape`
 
 **Subject guidelines:**
 - 1-3 specific sentences describing ONLY the image itself: what it shows and from what point of view (composition, framing, vantage, mood). This is the actual generation subject — do not put the page placement here, that goes in `page-context`.
+- NEVER ask the image to render text. No words, names, letters, numerals, wordmarks, monograms, mottos, signage copy, labels, or "calligraphy/hand-lettering of <words>" — in any language or script. Image models garble glyphs and invent fake scripts, and raster text can't be read by assistive tech, translated, or restyled. Everything meant to be read is real HTML typography styled by the theme. If a plan or design note asks for lettered imagery (a hand-lettered name, a calligraphic line), express it as styled heading/paragraph text instead and keep imagery purely pictorial. Incidental illegible text inside a photographic scene (a distant storefront, a menu blur) is fine — text as the subject is not.
 - Describe content and composition, NOT photographic grade or style treatment. A single site-wide grade (color vs black-and-white, film grain, light quality, color grading) is applied to every image automatically at generation time — do not restate or contradict it in the subject (no "black and white", "golden hour color", "muted grey tones", "35mm grain" and the like). Per-image grading would make adjacent images clash.
 - Make sibling images in the same section describe their distinct subject so they don't read alike.
 - For cover/hero backgrounds, keep the focal subject off-center with calm, low-detail areas so the overlaid text (described in `page-context`) stays legible.
@@ -74,18 +80,22 @@ For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOT
 ### Example: Complete Hero Section
 
 ```html
-<!-- wp:cover {"url":"theme:./assets/hero-mountain-dawn.jpg","dimRatio":50,"align":"full","minHeight":80,"minHeightUnit":"vh"} -->
-<div class="wp-block-cover alignfull" style="min-height:80vh">
-    <span aria-hidden="true" class="wp-block-cover__background has-background-dim-50 has-background-dim"></span>
-    <img class="wp-block-cover__image-background" alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
-    <div class="wp-block-cover__inner-container">
-        <!-- wp:heading {"textAlign":"center","textColor":"background","style":{"typography":{"fontSize":"clamp(2.5rem, 5vw, 3.5rem)"}}} -->
-        <h2 class="wp-block-heading has-text-align-center has-background-color has-text-color">Into the High Country</h2>
-        <!-- /wp:heading -->
-        <!-- wp:paragraph {"align":"center","textColor":"background"} -->
-        <p class="has-text-align-center has-background-color has-text-color">Guided treks through the alpine wilderness.</p>
-        <!-- /wp:paragraph -->
+<!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->
+<div class="wp-block-group alignfull" style="margin-top:0">
+    <!-- wp:cover {"url":"theme:./assets/hero-mountain-dawn.jpg","dimRatio":50,"align":"full","minHeight":80,"minHeightUnit":"vh"} -->
+    <div class="wp-block-cover alignfull" style="min-height:80vh">
+        <span aria-hidden="true" class="wp-block-cover__background has-background-dim-50 has-background-dim"></span>
+        <img class="wp-block-cover__image-background" alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
+        <div class="wp-block-cover__inner-container">
+            <!-- wp:heading {"level":1,"textAlign":"center","textColor":"base","fontFamily":"heading","fontSize":"display"} -->
+            <h1 class="wp-block-heading has-text-align-center has-base-color has-text-color has-heading-font-family has-display-font-size">Into the High Country</h1>
+            <!-- /wp:heading -->
+            <!-- wp:paragraph {"align":"center","textColor":"base","fontSize":"lead"} -->
+            <p class="has-text-align-center has-base-color has-text-color has-lead-font-size">Guided treks through the alpine wilderness.</p>
+            <!-- /wp:paragraph -->
+        </div>
     </div>
+    <!-- /wp:cover -->
 </div>
-<!-- /wp:cover -->
+<!-- /wp:group -->
 ```

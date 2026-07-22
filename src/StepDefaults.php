@@ -9,45 +9,57 @@ namespace Automattic\SiteBuild;
  * including hosts that only load autoload.php. CLI helpers step_models() /
  * step_temperatures() delegate here.
  *
- * Env overrides: LLM_MODEL, LLM_MODEL_<STEP>, LLM_TEMPERATURE,
- * LLM_TEMPERATURE_<STEP>.
+ * Models come from the active provider's large/small tiers in config/models.json
+ * (see ModelConfig): the provider is chosen by LLM_PROVIDER (which `--provider`
+ * sets), and each step uses its configured tier. Env overrides still win, in
+ * order: LLM_MODEL_<STEP> (one step, any model) > LLM_MODEL / LLM_MODEL_SMALL
+ * (the run-wide large / small tier) > the provider tier default.
+ *
+ * Env overrides: LLM_PROVIDER, LLM_MODEL, LLM_MODEL_SMALL, LLM_MODEL_<STEP>,
+ * LLM_TEMPERATURE, LLM_TEMPERATURE_<STEP>.
  */
 final class StepDefaults
 {
-    /** The model used by any LLM step that isn't given a more specific one. */
+    /** Active provider: LLM_PROVIDER, else the config default. */
+    public static function provider(): string
+    {
+        return strtolower((string) Env::get('LLM_PROVIDER', ModelConfig::defaultProvider()));
+    }
+
+    /**
+     * The run-wide "large" model: any LLM step without a more specific one uses
+     * this. LLM_MODEL overrides the active provider's large tier.
+     */
     public static function model(): string
     {
-        return Env::get('LLM_MODEL', 'claude-opus-4-8');
+        return Env::get('LLM_MODEL') ?? ModelConfig::tierModel(self::provider(), 'large');
+    }
+
+    /** The run-wide "small" model. LLM_MODEL_SMALL overrides the provider's small tier. */
+    public static function smallModel(): string
+    {
+        return Env::get('LLM_MODEL_SMALL') ?? ModelConfig::tierModel(self::provider(), 'small');
     }
 
     /**
      * Per-step model selection. Only LLM steps appear; deterministic steps make
-     * no LLM calls.
+     * no LLM calls. Each step's tier comes from config/models.json; a matching
+     * LLM_MODEL_<STEP> env var (e.g. LLM_MODEL_SITE_SPEC) overrides it with any
+     * model id, from any provider.
      *
      * @return array<string,string> step id => model id
      */
     public static function models(): array
     {
-        $default = self::model();
-        return [
-            // Fast, cheap prompt clean-up at the very start — small model by default.
-            'refine-prompt' => Env::get('LLM_MODEL_REFINE_PROMPT', 'claude-haiku-4-5'),
-            'site-spec'    => Env::get('LLM_MODEL_SITE_SPEC',    'claude-haiku-4-5'),
-            // Design direction is the creative seed every later step builds on, so
-            // it runs on the best model by default; override to trade cost/quality.
-            'design-direction' => Env::get('LLM_MODEL_DESIGN_DIRECTION', $default),
-            // Brainstorming concept seeds is cheap divergence work — small model.
-            'design-direction-seeds' => Env::get('LLM_MODEL_DESIGN_DIRECTION_SEEDS', 'claude-haiku-4-5'),
-            'theme-json'   => Env::get('LLM_MODEL_THEME_JSON',   $default),
-            // Planning is light and structural — cheap/fast model by default.
-            'section-plan' => Env::get('LLM_MODEL_SECTION_PLAN', 'claude-haiku-4-5'),
-            // Section markup is the quality-critical work — best model by default.
-            'sections'     => Env::get('LLM_MODEL_SECTIONS',     $default),
-            // One small CSS appendix with a strict validator — best model by default.
-            'page-styles'  => Env::get('LLM_MODEL_PAGE_STYLES',  $default),
-            // fonts.php behind a strict validator; scan-built fallback otherwise.
-            'fonts-php'    => Env::get('LLM_MODEL_FONTS_PHP',    $default),
-        ];
+        $large = self::model();
+        $small = self::smallModel();
+
+        $out = [];
+        foreach (ModelConfig::stepTiers() as $step => $tier) {
+            $envKey = 'LLM_MODEL_' . strtoupper(str_replace('-', '_', $step));
+            $out[$step] = Env::get($envKey, $tier === 'small' ? $small : $large);
+        }
+        return $out;
     }
 
     /**
@@ -64,9 +76,10 @@ final class StepDefaults
             'site-spec'        => self::temperature('SITE_SPEC', null),
             'design-direction' => self::temperature('DESIGN_DIRECTION', 1.0),
             'theme-json'       => self::temperature('THEME_JSON', null),
-            'section-plan'     => self::temperature('SECTION_PLAN', null),
+            'page-plan'        => self::temperature('PAGE_PLAN', null),
             'sections'         => self::temperature('SECTIONS', 0.9),
             'page-styles'      => self::temperature('PAGE_STYLES', null),
+            'custom-motion'    => self::temperature('CUSTOM_MOTION', null),
             'fonts-php'        => self::temperature('FONTS_PHP', null),
         ];
     }

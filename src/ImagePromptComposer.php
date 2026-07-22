@@ -38,7 +38,7 @@ namespace Automattic\SiteBuild;
  * sheddable context first and keeps the subject and grade intact.
  *
  * The aspect ratio is intentionally absent from this text — it is sent to the
- * endpoint as a structured parameter (WpcomImageClient::aspectRatio / buildBody).
+ * endpoint as a structured parameter (Imagen::aspectRatio / buildBody).
  */
 final class ImagePromptComposer
 {
@@ -46,7 +46,9 @@ final class ImagePromptComposer
      * @param string             $subject     what the image shows and from what POV
      * @param string             $pageContext where/how the image is used on the page
      * @param string             $style       one of the AI_IMAGE style keywords
-     * @param string             $siteContext a factual sentence about the site
+     * @param string             $siteContext a factual site-context phrase that
+     *        leads with a noun ("the website “X”. Description…" — see
+     *        GenerateImagesStep::siteContext), so it reads after "used as … on"
      * @param string             $imageGrade  the project-wide photographic grade
      *        from the design direction, applied to every image
      * @param bool               $transparent whether the asset needs a transparent
@@ -100,16 +102,21 @@ final class ImagePromptComposer
 
         // Page and site context only steer mood/composition — they are NOT drawn,
         // so they are framed as guidance and omitted entirely when there is none.
-        $sentences = [];
-        if ($pageContext !== '') {
-            $sentences[] = "This image is used as {$pageContext}.";
+        // The two fold into ONE sentence ("used as X on the website Y") — the
+        // site context leads with a noun phrase (GenerateImagesStep::siteContext)
+        // precisely so it reads after "on".
+        if ($pageContext !== '' && $siteContext !== '') {
+            $where = "This image is used as {$pageContext} on {$siteContext}";
+        } elseif ($pageContext !== '') {
+            $where = "This image is used as {$pageContext}.";
+        } elseif ($siteContext !== '') {
+            $where = "This image appears on {$siteContext}";
+        } else {
+            $where = '';
         }
-        if ($siteContext !== '') {
-            $sentences[] = "This is for a site about: {$siteContext}";
-        }
-        $guidance = $sentences === [] ? '' : 'Context to guide the subject, mood and '
+        $guidance = $where === '' ? '' : 'Context to guide the subject, mood and '
             . 'composition only — do not render any of it as text or literal objects: '
-            . implode(' ', $sentences);
+            . $where;
 
         $prompt = $renderer->render('image-prompt.md', [
             'subject'             => $subject,
@@ -123,6 +130,6 @@ final class ImagePromptComposer
         // normalise the surrounding whitespace, then cap to the model's hard input
         // limit (sheds trailing context first — see class doc).
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
-        return WpcomImageClient::fitToTokens($prompt, WpcomImageClient::MAX_PROMPT_TOKENS);
+        return Imagen::fitToTokens($prompt, Imagen::MAX_PROMPT_TOKENS);
     }
 }

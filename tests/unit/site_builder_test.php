@@ -35,9 +35,13 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
     $builder = make_test_builder(new FakeLlm(), $tmp);
 
     assert_eq([
-        'scaffold-theme', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+section-plan', 'sections', 'assemble-landing-page',
-        'collect-images', 'fix-blocks', 'page-styles', 'fonts-php', 'finalize-theme',
+        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
+        'theme-json+page-plan', 'sections', 'section-rhythm',
+        // normalize-layout MUST precede contrast-fix and motion-sanity: the
+        // attribute repair can activate previously-inert color/motion
+        // attributes, which those policy passes must be able to see.
+        'collect-images', 'normalize-layout', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
+        'fonts-php', 'finalize-theme', 'validate-theme',
     ], $builder->pipeline()->stepIds());
     assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
     assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true), 'group member is a valid stop');
@@ -76,6 +80,25 @@ test('SiteBuilder createProject respects an explicit slug and merges meta', func
     assert_eq('prompt text', $meta['prompt']);
     assert_eq('unit-test', $meta['demo_source'], 'pre-seeded meta must survive merge');
     assert_eq('fixed-slug', $meta['provisional_slug']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder createProject records a fixed page list only when given', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    $project = $builder->createProject('a test cafe', 'with-pages', true, ['Home', 'Menu']);
+    $meta = $project->readJson('meta.json');
+    assert_eq(['Home', 'Menu'], $meta['pages']);
+    assert_eq(true, $meta['multi_page']);
+
+    // No list -> no `pages` key written, so a pre-seeded one survives the
+    // merge (a host whose site spec already names its pages).
+    $pre = $builder->store()->create('pre-seeded');
+    $pre->writeJson('meta.json', ['pages' => ['Home', 'About']]);
+    $project = $builder->createProject('a test cafe', 'pre-seeded', true);
+    assert_eq(['Home', 'About'], $project->readJson('meta.json')['pages']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

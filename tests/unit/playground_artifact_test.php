@@ -39,7 +39,9 @@ test('playground artifact bundles runnable blueprint and full project archive on
     assert_true(in_array('project/demo-site/logs/home.png', $projectEntries, true), 'screenshots copied into archive');
     assert_true(in_array('project/demo-site/siteSpec.json', $projectEntries, true), 'project JSON copied into archive');
 
-    $blueprint = json_decode(zip_file($bundle, 'blueprint.json'), true);
+    $blueprintJson = zip_file($bundle, 'blueprint.json');
+    $blueprint = json_decode($blueprintJson, true);
+    assert_true(!str_contains($blueprintJson, '0-preview-offline.php'), 'published browser blueprint keeps networking enabled');
     assert_eq('Demo Site Name', $blueprint['steps'][0]['options']['blogname']);
     assert_eq('A test tagline', $blueprint['steps'][0]['options']['blogdescription']);
     assert_eq('mkdir', $blueprint['steps'][1]['step']);
@@ -51,8 +53,45 @@ test('playground artifact bundles runnable blueprint and full project archive on
     assert_eq('/wordpress/wp-content/themes/demo-site', $blueprint['steps'][3]['toPath']);
     assert_eq('activateTheme', $blueprint['steps'][4]['step']);
     assert_eq('demo-site', $blueprint['steps'][4]['themeFolderName']);
+    // Page paths like /menu/ must resolve on the seeded site.
+    assert_eq('/%postname%/', $blueprint['steps'][0]['options']['permalink_structure']);
+    // No content plugin in this fixture — the blueprint stays theme-only.
+    assert_eq(5, count($blueprint['steps']));
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('blueprint installs and activates the content plugin after the theme', function () {
+    $tmp = sys_get_temp_dir() . '/builder_playground_plugin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo-site');
+    $project->writeText('theme/style.css', "/*\nTheme Name: Demo Theme\n*/\n");
+    $project->writeText('plugin/site-content.php', "<?php\n// seeder\n");
+    $project->writeJson('plugin/pages.json', ['pages' => []]);
+
+    $blueprint = PlaygroundArtifact::blueprint($project);
+    $steps = $blueprint['steps'];
+
+    $ids = array_column($steps, 'step');
+    assert_eq(['setSiteOptions', 'mkdir', 'unzip', 'mv', 'activateTheme', 'mv', 'activatePlugin'], $ids);
+
+    // The plugin moves out of the archive next to the theme…
+    assert_eq('/wordpress/wp-content/builder-project-archive/project/demo-site/plugin', $steps[5]['fromPath']);
+    assert_eq('/wordpress/wp-content/plugins/demo-site-content', $steps[5]['toPath']);
+    // …and activates AFTER the theme, so the seeder resolves asset URLs
+    // against the active stylesheet.
+    assert_eq('demo-site-content/site-content.php', $steps[6]['pluginPath']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('offline guard step fails outbound HTTP fast for local CLI previews', function () {
+    $step = PlaygroundArtifact::offlineGuardStep();
+
+    assert_eq('writeFile', $step['step']);
+    assert_eq('/wordpress/wp-content/mu-plugins/0-preview-offline.php', $step['path']);
+    assert_contains('pre_oembed_result', $step['data']);
+    assert_contains('pre_http_request', $step['data']);
+    assert_contains('local Playground preview', $step['data']);
 });
 
 test('playground artifact URLs point a raw branch asset at Playground blueprint-url', function () {

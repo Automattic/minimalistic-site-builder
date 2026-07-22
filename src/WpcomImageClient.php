@@ -4,7 +4,13 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Image generation via the WPCOM AI proxy (Google Vertex Imagen).
+ * Image generation transport via the WPCOM AI proxy (Google Vertex Imagen).
+ *
+ * The wpcom-specific half of image generation: the proxy endpoint, the
+ * feature-slugged auth header, and the cURL I/O. Everything protocol-shaped
+ * (request bodies, response classification, prompt-spec math, batch-retry
+ * orchestration) lives in {@see Imagen}, so a different host can ship its own
+ * ImageClient over the same protocol without copying any of this.
  *
  * Zero dependencies: a plain cURL POST, matching AnthropicClient's style. This
  * is the one proxy route that works for the builder — the GOOGLE_VERTEX_API_TOKEN
@@ -16,17 +22,13 @@ final class WpcomImageClient implements ImageClient
     private const ENDPOINT_TPL =
         'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/publishers/google/models/%s:predict';
 
-    /**
-     * Hard cap Imagen enforces on the text prompt (input tokens). We compose the
-     * site context + per-image prompt to stay safely under this.
-     */
-    public const MAX_PROMPT_TOKENS = 480;
-
     private int $requests = 0;
 
     /**
      * @param array<int,int> $retryDelays seconds to wait before retries 1..N of
-     *        a transient failure (its length is the max retry count)
+     *        a retryable failure — transient transport errors AND
+     *        safety-filtered prompts, which the non-deterministic filter can
+     *        pass on a later attempt (its length is the max retry count)
      */
     public function __construct(
         private string $apiToken,
@@ -47,90 +49,9 @@ final class WpcomImageClient implements ImageClient
         return $this->model;
     }
 
-    /**
-     * Map the prompt's aspect-ratio keyword to the Imagen ratio string.
-     * Accepts either a keyword (square/landscape/portrait) or a ratio as-is.
-     */
-    public static function aspectRatio(string $keyword): string
-    {
-        return match (strtolower(trim($keyword))) {
-            'square'   => '1:1',
-            'portrait' => '9:16',
-            'landscape' => '16:9',
-            default    => preg_match('/^\d+:\d+$/', trim($keyword)) ? trim($keyword) : '16:9',
-        };
-    }
-
-    /**
-     * The Imagen sample size to request for a given aspect ratio. Wide (16:9)
-     * images are the ones used full-bleed (heroes, banners, wide features) where
-     * a 1K render stretched past ~1366px goes soft — request 2K for those. The
-     * smaller square/portrait slots stay at 1K to keep cost down.
-     *
-     * Transparent assets are always 1K, whatever their ratio: they are
-     * decorative line art (flourishes, ornaments, logo marks) rendered small
-     * on the page, never full-bleed, and line art downscales gracefully. A 1K
-     * render quarters the pixels to generate and key and roughly cuts the
-     * shipped PNG bytes to a third.
-     */
-    public static function sampleImageSize(string $aspectRatio, bool $transparent = false): string
-    {
-        if ($transparent) {
-            return '1K';
-        }
-        return trim($aspectRatio) === '16:9' ? '2K' : '1K';
-    }
-
-    /**
-     * The output MIME type an asset filename calls for. `.png` assets are the
-     * transparent-background ones (decorative flourishes, ornaments, logo
-     * marks); everything else is photographic and stays JPEG for size.
-     */
-    public static function mimeForFilename(string $filename): string
-    {
-        return preg_match('/\.png$/i', trim($filename)) === 1 ? 'image/png' : 'image/jpeg';
-    }
-
-    /**
-     * Conservative token estimate for an Imagen text prompt. No local tokenizer
-     * is available, so over-estimate (the larger of a word- and a character-based
-     * count) to stay safely under the hard model limit.
-     */
-    public static function estimateTokens(string $text): int
-    {
-        $text = trim($text);
-        if ($text === '') {
-            return 0;
-        }
-        $words = count(preg_split('/\s+/', $text) ?: []);
-        $chars = mb_strlen($text);
-        return (int) max((int) ceil($words * 1.4), (int) ceil($chars / 4));
-    }
-
-    /**
-     * Trim text from the end on a word boundary until it fits $maxTokens. Public
-     * so ImagePromptComposer can cap a fully-composed prompt at MAX_PROMPT_TOKENS;
-     * because the subject leads the prompt, trimming from the end sheds the
-     * trailing context first and preserves the subject.
-     */
-    public static function fitToTokens(string $text, int $maxTokens): string
-    {
-        if ($maxTokens <= 0) {
-            return '';
-        }
-        if (self::estimateTokens($text) <= $maxTokens) {
-            return $text;
-        }
-        $words = preg_split('/\s+/', trim($text)) ?: [];
-        while ($words !== [] && self::estimateTokens(implode(' ', $words)) > $maxTokens) {
-            array_pop($words);
-        }
-        return rtrim(implode(' ', $words), " ,.;:—-");
-    }
-
     public function generate(string $prompt, array $opts = []): string
     {
-        $bytes = $this->requestWithRetry(self::buildBody($prompt, $opts));
+        $bytes = $this->requestWithRetry(Imagen::buildBody($prompt, $opts));
         $this->requests++;
         return $bytes;
     }
@@ -142,8 +63,9 @@ final class WpcomImageClient implements ImageClient
      * blocks the others and a partial failure never aborts the rest.
      *
      * @param array<int,array{prompt:string,aspect_ratio?:string}> $specs
-     * @return array<int,array{ok:bool,bytes?:string,error?:string}> keyed by the
-     *         same index as $specs (order preserved)
+     * @return array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>
+     *         keyed by the same index as $specs (order preserved); `filtered`
+     *         marks a prompt the safety filter rejected on every attempt
      */
     public function generateBatch(array $specs): array
     {
@@ -154,63 +76,23 @@ final class WpcomImageClient implements ImageClient
         // Bodies keyed by the caller's index.
         $bodies = [];
         foreach ($specs as $i => $spec) {
-            $bodies[$i] = self::buildBody((string) $spec['prompt'], [
+            $bodies[$i] = Imagen::buildBody((string) $spec['prompt'], [
                 'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
                 'sample_image_size' => $spec['sample_image_size'] ?? null,
                 'mime'              => $spec['mime'] ?? null,
             ]);
         }
 
-        $out = self::retryBatch($bodies, fn (array $subset): array => $this->multiRequest($subset), $this->retryDelays);
+        $out = Imagen::retryBatch(
+            $bodies,
+            fn (array $subset): array => $this->multiRequest($subset),
+            $this->retryDelays,
+            static function (int $count, int $attempt, int $wait): void {
+                fwrite(STDERR, "    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
+            }
+        );
         $this->requests += $out['succeeded'];
         return $out['results'];
-    }
-
-    /**
-     * Drive a batch transport to completion, retrying ONLY the transient
-     * failures with backoff. Pure orchestration (the transport does the I/O, and
-     * sleep() paces the rounds) so the retry accounting is unit-testable with a
-     * fake transport and zero delays.
-     *
-     * @param array<int,array<string,mixed>> $bodies request bodies keyed by index
-     * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool}> $transport
-     * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
-     * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string}>,succeeded:int}
-     */
-    public static function retryBatch(array $bodies, callable $transport, array $delays): array
-    {
-        $results = [];
-        $succeeded = 0;
-        $pending = array_keys($bodies);
-        $attempt = 0;
-
-        while ($pending !== []) {
-            $outcomes = $transport(array_intersect_key($bodies, array_flip($pending)));
-
-            $retry = [];
-            foreach ($outcomes as $i => $outcome) {
-                if ($outcome['ok']) {
-                    $results[$i] = ['ok' => true, 'bytes' => $outcome['bytes']];
-                    $succeeded++;
-                } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
-                    $retry[] = $i; // try this one again next round
-                } else {
-                    $results[$i] = ['ok' => false, 'error' => $outcome['error']];
-                }
-            }
-
-            $pending = $retry;
-            if ($pending !== []) {
-                $wait = $delays[$attempt];
-                $attempt++;
-                fwrite(STDERR, "    (transient image API error on " . count($pending)
-                    . " image(s); retry {$attempt} in {$wait}s)\n");
-                sleep($wait);
-            }
-        }
-
-        ksort($results);
-        return ['results' => $results, 'succeeded' => $succeeded];
     }
 
     /**
@@ -218,7 +100,7 @@ final class WpcomImageClient implements ImageClient
      * each transfer. Pure transport — no retry, no request counting.
      *
      * @param array<int,array<string,mixed>> $bodies request body keyed by index
-     * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool}>
+     * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,filtered?:bool}>
      */
     private function multiRequest(array $bodies): array
     {
@@ -250,7 +132,13 @@ final class WpcomImageClient implements ImageClient
             curl_close($ch);
 
             try {
-                $out[$i] = ['ok' => true, 'bytes' => self::interpret($raw, $errno, $error, (int) $httpStatus)];
+                self::throwOnTransportError($errno, $error);
+                $out[$i] = ['ok' => true, 'bytes' => Imagen::interpret($raw, (int) $httpStatus)];
+            } catch (ImageFilteredException $e) {
+                // The safety filter is non-deterministic: retry like a
+                // transient failure, but keep the filtered flag so the caller
+                // can repair the prompt once the retries run out.
+                $out[$i] = ['ok' => false, 'transient' => true, 'filtered' => true, 'error' => $e->getMessage()];
             } catch (TransientApiException $e) {
                 $out[$i] = ['ok' => false, 'transient' => true, 'error' => $e->getMessage()];
             } catch (\Throwable $e) {
@@ -263,36 +151,10 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * The Imagen predict request body for one prompt.
-     *
-     * @param array{aspect_ratio?:string,sample_image_size?:?string,mime?:?string} $opts
-     * @return array<string,mixed>
-     */
-    private static function buildBody(string $prompt, array $opts): array
-    {
-        // Ask Imagen for the format matching the asset filename: JPEG for the
-        // photographic default (it returns PNG otherwise — larger and
-        // mislabeled), PNG for transparent-background assets (JPEG has no
-        // alpha channel). compressionQuality is a JPEG-only knob.
-        $mime = ($opts['mime'] ?? null) ?: 'image/jpeg';
-        $outputOptions = ['mimeType' => $mime];
-        if ($mime === 'image/jpeg') {
-            $outputOptions['compressionQuality'] = 85;
-        }
-
-        return [
-            'instances'  => [['prompt' => $prompt]],
-            'parameters' => [
-                'sampleCount'     => 1,
-                'aspectRatio'     => $opts['aspect_ratio'] ?? '16:9',
-                'sampleImageSize' => $opts['sample_image_size'] ?? '1K',
-                'outputOptions'   => $outputOptions,
-            ],
-        ];
-    }
-
-    /**
-     * POST the request, retrying transient failures (429/5xx, stalls) with backoff.
+     * POST the request, retrying retryable failures — transient transport
+     * errors (429/5xx, stalls) and safety-filtered prompts — with backoff. A
+     * prompt still filtered after the retries rethrows ImageFilteredException
+     * so the caller can repair the prompt.
      *
      * @param array<string,mixed> $body
      */
@@ -303,8 +165,11 @@ final class WpcomImageClient implements ImageClient
         while (true) {
             try {
                 return $this->request($body);
-            } catch (TransientApiException $e) {
+            } catch (TransientApiException|ImageFilteredException $e) {
                 if ($attempt >= count($delays)) {
+                    if ($e instanceof ImageFilteredException) {
+                        throw $e; // callers tell a filtered prompt from a transport failure
+                    }
                     throw new \RuntimeException('Image proxy failed after retries: ' . $e->getMessage(), 0, $e);
                 }
                 $wait = $delays[$attempt];
@@ -330,7 +195,27 @@ final class WpcomImageClient implements ImageClient
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        return self::interpret((string) $raw, $errno, $error, (int) $status);
+        self::throwOnTransportError($errno, $error);
+        return Imagen::interpret((string) $raw, (int) $status);
+    }
+
+    /**
+     * Classify a completed cURL transfer's connection-level result — the
+     * transport-specific half interpret() must not carry. Retryable connect/
+     * timeout/stall errnos become a TransientApiException; any other non-zero
+     * errno is a permanent transport failure.
+     *
+     * @throws TransientApiException on a retryable connection failure
+     */
+    private static function throwOnTransportError(int $errno, string $error): void
+    {
+        // Connection-level failures: timeout, stall, connect/recv — retryable.
+        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
+            throw new TransientApiException("cURL ({$errno}): {$error}");
+        }
+        if ($errno !== 0) {
+            throw new \RuntimeException("cURL error ({$errno}): {$error}");
+        }
     }
 
     /**
@@ -359,42 +244,5 @@ final class WpcomImageClient implements ImageClient
             CURLOPT_CONNECTTIMEOUT  => 15,
         ]);
         return $ch;
-    }
-
-    /**
-     * Interpret a completed transfer: return decoded image bytes, or throw a
-     * TransientApiException (retryable: 429/5xx/stall) or RuntimeException
-     * (permanent). Pure — no I/O — so the single and batched paths share it.
-     *
-     * @throws TransientApiException on a retryable failure
-     */
-    private static function interpret(string $raw, int $errno, string $error, int $status): string
-    {
-        // Connection-level failures: timeout, stall, connect/recv — retryable.
-        if (in_array($errno, [7, 28, 35, 52, 55, 56], true)) {
-            throw new TransientApiException("cURL ({$errno}): {$error}");
-        }
-        if ($errno !== 0) {
-            throw new \RuntimeException("cURL error ({$errno}): {$error}");
-        }
-
-        if ($status === 429 || $status >= 500) {
-            throw new TransientApiException("HTTP {$status}: " . substr($raw, 0, 300));
-        }
-        if ($status < 200 || $status >= 300) {
-            throw new \RuntimeException("Image proxy HTTP {$status}: " . substr($raw, 0, 500));
-        }
-
-        $data = json_decode($raw, true);
-        $b64 = $data['predictions'][0]['bytesBase64Encoded'] ?? null;
-        if (!is_string($b64) || $b64 === '') {
-            throw new \RuntimeException('Image proxy response had no image data: ' . substr($raw, 0, 300));
-        }
-
-        $bytes = base64_decode($b64, true);
-        if ($bytes === false || $bytes === '') {
-            throw new \RuntimeException('Image proxy returned undecodable base64');
-        }
-        return $bytes;
     }
 }

@@ -7,18 +7,17 @@ use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /**
- * PageStylesStep: the CSS-appendix validator (namespaced selectors only, preset
- * variables for color, @media only), the used-class scan, and the run behavior
- * (skip when unused, append when valid, reject-and-skip when invalid).
+ * PageStylesStep: the layout-only CSS-appendix validator (namespaced selectors
+ * only, preset variables for color, @media only), the used-class scan, and the
+ * run behavior (skip when unused, append when valid, reject-and-skip when
+ * invalid). Motion timing and hover behavior belong to the static motion kit.
  */
 
 const PS_VALID_CSS = <<<CSS
-    .hover-lift {
-        transition: transform 0.25s ease, box-shadow 0.25s ease;
-    }
-    .hover-lift:hover {
-        transform: translateY(-6px);
-        box-shadow: var(--wp--preset--shadow--natural);
+    .overlap-up {
+        margin-top: -4rem;
+        position: relative;
+        z-index: 2;
     }
     .masonry-3 {
         columns: 3;
@@ -54,8 +53,7 @@ test('validate accepts namespaced classes, preset vars, and media queries', func
 });
 
 test('validate accepts color-mix over preset variables', function () {
-    $css = ".hover-reveal img {\n    filter: brightness(0.9);\n}\n"
-        . ".hover-reveal:hover {\n    background: color-mix(in srgb, var(--wp--preset--color--contrast) 20%, transparent);\n}";
+    $css = ".overlap-up {\n    background: color-mix(in srgb, var(--wp--preset--color--contrast) 20%, transparent);\n}";
     assert_eq([], PageStylesStep::validate($css));
 });
 
@@ -75,24 +73,37 @@ test('validate rejects global and element selectors', function () {
 });
 
 test('validate rejects raw color literals', function () {
-    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    color: #fff;\n}"), 'hex');
-    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);\n}"), 'rgba');
-    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    color: hsl(20 10% 20%);\n}"), 'hsl');
-    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    color: red;\n}"), 'named color');
-    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    box-shadow: 0 10px 30px black;\n}"), 'named shadow color');
+    assert_true([] !== PageStylesStep::validate(".overlap-up {\n    color: #fff;\n}"), 'hex');
+    assert_true([] !== PageStylesStep::validate(".overlap-up {\n    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);\n}"), 'rgba');
+    assert_true([] !== PageStylesStep::validate(".overlap-up {\n    color: hsl(20 10% 20%);\n}"), 'hsl');
+    assert_true([] !== PageStylesStep::validate(".overlap-up {\n    color: red;\n}"), 'named color');
+    assert_true([] !== PageStylesStep::validate(".overlap-up {\n    box-shadow: 0 10px 30px black;\n}"), 'named shadow color');
 });
 
 test('validate rejects disallowed at-rules and url()', function () {
-    assert_true([] !== PageStylesStep::validate("@import 'x.css';\n.hover-lift {\n    color: var(--wp--preset--color--base);\n}"), '@import');
+    assert_true([] !== PageStylesStep::validate("@import 'x.css';\n.overlap-up {\n    color: var(--wp--preset--color--base);\n}"), '@import');
     assert_true([] !== PageStylesStep::validate("@keyframes spin {\n    to { transform: rotate(1turn); }\n}"), '@keyframes');
-    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    background: url(x.png);\n}"), 'url()');
+    assert_true([] !== PageStylesStep::validate(".overlap-up {\n    background: url(x.png);\n}"), 'url()');
+    assert_true(
+        [] !== PageStylesStep::validate(".overlap-up {\n    background-image: image-set(\"https://example.invalid/t.png\" 1x);\n}"),
+        'image-set()'
+    );
+});
+
+test('validate rejects motion overrides even under an allowed layout selector', function () {
+    $problems = PageStylesStep::validate(
+        ".overlap-up {\n    --motion-enter-duration: 150ms;\n    margin-top: -4rem;\n}"
+    );
+    assert_contains('profile-owned', implode('; ', $problems));
 });
 
 test('validate rejects CSS that hides generated content', function () {
     foreach ([
-        ".hover-reveal > :not(img) {\n    opacity: 0;\n}",
-        ".hover-reveal .caption {\n    visibility: hidden;\n}",
-        ".hover-reveal .wp-block-image {\n    display: none;\n}",
+        ".masonry-3 > * {\n    opacity: 0;\n}",
+        ".masonry-3 > * {\n    opacity: 0%;\n}",
+        ".masonry-3 > * {\n    opacity: calc(0);\n}",
+        ".masonry-3 .caption {\n    visibility: hidden;\n}",
+        ".masonry-3 .wp-block-image {\n    display: none;\n}",
     ] as $css) {
         $problems = PageStylesStep::validate($css);
         assert_true($problems !== [], "should reject hidden content: {$css}");
@@ -101,17 +112,93 @@ test('validate rejects CSS that hides generated content', function () {
 
 test('validate rejects empty, oversized, and unbalanced CSS', function () {
     assert_eq(['empty CSS'], PageStylesStep::validate("  \n "));
-    $long = str_repeat(".hover-lift {\n    opacity: 1;\n}\n", 40); // 120 lines
+    $long = str_repeat(".overlap-up {\n    opacity: 1;\n}\n", 40); // 120 lines
     assert_true([] !== PageStylesStep::validate($long), 'over the line ceiling');
-    assert_true([] !== PageStylesStep::validate(".hover-lift {\n    opacity: 1;\n"), 'unbalanced braces');
+    assert_true([] !== PageStylesStep::validate(".overlap-up {\n    opacity: 1;\n"), 'unbalanced braces');
+    assert_true(
+        in_array('unbalanced braces', PageStylesStep::validate("}\n.overlap-up {\n    opacity: 1;\n}\n@media (min-width: 600px) {"), true),
+        'stray closing brace balanced by a trailing open brace'
+    );
 });
 
-test('classesIn finds documented classes on word boundaries only', function () {
-    $markup = '<!-- wp:group {"className":"equal-cards hover-lift"} -->'
-        . '<div class="wp-block-group equal-cards hover-lift"></div><!-- /wp:group -->'
+test('dropOffendingDeclarations removes bad declarations and keeps the rest', function () {
+    // The real-world failure shape (tbilisi20): a shadow var() with a raw
+    // rgba() fallback poisoning an otherwise-valid appendix.
+    $css = "/* utilities */\n"
+        . ".overlap-up {\n"
+        . "    margin-top: -4rem;\n"
+        . "    position: relative;\n"
+        . "    box-shadow: var(--wp--preset--shadow--glow, 0 12px 30px rgba(0,0,0,0.6));\n"
+        . "    --motion-enter-duration: 150ms;\n"
+        . "    z-index: 2;\n"
+        . "}\n"
+        . "@media (max-width: 600px) {\n"
+        . "    .masonry-3 {\n"
+        . "        columns: 1;\n"
+        . "        opacity: 0;\n"
+        . "    }\n"
+        . "}";
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+
+    assert_eq(3, count($dropped), 'three offending declarations dropped');
+    assert_contains('raw color literal', implode('; ', $dropped));
+    assert_contains('profile-owned', implode('; ', $dropped));
+    assert_contains('hides content', implode('; ', $dropped));
+    assert_contains('margin-top: -4rem', $salvaged, 'clean declarations kept');
+    assert_contains('z-index: 2', $salvaged, 'declarations after a dropped one kept');
+    assert_contains('columns: 1', $salvaged, 'media-nested rule bodies salvaged too');
+    assert_contains('@media (max-width: 600px)', $salvaged, 'media prelude untouched');
+    assert_true(!str_contains($salvaged, 'rgba'), 'raw color gone');
+    assert_true(!str_contains($salvaged, '--motion-'), 'motion override gone');
+    assert_true(!str_contains($salvaged, 'opacity'), 'hidden-content declaration gone');
+    assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
+});
+
+test('dropOffendingDeclarations leaves structural problems for the re-validation', function () {
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations(
+        ":root {\n    --motion-enter-duration: 150ms;\n}\n.overlap-up {\n    margin-top: -4rem;\n}"
+    );
+    assert_eq(1, count($dropped), 'the declaration is dropped');
+    assert_contains(':root', $salvaged, 'the unscoped selector is NOT repaired away');
+    assert_true(PageStylesStep::validate($salvaged) !== [], 'still rejected on the selector');
+});
+
+test('run drops offending declarations and ships the rest of the appendix', function () {
+    [$project, $tmp] = ps_project('builder_ps_salvage_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up {\n"
+        . "    margin-top: -4rem;\n"
+        . "    position: relative;\n"
+        . "    z-index: 2;\n"
+        . "    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);\n"
+        . "}"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_contains('margin-top: -4rem', $style, 'appendix shipped');
+    assert_contains('page-styles step', $style, 'marker comment present');
+    assert_true(!str_contains($style, 'rgba'), 'offending declaration not shipped');
+    $log = $project->readText('logs/page-styles.log');
+    assert_contains('SALVAGED', $log);
+    assert_contains('raw color literal', $log);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('classesIn finds layout utilities only and ignores static hover classes', function () {
+    $markup = '<!-- wp:group {"className":"masonry-3 hover-lift hover-reveal"} -->'
+        . '<div class="wp-block-group masonry-3 hover-lift hover-reveal"></div><!-- /wp:group -->'
         . '<div class="hover-lifted masonry-30"></div>'; // near-misses must not match
-    assert_eq(['hover-lift'], PageStylesStep::classesIn($markup));
+    assert_eq(['masonry-3'], PageStylesStep::classesIn($markup));
     assert_eq([], PageStylesStep::classesIn('<div class="plain"></div>'));
+    assert_true(!array_key_exists('hover-lift', PageStylesStep::CLASSES));
+    assert_true(!array_key_exists('hover-reveal', PageStylesStep::CLASSES));
 });
 
 test('run skips without an LLM call when no utility class is used', function () {
@@ -131,8 +218,8 @@ test('run appends validated CSS to style.css and passes the configured model', f
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(
         'theme/parts/section-work.html',
-        '<!-- wp:group {"className":"masonry-3"} --><div class="wp-block-group masonry-3">'
-        . '<!-- wp:image {"className":"hover-lift"} --><figure class="wp-block-image hover-lift"></figure><!-- /wp:image -->'
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">'
+        . '<!-- wp:group {"className":"masonry-3"} --><div class="wp-block-group masonry-3"></div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->'
     );
     $llm = new FakeLlm();
@@ -142,11 +229,15 @@ test('run appends validated CSS to style.css and passes the configured model', f
 
     $style = $project->readText('theme/style.css');
     assert_contains('Theme Name: Demo', $style, 'header kept');
-    assert_contains('.hover-lift:hover', $style, 'appendix appended');
+    assert_contains('.overlap-up', $style, 'appendix appended');
+    assert_contains('.masonry-3', $style, 'appendix appended');
     assert_contains('page-styles step', $style, 'marker comment present');
     // The prompt asked only for the classes actually used, in vocabulary order.
+    assert_contains('- .overlap-up', $llm->calls[0]['prompt']);
     assert_contains('- .masonry-3', $llm->calls[0]['prompt']);
-    assert_contains('- .hover-lift', $llm->calls[0]['prompt']);
+    assert_true(!str_contains($llm->calls[0]['prompt'], '- .hover-lift'), 'hover-lift is not a requested utility');
+    assert_true(!str_contains($llm->calls[0]['prompt'], '- .hover-reveal'), 'hover-reveal is not a requested utility');
+    assert_true(!str_contains($llm->calls[0]['prompt'], 'MOTION TUNING'), 'motion timing is not offered');
     assert_true(!str_contains($llm->calls[0]['prompt'], '- .sticky-side'), 'unused class not requested');
     assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null);
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -156,7 +247,7 @@ test('run rejects invalid CSS, leaves style.css untouched, and logs the problems
     [$project, $tmp] = ps_project('builder_ps_bad_');
     $project->writeText(
         'theme/parts/section-work.html',
-        '<!-- wp:group {"className":"hover-lift"} --><div class="wp-block-group hover-lift"></div><!-- /wp:group -->'
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
     );
     $before = $project->readText('theme/style.css');
     $llm = new FakeLlm();
@@ -165,6 +256,56 @@ test('run rejects invalid CSS, leaves style.css untouched, and logs the problems
     (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     assert_eq($before, $project->readText('theme/style.css'), 'style.css untouched');
+    assert_contains('not scoped', $project->readText('logs/page-styles.log'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('usedClasses sees classes that only appear in the content plugin pages', function () {
+    [$project, $tmp] = ps_project('builder_ps_plug_');
+    $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">x</div><!-- /wp:group -->'
+    );
+
+    assert_eq(['overlap-up'], PageStylesStep::usedClasses($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('run skips when markup contains only static hover classes', function () {
+    [$project, $tmp] = ps_project('builder_ps_static_hover_');
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"hover-lift hover-reveal"} --><div class="wp-block-group hover-lift hover-reveal"></div><!-- /wp:group -->'
+    );
+    $before = $project->readText('theme/style.css');
+    $llm = new FakeLlm(); // nothing queued: PageStyles must not own hover CSS
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq([], $llm->calls, 'no LLM call for static hover classes');
+    assert_eq($before, $project->readText('theme/style.css'), 'style.css untouched');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('run rejects :root motion tuning instead of extracting it', function () {
+    [$project, $tmp] = ps_project('builder_ps_no_motion_tuning_');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'calm']);
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
+    );
+    $before = $project->readText('theme/style.css');
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ":root {\n    --motion-enter-duration: 150ms;\n}\n"
+        . ".overlap-up { margin-top: -4rem; position: relative; z-index: 2; }"
+    );
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_true(!str_contains($llm->calls[0]['prompt'], 'MOTION TUNING'), 'prompt offers no override channel');
+    assert_eq($before, $project->readText('theme/style.css'), 'global override rejects the whole appendix');
     assert_contains('not scoped', $project->readText('logs/page-styles.log'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });

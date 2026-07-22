@@ -103,39 +103,90 @@ final class PlaygroundArtifact
         return implode("\n", $lines) . "\n";
     }
 
+    /**
+     * Blueprint step neutralizing outbound HTTP for the local Playground CLI.
+     *
+     * The CLI's wasm PHP cannot complete outbound requests, so a block whose
+     * render fetches remote content — wp:embed → server-side oEmbed discovery —
+     * blocks forever and pins its worker. This mu-plugin makes the local preview
+     * fail fast instead. Published browser artifacts use Playground's networking
+     * support and must not install this step.
+     *
+     * @return array<mixed>
+     */
+    public static function offlineGuardStep(): array
+    {
+        return [
+            'step' => 'writeFile',
+            'path' => '/wordpress/wp-content/mu-plugins/0-preview-offline.php',
+            'data' => <<<'PHP'
+                <?php
+                /**
+                 * The local Playground CLI cannot complete outbound requests.
+                 * Resolve oEmbeds to a plain link and fail any other WordPress
+                 * HTTP request fast so a render never pins a worker.
+                 */
+                add_filter( 'pre_oembed_result', function ( $result, $url ) {
+                    return '<a href="' . esc_url( $url ) . '">' . esc_html( $url ) . '</a>';
+                }, 10, 2 );
+                add_filter( 'pre_http_request', function () {
+                    return new WP_Error( 'http_request_failed', 'Outbound HTTP is disabled in the local Playground preview.' );
+                } );
+                PHP,
+        ];
+    }
+
     /** @return array<mixed> */
     public static function blueprint(Project $project): array
     {
         $options = self::siteOptions($project);
 
+        $steps = [
+            ['step' => 'setSiteOptions', 'options' => $options],
+            [
+                'step' => 'mkdir',
+                'path' => '/wordpress/wp-content/builder-project-archive',
+            ],
+            [
+                'step'          => 'unzip',
+                'zipFile'       => [
+                    'resource' => 'bundled',
+                    'path'     => '/project.zip',
+                ],
+                'extractToPath' => '/wordpress/wp-content/builder-project-archive',
+            ],
+            [
+                'step'     => 'mv',
+                'fromPath' => '/wordpress/wp-content/builder-project-archive/project/' . $project->slug() . '/theme',
+                'toPath'   => '/wordpress/wp-content/themes/' . $project->slug(),
+            ],
+            [
+                'step'            => 'activateTheme',
+                'themeFolderName' => $project->slug(),
+            ],
+        ];
+
+        // The companion content plugin ships next to the theme and activates
+        // AFTER it: the seeder resolves theme:./assets/ refs against the
+        // ACTIVE stylesheet when it creates the pages.
+        if ($project->exists('plugin/site-content.php')) {
+            $pluginDir = $project->slug() . '-content';
+            $steps[] = [
+                'step'     => 'mv',
+                'fromPath' => '/wordpress/wp-content/builder-project-archive/project/' . $project->slug() . '/plugin',
+                'toPath'   => '/wordpress/wp-content/plugins/' . $pluginDir,
+            ];
+            $steps[] = [
+                'step'       => 'activatePlugin',
+                'pluginPath' => $pluginDir . '/site-content.php',
+            ];
+        }
+
         return [
             '$schema'     => 'https://playground.wordpress.net/blueprint-schema.json',
             'landingPage' => '/',
             'login'       => true,
-            'steps'       => [
-                ['step' => 'setSiteOptions', 'options' => $options],
-                [
-                    'step' => 'mkdir',
-                    'path' => '/wordpress/wp-content/builder-project-archive',
-                ],
-                [
-                    'step'          => 'unzip',
-                    'zipFile'       => [
-                        'resource' => 'bundled',
-                        'path'     => '/project.zip',
-                    ],
-                    'extractToPath' => '/wordpress/wp-content/builder-project-archive',
-                ],
-                [
-                    'step'     => 'mv',
-                    'fromPath' => '/wordpress/wp-content/builder-project-archive/project/' . $project->slug() . '/theme',
-                    'toPath'   => '/wordpress/wp-content/themes/' . $project->slug(),
-                ],
-                [
-                    'step'            => 'activateTheme',
-                    'themeFolderName' => $project->slug(),
-                ],
-            ],
+            'steps'       => $steps,
         ];
     }
 
@@ -222,6 +273,10 @@ final class PlaygroundArtifact
         return [
             'blogname'        => $blogname,
             'blogdescription' => $blogdescription,
+            // Pretty permalinks so the seeded page tree's paths (/menu/,
+            // /menu/breads/) resolve; WP rebuilds rewrite rules lazily and
+            // the content plugin flushes them on activation.
+            'permalink_structure' => '/%postname%/',
         ];
     }
 

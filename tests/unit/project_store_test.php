@@ -76,3 +76,19 @@ test('freeSlug slugifies its input before checking, like create()', function () 
     rmdir($base . '/tbilisi-tavern');
     rmdir($base);
 });
+
+test('markupFiles collects theme parts, templates, and plugin pages', function () {
+    $base = sys_get_temp_dir() . '/builder-store-' . getmypid() . '-' . uniqid();
+    $project = (new ProjectStore($base))->create('demo');
+    $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
+    $project->writeText('theme/templates/page.html', '<!-- wp:post-content /-->');
+    $project->writeText('plugin/pages/home.html', '<!-- wp:heading --><h2>x</h2><!-- /wp:heading -->');
+    $project->writeText('plugin/pages.json', '{}');            // not markup — excluded
+    $project->writeText('theme/parts/notes.txt', 'not markup'); // wrong extension — excluded
+
+    $names = array_map('basename', $project->markupFiles());
+    sort($names);
+    assert_eq(['header.html', 'home.html', 'page.html'], $names);
+
+    exec('rm -rf ' . escapeshellarg($base));
+});

@@ -5,15 +5,21 @@ use Automattic\SiteBuild\NodeBlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
  * One-shot: build a site from a prompt, report tokens + wall time, then boot it
  * in WordPress Playground and print the URL.
  *
- *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--with-images]
+ *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--multi-page] [--pages="Home, Menu, About"] [--with-images]
  *
  * --no-serve builds and reports metrics without launching Playground.
+ * --multi-page lets the site plan inner pages beyond the homepage (off by
+ *   default: the build produces ONLY the landing page).
+ * --pages="Home, Menu, About" (requires --multi-page) fixes the page list —
+ *   comma-separated titles, the FIRST one is the homepage — instead of
+ *   letting the LLM invent it. Without it the LLM decides the pages.
  * --with-images also generates real assets for the AI_IMAGE placeholders
  *   (slow + networked; via the WPCOM proxy).
  */
@@ -25,24 +31,40 @@ $slug = null;
 $port = null;
 $serve = true;
 $withImages = false;
+$multiPage = false;
+$pagesArg = null;
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
     } elseif (str_starts_with($a, '--port=')) {
         $port = (int) substr($a, 7);
+    } elseif (str_starts_with($a, '--pages=')) {
+        $pagesArg = substr($a, 8);
     } elseif ($a === '--no-serve') {
         $serve = false;
     } elseif ($a === '--with-images') {
         $withImages = true;
+    } elseif ($a === '--multi-page') {
+        $multiPage = true;
     } elseif ($prompt === null) {
         $prompt = $a;
     }
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve]\n");
+    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"]\n");
     exit(1);
 }
+
+// --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
+// exist at all, so a list without the flag is a contradiction — fail loud
+// rather than silently ignore either.
+if ($pagesArg !== null && !$multiPage) {
+    fwrite(STDERR, "--pages requires --multi-page.\n");
+    exit(1);
+}
+$pages = $pagesArg === null ? []
+    : array_values(array_filter(array_map('trim', explode(',', $pagesArg)), static fn (string $t): bool => $t !== ''));
 
 $llm = make_llm();
 $builder = new SiteBuilder(
@@ -54,7 +76,7 @@ $builder = new SiteBuilder(
 );
 // Without an explicit --slug, createProject picks a free random adjective-noun
 // name rather than echoing the whole prompt.
-$project = $builder->createProject($prompt, $slug);
+$project = $builder->createProject($prompt, $slug, $multiPage, $pages);
 $pipeline = $builder->pipeline();
 
 // step id => model, so the report can show which model each LLM step ran on.
@@ -91,15 +113,27 @@ $pipeline->runThrough(
 );
 
 // Opt-in image generation: turn the AI_IMAGE placeholders into real assets.
-// It makes no LLM calls, so its token columns are a deterministic zero.
+// Its only LLM use is rewriting prompts the image safety filter rejects (the
+// small tier), so its token columns stay a deterministic zero in normal runs.
 if ($withImages) {
-    $imageStep = new GenerateImagesStep(make_image_client());
+    $imageStep = new GenerateImagesStep(make_image_client(), $llm, $models['image-prompt-repair'] ?? null);
     announce_step($imageStep);
     $start = microtime(true);
     $imageStep->run($project);
     $secs = microtime(true) - $start;
     $steps[] = record_step('generate-images', $secs, 0, 0);
     printf("  %-18s %7.1fs %10s %10s  %s\n", 'generate-images', $secs, fmt(0), fmt(0), '—');
+
+    // Now that the real pixels exist, re-check cover text against the actual
+    // (dimmed) images and raise dimRatio / flip text colors where needed —
+    // the same follow-up build.php and images.php run after generation.
+    $coverStep = new CoverContrastStep(NodeBlockFixer::default());
+    announce_step($coverStep);
+    $start = microtime(true);
+    $coverStep->run($project);
+    $secs = microtime(true) - $start;
+    $steps[] = record_step($coverStep->id(), $secs, 0, 0);
+    printf("  %-18s %7.1fs %10s %10s  %s\n", $coverStep->id(), $secs, fmt(0), fmt(0), '—');
 }
 
 $wall = microtime(true) - $wallStart;

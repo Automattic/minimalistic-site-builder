@@ -9,7 +9,7 @@ SITE SPEC (JSON — factual info about the site, no design):
 DESIGN DIRECTION (the committed creative concept for THIS site — let it drive every choice below):
 {{design_direction}}
 
-Make opinionated, specific design choices that genuinely fit this site's topic, area, audience, and visual vibe — not generic defaults. Translate the DESIGN DIRECTION into concrete tokens: the palette must express its stated palette approach, the font pairing its type pairing, and the spacing/shapes its shape language. When the DESIGN DIRECTION carries an explicit **Palette** fact list (hex per role) and a **Type** pairing, EXECUTE them: use those exact hexes for the five palette slugs and those exact families/weights for heading/body — adjust a hex only if base/contrast lack readable contrast, and keep any adjustment in the same hue family. Steer clear of the cliché it calls out avoiding. You tend to converge toward safe, "on-distribution" output — resist it; commit to a distinctive, cohesive aesthetic.
+Make opinionated, specific design choices that genuinely fit this site's topic, area, audience, and visual vibe — not generic defaults. Translate the DESIGN DIRECTION into concrete tokens: the palette must express its stated palette approach, the font pairing its type pairing, and the spacing/shapes its shape language. When the DESIGN DIRECTION carries an explicit **Palette** fact list (hex per role) and a **Type** pairing, EXECUTE them: use those exact hexes for the five palette slugs and those exact families/weights for heading/body — adjust a hex only when a pair misses the CONTRAST REQUIREMENTS below, and keep any adjustment in the same hue family (darken/lighten, don't re-hue). Steer clear of the cliché it calls out avoiding. You tend to converge toward safe, "on-distribution" output — resist it; commit to a distinctive, cohesive aesthetic.
 
 Design intelligence to encode as tokens:
 
@@ -24,16 +24,23 @@ Design intelligence to encode as tokens:
   Example: `0.875rem / 1.125rem / 1.375rem / 1.75rem / clamp(2.25rem, 3vw, 3rem) / clamp(3rem, 7vw, 6rem)`. Only caption and body are paragraph sizes (lead is for ONE short line per section); everything above is heading territory, and display exists for ONE hero/masthead moment per page.
 - **Line height.** Body 1.5–1.65; headings 1.1–1.3; never below 1.0. Set `styles.typography.lineHeight` and `styles.elements.heading.typography.lineHeight`.
 - **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` RARE: CTAs/interaction, plus at most the ONE micro-motif the DESIGN DIRECTION's `signature_device` explicitly commits accent to (e.g. eyebrow labels, hairline rules, hover underlines) — never body text, large-area backgrounds, or any motif the direction didn't name. Avoid purple-on-white and generic blue-gray.
+- **CONTRAST REQUIREMENTS (WCAG 2.1, non-negotiable).** The contrast ratio is (L1+0.05)/(L2+0.05) over relative luminance; 4.5:1 is the minimum for normal text, 3:1 for large headings. A deterministic build step verifies these and rewrites colors that fail, so a palette that misses them will be altered — pick hexes that pass on your own terms instead:
+    `contrast` on `base` ≥ 7:1 (body text; aim comfortably above the 4.5 floor — near-black on near-white territory, tinted toward the palette's hue is fine)
+    `primary` on `base` ≥ 4.5:1 (it colors links and structural text at body size)
+    `secondary` on `base` ≥ 4.5:1 (it colors captions and metadata — SMALL text, which needs MORE contrast, not less; "muted" must come from size and letterspacing, not from a mid-tone hex)
+    `base` on `accent` (or `primary` if buttons use it) ≥ 4.5:1 (button labels)
+  Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
 - **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies, dramatic shadows and decorative borders over flat solids. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
 
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 
 - Top-level: "$schema": "https://schemas.wp.org/trunk/theme.json", "version": 3.
+- WordPress core's default presets are DISABLED in every generated theme: the build forces `settings.color.defaultPalette`, `settings.color.defaultGradients`, `settings.color.defaultDuotone`, `settings.typography.defaultFontSizes`, and `settings.spacing.defaultSpacingSizes` to `false` (only core SHADOW presets remain available). The slugs YOU declare below are the only presets that exist at runtime — never reference a core default slug (e.g. color "white"/"black", fontSize "large", a core gradient or duotone name), and do not set those flags to `true`.
 - settings.layout: set "contentSize" (800–900px) and "wideSize" (1200–1400px).
 - settings.color.palette: an array with EXACTLY these five slugs, each a valid #RRGGBB hex you choose:
-    "base"      = page background (body text on it must have strong contrast)
-    "contrast"  = body text color
+    "base"      = page background (body text on it must meet the CONTRAST REQUIREMENTS above)
+    "contrast"  = body text color (≥ 7:1 against base)
     "primary"   = main brand color (headings, structure)
     "secondary" = supporting color (metadata, captions)
     "accent"    = CTAs / interaction, plus the direction's signature_device motif when it names accent
@@ -48,13 +55,19 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
   Each entry: { "fontFamily": "<stack>", "name": "...", "slug": "..." }.
   Pick REAL Google Fonts families spelled exactly (e.g. "Cormorant Garamond", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts automatically by name, so no fontFace/src is needed here. Just make the FIRST family in each stack the exact Google font name.
   Include EXACTLY these two fontFamilies and no others — do NOT add a third entry (e.g. a "mono" or "accent" family). Two families only: heading and body.
-- settings.spacing: include "spacingSizes" with slugs sm, md, lg, xl, xxl (a comfortable rising scale), and set "blockGap": true — a null blockGap makes WordPress skip ALL frontend block-gap CSS while the editor still previews it, so the two render different spacing.
-- styles.spacing.blockGap: a default vertical rhythm between sibling blocks, from the spacing scale (e.g. "var:preset|spacing|md").
+- settings.spacing: set `"blockGap": true` and include EXACTLY this bounded, responsive `spacingSizes` profile (the build normalizes it deterministically, so do not rename or rescale it):
+    `sm` — Small — `clamp(0.75rem, 1vw, 1rem)`
+    `md` — Medium — `clamp(1.5rem, 2vw, 2rem)`
+    `lg` — Compact — `clamp(3rem, 4vw, 4rem)`
+    `xl` — Standard — `clamp(4rem, 6vw, 6rem)`
+    `xxl` — Spacious — `clamp(5rem, 7vw, 7rem)`
+  Use sm/md for component gaps and lg/xl/xxl for compact/standard/spacious section padding. Never replace these with fixed large values: the fluid bounds keep mobile padding proportional and cap a spacious desktop edge at 7rem.
+- styles.spacing.blockGap: a default vertical rhythm between sibling blocks, from the spacing scale (e.g. "var:preset|spacing|md") — a null blockGap makes WordPress skip ALL frontend block-gap CSS while the editor still previews it, so the two render different spacing.
 - styles.color.background = var(--wp--preset--color--base), styles.color.text = var(--wp--preset--color--contrast).
 - styles.typography.fontFamily = body font var, fontSize = var(--wp--preset--font-size--body), lineHeight 1.5–1.65.
 - styles.elements.heading.typography.lineHeight = a tight heading line-height (1.1–1.3).
 - styles.elements.h1 / h2 / h3 typography.fontFamily = heading font var, with sizes drawn from the scale via `var(--wp--preset--font-size--<slug>)` references: h1 = display (it renders once per page, as the hero masthead), h2 = section-title, h3 = heading.
-- styles.elements.button: background = accent (or primary), text = base, with padding and borderRadius.
-- styles.elements.link: color = primary; :hover color = accent.
+- styles.elements.button: background = accent (or primary), text = whichever of base/contrast reads ≥ 4.5:1 on that background, with padding and borderRadius.
+- styles.elements.link: color = primary (which must meet 4.5:1 on base — see CONTRAST REQUIREMENTS); :hover color = accent.
 
 Use CSS custom-property references like "var:preset|color|accent" or "var(--wp--preset--color--accent)" as appropriate for theme.json. Output ONLY the theme.json content as valid JSON.
