@@ -52,8 +52,8 @@
   "registry": {
     "generatorVersion": "1.0.0",
     "generatorSourceSha256": "f7618fd0807aab8770ffab44c5fc2405c2ef6caa37721e016c570957862847ee",
-    "runtimeJsonSha256": "3384dbf56db0506bbacd2e496db982b76354b02540c796f6704633157c5fcb3a",
-    "generatedPhpSha256": "3539f97fccf128399113284177cebba75349b9993b5727d8011ad4548e015cee",
+    "runtimeJsonSha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716",
+    "generatedPhpSha256": "ed3710cf608f7575ba138ef1e825bf093f6f535f453dd9ba936a291382d3a3a6",
     "registeredSnapshotSha256": "8aff8e7704a773d322624ffe216de635863f7ad93783308aa135d894410e4dc0",
     "hookTraceSha256": "718a6d2f635b3eb512a996fe3005e2312cbbadddd5f411fb847469b9c0bae4d4",
     "counts": {
@@ -68,5 +68,24 @@
     "generatorVersion": "1.0.0",
     "generatorSourceSha256": "9be3621a29b69d1771419c4972ecf99803f21ac31652e654751d7f5009027daa",
     "definitionsSha256": "1761c7a60660ff89875108fc5313837e2a9c796b146eea83a63cc2e640c8344b"
-  }
+  },
+  "amendments": [
+    {
+      "commit": "1eacd4a",
+      "summary": "Fix generated block compatibility edge cases (post-oracle, hand-reviewed)."
+    },
+    {
+      "commit": "a269765",
+      "summary": "Handle generated button href aliases (post-oracle, hand-reviewed)."
+    },
+    {
+      "commit": "4210065",
+      "summary": "Cover additional generated block signatures (post-oracle, hand-reviewed)."
+    },
+    {
+      "commit": "b580c20",
+      "summary": "Handle custom-site block signatures; adds core/details as a STATIC_RENDERER certified by the abcf523 saveProbes plus @wordpress/block-library@9.42.0 details/save.js (see cases/details-static-renderer)."
+    }
+  ],
+  "amendmentPolicy": "registry.generatedPhpSha256 and registry.runtimeJsonSha256 are re-frozen hashes of the committed artifacts, enforced by tests/unit/oracle_manifest_consistency_test.php. Any post-oracle edit to those artifacts must be listed here with its certification evidence and must ship an end-to-end golden case; see docs/block-fixer-oracle.md for regeneration."
 }
