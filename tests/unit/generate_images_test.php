@@ -96,6 +96,30 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images rewrites theme: placeholders in assembled plugin/pages', function () {
+    [$project, $tmp] = generate_fixture();
+    // Simulate post-assemble multipage content: section covers live in the
+    // content plugin, not only in theme/templates.
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src="theme:./assets/hero.jpg" '
+        . 'alt="AI_IMAGE: A bakery at dawn | full-bleed hero with text overlay | photorealistic | landscape"/>'
+        . '</div><!-- /wp:cover -->'
+    );
+    // Collect from theme template (fixture); the plugin page reuses the same
+    // theme:./assets/hero.jpg placeholder and must rewrite with the same map.
+    $images = new FakeImageClient('JPEGDATA');
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $page = $project->readText('plugin/pages/home.html');
+    assert_contains('/wp-content/themes/demo/assets/hero.jpg', $page);
+    assert_true(!str_contains($page, 'theme:./assets/hero.jpg'), 'plugin page theme: placeholders rewritten');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images weaves the site context into each prompt as one sentence', function () {
     [$project, $tmp] = generate_fixture();
     $project->writeJson('siteSpec.json', [
