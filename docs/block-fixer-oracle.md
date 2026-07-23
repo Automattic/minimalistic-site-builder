@@ -5,7 +5,8 @@ that doubled as the **oracle**: it ran the real `@wordpress/blocks` runtime in a
 pinned container and generated every frozen artifact the PHP port is certified
 against — `src/BlockSerializer/Registry/generated-registry.php`, the fixture
 snapshots under `tests/fixtures/block-fixer/`, and the golden cases under
-`tests/fixtures/block-fixer/cases/`.
+`tests/fixtures/block-fixer/cases/`. (What those artifacts contain and how the
+PHP pipeline consumes them is documented in `docs/block-fixer-architecture.md`.)
 
 The oracle and all regeneration tooling were removed in commit `619b8c9`
 ("Remove the Node block fixer"). That is safe while the compatibility domain

@@ -1,5 +1,13 @@
 # Plan — Pure-PHP block fixer (replace the Node re-serializer)
 
+> **Status (July 2026):** executed and shipped. This document is the design
+> record, written before implementation; its present-tense descriptions of the
+> Node oracle, its CI job, and the observation gates describe the plan, not the
+> current tree — the oracle was removed in `619b8c9`, ahead of the M4 gate (see
+> the *M4 outcome addendum* below). Current-state references:
+> `docs/block-fixer-architecture.md` (how the shipped pipeline works) and
+> `docs/block-fixer-oracle.md` (artifact provenance and regeneration).
+
 Replace the production Node block re-serialization step (`bin/block-fixer/`)
 with `PhpBlockFixer implements BlockFixer`. The production runtime must need
 only PHP 8.1: no Node process, `node_modules`, or Composer install. Development
@@ -393,9 +401,11 @@ For the registered universe it records:
   supports metadata alone does not define class and style ordering.
 - Oracle package versions and lockfile hash.
 
-CI has a Node-enabled oracle job that regenerates this file and fails on an
-unexplained diff. Normal PHP unit and integration tests consume the checked-in
-snapshot and do not require Node.
+CI had a Node-enabled oracle job that regenerated this file and failed on an
+unexplained diff; it was removed with the oracle in `619b8c9`. Drift protection
+now comes from `tests/unit/oracle_manifest_consistency_test.php` and the
+amendment rule in `docs/block-fixer-oracle.md`. Normal PHP unit and integration
+tests consume the checked-in snapshot and do not require Node.
 
 ### Attribute sourcing and normalization
 
