@@ -43,7 +43,10 @@ final class RefinePromptStep implements Step
      */
     public const SINGLE_PAGE_SCOPE_RULE = 'The site is a single landing page — one strong, scrollable'
         . ' home page, not a multi-page site — so describe everything that page should convey; do not'
-        . ' imply separate pages or navigation to other destinations.';
+        . ' imply separate pages or navigation to other destinations. If the request names separate pages'
+        . ' (e.g. Home, Menu, About), preserve each page\'s name and intended content within this one-page'
+        . ' brief: treat Home as the page itself and turn the others into clearly named on-page sections,'
+        . ' not separate routes.';
 
     /**
      * {{page_scope_rule}} when multi_page is on. Site-spec still decides the

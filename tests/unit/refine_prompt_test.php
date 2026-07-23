@@ -19,19 +19,25 @@ function make_refine_fixture(bool $multiPage = false, string $prompt = 'Lisbon c
     return [$project, new FakeLlm(), $tmp];
 }
 
-test('refine-prompt without multi_page asks for a single landing page', function () {
+test('refine-prompt without multi_page turns named pages into on-page sections', function () {
     [$project, $llm, $tmp] = make_refine_fixture(multiPage: false);
-    $llm->queueText('A refined single-page coffee shop brief.');
+    $llm->queueText('A single coffee shop page with Menu and About sections.');
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new RefinePromptStep($llm, $renderer))->run($project);
 
     assert_eq(1, count($llm->calls));
     assert_contains('single landing page', $llm->calls[0]['prompt']);
+    assert_contains('turn the others into clearly named on-page sections', $llm->calls[0]['prompt']);
+    assert_contains('while applying the page-scope rule above', $llm->calls[0]['prompt']);
     assert_true(
         !str_contains($llm->calls[0]['prompt'], 'can produce multiple pages'),
         'multi-page scope must not appear when multi_page is off'
     );
-    assert_eq('A refined single-page coffee shop brief.', $project->readJson('meta.json')['prompt']);
+    assert_true(
+        !str_contains($llm->calls[0]['prompt'], 'keep those as separate destinations'),
+        'multi-page destination rule must not appear when multi_page is off'
+    );
+    assert_eq('A single coffee shop page with Menu and About sections.', $project->readJson('meta.json')['prompt']);
     assert_eq(
         'Lisbon coffee shop with separate Home, Menu, and About pages',
         $project->readJson('meta.json')['original_prompt']
@@ -48,13 +54,16 @@ test('refine-prompt with multi_page preserves multi-page intent in the brief rul
 
     assert_eq(1, count($llm->calls));
     assert_contains('can produce multiple pages', $llm->calls[0]['prompt']);
+    assert_contains('keep those as separate destinations', $llm->calls[0]['prompt']);
     assert_contains('do not collapse them into one scrollable landing page', $llm->calls[0]['prompt']);
     assert_true(
         !str_contains($llm->calls[0]['prompt'], 'not a multi-page site'),
         'single-page force must not appear when multi_page is on'
     );
-    // Named pages must still be listed as facts to preserve.
-    assert_contains('named pages', $llm->calls[0]['prompt']);
+    assert_true(
+        !str_contains($llm->calls[0]['prompt'], 'turn the others into clearly named on-page sections'),
+        'single-page section rule must not appear when multi_page is on'
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
