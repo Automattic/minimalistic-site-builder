@@ -19,6 +19,24 @@
       "slug": "naturaleza",
       "site_type": "restaurant",
       "prompt": "Create a website for my vegetarian restaurant called \"Naturaleza Sabia\" located in the old San Telmo neighborhood in Buenos Aires, Argentina. We serve vegetarian versions of Argentinean traditional dishes. Everything should be in english, our restaurant website is for international tourists."
+    },
+    {
+      "id": "lumen",
+      "slug": "lumen",
+      "site_type": "product-catalog",
+      "prompt": "Create a warm, editorial website for Lumen Objects, a small Copenhagen studio that makes sculptural table lamps from recycled glass. The site should showcase the current collection, explain the hand-blown production process, and invite interior designers to request a trade catalogue."
+    },
+    {
+      "id": "atlas",
+      "slug": "atlas",
+      "site_type": "saas",
+      "prompt": "Create a clean, confident website for Atlas Field, a mobile app for independent construction crews. It helps them schedule jobs, track materials, share daily site reports, and keep clients updated. The audience is owner-operators and small contractors; the main goal is to get visitors to start a free trial."
+    },
+    {
+      "id": "pulso",
+      "slug": "pulso",
+      "site_type": "event",
+      "prompt": "Crea un sitio web en español para Pulso Sur, un festival independiente de música electrónica y arte digital en Montevideo. El festival dura dos noches y presenta artistas locales, instalaciones inmersivas y talleres durante el día. Necesitamos mostrar la programación, el lugar, información de accesibilidad y un botón destacado para comprar entradas."
     }
   ]
 }
