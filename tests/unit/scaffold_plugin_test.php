@@ -175,6 +175,33 @@ test('scaffold-plugin writes the static seeder with identity placeholders', func
     assert_contains('register_activation_hook', $php);
     assert_contains('register_deactivation_hook', $php);
     assert_contains("if (!defined('ABSPATH'))", $php);
+    // Path-traversal guard on images.json filenames (basename + charset + realpath).
+    assert_contains('basename($filename)', $php);
+    assert_contains('realpath($path)', $php);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('content plugin skips path-shaped image filenames from images.json', function () {
+    [$project, $tmp] = scaffold_plugin_fixture();
+
+    $project->writeJson('plugin/pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0, 'parent' => null],
+    ]]);
+    $project->writeText('plugin/pages/home.html', '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->');
+    $project->writeJson('plugin/images.json', ['images' => [
+        ['filename' => '../site-content.php', 'title' => 'traversal'],
+        ['filename' => 'not/a/basename.jpg', 'title' => 'slash'],
+        ['filename' => '..%2fpasswd.jpg', 'title' => 'encoded'],
+        'not-an-array',
+        ['filename' => 'ok.jpg', 'title' => 'missing file'],
+    ]]);
+
+    wp_stub_reset();
+    require_once $project->pluginPath('site-content.php');
+    builder_content_activate();
+
+    assert_eq(0, count($GLOBALS['wp_attachments']), 'path-shaped or invalid filenames never imported');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

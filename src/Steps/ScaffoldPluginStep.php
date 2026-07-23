@@ -210,14 +210,31 @@ final class ScaffoldPluginStep implements Step
                 : array();
 
             $map = array();
+            $images_dir = realpath(__DIR__ . '/images');
             foreach ($images as $image) {
+                if (!is_array($image)) {
+                    continue;
+                }
                 $filename = isset($image['filename']) ? (string) $image['filename'] : '';
-                $path = __DIR__ . '/images/' . $filename;
-                if ($filename === '' || !is_file($path)) {
+                // Basename only, same charset CollectImagesStep accepts — reject
+                // path segments so a crafted images.json cannot escape plugin/images/.
+                if ($filename === '' || $filename !== basename($filename)
+                    || !preg_match('/^[a-z0-9-]+\.(?:jpe?g|png)$/i', $filename)) {
+                    continue;
+                }
+                if ($images_dir === false) {
+                    continue;
+                }
+                $path = $images_dir . DIRECTORY_SEPARATOR . $filename;
+                if (!is_file($path)) {
+                    continue;
+                }
+                $real = realpath($path);
+                if ($real === false || strpos($real, $images_dir . DIRECTORY_SEPARATOR) !== 0) {
                     continue;
                 }
 
-                $upload = wp_upload_bits($filename, null, (string) file_get_contents($path));
+                $upload = wp_upload_bits($filename, null, (string) file_get_contents($real));
                 if (!empty($upload['error'])) {
                     continue;
                 }
