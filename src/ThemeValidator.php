@@ -90,8 +90,11 @@ final class ThemeValidator
      * anchor that exists on the page it targets (the chrome's anchors count
      * everywhere — it renders on every page), a bare "#fragment" in the
      * chrome must resolve on EVERY page, and a button link must carry an
-     * href at all. External URLs, mailto:/tel:, and the bare "#" placeholder
-     * the prompts allow for social links are not judged. Fragment checks are
+     * href at all. External URLs, mailto:/tel:, the bare "#" placeholder the
+     * prompts allow for social links, and static theme asset URLs are not
+     * judged. Asset URLs include the pre-image `theme:./assets/…` form and the
+     * post-GenerateImagesStep rewrite `/wp-content/themes/{slug}/assets/…`
+     * (also scraped from cover/image block `"url"` JSON). Fragment checks are
      * skipped for pages whose markup is not on disk (theme-only builds).
      *
      * @return string[]
@@ -192,10 +195,15 @@ final class ThemeValidator
                     continue;
                 }
                 if ($href[0] !== '/') {
-                    continue; // external schemes, mailto:, tel:, theme assets
+                    continue; // external schemes, mailto:, tel:, theme:./assets
                 }
                 $parts = parse_url($href) ?: [];
                 $path = self::normalizePath((string) ($parts['path'] ?? ''));
+                // After generate-images, cover/image "url" and rewritten srcs
+                // look root-relative — they are media, not page routes.
+                if (self::isThemeAssetPath($path)) {
+                    continue;
+                }
                 if (!isset($routes[$path])) {
                     $problems[] = "{$rel}: link href=\"{$href}\" targets no generated page (no page has path {$path})";
                     continue;
@@ -231,6 +239,20 @@ final class ThemeValidator
             $set[$id] = true;
         }
         return $set;
+    }
+
+    /**
+     * Root-relative URLs that are theme static files (not page routes).
+     * GenerateImagesStep rewrites theme:./assets/* to
+     * /wp-content/themes/{slug}/assets/*; cover/image block "url" attrs and
+     * img src then look like paths and must not be judged as page links.
+     */
+    private static function isThemeAssetPath(string $path): bool
+    {
+        if (str_contains($path, '/wp-content/themes/') && str_contains($path, '/assets/')) {
+            return true;
+        }
+        return (bool) preg_match('/\.(?:jpe?g|png|gif|webp|svg|css|js|woff2?|ttf|eot|ico)(?:$|\?)/i', $path);
     }
 
     /** Page paths compared in one canonical form: leading + trailing slash. */

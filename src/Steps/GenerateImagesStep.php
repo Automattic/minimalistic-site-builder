@@ -73,7 +73,16 @@ final class GenerateImagesStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'plugin/images.json', 'theme/parts/*', 'theme/templates/*'],
+            reads: [
+                'images.json',
+                'siteSpec.json',
+                'designDirection.json',
+                'plugin/images.json',
+                'theme/parts/*',
+                'theme/templates/*',
+                // After assemble-pages, multipage section covers live here.
+                'plugin/pages/*',
+            ],
             writes: [
                 'images.json',
                 self::COMPLETION_ARTIFACT,
@@ -81,6 +90,7 @@ final class GenerateImagesStep implements Step
                 'theme/parts/*',
                 'theme/templates/*',
                 'plugin/images/*',
+                'plugin/pages/*',
             ],
             concurrent: true,
         );
@@ -485,7 +495,10 @@ final class GenerateImagesStep implements Step
 
     /**
      * Replace every "theme:./assets/<file>" reference (img src and wp:cover url)
-     * with the served URL, in every theme markup file.
+     * with the served URL, in every theme markup file and in assembled content
+     * plugin pages (assemble-pages inlines section markup into plugin/pages/*;
+     * CLI --with-images and hosts that schedule this step after assemble must
+     * rewrite those files or multipage covers keep theme: placeholders).
      *
      * @param array<string,string> $resolved theme: src => served URL
      */
@@ -499,6 +512,18 @@ final class GenerateImagesStep implements Step
                 if ($updated !== $content) {
                     $project->writeText('theme/' . $rel, $updated);
                 }
+            }
+        }
+
+        // Multipage section markup is inlined into the content plugin after
+        // assemble-pages; rewrite placeholders there too (wpcom BIGR-703 /
+        // CLI --with-images after the full default pipeline).
+        foreach (glob($project->path('plugin/pages/*.html')) ?: [] as $abs) {
+            $rel = 'plugin/pages/' . basename($abs);
+            $content = $project->readText($rel);
+            $updated = strtr($content, $resolved);
+            if ($updated !== $content) {
+                $project->writeText($rel, $updated);
             }
         }
     }
