@@ -37,7 +37,7 @@ The pipeline (current — see **Phase 3** below for the design-half refactor):
 | 3 | apply-identity   | det | siteSpec → filled style.css/readme.txt |
 | 4a | theme-json    | LLM | meta.json prompt + siteSpec → theme/theme.json (v3); **design decisions made inline** (no design.md) |
 | 4b | section-plan  | LLM | meta.json prompt + siteSpec → sections.json (ordered section briefs). **Runs concurrently with theme-json** (`ConcurrentGroup`, one batched call) |
-| 5 | sections        | LLM | siteSpec + theme.json + sections.json → parts/{header,footer,section-*}.html. **One concurrent batch — every part generated in parallel** (with AI_IMAGE placeholders) |
+| 5 | sections        | LLM | siteSpec + theme.json + sections.json → parts/{header,footer,section-*}.html. **One warm-up probe primes the prompt cache, then one concurrent batch — every part generated in parallel** (with AI_IMAGE placeholders) |
 | 6 | assemble-landing-page | det | sections.json + parts/ → templates/{front-page,index}.html (compose template parts in order) + theme.json templateParts |
 | 7 | collect-images  | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
 | 8 | fix-blocks      | det | templates/ + parts/ → same files re-serialized (block validation) |

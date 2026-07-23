@@ -113,6 +113,9 @@ final class OpenAiCompatibleClient implements Llm
 
         LlmLogger::log($label, $body, $res, $res['time']);
 
+        // Unreachable in practice: retrySingleRequest already converts an
+        // empty non-tolerated response into a transient failure. Kept as a
+        // final guard so a transport change can't silently return ''.
         if (!$tolerateEmpty && trim($res['text']) === '') {
             throw new \RuntimeException('No text content in streamed response');
         }

@@ -23,7 +23,7 @@ interface Llm
      *        Cache reuse requires the same model and an identical prefix,
      *        including tools, system content, and all preceding message content,
      *        through the reused boundary. On Anthropic Sonnet, the cumulative
-     *        prefix through a breakpoint must be approximately 1,024 tokens.
+     *        prefix through a breakpoint must meet the model's minimum cacheable size (1,024 tokens on Sonnet-tier; higher on some tiers) or it silently will not cache. For cross-provider byte-equality, callers append their own separator (e.g. a trailing blank line) to each prefix — Anthropic joins blocks verbatim while OpenAI-compatible providers insert "\n\n".
      *        tolerate_empty defaults to false. When true, a successful response
      *        containing only whitespace returns '' without an empty-response
      *        transient retry; this narrow opt is for throwaway cache-warm probes.
@@ -43,7 +43,7 @@ interface Llm
      *        Cache reuse requires the same model and an identical prefix,
      *        including tools, system content, and all preceding message content,
      *        through the reused boundary. On Anthropic Sonnet, the cumulative
-     *        prefix through a breakpoint must be approximately 1,024 tokens.
+     *        prefix through a breakpoint must meet the model's minimum cacheable size (1,024 tokens on Sonnet-tier; higher on some tiers) or it silently will not cache. For cross-provider byte-equality, callers append their own separator (e.g. a trailing blank line) to each prefix — Anthropic joins blocks verbatim while OpenAI-compatible providers insert "\n\n".
      * @return array<mixed>
      */
     public function completeJson(string $prompt, array $opts = []): array;
@@ -65,7 +65,7 @@ interface Llm
      *        model and an identical prefix, including tools, system content, and
      *        all preceding message content, through the reused boundary. On
      *        Anthropic Sonnet, the cumulative prefix through a breakpoint must
-     *        be approximately 1,024 tokens.
+     *        meet the model's minimum cacheable size (1,024 tokens on Sonnet-tier; higher on some tiers) or it silently will not cache.
      * @return array<array-key,array<mixed>> decoded JSON keyed as the input
      */
     public function completeJsonBatch(array $requests): array;
@@ -87,7 +87,7 @@ interface Llm
      *        model and an identical prefix, including tools, system content, and
      *        all preceding message content, through the reused boundary. On
      *        Anthropic Sonnet, the cumulative prefix through a breakpoint must
-     *        be approximately 1,024 tokens.
+     *        meet the model's minimum cacheable size (1,024 tokens on Sonnet-tier; higher on some tiers) or it silently will not cache.
      * @return array<array-key,string> raw assistant text keyed as the input
      */
     public function completeBatch(array $requests): array;
