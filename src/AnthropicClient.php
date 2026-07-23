@@ -45,8 +45,8 @@ final class AnthropicClient implements Llm
 
     /**
      * Appended to the system prompt of every JSON call (single and batch) to
-     * steer the model toward raw, fence-free JSON. One constant so the wire
-     * request and the decode-failure log reconstruction can never drift apart.
+     * steer the model toward raw, fence-free JSON. One constant keeps the
+     * single-request and concurrent-batch paths aligned.
      */
     private const JSON_SYSTEM = "\nRespond with a single valid JSON value and nothing else. "
         . 'No prose, no markdown fences.';
@@ -152,61 +152,16 @@ final class AnthropicClient implements Llm
 
     public function completeJson(string $prompt, array $opts = []): array
     {
-        // Steer toward raw JSON; still strip fences defensively.
-        $opts['system'] = ($opts['system'] ?? '') . self::JSON_SYSTEM;
-        $text = $this->complete($prompt, $opts);
-
-        $data = self::decodeJson($text);
-        if ($data === null) {
-            // The transport call succeeded and was logged OK above; log the
-            // decode failure as its own FAILED entry so the transcript reflects
-            // that the build died on THIS call, not somewhere downstream. The
-            // body is rebuilt through bodyFor so the log carries the request as
-            // built (system preamble included). Sampling parameters or
-            // cache_control markers stripped mid-retry are the divergences it
-            // can't see.
-            $error = "Expected JSON, got: {$text}";
-            LlmLogger::log(
-                (string) ($opts['log_label'] ?? 'request'),
-                self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens),
-                ['text' => $text, 'input' => 0, 'output' => 0],
-                0.0,
-                $error,
-            );
-            throw new \RuntimeException($error);
-        }
-        return $data;
+        $result = $this->completeJsonBatch(['request' => ['prompt' => $prompt] + $opts]);
+        return $result['request'];
     }
 
     public function completeJsonBatch(array $requests): array
     {
-        $out = [];
-        foreach ($this->textBatch($requests, true) as $key => $text) {
-            $data = self::decodeJson($text);
-            if ($data === null) {
-                // Same as completeJson: the transport entry was logged OK, so
-                // log the decode failure as its own FAILED entry too, with the
-                // body rebuilt as textBatch built it (preamble + JSON steer
-                // included). Sampling parameters or cache_control markers
-                // stripped mid-retry are the divergences it can't see.
-                $error = "batch request '{$key}': expected JSON, got: {$text}";
-                $req = $requests[$key];
-                LlmLogger::log(
-                    (string) ($req['log_label'] ?? $key),
-                    self::bodyFor(
-                        ['system' => (string) ($req['system'] ?? '') . self::JSON_SYSTEM] + $req,
-                        $this->model,
-                        $this->defaultMaxTokens,
-                    ),
-                    ['text' => $text, 'input' => 0, 'output' => 0],
-                    0.0,
-                    $error,
-                );
-                throw new \RuntimeException($error);
-            }
-            $out[$key] = $data;
-        }
-        return $out;
+        return JsonBatchRecovery::run(
+            $requests,
+            fn (array $subset): array => $this->responseBatch($subset, true),
+        );
     }
 
     public function completeBatch(array $requests): array
@@ -218,12 +173,12 @@ final class AnthropicClient implements Llm
      * Shared concurrent-batch transport for both completeJsonBatch (JSON) and
      * completeBatch (raw text). Builds one Messages body per request, runs them
      * concurrently retrying only transient failures, accrues token usage, and
-     * returns each request's raw assistant text keyed as the input.
+     * returns each response record keyed as the input.
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
-     * @return array<array-key,string> raw text keyed as the input
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
+     * @return array<array-key,array<string,mixed>>
      */
-    private function textBatch(array $requests, bool $json): array
+    private function responseBatch(array $requests, bool $json): array
     {
         if ($requests === []) {
             return [];
@@ -251,7 +206,7 @@ final class AnthropicClient implements Llm
         // call that broke the build is still inspectable.
         $results = self::retryTextBatch(
             $bodies,
-            fn (array $subset): array => $this->streamMulti($subset),
+            fn (array $subset): array => $this->streamMulti($subset, $json),
             [2, 5, 12],
             function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
                 LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
@@ -266,9 +221,22 @@ final class AnthropicClient implements Llm
             $this->cacheReadInputTokens += $res['cache_read_input_tokens'];
             $this->cacheCreationInputTokens += $res['cache_creation_input_tokens'];
 
-            LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+            $res['log_path'] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+            $res['model'] = (string) $bodies[$key]['model'];
+            $out[$key] = $res;
+        }
+        return $out;
+    }
 
-            $out[$key] = $res['text'];
+    /**
+     * @param array<array-key,array<string,mixed>> $requests
+     * @return array<array-key,string>
+     */
+    private function textBatch(array $requests, bool $json): array
+    {
+        $out = [];
+        foreach ($this->responseBatch($requests, $json) as $key => $response) {
+            $out[$key] = (string) $response['text'];
         }
         return $out;
     }
@@ -293,7 +261,7 @@ final class AnthropicClient implements Llm
      * sampling-less model (Opus 4.7+, Fable) doesn't 400. Pure apart from the
      * cached preamble read — unit-testable.
      *
-     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $req
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>} $req
      * @return array<string,mixed>
      */
     public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens): array
@@ -339,6 +307,18 @@ final class AnthropicClient implements Llm
         ];
         if (isset($req['temperature']) && self::supportsSampling($model)) {
             $body['temperature'] = (float) $req['temperature'];
+        }
+        if (isset($req['json_schema'])) {
+            $spec = $req['json_schema'];
+            if (!is_array($spec) || !is_array($spec['schema'] ?? null)) {
+                throw new \InvalidArgumentException('json_schema must contain a schema array');
+            }
+            $body['output_config'] = [
+                'format' => [
+                    'type'   => 'json_schema',
+                    'schema' => $spec['schema'],
+                ],
+            ];
         }
         $system = self::systemPreamble();
         if (trim((string) ($req['system'] ?? '')) !== '') {
@@ -428,10 +408,10 @@ final class AnthropicClient implements Llm
      * post-batch logging reflects what was actually sent.
      *
      * @param array<array-key,array<string,mixed>> $bodies request bodies keyed by id
-     * @param callable(array<array-key,array<string,mixed>>):array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string}> $transport
+     * @param callable(array<array-key,array<string,mixed>>):array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param null|callable(string|int,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
-     * @return array<array-key,array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float}>
+     * @return array<array-key,array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}>
      */
     public static function retryTextBatch(array &$bodies, callable $transport, array $delays, ?callable $onFailure = null): array
     {
@@ -459,6 +439,9 @@ final class AnthropicClient implements Llm
                             'cache_read_input_tokens' => (int) ($outcome['cache_read_input_tokens'] ?? 0),
                             'cache_creation_input_tokens' => (int) ($outcome['cache_creation_input_tokens'] ?? 0),
                             'time'   => (float) ($outcome['time'] ?? 0),
+                            'stop_reason' => isset($outcome['stop_reason'])
+                                ? (string) $outcome['stop_reason']
+                                : null,
                         ];
                     } elseif ($dropParam !== null && self::stripRejectedParam($bodies[$key], $dropParam)) {
                         $stripRetry[] = $key;
@@ -496,14 +479,14 @@ final class AnthropicClient implements Llm
      * decides). Bounding concurrency keeps a wide fan-out (every landing-page
      * part at once) from tripping the API's rate limits.
      *
-     * @param array<string,array<string,mixed>> $bodies request body keyed by id
-     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool}>
+     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}>
      */
-    private function streamMulti(array $bodies): array
+    private function streamMulti(array $bodies, bool $allowEmptyTerminal = false): array
     {
         $out = [];
         foreach (self::concurrencyWindows($bodies) as $chunk) {
-            $out += $this->streamChunk($chunk);
+            $out += $this->streamChunk($chunk, $allowEmptyTerminal);
         }
         return $out;
     }
@@ -513,8 +496,8 @@ final class AnthropicClient implements Llm
      * preserving keys, so the transport runs each window concurrently and no
      * more than MAX_CONCURRENCY transfers are ever in flight. Pure — unit-testable.
      *
-     * @param array<string,array<string,mixed>> $bodies request body keyed by id
-     * @return array<int,array<string,array<string,mixed>>>
+     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
+     * @return array<int,array<array-key,array<string,mixed>>>
      */
     public static function concurrencyWindows(array $bodies): array
     {
@@ -525,10 +508,10 @@ final class AnthropicClient implements Llm
      * Run one window of streaming requests concurrently with curl_multi and
      * assemble each SSE body per handle. Mirrors WpcomImageClient::multiRequest.
      *
-     * @param array<string,array<string,mixed>> $bodies request body keyed by id
-     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool}>
+     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}>
      */
-    private function streamChunk(array $bodies): array
+    private function streamChunk(array $bodies, bool $allowEmptyTerminal = false): array
     {
         $multi = curl_multi_init();
         $handles = [];
@@ -574,7 +557,14 @@ final class AnthropicClient implements Llm
             $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
             curl_multi_remove_handle($multi, $ch);
             curl_close($ch);
-            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus, $time);
+            $out[$key] = self::interpretStream(
+                $raw[$key],
+                $errno,
+                $error,
+                $httpStatus,
+                $time,
+                $allowEmptyTerminal,
+            );
         }
 
         curl_multi_close($multi);
@@ -588,9 +578,16 @@ final class AnthropicClient implements Llm
      * "could not resolve host") and 429/5xx are transient; a clean 4xx or any
      * other cURL error is permanent and aborts the build. Pure — no I/O.
      *
-     * @return array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,time?:float,error?:string,transient?:bool,retry_without?:string}
+     * @return array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,time?:float,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}
      */
-    private static function interpretStream(string $raw, int $errno, string $error, int $status, float $time = 0.0): array
+    private static function interpretStream(
+        string $raw,
+        int $errno,
+        string $error,
+        int $status,
+        float $time = 0.0,
+        bool $allowEmptyTerminal = false,
+    ): array
     {
         if ($errno !== 0) {
             return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}"];
@@ -611,7 +608,10 @@ final class AnthropicClient implements Llm
             $transient = in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true);
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}"];
         }
-        if (trim($parsed['text']) === '') {
+        if (trim($parsed['text']) === '' && !(
+            $allowEmptyTerminal
+            && JsonBatchRecovery::terminationError($parsed['stop_reason']) !== null
+        )) {
             return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response'];
         }
         return [
@@ -622,6 +622,7 @@ final class AnthropicClient implements Llm
             'cache_read_input_tokens' => $parsed['cache_read_input_tokens'],
             'cache_creation_input_tokens' => $parsed['cache_creation_input_tokens'],
             'time' => $time,
+            'stop_reason' => $parsed['stop_reason'],
         ];
     }
 
@@ -654,7 +655,7 @@ final class AnthropicClient implements Llm
      * by-reference so the caller logs what was actually sent.
      *
      * @param array<string,mixed> $body
-     * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float}
+     * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}
      */
     private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
     {
@@ -717,7 +718,7 @@ final class AnthropicClient implements Llm
      * the SSE event stream.
      *
      * @param array<string,mixed> $body
-     * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float}
+     * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}
      * @throws TransientApiException on a retryable failure (DNS, stall, 429, 5xx, overload)
      */
     private function streamRequest(array $body): array
@@ -783,6 +784,9 @@ final class AnthropicClient implements Llm
             }
             throw new \RuntimeException("stream error: {$parsed['error']}");
         }
+        // Empty-text handling lives in retrySingleRequest so tolerate_empty
+        // (cache-warm probes) can accept a blank one-token reply without a
+        // transient retry loop.
         return [
             'text' => $parsed['text'],
             'input' => $parsed['input'],
@@ -790,6 +794,7 @@ final class AnthropicClient implements Llm
             'cache_read_input_tokens' => $parsed['cache_read_input_tokens'],
             'cache_creation_input_tokens' => $parsed['cache_creation_input_tokens'],
             'time' => $time,
+            'stop_reason' => $parsed['stop_reason'],
         ];
     }
 
@@ -797,7 +802,7 @@ final class AnthropicClient implements Llm
      * Parse an assembled Server-Sent Events body from the Messages API into the
      * concatenated text and token usage. Pure (no I/O) so it can be unit-tested.
      *
-     * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,error:?string,error_type:string}
+     * @return array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,error:?string,error_type:string,stop_reason:?string}
      */
     public static function parseSse(string $raw): array
     {
@@ -808,6 +813,7 @@ final class AnthropicClient implements Llm
         $cacheCreation = 0;
         $error = null;
         $errorType = '';
+        $stopReason = null;
 
         foreach (preg_split('/\r?\n/', $raw) ?: [] as $line) {
             if (!str_starts_with($line, 'data:')) {
@@ -838,6 +844,9 @@ final class AnthropicClient implements Llm
                     if (isset($evt['usage']['output_tokens'])) {
                         $output = (int) $evt['usage']['output_tokens'];
                     }
+                    if (isset($evt['delta']['stop_reason'])) {
+                        $stopReason = (string) $evt['delta']['stop_reason'];
+                    }
                     break;
                 case 'error':
                     $error = $evt['error']['message'] ?? 'stream error';
@@ -854,6 +863,7 @@ final class AnthropicClient implements Llm
             'cache_creation_input_tokens' => $cacheCreation,
             'error' => $error,
             'error_type' => $errorType,
+            'stop_reason' => $stopReason,
         ];
     }
 
@@ -862,74 +872,20 @@ final class AnthropicClient implements Llm
         return strlen($s) > $max ? substr($s, 0, $max) . '…' : $s;
     }
 
-    private static function stripFences(string $text): string
-    {
-        $text = trim($text);
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
-    }
-
     /**
-     * Decode assistant text into a JSON array, tolerating the two mistakes models
-     * make most often: wrapping the value in ```json fences, and leaving trailing
-     * commas before a closing } or ]. Strict json_decode is tried first; only if
-     * that fails do we attempt the trailing-comma repair, so well-formed output is
-     * never altered. Returns null when the text isn't recoverable JSON.
+     * Provider-neutral decoder entry point retained on the concrete client for
+     * callers that need defensive parsing without making a request.
      *
      * @return array<mixed>|null
      */
     public static function decodeJson(string $text): ?array
     {
-        $json = self::stripFences($text);
-        $data = json_decode($json, true);
-        if (!is_array($data)) {
-            $data = json_decode(self::stripTrailingCommas($json), true);
-        }
-        return is_array($data) ? $data : null;
+        return JsonDecoder::decode($text);
     }
 
-    /**
-     * Remove commas that sit immediately before a closing } or ] (ignoring
-     * whitespace) — invalid JSON that LLMs emit routinely. Walks the string
-     * tracking string/escape state so commas inside string values are left
-     * untouched.
-     */
-    private static function stripTrailingCommas(string $json): string
+    /** @return array{data:?array,error:?string} */
+    public static function decodeJsonResult(string $text): array
     {
-        $out = '';
-        $len = strlen($json);
-        $inStr = false;
-        for ($i = 0; $i < $len; $i++) {
-            $ch = $json[$i];
-            if ($inStr) {
-                $out .= $ch;
-                if ($ch === '\\' && $i + 1 < $len) {
-                    $out .= $json[$i + 1]; // copy the escaped char verbatim
-                    $i++;
-                } elseif ($ch === '"') {
-                    $inStr = false;
-                }
-                continue;
-            }
-            if ($ch === '"') {
-                $inStr = true;
-                $out .= $ch;
-                continue;
-            }
-            if ($ch === ',') {
-                $j = $i + 1;
-                while ($j < $len && ctype_space($json[$j])) {
-                    $j++;
-                }
-                if ($j < $len && ($json[$j] === '}' || $json[$j] === ']')) {
-                    continue; // drop the trailing comma
-                }
-            }
-            $out .= $ch;
-        }
-        return $out;
+        return JsonDecoder::decodeResult($text);
     }
 }

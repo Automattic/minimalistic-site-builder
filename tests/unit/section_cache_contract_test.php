@@ -25,6 +25,7 @@ function section_cache_input(string $slug = 'hero', string $title = 'Hero'): arr
         'section'          => [
             'slug'             => $slug,
             'title'            => $title,
+            'role'             => 'hero',
             'type'             => 'hero',
             'purpose'          => "Purpose for {$title}",
             'content_notes'    => "Notes for {$title}",
@@ -54,13 +55,13 @@ function section_cache_project(): array
         'purpose'    => 'Cache demo',
         'sections'   => [
             [
-                'slug' => 'hero', 'title' => 'Hero', 'type' => 'hero',
+                'slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero',
                 'purpose' => 'Open', 'content_notes' => 'Lead strongly.',
                 'layout_archetype' => 'full-bleed-cover', 'background' => 'image',
                 'vertical_density' => 'standard', 'handoff' => 'Between header and about.',
             ],
             [
-                'slug' => 'about', 'title' => 'About', 'type' => 'about',
+                'slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about',
                 'purpose' => 'Explain', 'content_notes' => 'Tell the story.',
                 'layout_archetype' => 'asymmetric-split', 'background' => 'base',
                 'vertical_density' => 'standard', 'handoff' => 'Between hero and footer.',

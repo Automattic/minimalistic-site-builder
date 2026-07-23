@@ -44,7 +44,7 @@ test('parseSse assembles text and usage from an SSE body', function () {
         'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"world"}}',
         '',
         'event: message_delta',
-        'data: {"type":"message_delta","usage":{"output_tokens":7}}',
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}',
         '',
         'event: message_stop',
         'data: {"type":"message_stop"}',
@@ -57,6 +57,7 @@ test('parseSse assembles text and usage from an SSE body', function () {
     assert_eq(10, $p['cache_read_input_tokens']);
     assert_eq(3, $p['cache_creation_input_tokens']);
     assert_eq(null, $p['error']);
+    assert_eq('end_turn', $p['stop_reason']);
 });
 
 test('usageTotals exposes accrued cache read and creation totals by API field name', function () {
@@ -87,4 +88,25 @@ test('parseSse surfaces a stream error', function () {
     $p = AnthropicClient::parseSse($sse);
     assert_eq('overloaded', $p['error']);
     assert_eq('overloaded_error', $p['error_type']);
+});
+
+test('Anthropic JSON transport preserves an empty max_tokens response for decode recovery', function () {
+    $sse = implode("\n", [
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}',
+        'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":9}}',
+        'data: {"type":"message_stop"}',
+        '',
+    ]);
+
+    $method = new ReflectionMethod(AnthropicClient::class, 'interpretStream');
+    $method->setAccessible(true);
+
+    $jsonResult = $method->invoke(null, $sse, 0, '', 200, 0.25, true);
+    assert_eq(true, $jsonResult['ok'], 'JSON recovery receives the terminal response without transport retries');
+    assert_eq('', $jsonResult['text']);
+    assert_eq('max_tokens', $jsonResult['stop_reason']);
+
+    $textResult = $method->invoke(null, $sse, 0, '', 200, 0.25, false);
+    assert_eq(false, $textResult['ok'], 'ordinary text batches retain empty-response retry behavior');
+    assert_eq(true, $textResult['transient']);
 });

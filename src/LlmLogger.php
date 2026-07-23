@@ -63,23 +63,23 @@ final class LlmLogger
      *
      * @param string $label             call identity (step + variable), e.g. "section-hero"
      * @param array<string,mixed> $request  the Messages API request body that was sent
-     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int} $response
+     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,stop_reason?:?string} $response
      * @param float $seconds            wall-clock time the call took
      * @param ?string $error            failure message, or null for a successful call
      */
-    public static function log(string $label, array $request, array $response, float $seconds, ?string $error = null): void
+    public static function log(string $label, array $request, array $response, float $seconds, ?string $error = null): ?string
     {
         if (self::$disabled) {
-            return;
+            return null;
         }
         $dir = self::$dir;
         if ($dir === null) {
             // No active project context — nowhere to log (and never the repo root).
-            return;
+            return null;
         }
         try {
             if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
-                return;
+                return null;
             }
             // Prefix the filename with the call's position this run (01, 02, …)
             // so the directory listing reflects the order calls were made, and
@@ -87,9 +87,11 @@ final class LlmLogger
             $prefix = sprintf('%02d', ++self::$seq);
             $name = $prefix . '-' . $label . ($error !== null ? '-failed' : '');
             $path = self::uniquePath($dir, $name);
-            @file_put_contents($path, self::format($label, $request, $response, $seconds, $error));
+            $written = @file_put_contents($path, self::format($label, $request, $response, $seconds, $error));
+            return $written === false ? null : $path;
         } catch (\Throwable $e) {
             // Best-effort: a logging failure must never break a build.
+            return null;
         }
     }
 
@@ -127,7 +129,7 @@ final class LlmLogger
      * (or, for a failed call, the error). Pure — unit-testable.
      *
      * @param array<string,mixed> $request
-     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int} $response
+     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,stop_reason?:?string} $response
      * @param ?string $error  failure message, or null for a successful call
      */
     public static function format(string $label, array $request, array $response, float $seconds, ?string $error = null): string
@@ -164,7 +166,7 @@ final class LlmLogger
             );
         }
 
-        $header = implode("\n", [
+        $headerLines = [
             $rule,
             'LLM REQUEST LOG',
             $rule,
@@ -174,7 +176,12 @@ final class LlmLogger
             'Logged at    : ' . date('Y-m-d H:i:s'),
             'Time         : ' . sprintf('%.2fs', $seconds),
             'Tokens       : ' . $tokens,
-        ]);
+        ];
+        $stopReason = trim((string) ($response['stop_reason'] ?? ''));
+        if ($stopReason !== '') {
+            $headerLines[] = 'Stop reason  : ' . $stopReason;
+        }
+        $header = implode("\n", $headerLines);
 
         $body = self::renderRequest($request);
 

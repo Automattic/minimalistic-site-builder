@@ -221,3 +221,108 @@ test('OpenAiCompatibleClient implements Llm', function () {
         assert_true(method_exists($c, $method), "missing {$method}");
     }
 });
+
+test('bodyFor maps json_schema to a strict OpenAI response_format', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'required' => ['sections'],
+        'additionalProperties' => false,
+    ];
+
+    $body = OpenAiCompatibleClient::bodyFor(
+        [
+            'prompt' => 'Plan a page.',
+            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+        ],
+        'gpt-5.5',
+        16000,
+        'openai',
+    );
+
+    assert_eq([
+        'type' => 'json_schema',
+        'json_schema' => [
+            'name' => 'page_plan',
+            'strict' => true,
+            'schema' => $schema,
+        ],
+    ], $body['response_format']);
+});
+
+test('bodyFor maps json_schema to the same strict xAI response_format', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'required' => ['sections'],
+        'additionalProperties' => false,
+    ];
+
+    $body = OpenAiCompatibleClient::bodyFor(
+        [
+            'prompt' => 'Plan a page.',
+            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+        ],
+        'grok-4.5',
+        16000,
+        'xai',
+    );
+
+    assert_eq([
+        'type' => 'json_schema',
+        'json_schema' => [
+            'name' => 'page_plan',
+            'strict' => true,
+            'schema' => $schema,
+        ],
+    ], $body['response_format']);
+});
+
+test('parseSse classifies OpenAI refusal fields without leaking refusal text as content', function () {
+    $nonStream = json_encode([
+        'choices' => [[
+            'message' => ['role' => 'assistant', 'content' => null, 'refusal' => 'I cannot help with that.'],
+            'finish_reason' => 'stop',
+        ]],
+        'usage' => ['prompt_tokens' => 8, 'completion_tokens' => 1],
+    ], JSON_UNESCAPED_SLASHES);
+
+    $parsed = OpenAiCompatibleClient::parseSse((string) $nonStream);
+    assert_eq('', $parsed['text']);
+    assert_eq(8, $parsed['input']);
+    assert_eq(1, $parsed['output']);
+    assert_eq(null, $parsed['error']);
+    assert_eq('refusal', $parsed['stop_reason']);
+
+    $stream = implode("\n", [
+        'data: {"choices":[{"delta":{"refusal":"I cannot help"},"index":0}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":1}}',
+        'data: [DONE]',
+        '',
+    ]);
+    $parsed = OpenAiCompatibleClient::parseSse($stream);
+    assert_eq('', $parsed['text']);
+    assert_eq('refusal', $parsed['stop_reason'], 'a later finish_reason does not erase the refusal classification');
+});
+
+test('OpenAI JSON transport preserves an empty refusal for decode recovery', function () {
+    $raw = json_encode([
+        'choices' => [[
+            'message' => ['role' => 'assistant', 'content' => null, 'refusal' => 'I cannot help with that.'],
+            'finish_reason' => 'stop',
+        ]],
+        'usage' => ['prompt_tokens' => 8, 'completion_tokens' => 1],
+    ], JSON_UNESCAPED_SLASHES);
+
+    $method = new ReflectionMethod(OpenAiCompatibleClient::class, 'interpretStream');
+    $method->setAccessible(true);
+
+    $jsonResult = $method->invoke(null, (string) $raw, 0, '', 200, 0.25, true);
+    assert_eq(true, $jsonResult['ok'], 'JSON recovery receives the refusal without transport retries');
+    assert_eq('', $jsonResult['text']);
+    assert_eq('refusal', $jsonResult['stop_reason']);
+
+    $textResult = $method->invoke(null, (string) $raw, 0, '', 200, 0.25, false);
+    assert_eq(false, $textResult['ok'], 'ordinary text batches retain empty-response retry behavior');
+    assert_eq(true, $textResult['transient']);
+});

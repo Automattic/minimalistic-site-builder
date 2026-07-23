@@ -374,9 +374,35 @@ test('layout fixer leaves correctly nested spacing attributes untouched', functi
     assert_eq($markup, $r['markup']);
 });
 
+test('layout fixer maps CSS flex justification vocabulary to Gutenberg values', function () {
+    $markup = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"flex-end","verticalAlignment":"center"}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->';
+    $result = LayoutFixer::fix($markup, LayoutFixer::ROLE_HEADER, 860.0);
+
+    assert_contains('"justifyContent":"right"', $result['markup']);
+    assert_contains('mapped it to Gutenberg', implode("\n", $result['notes']));
+    assert_eq([], LayoutFixer::fix($result['markup'], LayoutFixer::ROLE_HEADER, 860.0)['notes']);
+});
+
+test('layout fixer repairs malformed rendered preset variables only with matching attrs', function () {
+    $matching = '<!-- wp:paragraph {"style":{"spacing":{"margin":{"top":"var:preset|spacing|md"}}}} -->'
+        . '<p style="margin-top:var(--wp--spacing--md)">Copy</p><!-- /wp:paragraph -->';
+    $result = LayoutFixer::fix($matching, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('margin-top:var(--wp--preset--spacing--md)', $result['markup']);
+    assert_contains('restored the canonical CSS variable spelling', implode("\n", $result['notes']));
+    assert_eq([], LayoutFixer::fix($result['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+
+    $htmlOnly = '<!-- wp:paragraph --><p style="margin-top:var(--wp--spacing--md)">Copy</p><!-- /wp:paragraph -->';
+    assert_eq($htmlOnly, LayoutFixer::fix($htmlOnly, LayoutFixer::ROLE_SECTION, 860.0)['markup']);
+
+    $disagreeing = '<!-- wp:paragraph {"style":{"spacing":{"margin":{"top":"var:preset|spacing|lg"}}}} -->'
+        . '<p style="margin-top:var(--wp--spacing--md)">Copy</p><!-- /wp:paragraph -->';
+    assert_eq($disagreeing, LayoutFixer::fix($disagreeing, LayoutFixer::ROLE_SECTION, 860.0)['markup']);
+});
+
 test('layout fixer repairs attribute JSON whose only reading deletes a stray closer', function () {
     // A stray `}` closes the attrs object before ",layout" — json_decode
-    // fails and the Node fixer would erase EVERY attribute of the block.
+    // fails and block serialization would erase every attribute of the block.
     // Deleting any brace of the run yields the same, single valid object, so
     // the repair is unambiguous and applied.
     $markup = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} --><div class="wp-block-group alignfull">'
@@ -387,6 +413,21 @@ test('layout fixer repairs attribute JSON whose only reading deletes a stray clo
     assert_contains('wp:group {"style":{"spacing":{"blockGap":"var:preset|spacing|sm"}},"layout":{"type":"constrained"}}', $r['markup']);
     assert_eq(2, substr_count($r['markup'], '"layout":{"type":"constrained"}'));
     assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer restores an omitted final root attribute closer', function () {
+    // portfolio33: all nested objects were balanced, but the heading attrs
+    // omitted only the outermost `}`. The block parser consequently treated
+    // attrs as null and re-serialization dropped the declared top margin.
+    $markup = '<!-- wp:heading {"textAlign":"center","level":2,"fontFamily":"heading","fontSize":"section-title","style":{"typography":{"fontWeight":"400"},"spacing":{"margin":{"top":"var:preset|spacing|sm"}}} -->'
+        . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family has-section-title-font-size" style="margin-top:var(--wp--preset--spacing--sm);font-weight:400">Title</h2>'
+        . '<!-- /wp:heading -->';
+
+    $result = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+
+    assert_contains('"top":"var:preset|spacing|sm"}}}} -->', $result['markup']);
+    assert_contains('omitted their final root closer', implode("\n", $result['notes']));
+    assert_eq([], LayoutFixer::fix($result['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
 });
 
 test('layout fixer refuses a stray-closer repair with several distinct valid readings', function () {

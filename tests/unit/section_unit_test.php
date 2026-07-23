@@ -23,6 +23,7 @@ function section_unit_input(): array
         'section'          => [
             'slug'             => 'unit-section',
             'title'            => 'UNIT-TITLE-SENTINEL',
+            'role'             => 'hero',
             'type'             => 'hero',
             'purpose'          => 'UNIT-PURPOSE-SENTINEL',
             'content_notes'    => 'UNIT-NOTES-SENTINEL',
@@ -68,6 +69,7 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     $sent = $llm->calls[0]['opts'] + ['prompt' => $llm->calls[0]['prompt']];
     assert_eq(2, count($sent['cached_prefixes'] ?? []), 'direct execution forwards both cache layers');
     $prompt = section_unit_request_text($sent);
+    assert_contains('Role:     hero', $prompt);
     foreach ([
         'UNIT-SPEC-SENTINEL',
         'unit-language-sentinel',
@@ -138,6 +140,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'page_path'         => $input['page']['path'],
         'section_title'     => $input['section']['title'],
         'section_slug'      => $input['section']['slug'],
+        'section_role'      => $input['section']['role'],
         'section_type'      => $input['section']['type'],
         'section_purpose'   => $input['section']['purpose'],
         'content_notes'     => $input['section']['content_notes'],
@@ -161,4 +164,45 @@ test('SectionUnit rejects malformed nested HTTP input before calling the LLM', f
 
     assert_throws(fn () => $unit->generate($input));
     assert_eq(0, $llm->completeCalls);
+});
+
+test('SectionUnit requires an explicit section role before calling the LLM', function () {
+    $llm = new FakeLlm();
+    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+    $input = section_unit_input();
+    unset($input['section']['role']);
+
+    $error = null;
+    try {
+        $unit->generate($input);
+    } catch (InvalidArgumentException $e) {
+        $error = $e;
+    }
+
+    assert_true($error instanceof InvalidArgumentException);
+    assert_contains("unit input 'section.role' is required", $error->getMessage());
+    assert_eq(0, $llm->completeCalls);
+});
+
+test('SectionUnit rejects malformed or unsupported section roles before calling the LLM', function () {
+    foreach ([
+        'non-string'  => [['hero'], "unit input 'section.role' must be a string"],
+        'unsupported' => ['featured', "unit input 'section.role' must be one of: hero, content, closing"],
+    ] as $case => [$role, $message]) {
+        $llm = new FakeLlm();
+        $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+        $input = section_unit_input();
+        $input['section']['role'] = $role;
+
+        $error = null;
+        try {
+            $unit->generate($input);
+        } catch (InvalidArgumentException $e) {
+            $error = $e;
+        }
+
+        assert_true($error instanceof InvalidArgumentException, "{$case} role should be rejected");
+        assert_contains($message, $error->getMessage());
+        assert_eq(0, $llm->completeCalls, "{$case} role should fail before calling the LLM");
+    }
 });

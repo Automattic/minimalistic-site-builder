@@ -22,17 +22,24 @@ cp .env.example .env
 # Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
-npm install   # once; installs the Node helper tools under bin/ (block-fixer, screenshot)
+npm ci   # optional; installs local Playground and screenshot helpers
 ```
 
-Requires PHP 8.1+ (no Composer — the source set autoloads via the
-dependency-free PSR-4 loader `autoload.php`, loaded by `src/bootstrap.php`)
-and Node 18+.
+Theme generation and block fixing require PHP 8.1+ only. No Composer is needed:
+the source set autoloads through the dependency-free PSR-4 loader
+`autoload.php`, loaded by `src/bootstrap.php`.
 
-The `bin/` helper tools (`bin/block-fixer`, `bin/screenshot`) are npm
-workspaces, so a single `npm install` at the repo root installs all of them.
-The block-fixer runs as a standard step of `bin/build.php`, so this install is
-required for a normal build — not optional.
+The block fixer is implemented entirely in PHP and needs neither Node nor
+`node_modules`. WordPress Playground previews and screenshot tooling still use
+Node. Use `php bin/build.php "…" --no-serve` for a PHP-only build.
+
+> **Breaking change for downstream consumers:** the Node block fixer is gone —
+> `NodeBlockFixer` and `Package::blockFixerScript()` no longer exist. Any host
+> that vendors this package and wrapped the Node script in a sandbox or adapter
+> must delete or rewire that adapter in the same change as the re-vendor.
+> `PhpBlockFixer` runs in-process with zero runtime dependencies; the frozen
+> compatibility artifacts and their regeneration path are documented in
+> `docs/block-fixer-oracle.md`.
 
 ## Build a site
 
@@ -173,7 +180,7 @@ actually fetched and rendered — a plain `fullPage` capture leaves them as empt
 boxes (see [issue #31](docs/evidence/issue-31/README.md)).
 
 ```bash
-npm install   # once, at the repo root; uses your system Chrome, no download
+npm ci   # once, at the repo root; uses your system Chrome, no download
 node bin/screenshot/screenshot.js http://localhost:9400/ shot.png
 ```
 

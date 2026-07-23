@@ -13,9 +13,20 @@ require_once __DIR__ . '/FakeLlm.php';
 /** @var array<int,array{0:string,1:callable}> */
 $GLOBALS['__tests'] = [];
 
+/** Raised by skip_test() so a missing optional capability is never a false pass. */
+final class TestSkipped extends RuntimeException
+{
+}
+
 function test(string $name, callable $fn): void
 {
     $GLOBALS['__tests'][] = [$name, $fn];
+}
+
+/** Mark the current test as explicitly skipped, with a reviewable reason. */
+function skip_test(string $reason): never
+{
+    throw new TestSkipped($reason);
 }
 
 function assert_true(bool $cond, string $msg = ''): void
@@ -59,16 +70,20 @@ function run_tests(): int
 {
     $pass = 0;
     $fail = 0;
+    $skip = 0;
     foreach ($GLOBALS['__tests'] as [$name, $fn]) {
         try {
             $fn();
             echo "  PASS  {$name}\n";
             $pass++;
+        } catch (TestSkipped $e) {
+            echo "  SKIP  {$name}\n        {$e->getMessage()}\n";
+            $skip++;
         } catch (Throwable $e) {
             echo "  FAIL  {$name}\n        {$e->getMessage()}\n";
             $fail++;
         }
     }
-    echo "\n{$pass} passed, {$fail} failed\n";
+    echo "\n{$pass} passed, {$fail} failed, {$skip} skipped\n";
     return $fail === 0 ? 0 : 1;
 }

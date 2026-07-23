@@ -47,6 +47,19 @@ test('StepComposition default matches CLI step order and validates', function ()
     ], array_map(static fn (Step $s) => $s->id(), $steps));
 });
 
+test('StepComposition default uses the bundled PHP fixer when none is injected', function () {
+    $d = composition_deps();
+    $composition = StepComposition::default(
+        llm: $d['llm'],
+        renderer: $d['renderer'],
+    );
+
+    assert_true(in_array('fix-blocks', array_map(
+        static fn (Step $step): string => $step->id(),
+        $composition->steps(),
+    ), true));
+});
+
 test('StepComposition without removes a top-level step and still validates', function () {
     $d = composition_deps();
     $c = StepComposition::default(

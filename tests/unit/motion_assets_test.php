@@ -500,7 +500,14 @@ test('motion driver waits for the main viewport and observes stagger children in
 });
 
 test('motion driver runtime contract covers geometry, stagger batches, resize, and fail-open', function () {
-    $command = 'node '
+    $node = [];
+    $nodeExit = 1;
+    exec('command -v node 2>/dev/null', $node, $nodeExit);
+    if ($nodeExit !== 0 || ($node[0] ?? '') === '') {
+        skip_test('Node is unavailable; the static motion contract tests still ran');
+    }
+
+    $command = escapeshellarg($node[0]) . ' '
         . escapeshellarg(repo_path('tests/runtime/motion_driver_harness.js')) . ' '
         . escapeshellarg(repo_path('assets/motion/motion.js')) . ' 2>&1';
     $output = [];

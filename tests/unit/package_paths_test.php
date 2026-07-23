@@ -7,6 +7,5 @@ test('Package::root resolves to the package base dir regardless of CWD', functio
     $expected = dirname(__DIR__, 2); // tests/unit -> package root
     assert_eq($expected, Package::root());
     assert_eq($expected . '/prompts', Package::promptsDir());
-    assert_eq($expected . '/bin/block-fixer/fix-templates.js', Package::blockFixerScript());
     assert_true(is_file(Package::promptsDir() . '/site-spec.md'), 'a known prompt exists at the resolved dir');
 });

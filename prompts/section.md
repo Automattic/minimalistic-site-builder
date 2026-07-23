@@ -24,7 +24,7 @@ Rules:
     `lead` = the ONE standout line a section gets (if it has one): the hero's supporting line or a single-sentence intro under the section title. One per section, kept short.
   The upper steps belong to headings — the contrast between big headings and modest copy IS the hierarchy.
 - Keep the accent color RARE: buttons/CTAs, plus the DESIGN DIRECTION's `signature_device` motif when the direction explicitly commits accent to it (e.g. eyebrow labels, hairline rules, hover underlines) — then apply that motif consistently, not in some sections only. Never use accent for body text, large-area backgrounds, or any motif the direction didn't name.
-- CONTRAST on colored bands (WCAG 4.5:1 for text, 3:1 for headings — a build step verifies these and rewrites failing colors): whenever a group/cover gets a "backgroundColor" or gradient that isn't `base`, set an explicit "textColor" on it that reads against that background (on `contrast` backgrounds that is `base`), and if the band contains ANY link — an <a> in a paragraph or list — also set explicit link colors on the same group so links don't inherit the theme's `primary` default, which is invisible on dark backgrounds: `"style":{"elements":{"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|accent"}}}}}` (pick the palette slugs that actually read there). Never place `secondary`-colored text on a `secondary` background, `primary` on `primary`, etc.
+- CONTRAST on colored bands (WCAG 4.5:1 for text, 3:1 for headings — a build step verifies these and rewrites failing colors): whenever a group/cover gets a "backgroundColor" or gradient that isn't `base`, set an explicit "textColor" on it that reads against that background (on `contrast` backgrounds that is `base`), and if the band contains ANY link — an <a> in a paragraph or list — also set explicit link colors on the same group so links don't inherit the theme's `primary` default, which is invisible on dark backgrounds: `"style":{"elements":{"link":{"color":{"text":"var:preset|color|base"},":hover":{"color":{"text":"var:preset|color|accent"}}}}}` (pick the palette slugs that actually read there). Never place `secondary`-colored text on a `secondary` background, `primary` on `primary`, etc. That link recipe is the ONLY `elements` styling that works in block markup: never write any other `elements` path in block attributes — no `:hover` background colors, no `elements.button`, no `elements.heading` (color a heading with `"textColor"`, not an elements wrapper). Button hover styling lives in theme.json (`styles.elements.button`) and already ships with the theme — writing it per block does nothing and fails the build's block fixer.
 - Write real, specific copy in the brand voice grounded in the site spec — never lorem ipsum.
 - LANGUAGE: write ALL user-facing copy — headings, body text, captions, list items, labels, image alt text, button text — in {{language}}. Do NOT mix languages within the page; the only exceptions are proper nouns and the spec's verbatim identity values.
 - IDENTITY: the spec's `name`, `persona_name`, and `email_domain` are the site's ONE committed identity — masthead, hero, contact, and footer are all generated from them. Wherever this section names the brand or the person, use those exact values; any email address must be minted at `email_domain` (e.g. hello@that-domain). NEVER invent alternate names, personas, email addresses, or domains.
@@ -39,7 +39,7 @@ Section discipline:
 - **NO EMOJIS** anywhere — not in headings, paragraphs, button text, list items, or any content.
 - Be bold with layout WITHIN your archetype (see COMPOSITION in the final section brief): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
 
-Hero notes (if this is the hero section):
+Hero notes (if this section's Role is `hero`):
 - The primary headline is a level-1 `wp:heading` with `"fontSize":"display"` — the theme.json `display` step is a fluid masthead size defined for exactly this one moment. Do not shrink it with a smaller preset and do not override it with an inline size.
 - The supporting line under the masthead is ONE short sentence with `"fontSize":"lead"` — body-size subcopy gets lost under a masthead-scale headline, and anything longer or larger competes with it.
 - Do NOT default to "text left, image right." Execute your archetype from the COMPOSITION block in the final section brief in the spirit of the DESIGN DIRECTION's committed hero composition.
@@ -135,6 +135,7 @@ SITE PAGES (the whole site, for internal links):
 SECTION TO BUILD:
   Title:    {{section_title}}
   Slug:     {{section_slug}}
+  Role:     {{section_role}}
   Type:     {{section_type}}
   Purpose:  {{section_purpose}}
   Notes:    {{content_notes}}

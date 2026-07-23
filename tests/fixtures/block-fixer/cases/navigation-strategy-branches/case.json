@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "name": "navigation-strategy-branches",
+  "milestone": "M2",
+  "capabilities": [
+    "block:core/navigation",
+    "block:core/navigation-link",
+    "branch:navigation-without-ref",
+    "branch:navigation-with-ref",
+    "branch:navigation-link-children",
+    "strategy:conditional",
+    "strategy:inner-blocks",
+    "serializer:rendered-content-void-paired"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [],
+    "files": [
+      {
+        "path": "parts/navigation.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "9ce014b0134f33fc3909bce36c3774941be9791aee4d4cf89ec74bc2dcc583e3",
+        "outputSha256": "f994e88c0c72bf5087cdc53eaf87dd35cf1507bf72030f7e765056660b42c5f8",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation-link",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

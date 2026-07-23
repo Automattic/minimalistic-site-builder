@@ -583,3 +583,29 @@ test('retryTextBatch completes a strip retry before backing off a transient sibl
     assert_eq('T:cached', $out['cached']['text']);
     assert_eq('T:transient', $out['transient']['text']);
 });
+
+test('bodyFor maps json_schema to Anthropic output_config.format', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'required' => ['sections'],
+        'additionalProperties' => false,
+    ];
+
+    $body = AnthropicClient::bodyFor(
+        [
+            'prompt' => 'Plan a page.',
+            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+        ],
+        'claude-haiku-4-5',
+        16000,
+    );
+
+    assert_eq([
+        'format' => [
+            'type' => 'json_schema',
+            'schema' => $schema,
+        ],
+    ], $body['output_config']);
+    assert_true(!array_key_exists('json_schema', $body), 'provider-neutral metadata does not leak onto the wire');
+});

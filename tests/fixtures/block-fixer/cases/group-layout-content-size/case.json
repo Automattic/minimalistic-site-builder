@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "name": "group-layout-content-size",
+  "milestone": "M2",
+  "capabilities": [
+    "block:core/group",
+    "block:core/paragraph",
+    "support:layout",
+    "support:layout-content-size",
+    "support:spacing",
+    "report:fixed"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [],
+    "files": [
+      {
+        "path": "parts/constrained.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "fae994d90bf89a3b46d0eaf8d5acdbb12540b09b5856284491bc7078c90c210e",
+        "outputSha256": "34fd9254be557550b7c08cb8d897f448fcbe7a2833893469359aafc93f1887ff",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

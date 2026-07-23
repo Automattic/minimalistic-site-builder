@@ -14,7 +14,7 @@ interface Llm
     /**
      * Send one prompt, return the assistant's text.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>,tolerate_empty?:bool} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>,tolerate_empty?:bool} $opts
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers. Anthropic clients mark each
@@ -34,7 +34,7 @@ interface Llm
      * Send one prompt that must return a JSON value, decode and return it.
      * Tolerates ```json fenced blocks.
      *
-     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>} $opts
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>} $opts
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers. Anthropic clients mark each
@@ -55,7 +55,7 @@ interface Llm
      * is how the pipeline parallelises independent LLM work (theme.json beside
      * the section plan; every landing-page section at once).
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers per request. Anthropic
@@ -77,7 +77,7 @@ interface Llm
      * markup), so the model returns it verbatim instead of escaping it inside a
      * JSON string (which is brittle and wastes tokens).
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may
      *        provide at most three non-blank layers per request. Anthropic

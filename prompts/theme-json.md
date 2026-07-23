@@ -66,7 +66,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
 - styles.typography.fontFamily = body font var, fontSize = var(--wp--preset--font-size--body), lineHeight 1.5–1.65.
 - styles.elements.heading.typography.lineHeight = a tight heading line-height (1.1–1.3).
 - styles.elements.h1 / h2 / h3 typography.fontFamily = heading font var, with sizes drawn from the scale via `var(--wp--preset--font-size--<slug>)` references: h1 = display (it renders once per page, as the hero masthead), h2 = section-title, h3 = heading.
-- styles.elements.button: background = accent (or primary), text = whichever of base/contrast reads ≥ 4.5:1 on that background, with padding and borderRadius.
+- styles.elements.button: background = accent (or primary), text = whichever of base/contrast reads ≥ 4.5:1 on that background, with padding and borderRadius. Also define the button's `:hover` state here (e.g. a decisively darkened/lightened background, or swap background↔text, keeping label contrast ≥ 4.5:1) — theme.json is the ONLY place button hover styling exists; per-block hover attributes in section markup do not work and must never be written there.
 - styles.elements.link: color = primary (which must meet 4.5:1 on base — see CONTRAST REQUIREMENTS); :hover color = accent.
 
 Use CSS custom-property references like "var:preset|color|accent" or "var(--wp--preset--color--accent)" as appropriate for theme.json. Output ONLY the theme.json content as valid JSON.

@@ -20,7 +20,7 @@ interface ConcurrentStep extends Step
      * one request keyed by a step-local id; consume() receives the decoded
      * results under the same keys.
      *
-     * @return array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int}>
+     * @return array<string,array{prompt:string,system?:string,model?:string,max_tokens?:int,json_schema?:array{name:string,schema:array<string,mixed>}}>
      */
     public function requests(Project $project): array;
 

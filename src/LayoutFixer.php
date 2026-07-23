@@ -23,7 +23,7 @@ namespace Automattic\SiteBuild;
  *
  * This fixer parses the block-comment grammar, repairs those patterns by
  * editing the comment JSON attributes, and leaves the authored HTML
- * untouched — it is meant to run immediately BEFORE the Node block-fixer,
+ * untouched — it is meant to run immediately before the PHP block serializer,
  * which re-serializes every block from its comment attributes and thereby
  * syncs the HTML (align classes etc.) with what this pass wrote. The one
  * exception is inline gap CSS (see mirrorHtmlOnlyGap): blockGap is rendered
@@ -74,16 +74,27 @@ final class LayoutFixer
     public static function fix(string $markup, string $role, ?float $contentSize = null, array $spacingSlugs = []): array
     {
         $notes = [];
-        $markup = self::repairPrematurelyClosedAttributes($markup, $notes);
+        $markup = self::repairMalformedAttributes($markup, $notes);
         $parsed = self::parse($markup);
         if ($parsed === null) {
             return ['markup' => $markup, 'notes' => $notes];
         }
         [$roots, $all] = $parsed;
 
+        $canonicalMarkup = self::canonicalizeMalformedPresetCss($markup, $all, $notes);
+        if ($canonicalMarkup !== $markup) {
+            $markup = $canonicalMarkup;
+            $parsed = self::parse($markup);
+            if ($parsed === null) {
+                return ['markup' => $markup, 'notes' => $notes];
+            }
+            [$roots, $all] = $parsed;
+        }
+
         $htmlEdits = [];
         self::canonicalizeSpacingAttributes($all, $notes);
         self::repairBareSlugSpacing($markup, $all, $notes, $spacingSlugs);
+        self::canonicalizeLayoutVocabulary($all, $notes);
         self::mirrorHtmlOnlyVerticalSpacing($markup, $all, $notes);
         self::mirrorHtmlOnlyGap($markup, $all, $htmlEdits, $notes);
         self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
@@ -106,6 +117,98 @@ final class LayoutFixer
     }
 
     // ── Rules ────────────────────────────────────────────────────────────
+
+    /**
+     * Gutenberg's flex layout uses left/right in comment attributes even
+     * though the equivalent CSS vocabulary is flex-start/flex-end. Models
+     * occasionally put the CSS value in layout.justifyContent; map only that
+     * exact, lossless pair before the serializer's closed-domain guard.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function canonicalizeLayoutVocabulary(array $all, array &$notes): void
+    {
+        foreach ($all as $node) {
+            $layout = self::layout($node);
+            $value = $layout?->justifyContent ?? null;
+            if ($layout === null || ($layout->type ?? null) !== 'flex'
+                || !is_string($value) || !isset(['flex-start' => true, 'flex-end' => true][$value])) {
+                continue;
+            }
+            $layout->justifyContent = $value === 'flex-start' ? 'left' : 'right';
+            $node->dirty = true;
+            $notes[] = "wp:{$node->name} used CSS layout.justifyContent \"{$value}\" — mapped it to Gutenberg's \"{$layout->justifyContent}\" value";
+        }
+    }
+
+    /**
+     * Repair the invalid rendered spelling var(--wp--spacing--slug) only when
+     * the same block explicitly declares var:preset|spacing|slug in its
+     * comment attributes. That exact cross-channel agreement proves intent;
+     * an HTML-only or disagreeing value remains untouched for the rhythm gate.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function canonicalizeMalformedPresetCss(string $markup, array $all, array &$notes): string
+    {
+        $edits = [];
+        foreach ($all as $node) {
+            if ($node->selfClosing) {
+                continue;
+            }
+            $tagStart = $node->start + $node->len;
+            $tagHtml = self::wrapperTag($markup, $tagStart);
+            if ($tagHtml === null) {
+                continue;
+            }
+            $style = self::tagAttribute($tagHtml, 'style');
+            if ($style === null || !str_contains($style[0], 'var(--wp--spacing--')) {
+                continue;
+            }
+            $repairedSlugs = [];
+            $replacement = preg_replace_callback(
+                '/var\(--wp--spacing--([a-z0-9_-]+)\)/i',
+                static function (array $match) use ($node, &$repairedSlugs): string {
+                    $slug = strtolower($match[1]);
+                    if (!self::containsValue($node->attrs, "var:preset|spacing|{$slug}")) {
+                        return $match[0];
+                    }
+                    $repairedSlugs[$slug] = true;
+                    return "var(--wp--preset--spacing--{$slug})";
+                },
+                $style[0],
+            );
+            if ($replacement === null || $replacement === $style[0]) {
+                continue;
+            }
+            $edits[] = [$tagStart + $style[1], strlen($style[0]), $replacement];
+            $notes[] = "wp:{$node->name} rendered malformed spacing preset variable(s) "
+                . implode(', ', array_keys($repairedSlugs))
+                . ' while its attributes declared the matching preset — restored the canonical CSS variable spelling';
+        }
+        return $edits === [] ? $markup : self::render($markup, [], $edits);
+    }
+
+    private static function containsValue(mixed $value, string $expected): bool
+    {
+        if ($value === $expected) {
+            return true;
+        }
+        if ($value instanceof \stdClass) {
+            $value = get_object_vars($value);
+        }
+        if (!is_array($value)) {
+            return false;
+        }
+        foreach ($value as $child) {
+            if (self::containsValue($child, $expected)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * Spacing attributes at the wrong nesting path style nothing: WordPress
@@ -386,7 +489,7 @@ final class LayoutFixer
      * A vertical padding/margin declaration present ONLY in a container's
      * inline HTML (no attribute anywhere, canonical or misplaced) is deleted
      * by re-serialization and rejected by the rhythm gate. Mirror-copy the
-     * declared value into style.spacing.* — the inverse of the Node fixer's
+     * declared value into style.spacing.* — the inverse of the serializer's
      * sync direction — so the authored rhythm survives (BIGR-674 case 1).
      * Only sides absent from the attributes are copied: a declared attribute
      * (including SectionRhythm's owned root values, which that pass also
@@ -885,7 +988,7 @@ final class LayoutFixer
      * Repair attribute JSON containing a stray closer: an extra `}` splits
      * the opener into a valid prefix and dangling members (tbilisi24 wrote
      * `{"style":{...,"padding":{...}}},"layout":{...}}`), so json_decode fails,
-     * this fixer skips the whole file, and the Node fixer erases EVERY
+     * this fixer skips the whole file, and block serialization erases every
      * attribute of the block — the fatal rhythm drop plus silent losses.
      * The repair stays mechanical by refusing to guess: every single-closer
      * deletion is tried (see withoutPrematureClosers), and the rewrite is
@@ -894,7 +997,7 @@ final class LayoutFixer
      *
      * @param string[] $notes
      */
-    private static function repairPrematurelyClosedAttributes(string $markup, array &$notes): string
+    private static function repairMalformedAttributes(string $markup, array &$notes): string
     {
         if (preg_match_all(self::TOKEN_RE, $markup, $tokens, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
             return $markup;
@@ -908,6 +1011,12 @@ final class LayoutFixer
             if (json_decode($json) instanceof \stdClass) {
                 continue;
             }
+            $completed = self::withMissingRootCloser($json);
+            if ($completed !== null) {
+                $markup = substr_replace($markup, $completed, $t[3][1], strlen($json));
+                $notes[] = "wp:{$t[2][0]} attributes omitted their final root closer — restored it so the declared attributes parse instead of being erased";
+                continue;
+            }
             $repaired = self::withoutPrematureClosers($json);
             if ($repaired === null) {
                 continue;
@@ -916,6 +1025,57 @@ final class LayoutFixer
             $notes[] = "wp:{$t[2][0]} attributes closed their JSON object early — removed the stray closer(s) so the declared attributes parse instead of being erased";
         }
         return $markup;
+    }
+
+    /**
+     * Complete only the narrow, unambiguous truncated form where every nested
+     * object/array is already balanced and the sole missing token is the root
+     * object's final `}`. A missing nested closer could change which object a
+     * later member belongs to, so that broader shape remains fail-closed.
+     */
+    private static function withMissingRootCloser(string $json): ?string
+    {
+        $stack = [];
+        $inString = false;
+        $escaped = false;
+        $length = strlen($json);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $json[$i];
+            if ($inString) {
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ($char === '\\') {
+                    $escaped = true;
+                } elseif ($char === '"') {
+                    $inString = false;
+                }
+                continue;
+            }
+            if ($char === '"') {
+                $inString = true;
+                continue;
+            }
+            if ($char === '{') {
+                $stack[] = ['closer' => '}', 'offset' => $i];
+            } elseif ($char === '[') {
+                $stack[] = ['closer' => ']', 'offset' => $i];
+            } elseif ($char === '}' || $char === ']') {
+                $frame = array_pop($stack);
+                if ($frame === null || $frame['closer'] !== $char) {
+                    return null;
+                }
+            }
+        }
+
+        if ($inString || count($stack) !== 1
+            || $stack[0]['offset'] !== 0 || $stack[0]['closer'] !== '}') {
+            return null;
+        }
+        $candidate = $json . '}';
+        return json_decode($candidate) instanceof \stdClass
+            && !self::hasSameDepthDuplicateKeys($candidate)
+            ? $candidate
+            : null;
     }
 
     /**
@@ -1088,7 +1248,7 @@ final class LayoutFixer
     /**
      * Splice every dirty node's re-encoded opening comment — plus any rule's
      * explicit HTML edits — back into the original markup. Apart from those
-     * edits the HTML is left as authored; the Node block-fixer re-serializes
+     * edits the HTML is left as authored; the PHP block serializer re-serializes
      * it from these attributes right after. Comment spans and HTML-edit spans
      * never overlap (edits target attribute values inside wrapper tags), so
      * one descending-offset pass keeps every recorded byte offset valid.
