@@ -347,15 +347,16 @@ final class AnthropicClient implements Llm
 
     /**
      * Whether a model still accepts the sampling parameters (temperature,
-     * top_p, top_k). The API REMOVED them on Claude Opus 4.7/4.8 and Fable —
-     * sending one returns HTTP 400 "`temperature` is deprecated for this
-     * model". A model this misclassifies as supporting (e.g. a future family
-     * that also drops sampling) is still handled: the 400 is detected via
-     * rejectedParam() and the request retried without the parameter. Pure.
+     * top_p, top_k). The API REMOVED them on Claude Opus 4.7/4.8 and the
+     * whole Claude 5 family (Fable, Mythos, Sonnet 5) — sending one returns
+     * HTTP 400 "`temperature` is deprecated for this model". A model this
+     * misclassifies as supporting (e.g. a future family that also drops
+     * sampling) is still handled: the 400 is detected via rejectedParam()
+     * and the request retried without the parameter. Pure.
      */
     public static function supportsSampling(string $model): bool
     {
-        return preg_match('/claude-(fable|opus-4-[78])/', $model) !== 1;
+        return preg_match('/claude-(fable|mythos|opus-4-[78]|sonnet-5)/', $model) !== 1;
     }
 
     /**

@@ -380,11 +380,13 @@ test('bodyFor puts the language preamble on every request, before any per-reques
     assert_true(str_ends_with((string) $body['system'], 'Respond with JSON.'), 'per-request system follows');
 });
 
-test('supportsSampling is false for Opus 4.7/4.8 and Fable, true otherwise', function () {
+test('supportsSampling is false for the Claude 5 family and Opus 4.7/4.8, true otherwise', function () {
     assert_eq(false, AnthropicClient::supportsSampling('claude-opus-4-8'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-opus-4-7'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5[1m]'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-sonnet-5'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-mythos-5'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-haiku-4-5'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-sonnet-4-6'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-opus-4-6'));
