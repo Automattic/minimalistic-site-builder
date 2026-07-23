@@ -61,6 +61,17 @@ final class SectionsStep implements Step
         . ' of `wp:navigation-link` items targeting section anchors from the HOMEPAGE OUTLINE (each outline line ends'
         . ' with its [#anchor]; a link\'s "url" is that anchor, e.g. href="#menu-highlights").';
 
+    /**
+     * {{nav_rule}} text for header generation given how many pages the plan has.
+     *
+     * Public so host adapters (e.g. wpcom queue phase) share the same source of
+     * truth as jobs() — do not re-mirror the private constants.
+     */
+    public static function navRuleFor(int $pageCount): string
+    {
+        return $pageCount > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE;
+    }
+
     private SectionUnit $sectionUnit;
     private HeaderUnit $headerUnit;
     private FooterUnit $footerUnit;
@@ -168,7 +179,7 @@ final class SectionsStep implements Step
                 'input' => $common + [
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
-                    'nav_rule'   => count($pages) > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE,
+                    'nav_rule'   => self::navRuleFor(count($pages)),
                 ],
                 'file'  => 'parts/header.html',
             ],

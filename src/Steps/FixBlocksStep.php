@@ -144,9 +144,10 @@ final class FixBlocksStep implements Step
     {
         $notes = [];
         $contentSize = self::themeContentSize($project);
+        $spacingSlugs = self::themeSpacingSlugs($project);
         foreach (self::themeFiles($project) as $rel) {
             $markup = $project->readText('theme/' . $rel);
-            $result = LayoutFixer::fix($markup, LayoutFixer::roleFor($rel), $contentSize);
+            $result = LayoutFixer::fix($markup, LayoutFixer::roleFor($rel), $contentSize, $spacingSlugs);
             if ($result['markup'] !== $markup) {
                 $project->writeText('theme/' . $rel, $result['markup']);
             }
@@ -198,6 +199,15 @@ final class FixBlocksStep implements Step
             if (!in_array($property, $rhythmProperties, true)) {
                 continue;
             }
+            // A bare identifier that isn't a CSS keyword (e.g. a preset slug
+            // the model left unexpanded, `margin-top:sm`) never rendered in
+            // the first place — losing it cannot change the page's rhythm.
+            $colon = strpos($declaration, ':');
+            $value = $colon === false ? '' : trim(substr($declaration, $colon + 1));
+            if (preg_match('/^[a-z][a-z0-9_-]*$/i', $value) === 1
+                && !in_array(strtolower($value), ['auto', 'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'none', 'normal'], true)) {
+                continue;
+            }
             $declaration = trim($declaration);
             if (!in_array($declaration, $dropped, true)) {
                 $dropped[] = $declaration;
@@ -216,6 +226,31 @@ final class FixBlocksStep implements Step
             }
         }
         return $rels;
+    }
+
+    /**
+     * The theme's spacing-scale slugs (settings.spacing.spacingSizes), for
+     * LayoutFixer's bare-slug spacing repair. Empty when unknown.
+     *
+     * @return string[]
+     */
+    public static function themeSpacingSlugs(Project $project): array
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return [];
+        }
+        $theme = json_decode($project->readText('theme/theme.json'), true);
+        $sizes = $theme['settings']['spacing']['spacingSizes'] ?? [];
+        if (!is_array($sizes)) {
+            return [];
+        }
+        $slugs = [];
+        foreach ($sizes as $size) {
+            if (is_array($size) && is_string($size['slug'] ?? null) && $size['slug'] !== '') {
+                $slugs[] = $size['slug'];
+            }
+        }
+        return $slugs;
     }
 
     /** theme.json settings.layout.contentSize in px, when parseable. */

@@ -73,13 +73,24 @@ final class GenerateImagesStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['images.json', 'siteSpec.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            reads: [
+                'images.json',
+                'siteSpec.json',
+                'designDirection.json',
+                'plugin/images.json',
+                'theme/parts/*',
+                'theme/templates/*',
+                // After assemble-pages, multipage section covers live here.
+                'plugin/pages/*',
+            ],
             writes: [
                 'images.json',
                 self::COMPLETION_ARTIFACT,
                 'theme/assets/*',
                 'theme/parts/*',
                 'theme/templates/*',
+                'plugin/images/*',
+                'plugin/pages/*',
             ],
             concurrent: true,
         );
@@ -189,7 +200,30 @@ final class GenerateImagesStep implements Step
             $this->rewriteMarkup($project, $resolved);
         }
 
+        $this->shipPluginImages($project);
         $this->markComplete($project);
+    }
+
+    /**
+     * Copy every generated asset the content plugin's manifest lists into
+     * plugin/images/, so the seeder can import them into the media library at
+     * activation. Content images stay in theme/assets/ too: chrome may share
+     * them, and the seeder falls back to the theme copy for any file it
+     * cannot import.
+     */
+    private function shipPluginImages(Project $project): void
+    {
+        if (!$project->exists('plugin/images.json')) {
+            return; // theme-only composition, or assemble-pages never ran
+        }
+        $manifest = $project->readJson('plugin/images.json');
+        foreach ((array) ($manifest['images'] ?? []) as $image) {
+            $filename = is_array($image) ? (string) ($image['filename'] ?? '') : '';
+            if ($filename === '' || !$project->exists('theme/assets/' . $filename)) {
+                continue;
+            }
+            $project->writeText('plugin/images/' . $filename, $project->readText('theme/assets/' . $filename));
+        }
     }
 
     /** Publish the dependency stamp only after every required operation succeeds. */
@@ -461,7 +495,10 @@ final class GenerateImagesStep implements Step
 
     /**
      * Replace every "theme:./assets/<file>" reference (img src and wp:cover url)
-     * with the served URL, in every theme markup file.
+     * with the served URL, in every theme markup file and in assembled content
+     * plugin pages (assemble-pages inlines section markup into plugin/pages/*;
+     * CLI --with-images and hosts that schedule this step after assemble must
+     * rewrite those files or multipage covers keep theme: placeholders).
      *
      * @param array<string,string> $resolved theme: src => served URL
      */
@@ -475,6 +512,18 @@ final class GenerateImagesStep implements Step
                 if ($updated !== $content) {
                     $project->writeText('theme/' . $rel, $updated);
                 }
+            }
+        }
+
+        // Multipage section markup is inlined into the content plugin after
+        // assemble-pages; rewrite placeholders there too (wpcom BIGR-703 /
+        // CLI --with-images after the full default pipeline).
+        foreach (glob($project->path('plugin/pages/*.html')) ?: [] as $abs) {
+            $rel = 'plugin/pages/' . basename($abs);
+            $content = $project->readText($rel);
+            $updated = strtr($content, $resolved);
+            if ($updated !== $content) {
+                $project->writeText($rel, $updated);
             }
         }
     }
