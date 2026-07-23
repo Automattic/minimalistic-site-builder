@@ -182,6 +182,7 @@ test('bodyFor sends temperature only when set and supported, and applies model/t
     assert_eq(AnthropicClient::systemPreamble() . "\n\nBe terse.", $body['system']);
     assert_eq(true, $body['stream']);
     assert_eq('Hi', $body['messages'][0]['content']);
+    assert_true(!array_key_exists('output_config', $body), 'ordinary requests do not opt into structured output');
 
     $body = AnthropicClient::bodyFor(
         ['prompt' => 'Hi', 'model' => 'claude-haiku-4-5', 'max_tokens' => 512],
@@ -201,6 +202,32 @@ test('bodyFor sends temperature only when set and supported, and applies model/t
         16000,
     );
     assert_true(!array_key_exists('temperature', $body), 'temperature omitted on a sampling-less model');
+});
+
+test('bodyFor maps json_schema to Anthropic output_config.format', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'required' => ['sections'],
+        'additionalProperties' => false,
+    ];
+
+    $body = AnthropicClient::bodyFor(
+        [
+            'prompt' => 'Plan a page.',
+            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+        ],
+        'claude-haiku-4-5',
+        16000,
+    );
+
+    assert_eq([
+        'format' => [
+            'type' => 'json_schema',
+            'schema' => $schema,
+        ],
+    ], $body['output_config']);
+    assert_true(!array_key_exists('json_schema', $body), 'provider-neutral metadata does not leak onto the wire');
 });
 
 test('bodyFor puts the language preamble on every request, before any per-request system', function () {

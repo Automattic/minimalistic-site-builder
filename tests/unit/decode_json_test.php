@@ -14,6 +14,19 @@ test('decodeJson strips ```json fences', function () {
     assert_eq(1, $data['a']);
 });
 
+test('decodeJson strips a BOM and CRLF fenced envelope', function () {
+    $data = AnthropicClient::decodeJson("\xEF\xBB\xBF```json  \r\n{\r\n  \"a\": 1\r\n}\r\n```  ");
+    assert_eq(1, $data['a']);
+});
+
+test('decodeJson accepts a complete bare fence but not surrounding prose', function () {
+    assert_eq(['ok' => true], AnthropicClient::decodeJson("```\n{\"ok\":true}\n```"));
+    assert_true(
+        AnthropicClient::decodeJson("Here is the result:\n```json\n{\"ok\":true}\n```") === null,
+        'prose around a JSON fragment is not silently discarded',
+    );
+});
+
 test('decodeJson tolerates trailing commas before } and ]', function () {
     // The exact failure mode seen from the model: a comma after the last object
     // property and after the last array element.
@@ -34,4 +47,26 @@ test('decodeJson does not corrupt commas inside string values', function () {
 
 test('decodeJson returns null for unrecoverable text', function () {
     assert_true(AnthropicClient::decodeJson('not json at all') === null, 'null on garbage');
+});
+
+test('decodeJsonResult reports the observed missing-separator failure', function () {
+    $result = AnthropicClient::decodeJsonResult('{"title":"Reservations" "sections":[]}');
+
+    assert_true($result['data'] === null, 'missing comma is not guessed at locally');
+    assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained for repair');
+});
+
+test('decodeJsonResult reports unescaped quotes without corrupting valid strings', function () {
+    $invalid = AnthropicClient::decodeJsonResult('{"content_notes":"Headline "Reserve Now" in gold"}');
+    assert_true($invalid['data'] === null, 'unescaped inner quotes remain invalid');
+    assert_true(is_string($invalid['error']) && $invalid['error'] !== '', 'parser error is retained for repair');
+
+    $valid = AnthropicClient::decodeJson('{"content_notes":"Headline \\"Reserve Now\\" in gold"}');
+    assert_eq('Headline "Reserve Now" in gold', $valid['content_notes']);
+});
+
+test('decodeJson rejects a top-level scalar with an actionable error', function () {
+    $result = AnthropicClient::decodeJsonResult('"valid JSON, wrong shape"');
+    assert_true($result['data'] === null, 'JSON envelopes must be objects or arrays');
+    assert_contains('top-level JSON value', (string) $result['error']);
 });

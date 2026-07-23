@@ -23,6 +23,7 @@ function section_unit_input(): array
         'section'          => [
             'slug'             => 'unit-section',
             'title'            => 'UNIT-TITLE-SENTINEL',
+            'role'             => 'hero',
             'type'             => 'hero',
             'purpose'          => 'UNIT-PURPOSE-SENTINEL',
             'content_notes'    => 'UNIT-NOTES-SENTINEL',
@@ -60,6 +61,7 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq('page-unit-page--unit-section', $llm->calls[0]['opts']['log_label'] ?? null);
 
     $prompt = $llm->calls[0]['prompt'];
+    assert_contains('Role:     hero', $prompt);
     foreach ([
         'UNIT-SPEC-SENTINEL',
         'unit-language-sentinel',
@@ -114,4 +116,45 @@ test('SectionUnit rejects malformed nested HTTP input before calling the LLM', f
 
     assert_throws(fn () => $unit->generate($input));
     assert_eq(0, $llm->completeCalls);
+});
+
+test('SectionUnit requires an explicit section role before calling the LLM', function () {
+    $llm = new FakeLlm();
+    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+    $input = section_unit_input();
+    unset($input['section']['role']);
+
+    $error = null;
+    try {
+        $unit->generate($input);
+    } catch (InvalidArgumentException $e) {
+        $error = $e;
+    }
+
+    assert_true($error instanceof InvalidArgumentException);
+    assert_contains("unit input 'section.role' is required", $error->getMessage());
+    assert_eq(0, $llm->completeCalls);
+});
+
+test('SectionUnit rejects malformed or unsupported section roles before calling the LLM', function () {
+    foreach ([
+        'non-string'  => [['hero'], "unit input 'section.role' must be a string"],
+        'unsupported' => ['featured', "unit input 'section.role' must be one of: hero, content, closing"],
+    ] as $case => [$role, $message]) {
+        $llm = new FakeLlm();
+        $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+        $input = section_unit_input();
+        $input['section']['role'] = $role;
+
+        $error = null;
+        try {
+            $unit->generate($input);
+        } catch (InvalidArgumentException $e) {
+            $error = $e;
+        }
+
+        assert_true($error instanceof InvalidArgumentException, "{$case} role should be rejected");
+        assert_contains($message, $error->getMessage());
+        assert_eq(0, $llm->completeCalls, "{$case} role should fail before calling the LLM");
+    }
 });

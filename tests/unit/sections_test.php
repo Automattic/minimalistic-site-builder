@@ -36,8 +36,8 @@ function sections_fixture(): array
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
-            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base about split below.'],
-            ['slug' => 'about', 'title' => 'About', 'type' => 'about', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the image hero above and the footer below.'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base about split below.'],
+            ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'founder-letter', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the image hero above and the footer below.'],
         ]),
     ]]);
     return [$project, $tmp];
@@ -56,11 +56,11 @@ test('sections fans out across every page and gives each section its own page co
     [$project, $tmp] = sections_fixture();
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
-            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
         ]),
         sections_page('menu', [
-            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the bread list below.'],
-            ['slug' => 'breads', 'title' => 'Breads', 'type' => 'features', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the tinted hero above and the footer below.'],
+            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the bread list below.'],
+            ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the tinted hero above and the footer below.'],
         ], ['purpose' => 'What we bake']),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -72,7 +72,7 @@ test('sections fans out across every page and gives each section its own page co
     );
 
     // Each section sees ITS page's outline, not another page's.
-    assert_contains('1. Menu Hero (hero)', $reqs['page-menu--breads']['prompt']);
+    assert_contains('1. Menu Hero (menu-introduction)', $reqs['page-menu--breads']['prompt']);
     assert_true(!str_contains($reqs['page-menu--breads']['prompt'], '1. Hero (hero)'), 'menu section not given the home outline');
     assert_contains('"Menu"', $reqs['page-menu--breads']['prompt']);
 
@@ -83,6 +83,10 @@ test('sections fans out across every page and gives each section its own page co
 
     // The header is briefed on the FRONT page's hero and outline.
     assert_contains('1. Hero (hero)', $reqs['header']['prompt']);
+
+    // Role and free-form semantic type remain distinct in each section brief.
+    assert_true((bool) preg_match('/Role:\s+closing/', $reqs['page-menu--breads']['prompt']));
+    assert_true((bool) preg_match('/Type:\s+bread-catalog/', $reqs['page-menu--breads']['prompt']));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -95,8 +99,8 @@ test('sections passes the design direction and hero brief to header and footer p
     ]);
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
-            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header and about section.'],
-            ['slug' => 'about', 'title' => 'About', 'type' => 'about', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'vertical_density' => 'spacious', 'handoff' => 'Between the hero and footer.'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-introduction', 'purpose' => 'Immerse the visitor', 'content_notes' => 'Full-viewport cover photo.', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header and about section.'],
+            ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'vertical_density' => 'spacious', 'handoff' => 'Between the hero and footer.'],
         ]),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -155,8 +159,8 @@ test('sections passes each part its assigned composition and its neighbors\' ass
 
 test('outline and neighbors tolerate a plan without art-direction fields', function () {
     $sections = [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
-        ['slug' => 'about', 'title' => 'About', 'type' => 'about'],
+        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero'],
+        ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about'],
     ];
     assert_eq("1. Hero (hero) [#hero]\n2. About (about) [#about]", SectionsStep::outline($sections));
     assert_eq("Above: \"Hero\"\nBelow: the site footer (this is the last section)", SectionsStep::neighbors($sections, 1));
@@ -169,7 +173,7 @@ test('sections throws when a planned section is missing composition fields', fun
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
-            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero'],
         ]),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -180,18 +184,42 @@ test('sections throws when a planned section is missing composition fields', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('heroBrief summarizes the hero section and falls back to the first section', function () {
+test('sections rejects a missing structural role or semantic type', function () {
+    [$project, $tmp] = sections_fixture();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $pages = $project->readJson('pages.json');
+
+    unset($pages['pages'][0]['sections'][0]['role']);
+    $project->writeJson('pages.json', $pages);
+    assert_throws(function () use ($renderer, $project) {
+        (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+    }, "expected 'hero'");
+
+    $pages['pages'][0]['sections'][0]['role'] = 'hero';
+    unset($pages['pages'][0]['sections'][0]['type']);
+    $project->writeJson('pages.json', $pages);
+    assert_throws(function () use ($renderer, $project) {
+        (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+    }, 'missing semantic type');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('heroBrief selects only the structural hero role, not the semantic type', function () {
     $brief = SectionsStep::heroBrief([
-        ['slug' => 'intro', 'title' => 'Intro', 'type' => 'content'],
-        ['slug' => 'hero', 'title' => 'Big Hero', 'type' => 'hero', 'purpose' => 'Wow', 'content_notes' => 'Edge to edge.'],
+        ['slug' => 'decoy', 'title' => 'Not the Hero', 'role' => 'content', 'type' => 'hero'],
+        ['slug' => 'intro', 'title' => 'Big Hero', 'role' => 'hero', 'type' => 'cinematic-welcome', 'purpose' => 'Wow', 'content_notes' => 'Edge to edge.'],
     ]);
     assert_contains('Title: Big Hero', $brief);
+    assert_contains('Role: hero', $brief);
+    assert_contains('Type: cinematic-welcome', $brief);
     assert_contains('Purpose: Wow', $brief);
     assert_contains('Notes: Edge to edge.', $brief);
+    assert_true(!str_contains($brief, 'Not the Hero'), 'a semantic type named hero does not override the structural role');
 
-    // No hero-typed section: fall back to the first section.
-    $brief = SectionsStep::heroBrief([['slug' => 'intro', 'title' => 'Intro', 'type' => 'content']]);
-    assert_contains('Title: Intro', $brief);
+    // No hero-role section: do not silently treat another structural role as the hero.
+    $brief = SectionsStep::heroBrief([['slug' => 'intro', 'title' => 'Intro', 'role' => 'content', 'type' => 'opening-note']]);
+    assert_eq('(No hero section planned.)', $brief);
 
     assert_eq('(No hero section planned.)', SectionsStep::heroBrief([]));
 });
@@ -370,10 +398,10 @@ test('header nav rule follows the page count: anchors for one page, page-list fo
 
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
-            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
         ]),
         sections_page('menu', [
-            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
+            ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
         ]),
     ]]);
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);

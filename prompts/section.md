@@ -20,6 +20,7 @@ SITE PAGES (the whole site, for internal links):
 SECTION TO BUILD:
   Title:    {{section_title}}
   Slug:     {{section_slug}}
+  Role:     {{section_role}}
   Type:     {{section_type}}
   Purpose:  {{section_purpose}}
   Notes:    {{content_notes}}
@@ -65,7 +66,7 @@ Section discipline:
 - **NO EMOJIS** anywhere — not in headings, paragraphs, button text, list items, or any content.
 - Be bold with layout WITHIN your archetype (see COMPOSITION above): overlap, generous or controlled whitespace, distinctive treatments that match the direction's mood — not the safe default.
 
-Hero notes (if this is the hero section):
+Hero notes (if this section's Role is `hero`):
 - The primary headline is a level-1 `wp:heading` with `"fontSize":"display"` — the theme.json `display` step is a fluid masthead size defined for exactly this one moment. Do not shrink it with a smaller preset and do not override it with an inline size.
 - The supporting line under the masthead is ONE short sentence with `"fontSize":"lead"` — body-size subcopy gets lost under a masthead-scale headline, and anything longer or larger competes with it.
 - Do NOT default to "text left, image right." Execute your archetype from the COMPOSITION block above in the spirit of the DESIGN DIRECTION's committed hero composition.

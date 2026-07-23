@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\FooterUnit;
@@ -195,6 +196,21 @@ final class SectionsStep implements Step
             // A compact outline of THIS page, so each section knows its place.
             $outline = self::outline($sections);
             foreach ($sections as $i => $section) {
+                $role = trim((string) ($section['role'] ?? ''));
+                $expectedRole = SectionRole::forPosition($i, count($sections));
+                if ($role !== $expectedRole) {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    throw new \RuntimeException(
+                        "sections: page '{$page['slug']}' section '{$slug}' has role '{$role}', expected '{$expectedRole}'"
+                    );
+                }
+                $type = trim((string) ($section['type'] ?? ''));
+                if ($type === '') {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    throw new \RuntimeException(
+                        "sections: page '{$page['slug']}' section '{$slug}' has missing semantic type"
+                    );
+                }
                 $input = $common + [
                     'outline'   => $outline,
                     'page'      => [
@@ -210,8 +226,7 @@ final class SectionsStep implements Step
                     'unit'  => $this->sectionUnit,
                     'input' => $input,
                     'file'  => 'parts/' . $key . '.html',
-                ];
-            }
+                ];            }
         }
 
         return $jobs;
@@ -330,18 +345,20 @@ final class SectionsStep implements Step
     {
         $hero = null;
         foreach ($sections as $s) {
-            if ((string) ($s['type'] ?? '') === 'hero') {
+            if ((string) ($s['role'] ?? '') === 'hero') {
                 $hero = $s;
                 break;
             }
         }
-        $hero ??= $sections[0] ?? null;
         if (!is_array($hero)) {
             return '(No hero section planned.)';
         }
 
         $lines = [];
-        foreach (['title' => 'Title', 'type' => 'Type', 'purpose' => 'Purpose', 'content_notes' => 'Notes'] as $key => $label) {
+        foreach (
+            ['title' => 'Title', 'role' => 'Role', 'type' => 'Type', 'purpose' => 'Purpose', 'content_notes' => 'Notes']
+            as $key => $label
+        ) {
             $value = trim((string) ($hero[$key] ?? ''));
             if ($value !== '') {
                 $lines[] = "{$label}: {$value}";

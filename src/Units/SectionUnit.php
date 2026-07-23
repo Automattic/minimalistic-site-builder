@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\SectionRole;
+
 /**
  * Generate one page section from a self-contained input.
  *
@@ -10,8 +12,9 @@ namespace Automattic\SiteBuild\Units;
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
  * - page: slug/title/path of the page the section belongs to
- * - section: slug/title/type/purpose/content_notes plus the assigned
- *   layout_archetype/background/vertical_density/handoff
+ * - section: slug/title/role/type/purpose/content_notes plus the assigned
+ *   layout_archetype/background/vertical_density/handoff. Role is required
+ *   and must be one of hero/content/closing.
  * - neighbors: the preceding/following composition summary
  *
  * Static authoring rules come from the package's prompt templates; no Project
@@ -52,7 +55,7 @@ final class SectionUnit extends AbstractMarkupUnit
      *   site_pages:string,
      *   page:array{slug:string,title?:string,path?:string},
      *   section:array{
-     *     slug:string,title?:string,type?:string,purpose?:string,content_notes?:string,
+     *     slug:string,role:string,title?:string,type?:string,purpose?:string,content_notes?:string,
      *     layout_archetype:string,background:string,vertical_density:string,handoff:string
      *   },
      *   neighbors:string
@@ -63,6 +66,7 @@ final class SectionUnit extends AbstractMarkupUnit
         $section = $this->section($input);
         $slug = trim($this->sectionString($section, 'slug'));
         $pageSlug = trim($this->pageString($input, 'slug'));
+        $role = $this->sectionRole($section);
         $compositionVars = [];
         foreach (['layout_archetype', 'background', 'vertical_density', 'handoff'] as $field) {
             $compositionVars[$field] = $this->sectionString($section, $field);
@@ -85,6 +89,7 @@ final class SectionUnit extends AbstractMarkupUnit
             'page_path'         => $this->pageString($input, 'path', '/'),
             'section_title'     => $this->sectionString($section, 'title'),
             'section_slug'      => $slug,
+            'section_role'      => $role,
             'section_type'      => $this->sectionString($section, 'type', 'content'),
             'section_purpose'   => $this->sectionString($section, 'purpose'),
             'content_notes'     => $this->sectionString($section, 'content_notes'),
@@ -132,5 +137,24 @@ final class SectionUnit extends AbstractMarkupUnit
             throw new \InvalidArgumentException("unit input 'section.{$key}' must be a string");
         }
         return $section[$key];
+    }
+
+    /** Require a supported structural role for this section. */
+    private function sectionRole(array $section): string
+    {
+        if (!array_key_exists('role', $section)) {
+            throw new \InvalidArgumentException("unit input 'section.role' is required");
+        }
+        if (!is_string($section['role'])) {
+            throw new \InvalidArgumentException("unit input 'section.role' must be a string");
+        }
+
+        $role = trim($section['role']);
+        if (!in_array($role, SectionRole::ALL, true)) {
+            throw new \InvalidArgumentException(
+                "unit input 'section.role' must be one of: " . implode(', ', SectionRole::ALL)
+            );
+        }
+        return $role;
     }
 }

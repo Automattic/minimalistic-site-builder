@@ -47,7 +47,12 @@ test('format renders summary header, request, and response', function () {
         'model'    => 'claude-opus-4-8',
         'messages' => [['role' => 'user', 'content' => 'Build a hero section']],
     ];
-    $response = ['text' => '<!-- wp:group --><!-- /wp:group -->', 'input' => 120, 'output' => 340];
+    $response = [
+        'text' => '<!-- wp:group --><!-- /wp:group -->',
+        'input' => 120,
+        'output' => 340,
+        'stop_reason' => 'end_turn',
+    ];
 
     $out = LlmLogger::format('section-hero', $request, $response, 12.5);
 
@@ -55,6 +60,7 @@ test('format renders summary header, request, and response', function () {
     assert_contains('Model        : claude-opus-4-8', $out);
     assert_contains('Time         : 12.50s', $out);
     assert_contains('Tokens       : 120 in + 340 out = 460 total', $out);
+    assert_contains('Stop reason  : end_turn', $out);
     assert_contains('REQUEST', $out);
     assert_contains('Build a hero section', $out, 'full request body is included');
     assert_contains('RESPONSE', $out);
@@ -94,9 +100,10 @@ test('log writes a file to the configured directory and is reversible', function
     LlmLogger::setDir($dir);
 
     $request = ['model' => 'claude-haiku-4-5', 'messages' => [['role' => 'user', 'content' => 'hi']]];
-    LlmLogger::log('theme-json', $request, ['text' => 'OK', 'input' => 1, 'output' => 2], 0.5);
+    $written = LlmLogger::log('theme-json', $request, ['text' => 'OK', 'input' => 1, 'output' => 2], 0.5);
 
     $path = "{$dir}/01-theme-json.log";
+    assert_eq($path, $written, 'log returns the evidence path for failure diagnostics');
     assert_true(file_exists($path), 'first log file is prefixed 01-');
     assert_contains('Step / label : theme-json', (string) file_get_contents($path));
 
@@ -158,8 +165,8 @@ test('log writes a -failed file for a failed call', function () {
 test('log is a no-op when no project directory is set', function () {
     LlmLogger::setDir(null);
     // Must not throw and must not write anywhere (no repo-root fallback).
-    LlmLogger::log('orphan', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
-    assert_true(true, 'logging without a dir is a silent no-op');
+    $written = LlmLogger::log('orphan', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
+    assert_eq(null, $written, 'logging without a dir is a silent no-op');
 });
 
 test('log is a no-op when disabled', function () {
@@ -167,9 +174,10 @@ test('log is a no-op when disabled', function () {
     LlmLogger::setDir($dir);
     LlmLogger::setEnabled(false);
 
-    LlmLogger::log('nope', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
+    $written = LlmLogger::log('nope', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
 
     assert_true(!file_exists("{$dir}/nope.log"), 'nothing written while disabled');
+    assert_eq(null, $written, 'disabled logging has no evidence path');
 
     LlmLogger::setEnabled(true);
     LlmLogger::setDir(null);
