@@ -438,6 +438,57 @@ final class SupportDomainGuard
             }
         }
 
+        // Element-styles state beyond the reviewed tree is carried, not
+        // validated. Per the pinned block-editor save hooks, the only
+        // saved-markup effect of style.elements is the has-link-color class
+        // derived from elements.link.color, which the renderers implement;
+        // every other element path is render-time (or dead) state that
+        // Gutenberg keeps verbatim in the delimiter. Generated markup
+        // occasionally invents such paths (a button :hover background,
+        // elements.heading on a heading) — carry them per block instead of
+        // failing the whole file. Reviewed elements paths keep strict
+        // value validation.
+        $elements = $style['elements'] ?? null;
+        if (is_array($elements)) {
+            $view = $this->reviewedElementsView($elements, self::STYLE_PATHS['elements']);
+            if ($view === []) {
+                unset($style['elements']);
+            } else {
+                $style['elements'] = $view;
+            }
+        }
+
         return $style;
+    }
+
+    /**
+     * Restrict an authored style.elements subtree to the reviewed rule tree,
+     * hiding unreviewed keys from validation while the raw authored state
+     * stays in the delimiter.
+     *
+     * @param array<string,mixed> $value
+     * @param array<string,mixed>|true $rule
+     * @return array<string,mixed>
+     */
+    private function reviewedElementsView(array $value, array|bool $rule): array
+    {
+        if (!is_array($rule)) {
+            return $value;
+        }
+        $view = [];
+        foreach ($value as $key => $child) {
+            if (!is_string($key) || str_starts_with($key, '@') || !array_key_exists($key, $rule)) {
+                continue;
+            }
+            if (is_array($child) && is_array($rule[$key])) {
+                $childView = $this->reviewedElementsView($child, $rule[$key]);
+                if ($childView !== []) {
+                    $view[$key] = $childView;
+                }
+                continue;
+            }
+            $view[$key] = $child;
+        }
+        return $view;
     }
 }

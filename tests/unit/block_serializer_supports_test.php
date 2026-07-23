@@ -304,7 +304,6 @@ test('SupportDomainGuard never prunes pinned-but-unimplemented style families', 
         '{"style":{"filter":{"blur":"2px"}}}',
         '{"style":{"variation":"section-1"}}',
         '{"style":{"color":{"duotone":"var:preset|duotone|dark"}}}',
-        '{"style":{"elements":{"heading":{"color":{"text":"#112233"}}}}}',
         '{"style":{"layout":{"columnSpan":2}}}',
         '{"style":{"position":{"bottom":"0"}}}',
         '{"style":{"background":{"backgroundImage":{"id":42}}}}',
@@ -387,6 +386,13 @@ test('SupportDomainGuard admits only the exact reviewed inert AI style signature
         ['core/paragraph', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => null]]]],
         ['core/paragraph', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => 'false']]]],
         ['core/group', ['style' => ['typography' => ['fontStyle' => 'italic', 'fontStyleNormal' => false]]]],
+    ] as [$name, $attributes]) {
+        assert_throws(static fn () => $guard->assertSupported($name, $attributes, '0'));
+    }
+
+    // Near-miss caption variants used to fail closed; since unreviewed
+    // elements paths became delimiter-carried state they pass instead.
+    foreach ([
         ['core/paragraph', ['style' => ['elements' => [
             'caption' => ['typography' => ['fontStyle' => 'normal']],
         ]]]],
@@ -397,6 +403,45 @@ test('SupportDomainGuard admits only the exact reviewed inert AI style signature
             'caption' => ['typography' => ['fontStyle' => 'italic']],
         ]]]],
     ] as [$name, $attributes]) {
-        assert_throws(static fn () => $guard->assertSupported($name, $attributes, '0'));
+        $guard->assertSupported($name, $attributes, '0');
     }
+});
+
+test('SupportDomainGuard carries unreviewed elements state per block instead of failing', function () {
+    $guard = new SupportDomainGuard();
+    // The two signatures observed in generated sites (a button :hover
+    // background, elements.heading on a heading), plus a novel invention:
+    // all pass validation with their authored bytes untouched, because
+    // unreviewed elements paths are delimiter-carried state at the pinned
+    // save hooks, not saved-markup behaviour.
+    foreach ([
+        ['core/button', '{"textColor":"accent","style":{"color":{"background":"transparent"},'
+            . '"elements":{"link":{":hover":{"color":{"background":"var:preset|color|accent",'
+            . '"text":"var:preset|color|base"}}}}}}'],
+        ['core/heading', '{"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}}'],
+        ['core/group', '{"style":{"elements":{"cite":{"typography":{"fontStyle":"italic"}}}}}'],
+    ] as [$name, $json]) {
+        $attributes = supports_test_attributes($json);
+        $before = JsonNative::objectToArray($attributes);
+        assert_eq([], $guard->pruneInventedStylePaths($name, $attributes), "{$name} elements state is never pruned");
+        assert_eq($before, JsonNative::objectToArray($attributes), "{$name} keeps authored bytes");
+        $guard->assertSupported($name, $before, '0');
+    }
+});
+
+test('SupportDomainGuard still validates the reviewed elements link recipe strictly', function () {
+    $guard = new SupportDomainGuard();
+    // A reviewed path with a malformed value fails closed even though its
+    // unreviewed siblings are carried.
+    assert_throws(static fn () => $guard->assertSupported('core/group', [
+        'style' => ['elements' => ['link' => ['color' => ['text' => ['not' => 'a-color']]]]],
+    ], '0'));
+    // The reviewed hover text color next to a carried hover background keeps
+    // validating: a bad text value still fails.
+    assert_throws(static fn () => $guard->assertSupported('core/group', [
+        'style' => ['elements' => ['link' => [':hover' => ['color' => [
+            'background' => 'var:preset|color|accent',
+            'text' => ['not' => 'a-color'],
+        ]]]]],
+    ], '0'));
 });

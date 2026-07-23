@@ -510,7 +510,9 @@ test('PhpBlockFixer rejects nested style and layout variants before staging', fu
         // implement, so it must fail closed rather than be pruned.
         '<!-- wp:group {"style":{"color":{"duotone":"var:preset|duotone|dark"}}} -->'
             . '<div class="wp-block-group"></div><!-- /wp:group -->',
-        '<!-- wp:group {"style":{"elements":{"heading":{"color":{"text":"#112233"}}}}} -->'
+        // Unreviewed elements paths are carried per block, but real
+        // unimplemented style families like per-block CSS still fail closed.
+        '<!-- wp:group {"style":{"css":"color:red"}} -->'
             . '<div class="wp-block-group"></div><!-- /wp:group -->',
         '<!-- wp:group {"layout":{"type":"grid"}} -->'
             . '<div class="wp-block-group"></div><!-- /wp:group -->',

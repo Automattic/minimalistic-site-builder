@@ -730,6 +730,19 @@ decision, not an accident:
   paragraph is the only block whose reviewed adapters admit authored styles.
   Any future ingestion of non-generated (authored) markup must extend the
   guard to the affected blocks first.
+- `SupportDomainGuard` no longer fails closed on unreviewed `style.elements`
+  paths (July 2026): generated sites invented element styles (a button
+  `:hover` background, `elements.heading` on a heading) and a single such
+  attribute failed the whole theme. Unreviewed elements state is now carried
+  per block — kept verbatim in the delimiter, hidden from validation — which
+  is byte-safe because the pinned save hooks derive nothing from
+  `style.elements` except the `has-link-color` class (from
+  `elements.link.color`), already implemented by the renderers. Reviewed
+  elements paths keep strict validation; all other pinned-unimplemented
+  style families (`css`, `filter`, `variation`, duotone, …) remain
+  fail-closed. Pinned by `cases/carried-elements-signatures`; the prompts
+  were tightened in the same change so the generator routes hover intent to
+  theme.json.
 
 ---
 

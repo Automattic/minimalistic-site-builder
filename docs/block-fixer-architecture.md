@@ -79,7 +79,14 @@ One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
      what `useBlockProps.save()` would add — `SupportEngine` and `StyleEngine`
      derive the preset classes and `style` declarations from the registry
      `supports`, and `SupportDomainGuard` fails closed on any style path
-     outside the reviewed tree. `Html/HtmlSerializer` emits the bytes.
+     outside the reviewed tree. One deliberate exception: unreviewed
+     `style.elements` paths are **carried per block** — kept verbatim in the
+     delimiter and hidden from validation — instead of failing the file,
+     because at the pinned save hooks the only saved-markup effect of
+     `style.elements` is the `has-link-color` class from
+     `elements.link.color`, which the renderers implement (certified against
+     `block-editor@15.15.0`; pinned by `cases/carried-elements-signatures`).
+     Reviewed elements paths keep strict value validation. `Html/HtmlSerializer` emits the bytes.
    - `CommentSerializer` writes the delimiter: attributes ordered by the
      registry `attributeOrder`, encoded by `Json/JsJsonEncoder` +
      `JsStringCodec`, which reproduce Gutenberg's exact escaping (including
