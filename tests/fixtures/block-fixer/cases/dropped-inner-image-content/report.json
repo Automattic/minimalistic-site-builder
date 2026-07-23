@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 1,
+    "M": 1,
+    "D": 4,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/image.html",
+      "status": "FIXED",
+      "dropped": [
+        {
+          "kind": "style",
+          "value": "height:200px",
+          "lost": 2,
+          "line": "DROPPED style `height:200px` (x2) — not mirrored in the block comment JSON attributes"
+        },
+        {
+          "kind": "style",
+          "value": "object-fit:cover",
+          "lost": 1,
+          "line": "DROPPED style `object-fit:cover` — not mirrored in the block comment JSON attributes"
+        },
+        {
+          "kind": "style",
+          "value": "width:100%",
+          "lost": 1,
+          "line": "DROPPED style `width:100%` — not mirrored in the block comment JSON attributes"
+        },
+        {
+          "kind": "class",
+          "value": "legacy-crop",
+          "lost": 2,
+          "line": "DROPPED class `legacy-crop` (x2) — not mirrored in the block comment JSON attributes"
+        }
+      ]
+    }
+  ]
+}

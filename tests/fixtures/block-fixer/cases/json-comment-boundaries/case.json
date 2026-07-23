@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "name": "json-comment-boundaries",
+  "milestone": "M1",
+  "capabilities": [
+    "block:core/group",
+    "json:apostrophe",
+    "json:quote",
+    "json:backslash",
+    "json:comment-boundary",
+    "json:html-sensitive",
+    "json:empty-array",
+    "json:empty-object",
+    "json:unicode",
+    "json:numeric-key-order",
+    "json:negative-zero",
+    "json:exponent-formatting",
+    "json:wrong-type",
+    "json:defaults",
+    "json:object-key-order"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [],
+    "files": [
+      {
+        "path": "parts/json.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "cd84e93d8b1ec415a66221aff87da532d039c50576bbc6450132011345b0f267",
+        "outputSha256": "3fb8fdbd4404fef33d8a3a3fde420203818274fce5c96eaed43fc64d6deb3fc9",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

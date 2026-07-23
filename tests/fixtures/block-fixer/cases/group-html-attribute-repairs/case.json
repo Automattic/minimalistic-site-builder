@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "name": "group-html-attribute-repairs",
+  "milestone": "M1",
+  "capabilities": [
+    "block:core/group",
+    "repair:custom-class-recovery",
+    "repair:anchor-recovery",
+    "repair:aria-label-recovery",
+    "repair-gate:custom-class-already-authored",
+    "repair-gate:anchor-already-authored",
+    "repair-gate:aria-label-already-authored",
+    "selector:attribute-root",
+    "report:fixed"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "anchor-recovery",
+      "aria-label-recovery",
+      "custom-class-recovery"
+    ],
+    "files": [
+      {
+        "path": "parts/already-authored.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "5aac7e632dfa0f2f69de64557f99c9c680d3e96617cbdbf01847c66072722c12",
+        "outputSha256": "9229ed318ca84a27b7f72b5dce4c9966f5fd44fa07561670d3b890b8d6d56157",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/content.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "e3644f298f826a108362c76c821609096b26754a765837905b0c42c5c6f5eb2b",
+        "outputSha256": "f68a64ffaaa7b75d5bc0a33ebe16948ac29ed3d777c80723efc647c2251905ba",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/group",
+                  "code": "custom-class-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "campaign-copy"
+                },
+                {
+                  "blockName": "core/group",
+                  "code": "aria-label-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "Intro group"
+                },
+                {
+                  "blockName": "core/group",
+                  "code": "anchor-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "intro"
+                }
+              ],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 3,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

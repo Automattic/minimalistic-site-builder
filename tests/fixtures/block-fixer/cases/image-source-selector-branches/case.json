@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "name": "image-source-selector-branches",
+  "milestone": "M2",
+  "capabilities": [
+    "block:core/image",
+    "branch:image-link",
+    "branch:image-caption",
+    "branch:image-title-alt",
+    "html:void-element",
+    "rich-text:inline-formatting",
+    "selector:child",
+    "selector:descendant",
+    "source:attribute",
+    "source:rich-text",
+    "strategy:static-renderer"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [],
+    "files": [
+      {
+        "path": "parts/image.html",
+        "passes": 1,
+        "secondInvocationPasses": 1,
+        "inputSha256": "40f8a811360cc8ef47c8fb824e8c8ba8880fe5016f6a6a66631fc8832816c117",
+        "outputSha256": "40f8a811360cc8ef47c8fb824e8c8ba8880fe5016f6a6a66631fc8832816c117",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/image",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

@@ -12,7 +12,8 @@ use Automattic\SiteBuild\ProjectStore;
  *
  * Mounts projects/<slug>/theme (and plugin) into wp-content and activates them
  * via a Blueprint, then boots Playground (downloads WordPress on first run).
- * Requires Node.js (uses `npx @wp-playground/cli`). Runs in the foreground;
+ * Requires Node.js and the lockfile-pinned local Playground CLI (`npm ci`).
+ * Runs in the foreground;
  * Ctrl-C to stop.
  *
  * --workers caps the request-handling worker threads (each one holds its own
@@ -58,8 +59,13 @@ if (!is_dir($themeDir) || !is_file($themeDir . '/style.css')) {
     exit(1);
 }
 
-if (!command_exists('npx')) {
-    fwrite(STDERR, "npx (Node.js) is required to run WordPress Playground.\n");
+if (!command_exists('node')) {
+    fwrite(STDERR, "Node.js is required to run WordPress Playground.\n");
+    exit(1);
+}
+$playgroundCli = repo_path('node_modules/.bin/wp-playground-cli');
+if (!is_file($playgroundCli)) {
+    fwrite(STDERR, "WordPress Playground CLI is not installed. Run `npm ci` at the repository root.\n");
     exit(1);
 }
 
@@ -123,7 +129,8 @@ $pluginMount = $hasPlugin ? $pluginDir . ':/wordpress/wp-content/plugins/' . $sl
 // only mount is the one we pass. Booting from scratch costs no extra time
 // versus the old `start --reset`, which wiped the site every run anyway.
 $cmd = sprintf(
-    'npx --yes @wp-playground/cli@latest server --login --workers=%s --port=%d --mount=%s%s --blueprint=%s',
+    '%s server --login --workers=%s --port=%d --mount=%s%s --blueprint=%s',
+    escapeshellarg($playgroundCli),
     escapeshellarg($workers),
     $port,
     escapeshellarg($mount),

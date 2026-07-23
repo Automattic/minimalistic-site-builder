@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "carried-elements-signatures",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/buttons",
+    "block:core/button",
+    "block:core/heading",
+    "guard:carried-unreviewed-elements",
+    "drop:unbacked-inline-style",
+    "drop:legacy-text-align",
+    "report:fixed"
+  ],
+  "provenance": {
+    "kind": "post-oracle-authored",
+    "notes": [
+      "Input blocks are verbatim from generated sites naturaleza52 (a core/button with an invented elements.link.:hover background) and tbilisi55 (elements.heading on a core/heading with an unbacked inline color).",
+      "Pins the carried-elements policy: unreviewed style.elements paths stay verbatim in the delimiter instead of failing the file. Certified against block-editor@15.15.0 save hooks: the only saved-markup effect of style.elements is the has-link-color class from elements.link.color, which the renderers implement.",
+      "The heading's unbacked inline color and legacy textAlign re-render into DROPPED rows per the documented unmatched-legacy-signature policy (plan M4 outcome addendum)."
+    ]
+  },
+  "reviewedRepairCount": 0
+}

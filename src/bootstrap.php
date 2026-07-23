@@ -138,8 +138,8 @@ function playground_blueprint_path(string $slug, int $pid): string
 }
 
 /**
- * Stop one Playground boot: the php wrapper, its npx/node subtree, and the
- * reparented node server (once npx exits the server reparents to init and
+ * Stop one Playground boot: the php wrapper, its Playground/node subtree, and
+ * the reparented node server (once the launcher exits it reparents to init and
  * escapes the tree walk — but it keeps the blueprint path in its argv).
  */
 function teardown_playground($proc, int $pid, string $blueprintPath): void

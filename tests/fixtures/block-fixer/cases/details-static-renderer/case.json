@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "name": "details-static-renderer",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/details",
+    "block:core/paragraph",
+    "render:name-before-open-order",
+    "render:empty-name-omitted",
+    "render:anchor-id-slot",
+    "support:color",
+    "support:spacing",
+    "report:ok",
+    "report:fixed"
+  ],
+  "provenance": {
+    "kind": "post-oracle-authored",
+    "notes": [
+      "core/details entered the compatibility domain after the Node oracle was removed (619b8c9), so this case has no oracle instrumentation.",
+      "The default and inner-blocks shapes are certified by the oracle-generated saveProbes for core/details in generated-registry.php (frozen at abcf523).",
+      "The name/open/anchor/style variants were verified against packages/block-library/src/details/save.js at the pinned tag @wordpress/block-library@9.42.0: blockProps spread first (anchor id, classes, style), then name={name || undefined} (empty name omitted), then open={showContent}."
+    ]
+  },
+  "reviewedRepairCount": 0
+}

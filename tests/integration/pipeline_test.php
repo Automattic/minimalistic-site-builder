@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
-use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
@@ -22,7 +22,7 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
         llm: $llm,
         promptsDir: Package::promptsDir(),
         outputRoot: $outputRoot,
-        blockFixer: NodeBlockFixer::default(),
+        blockFixer: BlockFixers::default(),
         models: [],
     );
 }

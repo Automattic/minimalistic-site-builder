@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "name": "heading-legacy-text-align",
+  "milestone": "M2",
+  "capabilities": [
+    "block:core/heading",
+    "deprecation:heading-text-align",
+    "support:text-color",
+    "support:font-family",
+    "report:fixed"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "custom-class-recovery",
+      "deprecation:core/heading:0"
+    ],
+    "files": [
+      {
+        "path": "parts/heading.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "14938b48449eb25c11475daf5ae2d2124d4955477de3507c99b503d73ccb604f",
+        "outputSha256": "94dad099da7dc2730af7d40d469f39d2fdd70460c94f659b932273b5bffc9f27",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/heading",
+                  "code": "custom-class-recovery",
+                  "phase": "current",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-align-center"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "content": {},
+                    "level": 2,
+                    "textColor": "primary",
+                    "fontFamily": "heading",
+                    "className": "has-text-align-center"
+                  },
+                  "afterAttributes": {
+                    "content": "A table set for strangers, kept warm for centuries",
+                    "level": 2,
+                    "levelOptions": {
+                      "__type": "undefined"
+                    },
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "borderColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "primary",
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "anchor": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "fitText": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

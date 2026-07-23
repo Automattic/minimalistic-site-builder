@@ -60,7 +60,7 @@ final class StepComposition
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
     ): self {
-        $blockFixer ??= NodeBlockFixer::default();
+        $blockFixer ??= BlockFixers::default();
         $models = array_merge(StepDefaults::models(), $models);
         $temps = array_merge(StepDefaults::temperatures(), $temperatures);
 

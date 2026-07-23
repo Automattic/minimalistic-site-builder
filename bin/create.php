@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
@@ -71,7 +71,7 @@ $builder = new SiteBuilder(
     llm: $llm,
     promptsDir: Package::promptsDir(),
     outputRoot: repo_path('projects'),
-    blockFixer: NodeBlockFixer::default(),
+    blockFixer: BlockFixers::default(),
     models: step_models(),
 );
 // Without an explicit --slug, createProject picks a free random adjective-noun
@@ -127,7 +127,7 @@ if ($withImages) {
     // Now that the real pixels exist, re-check cover text against the actual
     // (dimmed) images and raise dimRatio / flip text colors where needed —
     // the same follow-up build.php and images.php run after generation.
-    $coverStep = new CoverContrastStep(NodeBlockFixer::default());
+    $coverStep = new CoverContrastStep(BlockFixers::default());
     announce_step($coverStep);
     $start = microtime(true);
     $coverStep->run($project);
