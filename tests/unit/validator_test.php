@@ -212,6 +212,23 @@ test('validator judges block-JSON url destinations (navigation links)', function
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator ignores rewritten theme asset urls from generate-images', function () {
+    [$project, $tmp] = validator_linked_project();
+    // Cover "url" after GenerateImagesStep rewrite — root-relative but not a page.
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:cover {"url":"/wp-content/themes/demo/assets/hero-barista.jpg","dimRatio":40} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="/wp-content/themes/demo/assets/hero-barista.jpg" alt=""/></div>'
+        . '<!-- /wp:cover -->'
+        . '<!-- wp:paragraph --><p><a href="/visit">Visit</a></p><!-- /wp:paragraph -->'
+    );
+
+    $problems = ThemeValidator::validate($project);
+    assert_eq([], $problems, 'theme assets must not be judged as page links: ' . implode('; ', $problems));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator holds chrome fragments to anchors that exist on every page', function () {
     [$project, $tmp] = validator_linked_project();
     // "hero" exists only on the home page; a header link to it 404s (well,
