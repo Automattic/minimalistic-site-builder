@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "name": "tabs-static-renderer",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/tabs",
+    "block:core/tab-list",
+    "block:core/tab-panels",
+    "block:core/tab-panel",
+    "block:core/paragraph",
+    "source:query-rich-text-labels",
+    "render:tab-list-role-before-class",
+    "render:tab-panel-role-tabindex-order",
+    "render:button-type-regenerated",
+    "render:comment-attribute-order",
+    "support:color",
+    "support:anchor",
+    "report:ok",
+    "report:fixed"
+  ],
+  "provenance": {
+    "kind": "post-oracle-authored",
+    "notes": [
+      "The core Tabs family entered the compatibility domain after the Node oracle was removed (619b8c9) and after the pinned @wordpress/block-library@9.42.0 runtime, where the family was still experimental; this case has no 9.42 oracle instrumentation.",
+      "Every certified byte comes from the real Gutenberg 23.6 runtime (@wordpress/blocks@15.24.0 + @wordpress/block-library@10.2.0, the release where the family first ships stable): the canonical.html bytes round-trip through that runtime's parse()+serialize() to a fixed point with every block valid, and the registered definitions/saveProbes/renderer probes in generated-registry.php and renderer-probes.json are that runtime's actual output.",
+      "repairs.html degrades the authored markup the way generation plausibly would: buttons missing type=\"button\" (invalidates core/tab-list) and comment attributes in authored order. The expected repair regenerates from sourced attributes \u2014 labels survive via the tabs query source \u2014 and matches the runtime-certified save shapes probed in renderer-probes.json (tabs/anchor-color, tab-list/two-tabs).",
+      "save.js for all four blocks reviewed at tag v23.6.0: tabs and tab-panels spread useBlockProps.save() onto a div; tab-list passes {role:'tablist'} so role precedes the generated class, with color/border/spacing skip-serialized to the buttons; tab-panel passes {role:'tabpanel', tabIndex:0} so both precede the anchor id."
+    ]
+  },
+  "reviewedRepairCount": 0
+}
