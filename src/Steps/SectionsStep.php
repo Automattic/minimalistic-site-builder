@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\FooterUnit;
@@ -196,7 +197,7 @@ final class SectionsStep implements Step
             $outline = self::outline($sections);
             foreach ($sections as $i => $section) {
                 $role = trim((string) ($section['role'] ?? ''));
-                $expectedRole = PagePlanStep::roleForPosition($i, count($sections));
+                $expectedRole = SectionRole::forPosition($i, count($sections));
                 if ($role !== $expectedRole) {
                     $slug = (string) ($section['slug'] ?? "section-{$i}");
                     throw new \RuntimeException(

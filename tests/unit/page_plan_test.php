@@ -19,7 +19,6 @@ function plan_section(array $overrides = []): array
     return array_merge([
         'slug'             => 'hero',
         'title'            => 'Hero',
-        'role'             => 'hero',
         'type'             => 'hero',
         'layout_archetype' => 'full-bleed-cover',
         'background'       => 'image',
@@ -58,7 +57,6 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
     $fields = [
         'slug',
         'title',
-        'role',
         'type',
         'purpose',
         'content_notes',
@@ -75,7 +73,7 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
         assert_eq('string', $item['properties'][$field]['type'], "{$field} is constrained to a string");
     }
     assert_true(!array_key_exists('enum', $item['properties']['type']), 'type remains a free-form semantic label');
-    assert_eq(PagePlanStep::SECTION_ROLES, $item['properties']['role']['enum']);
+    assert_true(!array_key_exists('role', $item['properties']), 'role is derived after generation, not requested from the model');
     assert_eq(PagePlanStep::ARCHETYPES, $item['properties']['layout_archetype']['enum']);
     assert_eq(PagePlanStep::BACKGROUNDS, $item['properties']['background']['enum']);
 });
@@ -83,15 +81,15 @@ test('PagePlanStep::jsonSchema constrains the complete section shape', function 
 test('PagePlanStep::normalize forces unique, file-safe slugs and fills defaults', function () {
     $sections = PagePlanStep::normalize([
         plan_section(['slug' => null]),                  // slug derived from title
-        plan_section(['slug' => 'Our Story!', 'title' => 'About', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
-        plan_section(['title' => 'Another Hero', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']), // duplicate slug -> hero-2
+        plan_section(['slug' => 'Our Story!', 'title' => 'About', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']),
+        plan_section(['title' => 'Another Hero', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']), // duplicate slug -> hero-2
         'not-an-array',                                  // skipped
     ]);
 
     $slugs = array_column($sections, 'slug');
     assert_eq(['hero', 'our-story', 'hero-2'], $slugs);
     assert_eq('hero', $sections[0]['type'], 'type preserved');
-    assert_eq('hero', $sections[0]['role'], 'role preserved');
+    assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'), 'roles derived after invalid entries are skipped');
 });
 
 test('PagePlanStep::normalize preserves a novel free-form type', function () {
@@ -103,34 +101,20 @@ test('PagePlanStep::normalize preserves a novel free-form type', function () {
     assert_eq('hero', $sections[0]['role']);
 });
 
-test('PagePlanStep::normalize rejects an unknown role', function () {
-    assert_throws(function () {
-        PagePlanStep::normalize([plan_section(['role' => 'sidebar'])]);
-    }, 'invalid role');
+test('PagePlanStep::normalize stamps positional roles and ignores model annotations', function () {
+    $sections = PagePlanStep::normalize([
+        plan_section(['role' => 'closing']),
+        plan_section(['slug' => 'middle', 'layout_archetype' => 'asymmetric-split']),
+        plan_section(['slug' => 'end', 'role' => 'sidebar', 'layout_archetype' => 'centered-stack']),
+    ]);
+
+    assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'));
 });
 
-test('PagePlanStep::normalize rejects a missing role', function () {
-    $section = plan_section();
-    unset($section['role']);
+test('PagePlanStep::normalize stamps a singleton as hero', function () {
+    $sections = PagePlanStep::normalize([plan_section(['role' => 'closing'])]);
 
-    assert_throws(function () use ($section) {
-        PagePlanStep::normalize([$section]);
-    }, 'invalid role');
-});
-
-test('PagePlanStep::normalize reports every positional role violation', function () {
-    try {
-        PagePlanStep::normalize([
-            plan_section(['role' => 'closing']),
-            plan_section(['slug' => 'middle', 'role' => 'hero', 'layout_archetype' => 'asymmetric-split']),
-            plan_section(['slug' => 'end', 'role' => 'content', 'layout_archetype' => 'centered-stack']),
-        ]);
-        assert_true(false, 'expected the plan to be rejected');
-    } catch (RuntimeException $e) {
-        assert_contains("first section 'hero' must have role 'hero', got 'closing'", $e->getMessage());
-        assert_contains("an interior section 'middle' must have role 'content', got 'hero'", $e->getMessage());
-        assert_contains("last section 'end' must have role 'closing', got 'content'", $e->getMessage());
-    }
+    assert_eq('hero', $sections[0]['role']);
 });
 
 test('PagePlanStep::normalize rejects an empty type', function () {
@@ -481,7 +465,9 @@ test('page-plan fans out one request per page with per-page context', function (
     assert_contains('What we bake', $reqs['menu']['prompt']);        // its own purpose
     assert_contains('/menu/breads/', $reqs['menu']['prompt']);       // site pages list
     assert_contains('`type` is an open-ended semantic label', $reqs['home']['prompt']);
+    assert_contains('builder derives each section\'s structural role', $reqs['home']['prompt']);
     assert_contains('examples:', $reqs['home']['prompt']);
+    assert_true(!str_contains($reqs['home']['prompt'], '"role"'), 'role is absent from the requested JSON shape');
     assert_true(!str_contains($reqs['home']['prompt'], '"type": "one of:'), 'semantic types are examples, not a closed list');
 
     $expectedSchema = ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()];
@@ -527,6 +513,44 @@ test('page-plan writes pages.json with sections per page', function () {
     assert_eq('bread-catalog', $plan['pages'][1]['sections'][1]['type']);
     assert_eq('menu', $plan['pages'][2]['parent']);
     assert_eq(20, $plan['pages'][2]['menu_order']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan stamps roles after a repair even when model role annotations stay wrong or missing', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ppr_roles_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    // The initial plan needs a semantic repair for its duplicate archetype.
+    // Its role annotations are deliberately wrong and must not create another
+    // validation failure.
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'welcome', 'role' => 'closing', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'story', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'tinted']),
+        plan_section(['slug' => 'visit', 'role' => 'content', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
+    ]]);
+    // The repaired plan fixes the actual art-direction error, but repeats bad
+    // role annotations and omits one. Normalization must stamp all positions.
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'welcome', 'role' => 'closing']),
+        plan_section(['slug' => 'story', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
+        plan_section(['slug' => 'visit', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ]]);
+
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(2, count($llm->calls), 'one initial request plus one repair');
+    assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'));
+    assert_true(
+        !str_contains($llm->calls[1]['prompt'], 'must have role'),
+        'model role annotations never become repair errors',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
