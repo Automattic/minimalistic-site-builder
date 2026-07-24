@@ -452,15 +452,81 @@ test('layout fixer refuses a stray-closer repair with several distinct valid rea
     assert_eq($heading, $r['markup']);
 });
 
+test('layout fixer deep-merges duplicate same-depth comment JSON keys and stays idempotent', function () {
+    // naturaleza (BIGR-719): a duplicate "style" key in valid JSON. Every
+    // json_decode downstream keeps only the last duplicate, so the spacing
+    // member would vanish while the HTML still carries margin-top:0 — and if
+    // this fixer dirtied the node, its own re-render would bake that loss in.
+    $markup = '<!-- wp:paragraph {"style":{"spacing":{"margin":{"top":"0"}}},'
+        . '"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}} -->'
+        . '<p style="margin-top:0"><a href="mailto:reservas@naturalezasabia.com.ar">'
+        . 'reservas@naturalezasabia.com.ar</a></p><!-- /wp:paragraph -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains(
+        '<!-- wp:paragraph {"style":{"spacing":{"margin":{"top":"0"}},'
+            . '"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}} -->',
+        $r['markup']
+    );
+    assert_contains('<p style="margin-top:0">', $r['markup'], 'authored HTML is untouched');
+    assert_eq(1, count($r['notes']));
+    assert_contains('wp:paragraph attributes declared "style" more than once', $r['notes'][0]);
+    assert_contains('deep-merged', $r['notes'][0]);
+
+    // Idempotent, so the same pass doubles as a dry-run linter.
+    $again = LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq([], $again['notes']);
+    assert_eq($r['markup'], $again['markup']);
+
+    // A scalar conflict resolves last-wins — the same outcome json_decode
+    // gave — while earlier non-conflicting members now survive a re-render
+    // of the dirtied node instead of being silently deleted.
+    $group = '<!-- wp:group {"align":"wide","align":"full","style":{"spacing":{"padding":{"top":"1rem"}}},'
+        . '"style":{"color":{"background":"#123456"}}} -->'
+        . '<div class="wp-block-group alignfull"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($group, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"align":"full"', $r['markup']);
+    assert_true(!str_contains($r['markup'], '"align":"wide"'), 'conflicting scalar keeps the last declaration');
+    assert_contains('"padding":{"top":"1rem"}', $r['markup']);
+    assert_contains('"background":"#123456"', $r['markup']);
+    assert_contains('"layout":{"type":"constrained"}', $r['markup'], 'later rules run on the merged attributes');
+});
+
+test('layout fixer merges escaped-equivalent duplicate keys before later rules dirty the node', function () {
+    $markup = '<!-- wp:group {"style":{"elements":{"link":{"color":{"text":"var:preset|color|accent"}}}},'
+        . '"\u0073tyle":{"color":{"background":"#123456"}},'
+        . '"layout":{"type":"flex","justifyContent":"flex-start"}} -->'
+        . '<div class="wp-block-group has-background has-link-color" style="background-color:#123456">'
+        . '<p><a href="#">Link</a></p></div><!-- /wp:group -->';
+
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains(
+        '"style":{"elements":{"link":{"color":{"text":"var:preset|color|accent"}}},'
+            . '"color":{"background":"#123456"}}',
+        $r['markup'],
+        'the earlier style member must survive the later layout rewrite',
+    );
+    assert_contains('"justifyContent":"left"', $r['markup']);
+    assert_contains('attributes declared "style" more than once', implode("\n", $r['notes']));
+    assert_contains('mapped it to Gutenberg', implode("\n", $r['notes']));
+
+    $again = LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq([], $again['notes']);
+    assert_eq($r['markup'], $again['markup']);
+});
+
 test('layout fixer rejects stray-closer repairs that create duplicate keys', function () {
     // Deleting the stray closer here merges two "style" members into one
     // object; json_decode keeps only the last, silently losing the background
     // (PR #109 review, finding 5). Such candidates never count as valid.
-    $markup = '<!-- wp:group {"style":{"color":{"background":"#000"}}},"style":{"spacing":{"padding":{"top":"1rem"}}}} -->'
-        . '<div class="wp-block-group"></div><!-- /wp:group -->';
-    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
-    assert_eq([], $r['notes']);
-    assert_eq($markup, $r['markup']);
+    foreach (['"style"', '"\u0073tyle"'] as $duplicateKey) {
+        $markup = '<!-- wp:group {"style":{"color":{"background":"#000"}}},'
+            . $duplicateKey
+            . ':{"spacing":{"padding":{"top":"1rem"}}}} -->'
+            . '<div class="wp-block-group"></div><!-- /wp:group -->';
+        $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+        assert_eq([], $r['notes']);
+        assert_eq($markup, $r['markup']);
+    }
 });
 
 test('layout fixer repairs an opener independently of an earlier unterminated one', function () {
