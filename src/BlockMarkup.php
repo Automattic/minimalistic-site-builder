@@ -38,10 +38,12 @@ final class BlockMarkup
      * @param list<array{name:string, attrs:?array<mixed>, void:bool, parent:?int,
      *                    children:list<int>, offset:int, length:int,
      *                    innerStart:int, innerEnd:int}> $nodes
+     * @param list<int> $unclosed indices of blocks still open at end of document
      */
     private function __construct(
         private string $source,
         private array $nodes,
+        private array $unclosed = [],
     ) {}
 
     /** @var array<int,array<mixed>> node index => replacement attrs */
@@ -111,7 +113,19 @@ final class BlockMarkup
             $nodes[$i]['innerEnd'] = $end;
         }
 
-        return new self($source, $nodes);
+        return new self($source, $nodes, array_values($stack));
+    }
+
+    /**
+     * Indices of the blocks left open at the end of the document (a truncated
+     * generation cuts off before their closers), outermost first. Empty for a
+     * well-formed document.
+     *
+     * @return list<int>
+     */
+    public function unclosedIndices(): array
+    {
+        return $this->unclosed;
     }
 
     /** @return list<int> all node indices, in document order */
@@ -134,6 +148,12 @@ final class BlockMarkup
     public function parent(int $i): ?int
     {
         return $this->nodes[$i]['parent'];
+    }
+
+    /** Whether the block is self-closing (`<!-- wp:name /-->`). */
+    public function isVoid(int $i): bool
+    {
+        return $this->nodes[$i]['void'];
     }
 
     /** @return list<int> */

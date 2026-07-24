@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 
 /** Project-free normalization shared by every generated markup unit. */
@@ -10,9 +11,10 @@ final class GeneratedMarkup
 {
     /**
      * Strip an accidental code fence, require block markup, repair common
-     * malformed preset references, and strip script-capable markup. Every
-     * part is untrusted model output headed for templates and stored post
-     * content, so this is the one intake it all passes through.
+     * malformed preset references, strip script-capable markup, and salvage a
+     * truncated response back to its last complete block. Every part is
+     * untrusted model output headed for templates and stored post content, so
+     * this is the one intake it all passes through.
      */
     public static function normalize(string $text, string $key): string
     {
@@ -20,7 +22,22 @@ final class GeneratedMarkup
         if ($markup === '' || !str_contains($markup, 'wp:')) {
             throw new \RuntimeException("part '{$key}' is not block markup");
         }
-        return MarkupSanitizer::sanitize(self::normalizePresetRefs(rtrim($markup)));
+        $markup = MarkupSanitizer::sanitize(self::normalizePresetRefs(rtrim($markup)));
+
+        // A response cut off by the output-token ceiling (or otherwise left
+        // structurally unclosed) is trimmed to its last complete block rather
+        // than accepted broken — it would only fail the build much later, at
+        // the section-rhythm root-group gate, after every other part was paid
+        // for.
+        try {
+            $salvage = MarkupSalvage::repair($markup);
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
+        }
+        foreach ($salvage['notes'] as $note) {
+            fwrite(STDERR, "    (part '{$key}': {$note})\n");
+        }
+        return $salvage['markup'];
     }
 
     /**

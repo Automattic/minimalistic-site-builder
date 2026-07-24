@@ -136,7 +136,7 @@ final class JsonBatchRecovery
         $prompt = (string) ($request['prompt'] ?? '');
         $reason = is_string($response['stop_reason'] ?? null) ? trim($response['stop_reason']) : '';
 
-        if (in_array($reason, self::TRUNCATION_REASONS, true)) {
+        if (self::isTruncation($reason)) {
             // Twice the explicit budget, or twice the clients' 16k default
             // when the request relied on it.
             $repair['max_tokens'] = isset($request['max_tokens'])
@@ -170,6 +170,12 @@ final class JsonBatchRecovery
 
     /** Stop reasons that mean the provider declined to answer. */
     private const REFUSAL_REASONS = ['refusal', 'content_filter', 'safety'];
+
+    /** Whether a provider stop reason means the output budget ran out. */
+    public static function isTruncation(mixed $reason): bool
+    {
+        return is_string($reason) && in_array(trim($reason), self::TRUNCATION_REASONS, true);
+    }
 
     /** Classify provider stop reasons that mean a JSON response is incomplete. */
     public static function terminationError(mixed $reason): ?string

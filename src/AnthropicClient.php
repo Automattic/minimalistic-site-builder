@@ -166,7 +166,10 @@ final class AnthropicClient implements Llm
 
     public function completeBatch(array $requests): array
     {
-        return $this->textBatch($requests, false);
+        return TextBatchRecovery::run(
+            $requests,
+            fn (array $subset): array => $this->responseBatch($subset, false),
+        );
     }
 
     /**
@@ -224,19 +227,6 @@ final class AnthropicClient implements Llm
             $res['log_path'] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
             $res['model'] = (string) $bodies[$key]['model'];
             $out[$key] = $res;
-        }
-        return $out;
-    }
-
-    /**
-     * @param array<array-key,array<string,mixed>> $requests
-     * @return array<array-key,string>
-     */
-    private function textBatch(array $requests, bool $json): array
-    {
-        $out = [];
-        foreach ($this->responseBatch($requests, $json) as $key => $response) {
-            $out[$key] = (string) $response['text'];
         }
         return $out;
     }
