@@ -13,8 +13,11 @@ final class SupportDomainGuard
      * Style families (or family members) that the pinned runtime implements
      * but this PHP pipeline does not. An unknown authored key at or under one
      * of these paths may carry real styling or editor metadata, so it is
-     * never pruned as invented state; it stays fail-closed instead. Matching
-     * is by exact path or by `<entry>.` prefix.
+     * never pruned as invented state. Matching is by exact path or by
+     * `<entry>.` prefix.
+     *
+     * Entries also listed in CARRIED_STYLE_PATHS are carried per block
+     * instead of failing validation; the rest stay fail-closed.
      *
      * @var list<string>
      */
@@ -32,6 +35,35 @@ final class SupportDomainGuard
         'layout',
         'position',
         'background',
+    ];
+
+    /**
+     * Pinned-unimplemented families whose unreviewed keys are carried, not
+     * validated: kept verbatim in the delimiter and hidden from the
+     * validation view, exactly as the pinned reserializer keeps them. This
+     * is byte-safe because no save-path consumer reads these families —
+     * StyleEngine and SupportEngine fetch exact reviewed paths only, so at
+     * the pinned save hooks everything here is render-time (or dead) state
+     * that cannot change saved markup. Reviewed paths inside these families
+     * (the elements.link color recipe, the inert layout/position signatures)
+     * keep strict value validation.
+     *
+     * `background` is deliberately absent: StyleEngine consumes
+     * style.background wholesale, and an unreviewed shape (e.g. an url-less
+     * backgroundImage object) reaches a branch never certified against the
+     * pinned engine, where carried keys could change saved bytes. It stays
+     * fail-closed.
+     *
+     * @var list<string>
+     */
+    private const CARRIED_STYLE_PATHS = [
+        'css',
+        'filter',
+        'color.duotone',
+        'variation',
+        'elements',
+        'layout',
+        'position',
     ];
     /**
      * Closed style path tree implemented by StyleEngine, SupportEngine, and
@@ -438,50 +470,48 @@ final class SupportDomainGuard
             }
         }
 
-        // Element-styles state beyond the reviewed tree is carried, not
-        // validated. Per the pinned block-editor save hooks, the only
-        // saved-markup effect of style.elements is the has-link-color class
-        // derived from elements.link.color, which the renderers implement;
-        // every other element path is render-time (or dead) state that
-        // Gutenberg keeps verbatim in the delimiter. Generated markup
-        // occasionally invents such paths (a button :hover background,
-        // elements.heading on a heading) — carry them per block instead of
-        // failing the whole file. Reviewed elements paths keep strict
-        // value validation.
-        $elements = $style['elements'] ?? null;
-        if (is_array($elements)) {
-            $view = $this->reviewedElementsView($elements, self::STYLE_PATHS['elements']);
-            if ($view === []) {
-                unset($style['elements']);
-            } else {
-                $style['elements'] = $view;
-            }
-        }
-
-        return $style;
+        // State beyond the reviewed tree at or under a carried style family
+        // is carried, not validated: the raw authored bytes stay in the
+        // delimiter, exactly as the pinned reserializer keeps them, and no
+        // save-path consumer reads those families (see CARRIED_STYLE_PATHS),
+        // so the saved markup cannot change. Generated markup occasionally
+        // invents such paths (a button :hover background under elements, a
+        // style.layout.contentSize on a group, per-block css) — carry them
+        // per block instead of failing the whole file. Reviewed paths inside
+        // the same families keep strict value validation.
+        return $this->reviewedStyleView($style, self::STYLE_PATHS, '');
     }
 
     /**
-     * Restrict an authored style.elements subtree to the reviewed rule tree,
-     * hiding unreviewed keys from validation while the raw authored state
-     * stays in the delimiter.
+     * Restrict an authored style tree to the reviewed rule tree wherever the
+     * unreviewed remainder is carried state: an unknown key at or under a
+     * carried family is hidden from this validation view while the raw
+     * authored state stays in the delimiter. Unknown keys outside carried
+     * families stay visible, so invented-path pruning and the fail-closed
+     * assertions still see them.
      *
      * @param array<string,mixed> $value
      * @param array<string,mixed>|true $rule
      * @return array<string,mixed>
      */
-    private function reviewedElementsView(array $value, array|bool $rule): array
+    private function reviewedStyleView(array $value, array|bool $rule, string $prefix): array
     {
-        if (!is_array($rule)) {
-            return $value;
-        }
         $view = [];
         foreach ($value as $key => $child) {
-            if (!is_string($key) || str_starts_with($key, '@') || !array_key_exists($key, $rule)) {
+            $label = is_string($key) ? $key : (string) $key;
+            $path = $prefix === '' ? $label : $prefix . '.' . $label;
+            $reviewed = is_string($key)
+                && is_array($rule)
+                && !str_starts_with($key, '@')
+                && array_key_exists($key, $rule);
+            if (!$reviewed) {
+                if (!$this->isCarriedStylePath($path)) {
+                    $view[$key] = $child;
+                }
                 continue;
             }
             if (is_array($child) && is_array($rule[$key])) {
-                $childView = $this->reviewedElementsView($child, $rule[$key]);
+                $childView = $this->reviewedStyleView($child, $rule[$key], $path);
                 if ($childView !== []) {
                     $view[$key] = $childView;
                 }
@@ -490,5 +520,15 @@ final class SupportDomainGuard
             $view[$key] = $child;
         }
         return $view;
+    }
+
+    private function isCarriedStylePath(string $path): bool
+    {
+        foreach (self::CARRIED_STYLE_PATHS as $entry) {
+            if ($path === $entry || str_starts_with($path, $entry . '.')) {
+                return true;
+            }
+        }
+        return false;
     }
 }

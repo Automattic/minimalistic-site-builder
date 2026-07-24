@@ -41,8 +41,11 @@ final class AttributeNormalizer
         // Invented style keys — authored paths that exist neither in the
         // reviewed tree nor in the pinned runtime — are deleted from the raw
         // comment state before sourcing and validation, so the serialized
-        // output drops the same bytes. Pinned-but-unimplemented families and
-        // value-level mismatches still fail closed in assertSupported().
+        // output drops the same bytes. Unknown keys under a carried
+        // pinned-unimplemented family (css, elements, layout, …) are kept
+        // verbatim in the delimiter and hidden from validation; value-level
+        // mismatches on reviewed paths and unknown keys under the remaining
+        // fail-closed family (background) still fail in assertSupported().
         if ($node->attributes !== null) {
             foreach ($this->supportDomain->pruneInventedStylePaths($node->name, $node->attributes) as $prunedPath) {
                 $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(

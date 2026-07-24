@@ -299,21 +299,48 @@ test('SupportDomainGuard prunes invented style keys and keeps reviewed state', f
 
 test('SupportDomainGuard never prunes pinned-but-unimplemented style families', function () {
     $guard = new SupportDomainGuard();
+
+    // Carried families: unknown keys are kept verbatim in the delimiter AND
+    // pass validation — no save-path consumer reads them, so the pinned
+    // save hooks emit identical bytes with or without them.
     foreach ([
         '{"style":{"css":"color:red"}}',
         '{"style":{"filter":{"blur":"2px"}}}',
         '{"style":{"variation":"section-1"}}',
         '{"style":{"color":{"duotone":"var:preset|duotone|dark"}}}',
         '{"style":{"layout":{"columnSpan":2}}}',
+        '{"style":{"layout":{"contentSize":"720px"}}}',
         '{"style":{"position":{"bottom":"0"}}}',
-        '{"style":{"background":{"backgroundImage":{"id":42}}}}',
     ] as $json) {
         $attributes = supports_test_attributes($json);
         $before = JsonNative::objectToArray($attributes);
         assert_eq([], $guard->pruneInventedStylePaths('core/group', $attributes));
         assert_eq($before, JsonNative::objectToArray($attributes), 'pinned families keep authored bytes');
-        assert_throws(static fn () => $guard->assertSupported('core/group', $before, '0'));
+        $guard->assertSupported('core/group', $before, '0');
     }
+
+    // style.background stays fail-closed: StyleEngine consumes it wholesale,
+    // so an unreviewed shape could change the emitted bytes.
+    $background = supports_test_attributes('{"style":{"background":{"backgroundImage":{"id":42}}}}');
+    $before = JsonNative::objectToArray($background);
+    assert_eq([], $guard->pruneInventedStylePaths('core/group', $background));
+    assert_eq($before, JsonNative::objectToArray($background), 'pinned families keep authored bytes');
+    assert_throws(static fn () => $guard->assertSupported('core/group', $before, '0'));
+});
+
+test('SupportDomainGuard carries a misplaced style.layout.contentSize instead of failing', function () {
+    $guard = new SupportDomainGuard();
+    // Verbatim signature from generated site tbilisi60: the model wrote the
+    // constrained width under style.layout instead of the top-level layout
+    // attribute. core/group save() reads only the top-level attribute, so
+    // the misplaced key is dead delimiter state — carried, never pruned.
+    $attributes = supports_test_attributes(
+        '{"style":{"layout":{"contentSize":"720px"}},"layout":{"type":"constrained"}}'
+    );
+    $before = JsonNative::objectToArray($attributes);
+    assert_eq([], $guard->pruneInventedStylePaths('core/group', $attributes));
+    assert_eq($before, JsonNative::objectToArray($attributes), 'authored bytes are kept');
+    $guard->assertSupported('core/group', $before, '0');
 });
 
 test('SupportDomainGuard pruning leaves value mismatches and reviewed signatures alone', function () {

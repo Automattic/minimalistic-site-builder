@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "name": "tbilisi60-traditional-offerings-fixed-point",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/group",
+    "block:core/columns",
+    "block:core/column",
+    "block:core/heading",
+    "block:core/paragraph",
+    "block:core/separator",
+    "block:core/image",
+    "guard:carried-unreviewed-layout",
+    "deprecation:paragraph-legacy-font-style-key",
+    "repair:nested-paragraph",
+    "drop:legacy-text-align",
+    "report:fixed"
+  ],
+  "provenance": {
+    "kind": "post-oracle-authored",
+    "notes": [
+      "Input is the verbatim parts/page-home--traditional-offerings.html from generated site tbilisi60, whose build failed in fix-blocks on the first block before this change.",
+      "Pins the carried pinned-unimplemented style families policy: the invented style.layout.contentSize on the inner core/group stays verbatim in the delimiter instead of failing the theme. Byte-safe at the pinned runtime: no save-path consumer (StyleEngine, SupportEngine, renderers) reads style.layout, so per block-editor@15.15.0 save hooks it is retained comment state with no saved-markup effect; core/group save() reads only the top-level layout attribute, which this block already carries.",
+      "Pins the reviewed-legacy disposition for the AI-authored core/paragraph fontStyle comment key ({\"fontStyle\":\"italic\"} alias for style.typography.fontStyle, six occurrences): the pinned createBlock path drops the unregistered delimiter key while the authored font-style:italic root declaration survives via the selector-less deprecation's root carryover, the same certified path as paragraph-inline-color-carryover.",
+      "The first paragraph's legacy align and the heading's legacy textAlign migrate through the existing reviewed adapters; the unmirrored has-text-align-center class re-renders into the one DROPPED row per the documented unmatched-legacy-signature policy."
+    ]
+  },
+  "reviewedRepairCount": 1
+}
