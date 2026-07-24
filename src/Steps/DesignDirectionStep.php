@@ -369,6 +369,20 @@ final class DesignDirectionStep implements Step
     }
 
     /**
+     * The committed direction's canvas ("full-bleed" or "framed"), or '' when
+     * no direction was persisted. A framed canvas keeps a mat of page
+     * background around every band, so an overlay header can never float over
+     * the hero image — SectionsStep gates the header archetype pool on this.
+     */
+    public static function canvasFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return '';
+        }
+        return strtolower(trim((string) ($project->readJson(self::FILE)['canvas'] ?? '')));
+    }
+
+    /**
      * The committed motion profile, gating the motion-sanity strip and the
      * finalize-theme kit wiring. Fails closed: no direction, or one that
      * predates/garbled the field, means `none` — a step run in isolation must

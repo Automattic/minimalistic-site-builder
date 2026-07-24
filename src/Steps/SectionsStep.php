@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -55,7 +56,7 @@ final class SectionsStep implements Step
     /** {{nav_rule}} for header.md when the site has inner pages to list. */
     private const NAV_RULE_MULTI = '- Navigation default: the `wp:navigation` should contain `<!-- wp:page-list /-->`'
         . ' so it auto-reflects the site\'s pages — do NOT hand-author `wp:navigation-link` entries unless a curated'
-        . ' menu is clearly wanted.';
+        . ' menu is clearly wanted (split-nav is the exception: it requires hand-authored links).';
 
     /** {{nav_rule}} when the site is the homepage alone — a page-list would render one self-referential "Home" link. */
     private const NAV_RULE_SINGLE = '- Navigation: this site is ONE page, so a page-list would render a single'
@@ -78,6 +79,26 @@ final class SectionsStep implements Step
     private SectionUnit $sectionUnit;
     private HeaderUnit $headerUnit;
     private FooterUnit $footerUnit;
+
+    /** Env var: force a header archetype (e.g. HEADER_ARCHETYPE=branded-lockup). */
+    public const ARCHETYPE_ENV = 'HEADER_ARCHETYPE';
+
+    /** Header archetype menu — must match the catalog in header.md. */
+    public const HEADER_ARCHETYPES = [
+        'standard-row',
+        'centered-masthead',
+        'minimal-overlay',
+        'oversized-wordmark',
+        'branded-lockup',
+        'double-decker',
+        'split-nav',
+    ];
+
+    /** Floats transparently over the hero, so it needs an image-led hero under it. */
+    private const OVERLAY_ARCHETYPE = 'minimal-overlay';
+
+    /** Splits the site's pages across two navs, so it needs pages to split. */
+    private const SPLIT_NAV_ARCHETYPE = 'split-nav';
 
     public function __construct(
         private Llm $llm,
@@ -214,6 +235,7 @@ final class SectionsStep implements Step
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
                     'nav_rule'   => self::navRuleFor(count($pages)),
+                    'archetype_assignment' => self::headerAssignment($frontSections, DesignDirectionStep::canvasFor($project), count($pages)),
                 ],
                 'file'  => 'parts/header.html',
             ],
@@ -376,13 +398,7 @@ final class SectionsStep implements Step
      */
     public static function heroBrief(array $sections): string
     {
-        $hero = null;
-        foreach ($sections as $s) {
-            if ((string) ($s['role'] ?? '') === 'hero') {
-                $hero = $s;
-                break;
-            }
-        }
+        $hero = self::heroSection($sections);
         if (!is_array($hero)) {
             return '(No hero section planned.)';
         }
@@ -398,5 +414,85 @@ final class SectionsStep implements Step
             }
         }
         return $lines === [] ? '(No hero section planned.)' : implode("\n", $lines);
+    }
+
+    /**
+     * The planned section with the structural hero ROLE — the semantic type is
+     * free-form and a `type: hero` elsewhere on the page must not win. No
+     * fallback: a plan without a hero role has no hero.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @return array<string,mixed>|null
+     */
+    private static function heroSection(array $sections): ?array
+    {
+        foreach ($sections as $s) {
+            if ((string) ($s['role'] ?? '') === SectionRole::HERO) {
+                return $s;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The header archetypes compatible with the planned hero, the direction's
+     * canvas, and the site's shape: minimal-overlay floats transparently over
+     * the first section, so it is only offered when the hero is an image-led
+     * cover it can read against — and never on a "framed" canvas, whose mat of
+     * page background would sit under the overlay instead of the image.
+     * split-nav splits the site's pages across two navs, so a one-page site
+     * (where the nav rule prescribes section anchors instead) drops it.
+     * Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @return string[]
+     */
+    public static function headerArchetypePool(array $sections, string $canvas = '', int $pageCount = 2): array
+    {
+        $hero = self::heroSection($sections);
+        $imageLed = is_array($hero) && (
+            (string) ($hero['layout_archetype'] ?? '') === 'full-bleed-cover'
+            || (string) ($hero['background'] ?? '') === 'image'
+        );
+        $excluded = [];
+        if (!$imageLed || $canvas === 'framed') {
+            $excluded[] = self::OVERLAY_ARCHETYPE;
+        }
+        if ($pageCount <= 1) {
+            $excluded[] = self::SPLIT_NAV_ARCHETYPE;
+        }
+        return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
+    }
+
+    /**
+     * The archetype assignment injected into header.md: the forced archetype
+     * (HEADER_ARCHETYPE env var) or two random picks from the compatible pool
+     * for the model to choose between. Randomizing the shortlist in code is
+     * what actually spreads header variety across builds — offered the full
+     * menu, the model gravitates to the same one or two archetypes every time.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     */
+    public static function headerAssignment(array $sections, string $canvas = '', int $pageCount = 2): string
+    {
+        $forced = Env::get(self::ARCHETYPE_ENV);
+        if ($forced !== null && $forced !== '') {
+            if (!in_array($forced, self::HEADER_ARCHETYPES, true)) {
+                throw new \RuntimeException(sprintf(
+                    'sections: %s=%s is not a header archetype (use one of: %s)',
+                    self::ARCHETYPE_ENV,
+                    $forced,
+                    implode(', ', self::HEADER_ARCHETYPES),
+                ));
+            }
+            return "ASSIGNED HEADER ARCHETYPE for this build: **{$forced}**. Build exactly this one.";
+        }
+
+        $pool = self::headerArchetypePool($sections, $canvas, $pageCount);
+        $first = array_splice($pool, random_int(0, count($pool) - 1), 1)[0];
+        $second = $pool[random_int(0, count($pool) - 1)];
+        return "ASSIGNED HEADER ARCHETYPES for this build: **{$first}** or **{$second}**. "
+            . 'Build EXACTLY ONE of these two — whichever serves the DESIGN DIRECTION and the planned hero better. '
+            . 'Every other catalog entry below is reference only and is OFF the table for this build.';
     }
 }

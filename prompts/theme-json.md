@@ -62,6 +62,7 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
     `xl` — Standard — `clamp(4rem, 6vw, 6rem)`
     `xxl` — Spacious — `clamp(5rem, 7vw, 7rem)`
   Use sm/md for component gaps and lg/xl/xxl for compact/standard/spacious section padding. Never replace these with fixed large values: the fluid bounds keep mobile padding proportional and cap a spacious desktop edge at 7rem.
+- styles.spacing.blockGap: a default vertical rhythm between sibling blocks, from the spacing scale (e.g. "var:preset|spacing|md") — a null blockGap makes WordPress skip ALL frontend block-gap CSS while the editor still previews it, so the two render different spacing.
 - styles.color.background = var(--wp--preset--color--base), styles.color.text = var(--wp--preset--color--contrast).
 - styles.typography.fontFamily = body font var, fontSize = var(--wp--preset--font-size--body), lineHeight 1.5–1.65.
 - styles.elements.heading.typography.lineHeight = a tight heading line-height (1.1–1.3).

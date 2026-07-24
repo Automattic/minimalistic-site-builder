@@ -54,6 +54,42 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json forces a non-null blockGap so frontend spacing matches the editor', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload()); // no blockGap anywhere
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new ThemeJsonStep($llm, $renderer))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(true, $theme['settings']['spacing']['blockGap']);
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['blockGap']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps a model-provided blockGap', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['spacing']['blockGap'] = true;
+    $payload['styles']['spacing']['blockGap'] = 'var:preset|spacing|lg';
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new ThemeJsonStep($llm, $renderer))->run($project);
+
+    assert_eq('var:preset|spacing|lg', $project->readJson('theme/theme.json')['styles']['spacing']['blockGap']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('disableCoreDefaultPresets forces the flags even when the model re-enables them', function () {
     // Missing settings sections are created.
     $theme = ThemeJsonStep::disableCoreDefaultPresets([]);

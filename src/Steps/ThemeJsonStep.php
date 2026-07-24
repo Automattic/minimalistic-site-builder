@@ -101,6 +101,19 @@ final class ThemeJsonStep implements ConcurrentStep
         $theme = self::normalizeSpacingSettings($theme);
         $theme = self::normalizeRootPadding($theme);
 
+        // A default vertical rhythm between sibling blocks: without it, per-block
+        // "blockGap" the parts set (e.g. the branded-lockup header's zero-gap
+        // title/tagline stack) renders editor-only and the frontend falls back
+        // to browser default margins. (settings.spacing.blockGap is already
+        // forced non-null by normalizeSpacingSettings above.)
+        if (!is_array($theme['styles'] ?? null)) {
+            $theme['styles'] = [];
+        }
+        if (!is_array($theme['styles']['spacing'] ?? null)) {
+            $theme['styles']['spacing'] = [];
+        }
+        $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
+
         self::assertColors($theme);
         self::assertFonts($theme);
 
