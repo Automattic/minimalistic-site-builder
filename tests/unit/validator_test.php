@@ -335,3 +335,35 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     assert_contains('bounded canonical profile', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('spacing warnings accept a coverless image section the build pass degraded', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3])
+    );
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'lugar-ubicacion', 'background' => 'image', 'vertical_density' => 'standard'],
+        ]],
+    ]]);
+
+    // The gate re-runs rewrite() with the plan still saying 'image'; the
+    // degradation must be re-derived identically so no note (= drift) appears.
+    $raw = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph --></div>'
+        . '<!-- /wp:group -->';
+    $degraded = SectionRhythm::rewrite([[
+        'slug' => 'lugar-ubicacion', 'markup' => $raw, 'density' => 'standard', 'background' => 'image',
+    ]]);
+    assert_contains('degraded to solid-band', implode(' ', $degraded['notes']));
+    $project->writeText('plugin/pages/home.html', $degraded['markups'][0]);
+    assert_eq([], ThemeValidator::spacingWarnings($project));
+
+    // A raw (never-rewritten) coverless image section is still drift, not an abort.
+    $project->writeText('plugin/pages/home.html', $raw);
+    $joined = implode(' ', ThemeValidator::spacingWarnings($project));
+    assert_contains('section root spacing drift', $joined);
+    assert_contains('degraded to solid-band', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

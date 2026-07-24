@@ -21,7 +21,11 @@ namespace Automattic\SiteBuild;
  * following section owns the gap. Tinted gradients and image assets are treated
  * as distinct even when their plan labels match. Image-section density is put
  * on the direct cover inside the required root group, so it remains inside the
- * image band instead of opening page-background gutters around it.
+ * image band instead of opening page-background gutters around it. An image
+ * section whose root does not carry exactly one editable direct cover is
+ * degraded to the solid-band treatment (with a note) rather than failing the
+ * build: rejecting a finished theme here would discard every LLM call already
+ * spent on one section model's markup mistake.
  */
 final class SectionRhythm
 {
@@ -121,7 +125,7 @@ final class SectionRhythm
             $sharedSeam = is_string($nextBackground)
                 && self::sharesContinuousSurface($entry['background'], $nextBackground);
 
-            [$markup, $changed] = self::rewriteOne(
+            [$markup, $changed, $degraded] = self::rewriteOne(
                 $entry['markup'],
                 $preset,
                 $sharedSeam,
@@ -132,9 +136,13 @@ final class SectionRhythm
 
             if ($changed) {
                 $bottom = $sharedSeam ? '0' : $preset;
-                $note = $entry['background'] === 'image'
-                    ? "{$entry['label']}: set root padding=0 and image-cover padding top={$preset}, bottom={$preset}; outer margins=0"
-                    : "{$entry['label']}: set outer padding top={$preset}, bottom={$bottom}; outer margins=0";
+                $note = match (true) {
+                    $degraded => "{$entry['label']}: image background lacks exactly one usable direct wp:cover;"
+                        . " degraded to solid-band outer padding top={$preset}, bottom={$bottom}; outer margins=0",
+                    $entry['background'] === 'image' =>
+                        "{$entry['label']}: set root padding=0 and image-cover padding top={$preset}, bottom={$preset}; outer margins=0",
+                    default => "{$entry['label']}: set outer padding top={$preset}, bottom={$bottom}; outer margins=0",
+                };
                 if ($sharedSeam) {
                     $owner = $next['label'] ?? 'the footer';
                     $note .= " (shared {$entry['background']} seam is owned by {$owner})";
@@ -163,7 +171,7 @@ final class SectionRhythm
             : 'section ' . ($i + 1);
     }
 
-    /** @return array{string,bool} rewritten markup and whether it changed */
+    /** @return array{string,bool,bool} rewritten markup, whether it changed, whether an image band was degraded to solid */
     private static function rewriteOne(
         string $markup,
         string $preset,
@@ -212,14 +220,36 @@ final class SectionRhythm
         }
 
         if ($background === 'image') {
-            $rewritten = self::rewriteImageCover($rewritten, $preset, $label);
+            $withCover = self::rewriteImageCover($rewritten, $preset, $label);
+            if ($withCover === null) {
+                // The plan promised an image band but the markup cannot honor
+                // it (zero or multiple direct covers, or a cover opener this
+                // pass cannot safely edit). Degrade to the solid-band
+                // treatment over the untouched markup instead of rejecting
+                // the theme: the root gets the same density edges an opaque
+                // background would. Seam semantics stay 'image' — adjacency
+                // was already decided against 'image', which never shares a
+                // continuous surface, so this section's $sharedSeam and its
+                // neighbours' bottom edges remain exactly as planned, and the
+                // fallback stays a pure function of markup+plan (the build
+                // pass and the validator drift gate can never disagree).
+                // 'base' below only selects solid padding placement.
+                [$fallback, $changed] = self::rewriteOne($originalMarkup, $preset, $sharedSeam, 'base', $label);
+                return [$fallback, $changed, true];
+            }
+            $rewritten = $withCover;
         }
 
-        return [$rewritten, $rewritten !== $originalMarkup];
+        return [$rewritten, $rewritten !== $originalMarkup, false];
     }
 
-    /** Put image-band breathing room inside its one direct cover, never outside it. */
-    private static function rewriteImageCover(string $markup, string $preset, string $label): string
+    /**
+     * Put image-band breathing room inside its one direct cover, never outside
+     * it. Returns null when the root does not contain exactly one direct
+     * wp:cover with an opener this pass can rewrite — the caller degrades the
+     * section instead of failing the build for one broken section model.
+     */
+    private static function rewriteImageCover(string $markup, string $preset, string $label): ?string
     {
         $doc = BlockMarkup::parse($markup);
         $roots = array_values(array_filter(
@@ -232,9 +262,7 @@ final class SectionRhythm
             static fn (int $i): bool => $doc->name($i) === 'cover',
         ));
         if (count($covers) !== 1) {
-            throw new \RuntimeException(
-                "section-rhythm: {$label} with image background must contain exactly one direct wp:cover"
-            );
+            return null;
         }
 
         $cover = $covers[0];
@@ -242,18 +270,18 @@ final class SectionRhythm
         $length = $doc->openingLength($cover);
         $rawOpening = substr($markup, $offset, $length);
         if (preg_match('/\A<!--\s+wp:cover(?<tail>(?:(?!-->).)*)-->\z/s', $rawOpening, $opening) !== 1) {
-            throw new \RuntimeException("section-rhythm: {$label} has a malformed direct wp:cover opener");
+            return null;
         }
         $tail = trim((string) ($opening['tail'] ?? ''));
         if ($tail === '') {
             $attrs = new \stdClass();
         } else {
             if (!str_starts_with($tail, '{') || !str_ends_with($tail, '}')) {
-                throw new \RuntimeException("section-rhythm: {$label} has a malformed direct wp:cover opener");
+                return null;
             }
             $attrs = json_decode($tail);
             if (!$attrs instanceof \stdClass || json_last_error() !== JSON_ERROR_NONE) {
-                throw new \RuntimeException("section-rhythm: {$label} direct wp:cover attributes are invalid JSON");
+                return null;
             }
         }
         $before = self::encodeAttrs($attrs);

@@ -118,6 +118,98 @@ test('section rhythm puts image density inside the direct cover, not outside the
     assert_contains('image-cover padding', implode("\n", $result['notes']));
 });
 
+test('section rhythm degrades a coverless image section to solid-band spacing', function () {
+    // A plan-declared image band whose model rendered no direct wp:cover
+    // (e.g. a plain wp:image inside wp:columns) must not fail the build:
+    // the root gets the same density edges an opaque background would.
+    $markup = sr_section(
+        ['align' => 'full', 'layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph -->'
+    );
+    $result = SectionRhythm::rewrite([[
+        'slug' => 'lugar-ubicacion', 'markup' => $markup, 'density' => 'standard', 'background' => 'image',
+    ]]);
+
+    $attrs = sr_root_attrs($result['markups'][0]);
+    assert_eq('var:preset|spacing|xl', $attrs['style']['spacing']['padding']['top']);
+    assert_eq('var:preset|spacing|xl', $attrs['style']['spacing']['padding']['bottom']);
+    assert_eq('0', $attrs['style']['spacing']['margin']['top']);
+    assert_eq('0', $attrs['style']['spacing']['margin']['bottom']);
+    assert_eq(
+        ["section 'lugar-ubicacion': image background lacks exactly one usable direct wp:cover;"
+            . ' degraded to solid-band outer padding top=xl, bottom=xl; outer margins=0'],
+        $result['notes']
+    );
+});
+
+test('section rhythm degrades multi-cover and uneditable-cover image sections', function () {
+    $cover = '<!-- wp:cover {"dimRatio":50,"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"}}}} -->'
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container"><p>Band</p></div></div><!-- /wp:cover -->';
+    $twoCovers = sr_section(['layout' => ['type' => 'constrained']], $cover . $cover);
+    $result = SectionRhythm::rewrite([[
+        'slug' => 'double', 'markup' => $twoCovers, 'density' => 'compact', 'background' => 'image',
+    ]]);
+    $attrs = sr_root_attrs($result['markups'][0]);
+    assert_eq('var:preset|spacing|lg', $attrs['style']['spacing']['padding']['top']);
+    assert_eq('var:preset|spacing|lg', $attrs['style']['spacing']['padding']['bottom']);
+    assert_eq(
+        '12rem',
+        sr_first_attrs($result['markups'][0], 'cover')['style']['spacing']['padding']['top'],
+        'ambiguous covers are left untouched — density moves to the root'
+    );
+    assert_contains('degraded to solid-band', implode("\n", $result['notes']));
+
+    $badCover = sr_section(
+        ['layout' => ['type' => 'constrained']],
+        '<!-- wp:cover {"dimRatio": nope} --><div class="wp-block-cover"><p>Band</p></div><!-- /wp:cover -->'
+    );
+    $result = SectionRhythm::rewrite([[
+        'slug' => 'bad-cover', 'markup' => $badCover, 'density' => 'compact', 'background' => 'image',
+    ]]);
+    assert_eq(
+        'var:preset|spacing|lg',
+        sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['top'],
+        'an uneditable cover opener degrades instead of aborting the build'
+    );
+    assert_contains('degraded to solid-band', implode("\n", $result['notes']));
+});
+
+test('section rhythm degraded image output is idempotent so the validator gate stays clean', function () {
+    $entry = static fn (string $markup): array => [
+        'slug' => 'lugar-ubicacion', 'markup' => $markup, 'density' => 'standard', 'background' => 'image',
+    ];
+    $coverless = sr_section(
+        ['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph -->'
+    );
+    // ThemeValidator::spacingWarnings re-runs rewrite() over the assembled
+    // page with the same plan entry ('image' is never rewritten in the plan),
+    // and any note becomes a drift warning — so a second pass over the
+    // degraded output must change nothing and report nothing.
+    $first = SectionRhythm::rewrite([$entry($coverless)]);
+    $second = SectionRhythm::rewrite([$entry($first['markups'][0])]);
+    assert_eq($first['markups'], $second['markups']);
+    assert_eq([], $second['notes']);
+});
+
+test('a degraded image section keeps image seam semantics for its neighbours', function () {
+    $coverless = sr_section(
+        ['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph -->'
+    );
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'before', 'markup' => sr_section(), 'density' => 'compact', 'background' => 'base'],
+        ['slug' => 'band', 'markup' => $coverless, 'density' => 'standard', 'background' => 'image'],
+        ['slug' => 'after', 'markup' => sr_section(), 'density' => 'compact', 'background' => 'base'],
+    ]);
+
+    $before = sr_root_attrs($result['markups'][0])['style']['spacing'];
+    $band = sr_root_attrs($result['markups'][1])['style']['spacing'];
+    assert_eq('var:preset|spacing|lg', $before['padding']['bottom'], 'image never shares a seam, degraded or not');
+    assert_eq('var:preset|spacing|xl', $band['padding']['top']);
+    assert_eq('var:preset|spacing|xl', $band['padding']['bottom'], 'the degraded band keeps its own bottom edge');
+});
+
 test('section rhythm collapses same-background seams onto the following top edge', function () {
     $result = SectionRhythm::rewrite([
         ['slug' => 'one', 'markup' => sr_section(), 'density' => 'compact', 'background' => 'base'],
@@ -248,16 +340,14 @@ test('section rhythm rejects non-group and malformed section roots', function ()
         '<!-- wp:group --><div class="wp-block-group">Never closed</div>',
         sr_section() . sr_section(),
         sr_section() . '<p>Content outside the group</p>',
-        sr_section([], '<!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph -->'),
     ];
 
     foreach ($badMarkups as $markup) {
-        $background = str_contains($markup, 'No cover') ? 'image' : 'base';
         assert_throws(static fn () => SectionRhythm::rewrite([[
             'slug' => 'broken',
             'markup' => $markup,
             'density' => 'compact',
-            'background' => $background,
+            'background' => 'base',
         ]]));
     }
 });
