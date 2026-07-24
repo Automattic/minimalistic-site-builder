@@ -61,7 +61,10 @@ site-build resume --slug a-bakery                     # resume; later steps pick
 
 - **`site-build` as a Composer `bin`** (a shebang'd `bin/site-build`, `"bin"` in `composer.json`) — not `php bin/build.php`. In-repo: `./bin/site-build`; installed: `site-build`. Users are developers who already have Composer/PHP.
 - **Subcommands** as the tool grows: `site-build create`, `site-build resume` (rather than more flags on one script).
-- **No `.phar`.** The Node block-fixer can't run from inside a phar (needs extraction) and PHP + Node + an API key are required regardless, so a phar isn't a clean single-binary. Deferred as possible future `brew`-style distribution only.
+- **No `.phar`.** The production pipeline and block fixer are pure PHP, but a
+  phar still is not the chosen distribution format. Playground previews and
+  screenshot tooling remain separate Node-based development conveniences;
+  packaging those helpers is deferred.
 
 ## What stays invariant (the core)
 

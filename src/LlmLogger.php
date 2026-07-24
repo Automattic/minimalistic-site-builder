@@ -63,23 +63,23 @@ final class LlmLogger
      *
      * @param string $label             call identity (step + variable), e.g. "section-hero"
      * @param array<string,mixed> $request  the Messages API request body that was sent
-     * @param array{text:string,input:int,output:int} $response
+     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,stop_reason?:?string} $response
      * @param float $seconds            wall-clock time the call took
      * @param ?string $error            failure message, or null for a successful call
      */
-    public static function log(string $label, array $request, array $response, float $seconds, ?string $error = null): void
+    public static function log(string $label, array $request, array $response, float $seconds, ?string $error = null): ?string
     {
         if (self::$disabled) {
-            return;
+            return null;
         }
         $dir = self::$dir;
         if ($dir === null) {
             // No active project context — nowhere to log (and never the repo root).
-            return;
+            return null;
         }
         try {
             if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
-                return;
+                return null;
             }
             // Prefix the filename with the call's position this run (01, 02, …)
             // so the directory listing reflects the order calls were made, and
@@ -87,9 +87,11 @@ final class LlmLogger
             $prefix = sprintf('%02d', ++self::$seq);
             $name = $prefix . '-' . $label . ($error !== null ? '-failed' : '');
             $path = self::uniquePath($dir, $name);
-            @file_put_contents($path, self::format($label, $request, $response, $seconds, $error));
+            $written = @file_put_contents($path, self::format($label, $request, $response, $seconds, $error));
+            return $written === false ? null : $path;
         } catch (\Throwable $e) {
             // Best-effort: a logging failure must never break a build.
+            return null;
         }
     }
 
@@ -127,7 +129,7 @@ final class LlmLogger
      * (or, for a failed call, the error). Pure — unit-testable.
      *
      * @param array<string,mixed> $request
-     * @param array{text:string,input:int,output:int} $response
+     * @param array{text:string,input:int,output:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,stop_reason?:?string} $response
      * @param ?string $error  failure message, or null for a successful call
      */
     public static function format(string $label, array $request, array $response, float $seconds, ?string $error = null): string
@@ -137,9 +139,34 @@ final class LlmLogger
 
         $input = (int) ($response['input'] ?? 0);
         $output = (int) ($response['output'] ?? 0);
+        $cacheRead = (int) ($response['cache_read_input_tokens'] ?? 0);
+        $cacheWrite = (int) ($response['cache_creation_input_tokens'] ?? 0);
         $model = (string) ($request['model'] ?? 'unknown');
 
-        $header = implode("\n", [
+        $tokens = sprintf(
+            '%s in + %s out = %s total',
+            number_format($input),
+            number_format($output),
+            number_format($input + $output)
+        );
+        if ($cacheRead !== 0 || $cacheWrite !== 0) {
+            $cacheParts = [];
+            if ($cacheRead !== 0) {
+                $cacheParts[] = number_format($cacheRead) . ' cache-read';
+            }
+            if ($cacheWrite !== 0) {
+                $cacheParts[] = number_format($cacheWrite) . ' cache-write';
+            }
+            $tokens = sprintf(
+                '%s in (%s) + %s out = %s total',
+                number_format($input),
+                implode(', ', $cacheParts),
+                number_format($output),
+                number_format($input + $output)
+            );
+        }
+
+        $headerLines = [
             $rule,
             'LLM REQUEST LOG',
             $rule,
@@ -148,8 +175,13 @@ final class LlmLogger
             'Status       : ' . ($error !== null ? 'FAILED' : 'OK'),
             'Logged at    : ' . date('Y-m-d H:i:s'),
             'Time         : ' . sprintf('%.2fs', $seconds),
-            'Tokens       : ' . sprintf('%d in + %d out = %d total', $input, $output, $input + $output),
-        ]);
+            'Tokens       : ' . $tokens,
+        ];
+        $stopReason = trim((string) ($response['stop_reason'] ?? ''));
+        if ($stopReason !== '') {
+            $headerLines[] = 'Stop reason  : ' . $stopReason;
+        }
+        $header = implode("\n", $headerLines);
 
         $body = self::renderRequest($request);
 
@@ -220,7 +252,9 @@ final class LlmLogger
     /**
      * Render a message/system `content` value as readable text. A plain string
      * comes through verbatim (real newlines intact); the content-block array
-     * form (text / tool_use / tool_result / image) is flattened block by block.
+     * form (text / tool_use / tool_result / image) has an explicit numbered,
+     * typed boundary for every block. Cache-marked blocks are labelled so a
+     * cached request remains distinguishable from its marker-stripped retry.
      * Pure.
      *
      * @param mixed $content
@@ -235,36 +269,43 @@ final class LlmLogger
         }
 
         $blocks = [];
-        foreach ($content as $block) {
+        foreach ($content as $index => $block) {
+            $type = is_array($block)
+                ? (string) ($block['type'] ?? 'unknown')
+                : (is_string($block) ? 'text' : get_debug_type($block));
+            $rendered = '';
             if (is_string($block)) {
-                $blocks[] = $block;
-                continue;
+                $rendered = $block;
+            } elseif (!is_array($block)) {
+                $rendered = (string) json_encode($block, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            } else {
+                switch ($type) {
+                    case 'text':
+                        $rendered = (string) ($block['text'] ?? '');
+                        break;
+                    case 'image':
+                        $src = $block['source'] ?? [];
+                        $kind = is_array($src) ? (string) ($src['media_type'] ?? $src['type'] ?? 'image') : 'image';
+                        $rendered = "[image: {$kind}]";
+                        break;
+                    case 'tool_use':
+                        $name = (string) ($block['name'] ?? '');
+                        $input = json_encode($block['input'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                        $rendered = "[tool_use: {$name}]\n" . ($input === false ? '' : $input);
+                        break;
+                    case 'tool_result':
+                        $rendered = "[tool_result]\n" . self::renderContent($block['content'] ?? '');
+                        break;
+                    default:
+                        $rendered = (string) json_encode($block, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                }
             }
-            if (!is_array($block)) {
-                $blocks[] = (string) json_encode($block, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                continue;
-            }
-            $type = (string) ($block['type'] ?? '');
-            switch ($type) {
-                case 'text':
-                    $blocks[] = (string) ($block['text'] ?? '');
-                    break;
-                case 'image':
-                    $src = $block['source'] ?? [];
-                    $kind = is_array($src) ? (string) ($src['media_type'] ?? $src['type'] ?? 'image') : 'image';
-                    $blocks[] = "[image: {$kind}]";
-                    break;
-                case 'tool_use':
-                    $name = (string) ($block['name'] ?? '');
-                    $input = json_encode($block['input'] ?? null, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                    $blocks[] = "[tool_use: {$name}]\n" . ($input === false ? '' : $input);
-                    break;
-                case 'tool_result':
-                    $blocks[] = "[tool_result]\n" . self::renderContent($block['content'] ?? '');
-                    break;
-                default:
-                    $blocks[] = (string) json_encode($block, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            }
+
+            $boundary = sprintf('--- CONTENT BLOCK %d [%s] ---', $index + 1, strtoupper($type));
+            $cacheMarker = is_array($block) && array_key_exists('cache_control', $block)
+                ? "\n[cached prefix]"
+                : '';
+            $blocks[] = $boundary . $cacheMarker . "\n" . $rendered;
         }
         return implode("\n", $blocks);
     }

@@ -71,7 +71,7 @@ final class FakeLlm implements Llm
      * given, keyed back as the input. Each request's meta (model/max_tokens/…)
      * is recorded as that call's opts so model-wiring assertions still work.
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
      * @return array<array-key,array<mixed>>
      */
     public function completeJsonBatch(array $requests): array
@@ -94,7 +94,7 @@ final class FakeLlm implements Llm
      * Pull one queued TEXT response per request, in order, keyed back as the
      * input. Records each call's meta as opts so model-wiring assertions work.
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int}> $requests
+     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
      * @return array<array-key,string>
      */
     public function completeBatch(array $requests): array

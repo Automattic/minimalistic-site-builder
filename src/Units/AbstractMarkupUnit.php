@@ -16,6 +16,10 @@ abstract class AbstractMarkupUnit implements MarkupUnit
         private ?float $temperature = null,
     ) {}
 
+    /**
+     * Execute one rendered request, forwarding all request metadata (including
+     * cached_prefixes) to the single-completion path.
+     */
     final public function generate(array $input): string
     {
         $request = $this->request($input);

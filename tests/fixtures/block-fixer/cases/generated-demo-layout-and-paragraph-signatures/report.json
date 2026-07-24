@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 6,
+    "M": 8,
+    "D": 2,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/align-items.html",
+      "status": "ok",
+      "dropped": []
+    },
+    {
+      "path": "parts/columns-element-link.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/group-element-link.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/layout-default.html",
+      "status": "ok",
+      "dropped": []
+    },
+    {
+      "path": "parts/legacy-border.html",
+      "status": "FIXED",
+      "dropped": [
+        {
+          "kind": "style",
+          "value": "border-bottom:1px solid var(--wp--preset--color--primary)",
+          "lost": 1,
+          "line": "DROPPED style `border-bottom:1px solid var(--wp--preset--color--primary)` — not mirrored in the block comment JSON attributes"
+        }
+      ]
+    },
+    {
+      "path": "parts/legacy-shadow.html",
+      "status": "FIXED",
+      "dropped": [
+        {
+          "kind": "style",
+          "value": "box-shadow:var(--wp--preset--shadow--soft-settle)",
+          "lost": 1,
+          "line": "DROPPED style `box-shadow:var(--wp--preset--shadow--soft-settle)` — not mirrored in the block comment JSON attributes"
+        }
+      ]
+    },
+    {
+      "path": "parts/paragraph-spacing.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/wide-size.html",
+      "status": "FIXED",
+      "dropped": []
+    }
+  ]
+}

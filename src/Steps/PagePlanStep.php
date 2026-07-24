@@ -9,6 +9,7 @@ use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\StepDeclaration;
 
 /**
@@ -19,7 +20,7 @@ use Automattic\SiteBuild\StepDeclaration;
  *
  * Input:  meta.json (user prompt) + siteSpec.json (with its `pages` tree).
  * Output: pages.json — { "pages": [ { slug, title, path, front, parent,
- *         menu_order, purpose, sections: [ { slug, title, type, purpose,
+ *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
  *         content_notes, layout_archetype, background, vertical_density,
  *         handoff } ] } ] }, a FLAT list in display order, parents before
  *         children.
@@ -114,6 +115,45 @@ final class PagePlanStep implements ConcurrentStep
         );
     }
 
+    /**
+     * Provider-neutral output contract for one page plan. Cross-section rules
+     * (non-empty plan, adjacency and grid caps) remain in normalize(), where
+     * they can report useful page-specific validation errors.
+     *
+     * @return array<string,mixed>
+     */
+    public static function jsonSchema(): array
+    {
+        $fields = [
+            'slug'             => ['type' => 'string'],
+            'title'            => ['type' => 'string'],
+            'type'             => ['type' => 'string'],
+            'purpose'          => ['type' => 'string'],
+            'content_notes'    => ['type' => 'string'],
+            'layout_archetype' => ['type' => 'string', 'enum' => self::ARCHETYPES],
+            'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
+            'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
+            'handoff'          => ['type' => 'string'],
+        ];
+
+        return [
+            'type'       => 'object',
+            'properties' => [
+                'sections' => [
+                    'type'  => 'array',
+                    'items' => [
+                        'type'                 => 'object',
+                        'properties'           => $fields,
+                        'required'             => array_keys($fields),
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required'             => ['sections'],
+            'additionalProperties' => false,
+        ];
+    }
+
     public function requests(Project $project): array
     {
         $meta = $project->readJson('meta.json');
@@ -128,13 +168,17 @@ final class PagePlanStep implements ConcurrentStep
         ];
 
         $requests = [];
+        $jsonSchema = ['name' => 'page_plan', 'schema' => self::jsonSchema()];
         foreach ($pages as $page) {
-            $requests[$page['slug']] = $this->withOptions(['prompt' => $this->renderer->render('page-plan.md', $shared + [
-                'page_title'    => (string) $page['title'],
-                'page_slug'     => (string) $page['slug'],
-                'page_purpose'  => (string) $page['purpose'],
-                'page_emphasis' => $page['front'] ? self::FRONT_EMPHASIS : self::INTERIOR_EMPHASIS,
-            ])]);
+            $requests[$page['slug']] = $this->withOptions([
+                'prompt' => $this->renderer->render('page-plan.md', $shared + [
+                    'page_title'    => (string) $page['title'],
+                    'page_slug'     => (string) $page['slug'],
+                    'page_purpose'  => (string) $page['purpose'],
+                    'page_emphasis' => $page['front'] ? self::FRONT_EMPHASIS : self::INTERIOR_EMPHASIS,
+                ]),
+                'json_schema' => $jsonSchema,
+            ]);
         }
         return $requests;
     }
@@ -205,7 +249,10 @@ final class PagePlanStep implements ConcurrentStep
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
 
-        return $this->llm->completeJson($prompt, $this->withOptions(['log_label' => $this->id() . "-{$pageSlug}-repair"]));
+        return $this->llm->completeJson($prompt, $this->withOptions([
+            'log_label'   => $this->id() . "-{$pageSlug}-repair",
+            'json_schema' => ['name' => 'page_plan', 'schema' => self::jsonSchema()],
+        ]));
     }
 
     public function run(Project $project): void
@@ -306,14 +353,14 @@ final class PagePlanStep implements ConcurrentStep
 
     /**
      * Validate one page's section list and force unique, file-safe slugs.
-     * Each section keeps its model-provided fields; missing optional fields
-     * default benignly so the sections + assemble steps can rely on the keys.
-     * The art-direction fields (layout_archetype, background,
-     * vertical_density, handoff) are strict: unknown values, a missing
-     * handoff, adjacent duplicate archetypes, too many card grids, or an
-     * interior page opening at homepage-cover scale are collected and thrown
-     * together in ONE message, so the single repair call sees every violation
-     * at once. Pure — unit-testable.
+     * The structural role is stamped deterministically from each section's
+     * position rather than trusted to model output. Art-direction fields
+     * (layout_archetype, background, vertical_density, handoff) are strict:
+     * unknown values, a missing handoff, adjacent duplicate archetypes, too
+     * many card grids, or an interior page opening at homepage-cover scale
+     * are collected and thrown together in ONE message, so the single repair
+     * call sees every violation at once. The semantic type is intentionally
+     * open-ended. Pure — unit-testable.
      *
      * @param mixed $raw
      * @param bool $front whether the page is the front page (interior pages
@@ -329,6 +376,7 @@ final class PagePlanStep implements ConcurrentStep
         $out = [];
         $seen = [];
         $errors = [];
+        $sectionCount = count(array_filter($raw, 'is_array'));
         foreach ($raw as $i => $section) {
             if (!is_array($section)) {
                 continue;
@@ -347,6 +395,10 @@ final class PagePlanStep implements ConcurrentStep
             }
             $seen[$slug] = true;
 
+            $type = trim((string) ($section['type'] ?? ''));
+            if ($type === '') {
+                $errors[] = "page-plan: section '{$slug}' is missing 'type' — provide a short semantic label";
+            }
             $archetype = trim((string) ($section['layout_archetype'] ?? ''));
             if (!in_array($archetype, self::ARCHETYPES, true)) {
                 $errors[] = "page-plan: section '{$slug}' has invalid layout_archetype '{$archetype}' — use one of: "
@@ -375,6 +427,7 @@ final class PagePlanStep implements ConcurrentStep
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
+                'role'             => SectionRole::forPosition(count($out), $sectionCount),
                 'type'             => $type,
                 'purpose'          => trim((string) ($section['purpose'] ?? '')),
                 'content_notes'    => trim((string) ($section['content_notes'] ?? '')),

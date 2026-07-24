@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\SectionRole;
+
 /**
  * Generate one page section from a self-contained input.
  *
@@ -10,8 +12,9 @@ namespace Automattic\SiteBuild\Units;
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
  * - page: slug/title/path of the page the section belongs to
- * - section: slug/title/type/purpose/content_notes plus the assigned
- *   layout_archetype/background/vertical_density/handoff
+ * - section: slug/title/role/type/purpose/content_notes plus the assigned
+ *   layout_archetype/background/vertical_density/handoff. Role is required
+ *   and must be one of hero/content/closing.
  * - neighbors: the preceding/following composition summary
  *
  * Static authoring rules come from the package's prompt templates; no Project
@@ -19,6 +22,10 @@ namespace Automattic\SiteBuild\Units;
  */
 final class SectionUnit extends AbstractMarkupUnit
 {
+    private const BUILD_LAYER_MARKER = '<!-- section-cache-layer:build -->';
+    private const PAGE_LAYER_MARKER = '<!-- section-cache-layer:page -->';
+    private const BRIEF_LAYER_MARKER = '<!-- section-cache-layer:brief -->';
+
     /** Prefix for a page section part's request key and filename. */
     public const KEY_PREFIX = 'page-';
 
@@ -52,7 +59,7 @@ final class SectionUnit extends AbstractMarkupUnit
      *   site_pages:string,
      *   page:array{slug:string,title?:string,path?:string},
      *   section:array{
-     *     slug:string,title?:string,type?:string,purpose?:string,content_notes?:string,
+     *     slug:string,role:string,title?:string,type?:string,purpose?:string,content_notes?:string,
      *     layout_archetype:string,background:string,vertical_density:string,handoff:string
      *   },
      *   neighbors:string
@@ -63,6 +70,7 @@ final class SectionUnit extends AbstractMarkupUnit
         $section = $this->section($input);
         $slug = trim($this->sectionString($section, 'slug'));
         $pageSlug = trim($this->pageString($input, 'slug'));
+        $role = $this->sectionRole($section);
         $compositionVars = [];
         foreach (['layout_archetype', 'background', 'vertical_density', 'handoff'] as $field) {
             $compositionVars[$field] = $this->sectionString($section, $field);
@@ -79,18 +87,24 @@ final class SectionUnit extends AbstractMarkupUnit
             'neighbors'        => $this->inputString($input, 'neighbors'),
         ]);
 
-        return $this->renderedRequest('section.md', $this->commonVars($input) + [
+        $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
             'site_pages'        => $this->inputString($input, 'site_pages'),
             'page_title'        => $this->pageString($input, 'title'),
             'page_path'         => $this->pageString($input, 'path', '/'),
             'section_title'     => $this->sectionString($section, 'title'),
             'section_slug'      => $slug,
+            'section_role'      => $role,
             'section_type'      => $this->sectionString($section, 'type', 'content'),
             'section_purpose'   => $this->sectionString($section, 'purpose'),
             'content_notes'     => $this->sectionString($section, 'content_notes'),
             'composition'       => $composition,
             'image_instructions' => $this->renderer->render('image-generation.md', []),
         ]);
+
+        [$buildLayer, $pageLayer, $brief] = self::cacheLayers($request['prompt']);
+        $request['cached_prefixes'] = [$buildLayer, $pageLayer];
+        $request['prompt'] = $brief;
+        return $request;
     }
 
     public function finish(string $raw, array $input): string
@@ -132,5 +146,67 @@ final class SectionUnit extends AbstractMarkupUnit
             throw new \InvalidArgumentException("unit input 'section.{$key}' must be a string");
         }
         return $section[$key];
+    }
+
+    /**
+     * Split the rendered section template at its frozen cache-layer markers.
+     * Cached build/page prefixes are returned with trailing newlines removed
+     * and exactly "\n\n" appended; the varying brief is newline-trimmed and
+     * unsuffixed. The explicit prefix separators are part of the wire contract,
+     * so adjacent Anthropic blocks and OpenAI-compatible text assemble equally.
+     *
+     * @return array{0:string,1:string,2:string} build layer, page layer, brief
+     */
+    private static function cacheLayers(string $rendered): array
+    {
+        foreach ([self::BUILD_LAYER_MARKER, self::PAGE_LAYER_MARKER, self::BRIEF_LAYER_MARKER] as $marker) {
+            if (substr_count($rendered, $marker) !== 1) {
+                throw new \RuntimeException("section prompt must contain exactly one {$marker} marker");
+            }
+        }
+        $buildPos = strpos($rendered, self::BUILD_LAYER_MARKER);
+        $pagePos = strpos($rendered, self::PAGE_LAYER_MARKER);
+        $briefPos = strpos($rendered, self::BRIEF_LAYER_MARKER);
+        if (!is_int($buildPos) || !is_int($pagePos) || !is_int($briefPos)
+            || !($buildPos < $pagePos && $pagePos < $briefPos)) {
+            throw new \RuntimeException('section prompt cache layer markers are out of order');
+        }
+
+        [$beforeBuild, $afterBuild] = explode(self::BUILD_LAYER_MARKER, $rendered, 2);
+        [$buildLayer, $afterPage] = explode(self::PAGE_LAYER_MARKER, $afterBuild, 2);
+        [$pageLayer, $brief] = explode(self::BRIEF_LAYER_MARKER, $afterPage, 2);
+
+        if (trim($beforeBuild, "\r\n") !== '') {
+            throw new \RuntimeException('section prompt has content before the build cache layer');
+        }
+
+        // Remove only newlines belonging to the marker separators. Preserve
+        // every other byte of each rendered layer, including indentation.
+        $buildLayer = rtrim(ltrim($buildLayer, "\r\n"), "\r\n");
+        $pageLayer = rtrim(ltrim($pageLayer, "\r\n"), "\r\n");
+        $brief = trim($brief, "\r\n");
+        if (in_array('', [$buildLayer, $pageLayer, $brief], true)) {
+            throw new \RuntimeException('section prompt cache layers must not be empty');
+        }
+        return [$buildLayer . "\n\n", $pageLayer . "\n\n", $brief];
+    }
+
+    /** Require a supported structural role for this section. */
+    private function sectionRole(array $section): string
+    {
+        if (!array_key_exists('role', $section)) {
+            throw new \InvalidArgumentException("unit input 'section.role' is required");
+        }
+        if (!is_string($section['role'])) {
+            throw new \InvalidArgumentException("unit input 'section.role' must be a string");
+        }
+
+        $role = trim($section['role']);
+        if (!in_array($role, SectionRole::ALL, true)) {
+            throw new \InvalidArgumentException(
+                "unit input 'section.role' must be one of: " . implode(', ', SectionRole::ALL)
+            );
+        }
+        return $role;
     }
 }

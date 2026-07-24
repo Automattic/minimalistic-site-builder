@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "name": "pre-paragraph-repair-noop",
+  "milestone": "M1",
+  "capabilities": [
+    "block:core/paragraph",
+    "oracle:authoritative-changed-flag",
+    "repair-gate:pre-paragraph-noop",
+    "report:ok"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "nested-paragraph"
+    ],
+    "files": [
+      {
+        "path": "parts/nested-paragraph.html",
+        "passes": 1,
+        "secondInvocationPasses": 1,
+        "inputSha256": "6bf3f703665bc25f802116a38d4d92e13247228379aa294980b981001474e5c5",
+        "outputSha256": "6bf3f703665bc25f802116a38d4d92e13247228379aa294980b981001474e5c5",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [
+              "core/paragraph: Nested paragraph tags detected and removed"
+            ],
+            "compatibilityRepairs": [
+              {
+                "code": "nested-paragraph",
+                "blockName": "core/paragraph",
+                "blockPath": "document",
+                "stage": "pre-parse",
+                "count": 1
+              }
+            ],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

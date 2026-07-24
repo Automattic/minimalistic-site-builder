@@ -1,0 +1,552 @@
+{
+  "schemaVersion": 1,
+  "name": "observed-deprecation-adapters",
+  "milestone": "M1",
+  "capabilities": [
+    "block:core/site-title",
+    "block:core/navigation",
+    "block:core/page-list",
+    "deprecation:site-title-align",
+    "deprecation:site-title-font-family",
+    "deprecation:navigation-font-family",
+    "report:fixed"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "deprecation:core/navigation:3",
+      "deprecation:core/site-title:0",
+      "deprecation:core/site-title:1"
+    ],
+    "files": [
+      {
+        "path": "parts/deprecations.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "96d512362ab058f4b06a5e4b28cb6e70b4b70761debe7dc29999fa04052c2660",
+        "outputSha256": "997550c8cfaa0de6a284b36369c43e9bd3f962ced170b1ad087fd55c83d241ce",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/page-list",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": 3,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "level": 1,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "isLink": true,
+                    "linkTarget": "_self"
+                  },
+                  "afterAttributes": {
+                    "level": 1,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "isLink": true,
+                    "linkTarget": "_self",
+                    "borderColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "anchor": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "level": 1,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "isLink": true,
+                    "linkTarget": "_self",
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "level": 1,
+                    "textAlign": {
+                      "__type": "undefined"
+                    },
+                    "isLink": true,
+                    "linkTarget": "_self",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": 3,
+                  "beforeAttributes": {
+                    "showSubmenuIcon": true,
+                    "submenuVisibility": "hover",
+                    "overlayMenu": "mobile",
+                    "icon": "handle",
+                    "hasIcon": true,
+                    "maxNestingLevel": 5,
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "customTextColor": {
+                      "__type": "undefined"
+                    },
+                    "rgbTextColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "rgbBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "showSubmenuIcon": true,
+                    "overlayMenu": "never",
+                    "__unstableLocation": {
+                      "__type": "undefined"
+                    },
+                    "overlayBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customOverlayBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "overlayTextColor": {
+                      "__type": "undefined"
+                    },
+                    "customOverlayTextColor": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "anchor": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    },
+                    "submenuVisibility": "hover",
+                    "layout": {
+                      "type": "flex",
+                      "orientation": "horizontal"
+                    },
+                    "ref": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [
+                    {
+                      "name": "core/page-list",
+                      "attributes": {
+                        "parentPageID": 0,
+                        "isNested": false
+                      },
+                      "innerBlocks": []
+                    }
+                  ],
+                  "afterInnerBlocks": [
+                    {
+                      "name": "core/page-list",
+                      "attributes": {
+                        "parentPageID": 0,
+                        "isNested": false
+                      },
+                      "innerBlocks": []
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/page-list",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": 3,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": [
+                {
+                  "blockName": "core/site-title",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "level": 1,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "isLink": true,
+                    "linkTarget": "_self",
+                    "fontFamily": "heading",
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "level": 1,
+                    "textAlign": {
+                      "__type": "undefined"
+                    },
+                    "isLink": true,
+                    "linkTarget": "_self",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/navigation",
+                  "deprecationIndex": 3,
+                  "beforeAttributes": {
+                    "showSubmenuIcon": true,
+                    "submenuVisibility": "hover",
+                    "overlayMenu": "never",
+                    "icon": "handle",
+                    "hasIcon": true,
+                    "maxNestingLevel": 5,
+                    "fontFamily": "heading",
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    },
+                    "layout": {
+                      "type": "flex",
+                      "orientation": "horizontal"
+                    }
+                  },
+                  "afterAttributes": {
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "customTextColor": {
+                      "__type": "undefined"
+                    },
+                    "rgbTextColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "rgbBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "showSubmenuIcon": true,
+                    "overlayMenu": "never",
+                    "__unstableLocation": {
+                      "__type": "undefined"
+                    },
+                    "overlayBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "customOverlayBackgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "overlayTextColor": {
+                      "__type": "undefined"
+                    },
+                    "customOverlayTextColor": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "anchor": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    },
+                    "submenuVisibility": "hover",
+                    "layout": {
+                      "type": "flex",
+                      "orientation": "horizontal"
+                    },
+                    "ref": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [
+                    {
+                      "name": "core/page-list",
+                      "attributes": {
+                        "parentPageID": 0,
+                        "isNested": false
+                      },
+                      "innerBlocks": []
+                    }
+                  ],
+                  "afterInnerBlocks": [
+                    {
+                      "name": "core/page-list",
+                      "attributes": {
+                        "parentPageID": 0,
+                        "isNested": false
+                      },
+                      "innerBlocks": []
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

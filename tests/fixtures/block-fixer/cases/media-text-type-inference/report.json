@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 3,
+    "M": 3,
+    "D": 0,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/media-image.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/media-video.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/media.html",
+      "status": "FIXED",
+      "dropped": []
+    }
+  ]
+}

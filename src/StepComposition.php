@@ -60,14 +60,15 @@ final class StepComposition
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
     ): self {
-        $blockFixer ??= NodeBlockFixer::default();
+        $blockFixer ??= BlockFixers::default();
         $models = array_merge(StepDefaults::models(), $models);
         $temps = array_merge(StepDefaults::temperatures(), $temperatures);
 
         return new self([
             new ScaffoldThemeStep(),
             // The companion content plugin is pure static code — scaffold it up
-            // front next to the theme; apply-identity fills its header later.
+            // front next to the theme; apply-identity fills its header and
+            // per-site symbol prefixes later.
             new ScaffoldPluginStep(),
             // Cheap, fast first pass on a small model: expand short/vague prompts and
             // normalize the brief before any expensive step reads it. Rewrites the

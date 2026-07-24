@@ -6,7 +6,7 @@ namespace Automattic\SiteBuild;
 /**
  * Repairs WordPress block-validation issues in generated markup (attribute/order
  * mismatches that trigger "unexpected or invalid content"). Consumers may supply
- * their own implementation; the package ships NodeBlockFixer as the default.
+ * their own implementation; BlockFixers selects the bundled implementation.
  */
 interface BlockFixer
 {

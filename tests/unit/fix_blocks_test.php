@@ -2,31 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
-use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\ThemeValidator;
-
-/**
- * Unit tests for NodeBlockFixer::summaryLine and FixBlocksStep → BlockFixer.
- */
-
-test('summaryLine returns the [fix-templates] summary, ignoring the verbose report', function () {
-    $stdout = "  FIXED  parts/header.html\n"
-        . "         - core/button: Expected attribute `class` ...\n"
-        . "  ok     parts/footer.html\n"
-        . "\n[fix-templates] 7/11 file(s) re-serialized, 14 issue(s) fixed across 1 theme(s).";
-
-    assert_eq(
-        '[fix-templates] 7/11 file(s) re-serialized, 14 issue(s) fixed across 1 theme(s).',
-        NodeBlockFixer::summaryLine($stdout)
-    );
-});
-
-test('summaryLine falls back when no summary line is present', function () {
-    assert_eq('block-fixer: no files changed', NodeBlockFixer::summaryLine("   \n  noise\n"));
-});
 
 test('FixBlocksStep delegates repair to the injected BlockFixer', function () {
     $fake = new class implements BlockFixer {
@@ -100,7 +80,7 @@ test('the rhythm gate ignores dropped declarations whose value was never valid C
     ], FixBlocksStep::droppedVerticalRhythmStyles($report));
 });
 
-test('FixBlocksStep logs and fails when block repair drops vertical rhythm CSS', function () {
+test('FixBlocksStep warns but does not fail when block repair drops vertical rhythm CSS', function () {
     $fake = new class implements BlockFixer {
         public function fix(string $themeDir): string
         {
@@ -125,11 +105,12 @@ test('FixBlocksStep logs and fails when block repair drops vertical rhythm CSS',
             $thrown = $e;
         }
 
-        assert_true($thrown instanceof RuntimeException, 'vertical rhythm loss must fail the step');
-        assert_contains('padding-top:8rem', $thrown->getMessage());
+        // A cosmetic spacing regression in one theme must not cost the user the
+        // whole build — the loss is flagged, the build continues.
+        assert_eq(null, $thrown, 'vertical rhythm loss is a warning, not a build failure');
         $log = $project->readText('logs/fix-blocks.log');
         assert_contains('DROPPED style `padding-top:8rem`', $log);
-        assert_contains('[rhythm] build rejected', $log, 'failure reason is logged before the exception');
+        assert_contains('[rhythm] WARNING', $log, 'the loss is recorded as a prominent warning');
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
@@ -158,7 +139,7 @@ test('FixBlocksStep does not fail for unrelated dropped image styles', function 
         (new FixBlocksStep($fake))->run($project);
         $log = $project->readText('logs/fix-blocks.log');
         assert_contains('DROPPED style `height:200px`', $log);
-        assert_true(!str_contains($log, '[rhythm] build rejected'), 'unrelated loss stays a warning');
+        assert_true(!str_contains($log, '[rhythm]'), 'unrelated loss does not trigger the rhythm warning');
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
@@ -226,16 +207,61 @@ test('block fixer keeps the card-media class hook the card recipe relies on', fu
 HTML;
     file_put_contents($theme . '/parts/cards.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
 
     $fixed = (string) file_get_contents($theme . '/parts/cards.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('card-media', $fixed);
     assert_contains('0 style/class value(s) dropped', $stdout);
+});
+
+test('FixBlocksStep preserves rhythm from attrs missing only their final root closer', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['layout' => ['contentSize' => '860px']],
+    ]);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:heading {"textAlign":"center","level":2,"fontFamily":"heading","fontSize":"section-title","style":{"typography":{"fontWeight":"400"},"spacing":{"margin":{"top":"var:preset|spacing|sm"}}} -->'
+        . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family has-section-title-font-size" style="margin-top:var(--wp--preset--spacing--sm);font-weight:400">Title</h2>'
+        . '<!-- /wp:heading -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+        $fixed = $project->readText('theme/parts/section.html');
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('margin-top:var(--wp--preset--spacing--sm)', $fixed);
+        assert_contains('font-weight:400', $fixed);
+        assert_true(!str_contains($log, 'DROPPED style `margin-top'), $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep canonicalizes matching malformed rendered preset variables before drop detection', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_blocks_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:columns {"style":{"spacing":{"margin":{"top":"var:preset|spacing|lg"}}}} -->'
+        . '<div class="wp-block-columns" style="margin-top:var(--wp--spacing--lg)"></div>'
+        . '<!-- /wp:columns -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+        $fixed = $project->readText('theme/parts/section.html');
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('margin-top:var(--wp--preset--spacing--lg)', $fixed);
+        assert_true(!str_contains($log, 'DROPPED style `margin-top'), $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('block fixer reports inline styles it drops during re-serialization', function () {
@@ -252,13 +278,10 @@ test('block fixer reports inline styles it drops during re-serialization', funct
 HTML;
     file_put_contents($theme . '/parts/cards.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('DROPPED style `height:200px`', $stdout);
     assert_contains('DROPPED style `object-fit:cover`', $stdout);
     assert_contains('DROPPED style `width:100%`', $stdout);
@@ -278,12 +301,9 @@ test('block fixer does not report semantic styles dropped for colon whitespace n
 HTML;
     file_put_contents($theme . '/parts/section.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('0 style/class value(s) dropped', $stdout);
     assert_true(!str_contains($stdout, 'DROPPED style `padding-top'), $stdout);
 });
@@ -300,12 +320,9 @@ test('block fixer reports vertical styles dropped from single-quoted HTML attrib
 HTML;
     file_put_contents($theme . '/parts/section.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_contains('DROPPED style `padding-top:8rem`', $stdout);
 });
 
@@ -327,13 +344,10 @@ test('block fixer drops nothing after the rhythm pass replaces mirrored root spa
     ]]);
     file_put_contents($theme . '/parts/section-story.html', $result['markups'][0]);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
-    $stdout = implode("\n", $out);
+    $stdout = (new PhpBlockFixer())->fix($theme);
     $fixed = (string) file_get_contents($theme . '/parts/section-story.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, $stdout);
     assert_true(!str_contains($stdout, 'DROPPED style'), $stdout);
     assert_eq([], FixBlocksStep::droppedVerticalRhythmStyles($stdout), 'the rhythm gate must not fire');
     assert_contains('padding-right:2rem', $fixed, 'Gutenberg restores promoted side padding');
@@ -361,13 +375,11 @@ test('block fixer preserves media-text images when mediaType is missing', functi
 HTML;
     file_put_contents($theme . '/parts/hero.html', $part);
 
-    $cmd = 'node ' . escapeshellarg(repo_path('bin/block-fixer/fix-templates.js')) . ' ' . escapeshellarg($theme) . ' 2>&1';
-    exec($cmd, $out, $exit);
+    (new PhpBlockFixer())->fix($theme);
 
     $fixed = (string) file_get_contents($theme . '/parts/hero.html');
     exec('rm -rf ' . escapeshellarg($tmp));
 
-    assert_eq(0, $exit, implode("\n", $out));
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
 });

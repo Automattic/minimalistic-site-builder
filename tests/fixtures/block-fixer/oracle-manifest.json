@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "fingerprint": {
+    "node": {
+      "version": "v22.19.0",
+      "platform": "linux",
+      "architecture": "x64",
+      "v8": "12.4.254.21-node.29",
+      "icu": "77.1"
+    },
+    "container": {
+      "image": "docker.io/library/node:22.19.0-bookworm-slim",
+      "indexDigest": "sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90",
+      "linuxAmd64Digest": "sha256:cff78eb5aa1cf27dc2b6aeea9d31366415a43e9a9ea0ddec00d780b2b66fad0f",
+      "sourceRevision": "8a6ee0d86da85db74f5bcf99c9dc6ef87203592f"
+    },
+    "packageLockSha256": "eb1b8c40981564cf9f1f01e0d4a5d910f20b83c8c73ee338d2b592df8d64150c",
+    "packages": {
+      "@wordpress/blocks": "15.15.0",
+      "@wordpress/block-library": "9.42.0",
+      "@wordpress/block-editor": "15.15.0",
+      "@wordpress/block-serialization-default-parser": "5.49.0",
+      "@wordpress/style-engine": "2.49.0",
+      "@wordpress/rich-text": "7.49.0",
+      "@wordpress/element": "6.46.0",
+      "react": "18.3.1",
+      "react-dom": "18.3.1",
+      "jsdom": "29.0.1"
+    },
+    "implementationSources": {
+      "bin/block-fixer/fix-templates.js": "6fe510e2f869d89a29f263734e9aff0f9a82d2767ecc7a93413d18bc03f943a7",
+      "bin/block-fixer/oracle.js": "34b863c7f6300e2190ba318601136d5f676b24ae3d9faeb1cbcd37b76d5508b4",
+      "bin/block-fixer/lib/blockFixer.js": "959145cbd9ee7ef90c4436a6e29f16180c5d3cc5bdfdffa06ee5a89523f19f42",
+      "bin/block-fixer/lib/paragraphFixer.js": "e11812214c0dbbf7643005462af1c7469268af330b1d854dabc532fe44cf6ed3",
+      "bin/block-fixer/lib/domEnvironment.js": "e4b799188c0afddd1fd99d4458e21a83e6cd84e4b16792998e006b556efc7fcd",
+      "bin/block-fixer/lib/droppedContentDetector.js": "e814e907fa16ec54c06f3a52a73423add68c3cc3af7bebdaabd4bd71aade3cbc",
+      "bin/block-fixer/lib/fixedPoint.js": "fd0d96de99bd8d32de189c2457ba37417436d98028b905955832f0c9939018e7",
+      "bin/block-fixer/lib/oracleFingerprint.js": "65f8d5ebfa003ef74ad5b3d5cb15a2f0a78b725615cdd7a4cc028bac6607d2c2"
+    },
+    "instrumentation": {
+      "version": "1.0.0",
+      "sourceSha256": "128bca987aa9afecd499418d43abec294002ea7a18e595e8ea789dea093db52f",
+      "captures": [
+        "validation-result",
+        "built-in-custom-class-recovery",
+        "built-in-anchor-recovery",
+        "built-in-aria-label-recovery",
+        "deprecation-index-and-before-after"
+      ]
+    }
+  },
+  "registry": {
+    "generatorVersion": "1.0.0",
+    "generatorSourceSha256": "f7618fd0807aab8770ffab44c5fc2405c2ef6caa37721e016c570957862847ee",
+    "runtimeJsonSha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716",
+    "generatedPhpSha256": "ed3710cf608f7575ba138ef1e825bf093f6f535f453dd9ba936a291382d3a3a6",
+    "registeredSnapshotSha256": "8aff8e7704a773d322624ffe216de635863f7ad93783308aa135d894410e4dc0",
+    "hookTraceSha256": "718a6d2f635b3eb512a996fe3005e2312cbbadddd5f411fb847469b9c0bae4d4",
+    "counts": {
+      "registered": 106,
+      "supported": 30,
+      "observed": 31,
+      "observedRegistered": 30,
+      "observedUnregistered": 1
+    }
+  },
+  "fixtures": {
+    "generatorVersion": "1.0.0",
+    "generatorSourceSha256": "9be3621a29b69d1771419c4972ecf99803f21ac31652e654751d7f5009027daa",
+    "definitionsSha256": "1761c7a60660ff89875108fc5313837e2a9c796b146eea83a63cc2e640c8344b"
+  },
+  "amendments": [
+    {
+      "commit": "1eacd4a",
+      "summary": "Fix generated block compatibility edge cases (post-oracle, hand-reviewed)."
+    },
+    {
+      "commit": "a269765",
+      "summary": "Handle generated button href aliases (post-oracle, hand-reviewed)."
+    },
+    {
+      "commit": "4210065",
+      "summary": "Cover additional generated block signatures (post-oracle, hand-reviewed)."
+    },
+    {
+      "commit": "b580c20",
+      "summary": "Handle custom-site block signatures; adds core/details as a STATIC_RENDERER certified by the abcf523 saveProbes plus @wordpress/block-library@9.42.0 details/save.js (see cases/details-static-renderer)."
+    }
+  ],
+  "amendmentPolicy": "registry.generatedPhpSha256 and registry.runtimeJsonSha256 are re-frozen hashes of the committed artifacts, enforced by tests/unit/oracle_manifest_consistency_test.php. Any post-oracle edit to those artifacts must be listed here with its certification evidence and must ship an end-to-end golden case; see docs/block-fixer-oracle.md for regeneration."
+}

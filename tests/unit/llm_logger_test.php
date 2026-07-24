@@ -47,7 +47,12 @@ test('format renders summary header, request, and response', function () {
         'model'    => 'claude-opus-4-8',
         'messages' => [['role' => 'user', 'content' => 'Build a hero section']],
     ];
-    $response = ['text' => '<!-- wp:group --><!-- /wp:group -->', 'input' => 120, 'output' => 340];
+    $response = [
+        'text' => '<!-- wp:group --><!-- /wp:group -->',
+        'input' => 120,
+        'output' => 340,
+        'stop_reason' => 'end_turn',
+    ];
 
     $out = LlmLogger::format('section-hero', $request, $response, 12.5);
 
@@ -55,10 +60,60 @@ test('format renders summary header, request, and response', function () {
     assert_contains('Model        : claude-opus-4-8', $out);
     assert_contains('Time         : 12.50s', $out);
     assert_contains('Tokens       : 120 in + 340 out = 460 total', $out);
+    assert_contains('Stop reason  : end_turn', $out);
     assert_contains('REQUEST', $out);
     assert_contains('Build a hero section', $out, 'full request body is included');
     assert_contains('RESPONSE', $out);
     assert_contains('<!-- wp:group -->', $out, 'full response text is included');
+});
+
+test('format shows cache-read tokens with thousands separators', function () {
+    $response = [
+        'text' => 'ok',
+        'input' => 19339,
+        'output' => 16000,
+        'cache_read_input_tokens' => 18102,
+        'cache_creation_input_tokens' => 0,
+    ];
+
+    $out = LlmLogger::format('section-hero', ['model' => 'm'], $response, 1.0);
+
+    assert_contains('Tokens       : 19,339 in (18,102 cache-read) + 16,000 out = 35,339 total', $out);
+});
+
+test('format shows cache-write tokens and orders both cache components deterministically', function () {
+    $writeOnly = LlmLogger::format('section-hero', ['model' => 'm'], [
+        'text' => 'ok',
+        'input' => 2345,
+        'output' => 6789,
+        'cache_creation_input_tokens' => 1234,
+    ], 1.0);
+    assert_contains('Tokens       : 2,345 in (1,234 cache-write) + 6,789 out = 9,134 total', $writeOnly);
+
+    $both = LlmLogger::format('section-hero', ['model' => 'm'], [
+        'text' => 'ok',
+        'input' => 25000,
+        'output' => 5000,
+        'cache_read_input_tokens' => 18000,
+        'cache_creation_input_tokens' => 2048,
+    ], 1.0);
+    assert_contains('Tokens       : 25,000 in (18,000 cache-read, 2,048 cache-write) + 5,000 out = 30,000 total', $both);
+});
+
+test('format uses thousands separators when cache tokens are explicitly zero', function () {
+    $response = [
+        'text' => 'ok',
+        'input' => 19339,
+        'output' => 16000,
+        'cache_read_input_tokens' => 0,
+        'cache_creation_input_tokens' => 0,
+    ];
+
+    $out = LlmLogger::format('section-hero', ['model' => 'm'], $response, 1.0);
+
+    assert_contains('Tokens       : 19,339 in + 16,000 out = 35,339 total', $out);
+    assert_true(strpos($out, 'cache-read') === false, 'zero cache-read tokens are omitted');
+    assert_true(strpos($out, 'cache-write') === false, 'zero cache-write tokens are omitted');
 });
 
 test('format renders message content as readable multi-line text, not escaped JSON', function () {
@@ -75,18 +130,33 @@ test('format renders message content as readable multi-line text, not escaped JS
     assert_contains('"model": "claude-opus-4-8"', $out, 'scalar params still shown as JSON');
 });
 
-test('renderContent flattens content blocks (text, tool_use, image)', function () {
+test('renderContent marks every content block boundary and cached prefixes', function () {
     $content = [
-        ['type' => 'text', 'text' => 'hello'],
+        ['type' => 'text', 'text' => 'hello', 'cache_control' => ['type' => 'ephemeral']],
         ['type' => 'tool_use', 'name' => 'get_theme', 'input' => ['slug' => 'x']],
         ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => 'image/png']],
     ];
     $out = LlmLogger::renderContent($content);
 
+    assert_contains("--- CONTENT BLOCK 1 [TEXT] ---\n[cached prefix]\nhello", $out);
+    assert_contains('--- CONTENT BLOCK 2 [TOOL_USE] ---', $out);
+    assert_contains('--- CONTENT BLOCK 3 [IMAGE] ---', $out);
     assert_contains('hello', $out);
     assert_contains('[tool_use: get_theme]', $out);
     assert_contains('"slug": "x"', $out);
     assert_contains('[image: image/png]', $out);
+});
+
+test('renderContent keeps boundaries after cache markers are stripped and leaves strings plain', function () {
+    $stripped = LlmLogger::renderContent([
+        ['type' => 'text', 'text' => 'shared'],
+        ['type' => 'text', 'text' => 'varying'],
+    ]);
+
+    assert_contains("--- CONTENT BLOCK 1 [TEXT] ---\nshared", $stripped);
+    assert_contains("--- CONTENT BLOCK 2 [TEXT] ---\nvarying", $stripped);
+    assert_true(!str_contains($stripped, '[cached prefix]'), 'stripped content has no cache marker');
+    assert_eq("plain\nstring", LlmLogger::renderContent("plain\nstring"));
 });
 
 test('log writes a file to the configured directory and is reversible', function () {
@@ -94,9 +164,10 @@ test('log writes a file to the configured directory and is reversible', function
     LlmLogger::setDir($dir);
 
     $request = ['model' => 'claude-haiku-4-5', 'messages' => [['role' => 'user', 'content' => 'hi']]];
-    LlmLogger::log('theme-json', $request, ['text' => 'OK', 'input' => 1, 'output' => 2], 0.5);
+    $written = LlmLogger::log('theme-json', $request, ['text' => 'OK', 'input' => 1, 'output' => 2], 0.5);
 
     $path = "{$dir}/01-theme-json.log";
+    assert_eq($path, $written, 'log returns the evidence path for failure diagnostics');
     assert_true(file_exists($path), 'first log file is prefixed 01-');
     assert_contains('Step / label : theme-json', (string) file_get_contents($path));
 
@@ -158,8 +229,8 @@ test('log writes a -failed file for a failed call', function () {
 test('log is a no-op when no project directory is set', function () {
     LlmLogger::setDir(null);
     // Must not throw and must not write anywhere (no repo-root fallback).
-    LlmLogger::log('orphan', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
-    assert_true(true, 'logging without a dir is a silent no-op');
+    $written = LlmLogger::log('orphan', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
+    assert_eq(null, $written, 'logging without a dir is a silent no-op');
 });
 
 test('log is a no-op when disabled', function () {
@@ -167,9 +238,10 @@ test('log is a no-op when disabled', function () {
     LlmLogger::setDir($dir);
     LlmLogger::setEnabled(false);
 
-    LlmLogger::log('nope', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
+    $written = LlmLogger::log('nope', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
 
     assert_true(!file_exists("{$dir}/nope.log"), 'nothing written while disabled');
+    assert_eq(null, $written, 'disabled logging has no evidence path');
 
     LlmLogger::setEnabled(true);
     LlmLogger::setDir(null);

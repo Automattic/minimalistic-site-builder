@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\RejectedApiParameterException;
 
 /**
  * Unit tests for the concurrent-batch retry orchestration
@@ -28,6 +29,27 @@ test('retryTextBatch returns text + usage per request, keyed as input', function
     assert_eq('T:theme-json', $out['theme-json']['text']);
     assert_eq(5, $out['page-plan']['input']);
     assert_eq(7, $out['page-plan']['output']);
+});
+
+test('retrySingleRequest tolerates an empty probe response without retrying', function () {
+    $body = ['messages' => []];
+    $calls = 0;
+    $transport = function (array $requestBody) use (&$calls): array {
+        $calls++;
+        return [
+            'text' => " \n\t",
+            'input' => 100,
+            'output' => 1,
+            'cache_read_input_tokens' => 0,
+            'cache_creation_input_tokens' => 100,
+            'time' => 0.25,
+        ];
+    };
+
+    $result = AnthropicClient::retrySingleRequest($body, $transport, [0, 0, 0], true);
+
+    assert_eq(1, $calls, 'successful empty probe makes exactly one transport attempt');
+    assert_eq('', $result['text'], 'tolerated whitespace is normalized to the empty-string contract');
 });
 
 test('retryTextBatch retries only the transient failures, then succeeds', function () {
@@ -203,6 +225,148 @@ test('bodyFor sends temperature only when set and supported, and applies model/t
     assert_true(!array_key_exists('temperature', $body), 'temperature omitted on a sampling-less model');
 });
 
+test('bodyFor keeps the uncached request body byte-identical to the original string-content shape', function () {
+    $expected = [
+        'model'      => 'claude-sonnet-4-6',
+        'max_tokens' => 16000,
+        'stream'     => true,
+        'messages'   => [
+            ['role' => 'user', 'content' => 'Build a hero section'],
+        ],
+        'system'     => AnthropicClient::systemPreamble(),
+    ];
+
+    $body = AnthropicClient::bodyFor(
+        ['prompt' => 'Build a hero section'],
+        'claude-sonnet-4-6',
+        16000,
+    );
+
+    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+    assert_eq(json_encode($expected, $flags), json_encode($body, $flags));
+    assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'uncached body has no cache marker');
+});
+
+test('bodyFor keeps an explicit empty cached_prefixes list byte-identical to uncached', function () {
+    $uncached = AnthropicClient::bodyFor(
+        ['prompt' => 'Build a hero section'],
+        'claude-sonnet-4-6',
+        16000,
+    );
+    $empty = AnthropicClient::bodyFor(
+        ['prompt' => 'Build a hero section', 'cached_prefixes' => []],
+        'claude-sonnet-4-6',
+        16000,
+    );
+
+    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+    assert_eq(json_encode($uncached, $flags), json_encode($empty, $flags));
+});
+
+test('bodyFor skips blank cached prefixes while preserving nonblank prefix bytes', function () {
+    $body = AnthropicClient::bodyFor(
+        [
+            'prompt' => 'Build this section.',
+            'cached_prefixes' => ["  Build bytes stay padded.  ", " \n\t ", 'Page context.'],
+        ],
+        'claude-sonnet-4-6',
+        16000,
+    );
+
+    assert_eq('  Build bytes stay padded.  ', $body['messages'][0]['content'][0]['text']);
+    assert_eq('Page context.', $body['messages'][0]['content'][1]['text']);
+    assert_eq('Build this section.', $body['messages'][0]['content'][2]['text']);
+});
+
+test('bodyFor makes an all-blank cached_prefixes list byte-identical to uncached', function () {
+    $uncached = AnthropicClient::bodyFor(['prompt' => 'Build it.'], 'claude-sonnet-4-6', 16000);
+    $allBlank = AnthropicClient::bodyFor(
+        ['prompt' => 'Build it.', 'cached_prefixes' => ['', " \n\t "]],
+        'claude-sonnet-4-6',
+        16000,
+    );
+
+    assert_eq($uncached, $allBlank);
+    assert_true(is_string($allBlank['messages'][0]['content']), 'all-empty list retains string content');
+});
+
+test('bodyFor rejects null, non-array, non-list, and non-string cached_prefixes with useful messages', function () {
+    foreach ([null, 'build context', ['build' => 'context']] as $invalid) {
+        try {
+            AnthropicClient::bodyFor(
+                ['prompt' => 'Build it.', 'cached_prefixes' => $invalid],
+                'claude-sonnet-4-6',
+                16000,
+            );
+            throw new \RuntimeException('expected bodyFor to reject cached_prefixes');
+        } catch (\RuntimeException $e) {
+            assert_contains('cached_prefixes must be a list of strings', $e->getMessage());
+        }
+    }
+
+    try {
+        AnthropicClient::bodyFor(
+            ['prompt' => 'Build it.', 'cached_prefixes' => ['valid', 42]],
+            'claude-sonnet-4-6',
+            16000,
+        );
+        throw new \RuntimeException('expected bodyFor to reject cached_prefixes[1]');
+    } catch (\RuntimeException $e) {
+        assert_contains('cached_prefixes[1]', $e->getMessage());
+    }
+});
+
+test('bodyFor renders cached prefixes as marked leading text blocks before the varying prompt', function () {
+    $body = AnthropicClient::bodyFor(
+        [
+            'prompt' => 'Build this section.',
+            'cached_prefixes' => ['Shared build context.', 'Shared page context.'],
+        ],
+        'claude-sonnet-4-6',
+        16000,
+    );
+
+    assert_eq([
+        [
+            'type' => 'text',
+            'text' => 'Shared build context.',
+            'cache_control' => ['type' => 'ephemeral'],
+        ],
+        [
+            'type' => 'text',
+            'text' => 'Shared page context.',
+            'cache_control' => ['type' => 'ephemeral'],
+        ],
+        [
+            'type' => 'text',
+            'text' => 'Build this section.',
+        ],
+    ], $body['messages'][0]['content']);
+});
+
+test('bodyFor rejects more than three cached prefixes', function () {
+    assert_throws(function () {
+        AnthropicClient::bodyFor(
+            [
+                'prompt' => 'Build this section.',
+                'cached_prefixes' => ['one', 'two', 'three', 'four'],
+            ],
+            'claude-sonnet-4-6',
+            16000,
+        );
+    });
+
+    $body = AnthropicClient::bodyFor(
+        [
+            'prompt' => 'Build this section.',
+            'cached_prefixes' => ['one', '', 'two', " \n", 'three'],
+        ],
+        'claude-sonnet-4-6',
+        16000,
+    );
+    assert_eq(4, count($body['messages'][0]['content']), 'blank layers do not count toward the three-layer cap');
+});
+
 test('bodyFor puts the language preamble on every request, before any per-request system', function () {
     // The respect-the-prompt-language rule must ride on EVERY call — even a
     // step that sets no system prompt of its own.
@@ -216,11 +380,13 @@ test('bodyFor puts the language preamble on every request, before any per-reques
     assert_true(str_ends_with((string) $body['system'], 'Respond with JSON.'), 'per-request system follows');
 });
 
-test('supportsSampling is false for Opus 4.7/4.8 and Fable, true otherwise', function () {
+test('supportsSampling is false for the Claude 5 family and Opus 4.7/4.8, true otherwise', function () {
     assert_eq(false, AnthropicClient::supportsSampling('claude-opus-4-8'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-opus-4-7'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5[1m]'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-sonnet-5'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-mythos-5'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-haiku-4-5'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-sonnet-4-6'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-opus-4-6'));
@@ -271,4 +437,175 @@ test('retryTextBatch fails loud when the rejected parameter is not in the body',
     assert_throws(function () use (&$bodies, $transport) {
         AnthropicClient::retryTextBatch($bodies, $transport, []);
     });
+});
+
+test('rejectedParam detects a cache_control rejection', function () {
+    $apiError = 'HTTP 400: {"type":"error","error":{"type":"invalid_request_error",'
+        . '"message":"messages.0.content.0.cache_control: Extra inputs are not permitted"}}';
+    assert_eq('cache_control', AnthropicClient::rejectedParam($apiError));
+});
+
+test('rejectedParamForHttpError classifies the full body only for HTTP 400', function () {
+    $lateRejection = str_repeat('x', 350) . ' cache_control is not supported';
+    $longUnrelated = str_repeat('x', 350) . ' messages must alternate';
+    assert_eq('cache_control', AnthropicClient::rejectedParamForHttpError(400, $lateRejection));
+    assert_eq(null, AnthropicClient::rejectedParamForHttpError(500, $lateRejection));
+    assert_eq(null, AnthropicClient::rejectedParamForHttpError(400, $longUnrelated));
+});
+
+test('RejectedApiParameterException exposes readonly parameter metadata', function () {
+    $exception = new RejectedApiParameterException('truncated diagnostic', 'cache_control');
+
+    assert_eq('cache_control', $exception->parameter);
+    assert_eq('truncated diagnostic', $exception->getMessage());
+    assert_true(
+        (new ReflectionProperty($exception, 'parameter'))->isReadOnly(),
+        'parameter metadata is readonly',
+    );
+});
+
+test('retryTextBatch strips every cache marker and retries exactly once', function () {
+    $bodies = [
+        'section' => [
+            'messages' => [[
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'text', 'text' => 'build', 'cache_control' => ['type' => 'ephemeral']],
+                    ['type' => 'text', 'text' => 'page', 'cache_control' => ['type' => 'ephemeral']],
+                    ['type' => 'text', 'text' => 'section'],
+                ],
+            ]],
+        ],
+    ];
+    $sent = [];
+    $transport = function (array $subset) use (&$sent): array {
+        $sent[] = $subset;
+        $encoded = (string) json_encode($subset['section']);
+        if (str_contains($encoded, 'cache_control')) {
+            return ['section' => [
+                'ok' => false,
+                'transient' => false,
+                'error' => 'HTTP 400: cache_control is not supported',
+                'retry_without' => 'cache_control',
+            ]];
+        }
+        return ['section' => [
+            'ok' => true,
+            'text' => 'done',
+            'input' => 12,
+            'output' => 3,
+            'cache_read_input_tokens' => 8,
+            'cache_creation_input_tokens' => 2,
+        ]];
+    };
+
+    $out = AnthropicClient::retryTextBatch($bodies, $transport, []);
+
+    assert_eq('done', $out['section']['text']);
+    assert_eq(8, $out['section']['cache_read_input_tokens']);
+    assert_eq(2, $out['section']['cache_creation_input_tokens']);
+    assert_eq(2, count($sent), 'one rejected request followed by one immediate retry');
+    assert_true(!str_contains((string) json_encode($bodies), 'cache_control'), 'all nested cache markers were stripped');
+});
+
+test('retryTextBatch does not recur when cache_control is rejected after stripping', function () {
+    $bodies = [
+        'section' => [
+            'messages' => [[
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'text', 'text' => 'shared', 'cache_control' => ['type' => 'ephemeral']],
+                    ['type' => 'text', 'text' => 'varying'],
+                ],
+            ]],
+        ],
+    ];
+    $calls = 0;
+    $transport = function (array $subset) use (&$calls): array {
+        $calls++;
+        return ['section' => [
+            'ok' => false,
+            'transient' => false,
+            'error' => 'HTTP 400: cache_control is not supported',
+            'retry_without' => 'cache_control',
+        ]];
+    };
+
+    assert_throws(function () use (&$bodies, $transport) {
+        AnthropicClient::retryTextBatch($bodies, $transport, []);
+    });
+    assert_eq(2, $calls, 'the rejection is retried once and cannot recur');
+});
+
+test('retryTextBatch completes a strip retry before backing off a transient sibling', function () {
+    $bodies = [
+        'cached' => [
+            'messages' => [[
+                'role' => 'user',
+                'content' => [[
+                    'type' => 'text',
+                    'text' => 'shared',
+                    'cache_control' => ['type' => 'ephemeral'],
+                ]],
+            ]],
+        ],
+        'transient' => ['messages' => []],
+    ];
+    $seen = [];
+    $transientFailures = 0;
+    $transport = function (array $subset) use (&$seen, &$transientFailures): array {
+        $seen[] = array_keys($subset);
+        $out = [];
+        foreach ($subset as $key => $body) {
+            if ($key === 'cached' && str_contains((string) json_encode($body), 'cache_control')) {
+                $out[$key] = [
+                    'ok' => false,
+                    'transient' => false,
+                    'error' => 'HTTP 400: cache_control is not supported',
+                    'retry_without' => 'cache_control',
+                ];
+            } elseif ($key === 'transient' && $transientFailures++ === 0) {
+                $out[$key] = ['ok' => false, 'transient' => true, 'error' => 'temporary'];
+            } else {
+                $out[$key] = ['ok' => true, 'text' => "T:{$key}", 'input' => 0, 'output' => 0];
+            }
+        }
+        return $out;
+    };
+
+    $out = AnthropicClient::retryTextBatch($bodies, $transport, [0]);
+
+    assert_eq([
+        ['cached', 'transient'],
+        ['cached'],
+        ['transient'],
+    ], $seen, 'the stripped key retries immediately before the transient retry round');
+    assert_eq('T:cached', $out['cached']['text']);
+    assert_eq('T:transient', $out['transient']['text']);
+});
+
+test('bodyFor maps json_schema to Anthropic output_config.format', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'required' => ['sections'],
+        'additionalProperties' => false,
+    ];
+
+    $body = AnthropicClient::bodyFor(
+        [
+            'prompt' => 'Plan a page.',
+            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+        ],
+        'claude-haiku-4-5',
+        16000,
+    );
+
+    assert_eq([
+        'format' => [
+            'type' => 'json_schema',
+            'schema' => $schema,
+        ],
+    ], $body['output_config']);
+    assert_true(!array_key_exists('json_schema', $body), 'provider-neutral metadata does not leak onto the wire');
 });

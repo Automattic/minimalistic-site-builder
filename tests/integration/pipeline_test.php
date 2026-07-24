@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
-use Automattic\SiteBuild\NodeBlockFixer;
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
@@ -22,7 +22,7 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
         llm: $llm,
         promptsDir: Package::promptsDir(),
         outputRoot: $outputRoot,
-        blockFixer: NodeBlockFixer::default(),
+        blockFixer: BlockFixers::default(),
         models: [],
     );
 }
@@ -83,17 +83,19 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]);
     // page-plan home (json) — ordered list of the front page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.'],
-        ['slug' => 'specials', 'title' => 'Specials', 'type' => 'features', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.'],
+        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.'],
+        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.'],
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'type' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.'],
-        ['slug' => 'breads', 'title' => 'Breads', 'type' => 'features', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.'],
+        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.'],
+        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.'],
     ]]);
-    // sections (raw markup) — header, footer, then home's parts, then menu's, in requests() order
+    // sections (raw markup) — disposable cache probe, then header, footer,
+    // home's parts, and menu's parts in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
     $ftr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>(c) Hearth</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $llm->queueText('OK');
     $llm->queueText($hdr);
     $llm->queueText($ftr);
     $llm->queueText(
@@ -166,6 +168,12 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
+
+    // Structural role is constrained independently while semantic section
+    // types remain open-ended and survive the complete pipeline.
+    $plannedPages = $project->readJson('pages.json')['pages'];
+    assert_eq(['hero', 'closing'], array_column($plannedPages[0]['sections'], 'role'));
+    assert_eq(['immersive-welcome', 'seasonal-specials'], array_column($plannedPages[0]['sections'], 'type'));
 
     // Every page's content was inlined into the plugin in plan order, and the
     // transient page parts left the theme.

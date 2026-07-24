@@ -1,0 +1,482 @@
+{
+  "schemaVersion": 1,
+  "name": "paragraph-inline-color-carryover",
+  "milestone": "M2",
+  "capabilities": [
+    "block:core/paragraph",
+    "deprecation:paragraph-selectorless",
+    "repair:nested-paragraph",
+    "repair:nested-paragraph-style-merge",
+    "support:text-color",
+    "support:font-size",
+    "support:font-family",
+    "support:typography",
+    "report:fixed"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "custom-class-recovery",
+      "deprecation:core/paragraph:6",
+      "nested-paragraph"
+    ],
+    "files": [
+      {
+        "path": "parts/colophon.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "9ff1d46ba6d4f84337b01abbad9d87818fac039a0af989fa7d1f950dd7503815",
+        "outputSha256": "cdc43d435001fa881f4277ff0f8e5ff0244a7b030a815cd5ea98538de530d8db",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [
+              "core/paragraph: Nested paragraph tags detected and removed"
+            ],
+            "compatibilityRepairs": [
+              {
+                "code": "nested-paragraph",
+                "blockName": "core/paragraph",
+                "blockPath": "document",
+                "stage": "post-serialize",
+                "count": 1
+              }
+            ],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-color has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-color has-caption-font-size has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-color has-caption-font-size has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-color has-caption-font-size has-heading-font-family"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "base",
+                    "fontFamily": "heading",
+                    "fontSize": "caption",
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.2em",
+                        "textTransform": "uppercase"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "content": "<p class=\"has-text-color has-caption-font-size has-heading-font-family\" style=\"color:var(--wp--preset--color--secondary);letter-spacing:0.2em;text-transform:uppercase\">06 — Colophon</p>",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "base",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.2em",
+                        "textTransform": "uppercase"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [
+              "core/paragraph: Nested paragraph tags detected and removed"
+            ],
+            "compatibilityRepairs": [
+              {
+                "code": "nested-paragraph",
+                "blockName": "core/paragraph",
+                "blockPath": "document",
+                "stage": "post-serialize",
+                "count": 1
+              }
+            ],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": null,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 0,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 1,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 2,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 3,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 4,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 5,
+                  "valid": false,
+                  "issueCount": 2
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-base-color has-text-color has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-base-color has-text-color has-heading-font-family has-caption-font-size"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-heading-font-family"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-text-color has-heading-font-family has-caption-font-size"
+                },
+                {
+                  "blockName": "core/paragraph",
+                  "code": "custom-class-recovery",
+                  "phase": "deprecation",
+                  "before": {
+                    "__type": "undefined"
+                  },
+                  "after": "has-base-color has-text-color has-heading-font-family has-caption-font-size"
+                }
+              ],
+              "deprecations": [
+                {
+                  "blockName": "core/paragraph",
+                  "deprecationIndex": 6,
+                  "beforeAttributes": {
+                    "content": {},
+                    "dropCap": false,
+                    "textColor": "base",
+                    "fontFamily": "heading",
+                    "fontSize": "caption",
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.2em",
+                        "textTransform": "uppercase"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "content": "<p class=\"has-base-color has-text-color has-heading-font-family has-caption-font-size\" style=\"letter-spacing:0.2em;text-transform:uppercase;color:var(--wp--preset--color--secondary)\">06 — Colophon</p>",
+                    "dropCap": false,
+                    "placeholder": {
+                      "__type": "undefined"
+                    },
+                    "textColor": "base",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": "caption",
+                    "direction": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "letterSpacing": "0.2em",
+                        "textTransform": "uppercase"
+                      }
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 1,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

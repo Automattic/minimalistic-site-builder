@@ -18,9 +18,8 @@ final class OpenAiCompatibleClient implements Llm
 {
     /**
      * Appended to the system prompt of every JSON call (single and batch) to
-     * steer the model toward raw, fence-free JSON. Kept in sync with
-     * AnthropicClient's JSON_SYSTEM so decode failure logs reconstruct the same
-     * intent.
+     * steer the model toward raw, fence-free JSON. Kept in sync with the
+     * Anthropic client so both provider paths receive the same instruction.
      */
     private const JSON_SYSTEM = "\nRespond with a single valid JSON value and nothing else. "
         . 'No prose, no markdown fences.';
@@ -89,13 +88,19 @@ final class OpenAiCompatibleClient implements Llm
         return ['input' => $input, 'output' => $output];
     }
 
+    /**
+     * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>,tolerate_empty?:bool,log_label?:string} $opts
+     *        tolerate_empty accepts a successful whitespace-only response as ''
+     *        without retrying; it is intended only for cache-warm probes.
+     */
     public function complete(string $prompt, array $opts = []): string
     {
         $body = self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens, $this->provider);
 
         $label = (string) ($opts['log_label'] ?? 'request');
+        $tolerateEmpty = ($opts['tolerate_empty'] ?? false) === true;
         try {
-            $res = $this->requestWithRetry($body);
+            $res = $this->requestWithRetry($body, $tolerateEmpty);
         } catch (\Throwable $e) {
             LlmLogger::log($label, $body, ['text' => '', 'input' => 0, 'output' => 0], 0.0, $e->getMessage());
             throw $e;
@@ -107,7 +112,10 @@ final class OpenAiCompatibleClient implements Llm
 
         LlmLogger::log($label, $body, $res, $res['time']);
 
-        if (trim($res['text']) === '') {
+        // Unreachable in practice: retrySingleRequest already converts an
+        // empty non-tolerated response into a transient failure. Kept as a
+        // final guard so a transport change can't silently return ''.
+        if (!$tolerateEmpty && trim($res['text']) === '') {
             throw new \RuntimeException('No text content in streamed response');
         }
         return $res['text'];
@@ -115,49 +123,16 @@ final class OpenAiCompatibleClient implements Llm
 
     public function completeJson(string $prompt, array $opts = []): array
     {
-        $opts['system'] = ($opts['system'] ?? '') . self::JSON_SYSTEM;
-        $text = $this->complete($prompt, $opts);
-
-        $data = AnthropicClient::decodeJson($text);
-        if ($data === null) {
-            $error = "Expected JSON, got: {$text}";
-            LlmLogger::log(
-                (string) ($opts['log_label'] ?? 'request'),
-                self::bodyFor(['prompt' => $prompt] + $opts, $this->model, $this->defaultMaxTokens, $this->provider),
-                ['text' => $text, 'input' => 0, 'output' => 0],
-                0.0,
-                $error,
-            );
-            throw new \RuntimeException($error);
-        }
-        return $data;
+        $result = $this->completeJsonBatch(['request' => ['prompt' => $prompt] + $opts]);
+        return $result['request'];
     }
 
     public function completeJsonBatch(array $requests): array
     {
-        $out = [];
-        foreach ($this->textBatch($requests, true) as $key => $text) {
-            $data = AnthropicClient::decodeJson($text);
-            if ($data === null) {
-                $error = "batch request '{$key}': expected JSON, got: {$text}";
-                $req = $requests[$key];
-                LlmLogger::log(
-                    (string) ($req['log_label'] ?? $key),
-                    self::bodyFor(
-                        ['system' => (string) ($req['system'] ?? '') . self::JSON_SYSTEM] + $req,
-                        $this->model,
-                        $this->defaultMaxTokens,
-                        $this->provider,
-                    ),
-                    ['text' => $text, 'input' => 0, 'output' => 0],
-                    0.0,
-                    $error,
-                );
-                throw new \RuntimeException($error);
-            }
-            $out[$key] = $data;
-        }
-        return $out;
+        return JsonBatchRecovery::run(
+            $requests,
+            fn (array $subset): array => $this->responseBatch($subset, true),
+        );
     }
 
     public function completeBatch(array $requests): array
@@ -168,10 +143,10 @@ final class OpenAiCompatibleClient implements Llm
     /**
      * Shared concurrent-batch transport for completeJsonBatch and completeBatch.
      *
-     * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float}> $requests
-     * @return array<array-key,string>
+     * @param array<array-key,array<string,mixed>> $requests
+     * @return array<array-key,array<string,mixed>>
      */
-    private function textBatch(array $requests, bool $json): array
+    private function responseBatch(array $requests, bool $json): array
     {
         if ($requests === []) {
             return [];
@@ -191,7 +166,7 @@ final class OpenAiCompatibleClient implements Llm
 
         $results = AnthropicClient::retryTextBatch(
             $bodies,
-            fn (array $subset): array => $this->streamMulti($subset),
+            fn (array $subset): array => $this->streamMulti($subset, $json),
             [2, 5, 12],
             function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
                 LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
@@ -204,25 +179,40 @@ final class OpenAiCompatibleClient implements Llm
             $this->inputTokens += $res['input'];
             $this->outputTokens += $res['output'];
 
-            LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+            $res['log_path'] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
+            $res['model'] = (string) $bodies[$key]['model'];
+            $out[$key] = $res;
+        }
+        return $out;
+    }
 
-            $out[$key] = $res['text'];
+    /**
+     * @param array<array-key,array<string,mixed>> $requests
+     * @return array<array-key,string>
+     */
+    private function textBatch(array $requests, bool $json): array
+    {
+        $out = [];
+        foreach ($this->responseBatch($requests, $json) as $key => $response) {
+            $out[$key] = (string) $response['text'];
         }
         return $out;
     }
 
     /**
      * Build one streaming Chat Completions request body. System text (preamble
-     * + optional per-request system) becomes a system message; the user prompt
-     * is the user message. stream_options.include_usage asks the provider to
-     * attach token usage on the final SSE chunk.
+     * + optional per-request system) becomes a system message. Reusable cached
+     * prefixes are joined ahead of the varying user prompt as plain text;
+     * OpenAI-compatible providers apply automatic server-side prefix caching,
+     * so no cache_control markers are sent. stream_options.include_usage asks
+     * the provider to attach token usage on the final SSE chunk.
      *
      * The token-limit key and whether a custom temperature is sent both depend
      * on $provider + model: OpenAI's o-series / gpt-5+ reasoning models want
      * max_completion_tokens and only accept the default temperature. See
      * maxTokensParam() and restrictsTemperature().
      *
-     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float} $req
+     * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>} $req
      * @return array<string,mixed>
      */
     public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens, string $provider = 'openai'): array
@@ -233,9 +223,17 @@ final class OpenAiCompatibleClient implements Llm
             $system .= "\n\n" . $req['system'];
         }
 
+        $userPrompt = '';
+        foreach ($req['cached_prefixes'] ?? [] as $prefix) {
+            if (trim($prefix) !== '') {
+                $userPrompt .= rtrim($prefix, "\r\n") . "\n\n";
+            }
+        }
+        $userPrompt .= (string) $req['prompt'];
+
         $messages = [
             ['role' => 'system', 'content' => $system],
-            ['role' => 'user', 'content' => (string) $req['prompt']],
+            ['role' => 'user', 'content' => $userPrompt],
         ];
 
         $maxTokens = (int) ($req['max_tokens'] ?? $defaultMaxTokens);
@@ -252,6 +250,22 @@ final class OpenAiCompatibleClient implements Llm
         // default (1), which is what those models require anyway.
         if (isset($req['temperature']) && !self::restrictsTemperature($provider, $model)) {
             $body['temperature'] = (float) $req['temperature'];
+        }
+        if (isset($req['json_schema'])) {
+            $spec = $req['json_schema'];
+            if (!is_array($spec) || trim((string) ($spec['name'] ?? '')) === ''
+                || !is_array($spec['schema'] ?? null)
+            ) {
+                throw new \InvalidArgumentException('json_schema must contain a name and schema array');
+            }
+            $body['response_format'] = [
+                'type'        => 'json_schema',
+                'json_schema' => [
+                    'name'   => (string) $spec['name'],
+                    'strict' => true,
+                    'schema' => $spec['schema'],
+                ],
+            ];
         }
         return $body;
     }
@@ -290,23 +304,23 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
-     * @param array<string,array<string,mixed>> $bodies
-     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float}>
+     * @param array<array-key,array<string,mixed>> $bodies
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
      */
-    private function streamMulti(array $bodies): array
+    private function streamMulti(array $bodies, bool $allowEmptyTerminal = false): array
     {
         $out = [];
         foreach (AnthropicClient::concurrencyWindows($bodies) as $chunk) {
-            $out += $this->streamChunk($chunk);
+            $out += $this->streamChunk($chunk, $allowEmptyTerminal);
         }
         return $out;
     }
 
     /**
-     * @param array<string,array<string,mixed>> $bodies
-     * @return array<string,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float}>
+     * @param array<array-key,array<string,mixed>> $bodies
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
      */
-    private function streamChunk(array $bodies): array
+    private function streamChunk(array $bodies, bool $allowEmptyTerminal = false): array
     {
         $multi = curl_multi_init();
         $handles = [];
@@ -345,7 +359,14 @@ final class OpenAiCompatibleClient implements Llm
             $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
             curl_multi_remove_handle($multi, $ch);
             curl_close($ch);
-            $out[$key] = self::interpretStream($raw[$key], $errno, $error, $httpStatus, $time);
+            $out[$key] = self::interpretStream(
+                $raw[$key],
+                $errno,
+                $error,
+                $httpStatus,
+                $time,
+                $allowEmptyTerminal,
+            );
         }
 
         curl_multi_close($multi);
@@ -353,9 +374,16 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
-     * @return array{ok:bool,text?:string,input?:int,output?:int,time?:float,error?:string,transient?:bool,retry_without?:string}
+     * @return array{ok:bool,text?:string,input?:int,output?:int,time?:float,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}
      */
-    private static function interpretStream(string $raw, int $errno, string $error, int $status, float $time = 0.0): array
+    private static function interpretStream(
+        string $raw,
+        int $errno,
+        string $error,
+        int $status,
+        float $time = 0.0,
+        bool $allowEmptyTerminal = false,
+    ): array
     {
         if ($errno !== 0) {
             return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}", 'time' => $time];
@@ -375,15 +403,19 @@ final class OpenAiCompatibleClient implements Llm
                 || str_contains(strtolower($parsed['error']), 'rate limit');
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
         }
-        if (trim($parsed['text']) === '') {
+        if (trim($parsed['text']) === '' && !(
+            $allowEmptyTerminal
+            && JsonBatchRecovery::terminationError($parsed['stop_reason']) !== null
+        )) {
             return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response', 'time' => $time];
         }
         return [
-            'ok'     => true,
-            'text'   => $parsed['text'],
-            'input'  => $parsed['input'],
-            'output' => $parsed['output'],
-            'time'   => $time,
+            'ok'          => true,
+            'text'        => $parsed['text'],
+            'input'       => $parsed['input'],
+            'output'      => $parsed['output'],
+            'time'        => $time,
+            'stop_reason' => $parsed['stop_reason'],
         ];
     }
 
@@ -399,15 +431,45 @@ final class OpenAiCompatibleClient implements Llm
 
     /**
      * @param array<string,mixed> $body
+     * @return array{text:string,input:int,output:int,time:float,stop_reason:?string}
+     */
+    private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
+    {
+        return self::retrySingleRequest(
+            $body,
+            fn (array $requestBody): array => $this->streamRequest($requestBody),
+            [2, 5, 12],
+            $tolerateEmpty,
+        );
+    }
+
+    /**
+     * Drive one request to completion with a fakeable transport seam. A
+     * successful empty response is transient unless tolerate_empty is set.
+     *
+     * @param array<string,mixed> $body
+     * @param callable(array<string,mixed>):array{text:string,input:int,output:int,time:float} $transport
+     * @param list<int> $delays
      * @return array{text:string,input:int,output:int,time:float}
      */
-    private function requestWithRetry(array &$body): array
+    public static function retrySingleRequest(
+        array &$body,
+        callable $transport,
+        array $delays,
+        bool $tolerateEmpty = false,
+    ): array
     {
-        $delays = [2, 5, 12];
         $attempt = 0;
         while (true) {
             try {
-                return $this->streamRequest($body);
+                $result = $transport($body);
+                if (trim($result['text']) === '') {
+                    if (!$tolerateEmpty) {
+                        throw new TransientApiException('no text content in streamed response');
+                    }
+                    $result['text'] = '';
+                }
+                return $result;
             } catch (TransientApiException $e) {
                 if ($attempt >= count($delays)) {
                     throw new \RuntimeException('OpenAI-compatible API failed after retries: ' . $e->getMessage(), 0, $e);
@@ -429,7 +491,7 @@ final class OpenAiCompatibleClient implements Llm
 
     /**
      * @param array<string,mixed> $body
-     * @return array{text:string,input:int,output:int,time:float}
+     * @return array{text:string,input:int,output:int,time:float,stop_reason:?string}
      */
     private function streamRequest(array $body): array
     {
@@ -479,11 +541,16 @@ final class OpenAiCompatibleClient implements Llm
             }
             throw new \RuntimeException($msg);
         }
-        if (trim($parsed['text']) === '') {
-            throw new TransientApiException('no text content in streamed response');
-        }
-
-        return ['text' => $parsed['text'], 'input' => $parsed['input'], 'output' => $parsed['output'], 'time' => $time];
+        // Empty-text handling lives in retrySingleRequest so tolerate_empty
+        // (cache-warm probes) can accept a blank one-token reply without a
+        // transient retry loop.
+        return [
+            'text'        => $parsed['text'],
+            'input'       => $parsed['input'],
+            'output'      => $parsed['output'],
+            'time'        => $time,
+            'stop_reason' => $parsed['stop_reason'],
+        ];
     }
 
     /** @return list<string> */
@@ -501,11 +568,12 @@ final class OpenAiCompatibleClient implements Llm
      * and token usage. Handles:
      *   - choices[0].delta.content (streaming tokens)
      *   - choices[0].message.content (non-stream JSON body if a host ignores stream)
+     *   - message.refusal / delta.refusal from structured-output safety refusals
      *   - usage on any chunk (final chunk when stream_options.include_usage)
      *   - data: [DONE]
      *   - top-level error objects some hosts send mid-stream
      *
-     * @return array{text:string,input:int,output:int,error:?string}
+     * @return array{text:string,input:int,output:int,error:?string,stop_reason:?string}
      */
     public static function parseSse(string $raw): array
     {
@@ -513,6 +581,7 @@ final class OpenAiCompatibleClient implements Llm
         $input = 0;
         $output = 0;
         $error = null;
+        $stopReason = null;
 
         // Non-stream JSON response (provider ignored stream:true or returned error JSON).
         $trimmed = trim($raw);
@@ -524,12 +593,36 @@ final class OpenAiCompatibleClient implements Llm
                     $error = is_array($err)
                         ? (string) ($err['message'] ?? json_encode($err))
                         : (string) $err;
-                    return ['text' => '', 'input' => 0, 'output' => 0, 'error' => $error];
+                    return ['text' => '', 'input' => 0, 'output' => 0, 'error' => $error, 'stop_reason' => null];
                 }
-                if (isset($json['choices'][0]['message']['content'])) {
-                    $text = (string) $json['choices'][0]['message']['content'];
+                $message = $json['choices'][0]['message'] ?? null;
+                if (is_array($message)) {
+                    $refusal = is_string($message['refusal'] ?? null)
+                        && trim((string) $message['refusal']) !== '';
+                    if (!array_key_exists('content', $message) && !$refusal) {
+                        return [
+                            'text' => '',
+                            'input' => 0,
+                            'output' => 0,
+                            'error' => null,
+                            'stop_reason' => null,
+                        ];
+                    }
+
+                    $text = is_string($message['content'] ?? null) ? $message['content'] : '';
                     $usage = self::extractUsage($json);
-                    return ['text' => $text, 'input' => $usage['input'], 'output' => $usage['output'], 'error' => null];
+                    $stopReason = $refusal
+                        ? 'refusal'
+                        : (isset($json['choices'][0]['finish_reason'])
+                        ? (string) $json['choices'][0]['finish_reason']
+                        : null);
+                    return [
+                        'text'        => $text,
+                        'input'       => $usage['input'],
+                        'output'      => $usage['output'],
+                        'error'       => null,
+                        'stop_reason' => $stopReason,
+                    ];
                 }
             }
         }
@@ -562,6 +655,14 @@ final class OpenAiCompatibleClient implements Llm
             if (is_string($msgContent) && $msgContent !== '' && $text === '') {
                 $text = $msgContent;
             }
+            $refusal = $evt['choices'][0]['delta']['refusal']
+                ?? $evt['choices'][0]['message']['refusal']
+                ?? null;
+            if (is_string($refusal) && trim($refusal) !== '') {
+                $stopReason = 'refusal';
+            } elseif ($stopReason !== 'refusal' && isset($evt['choices'][0]['finish_reason'])) {
+                $stopReason = (string) $evt['choices'][0]['finish_reason'];
+            }
             if (isset($evt['usage']) && is_array($evt['usage'])) {
                 $usage = self::extractUsage($evt);
                 $input = $usage['input'];
@@ -569,7 +670,13 @@ final class OpenAiCompatibleClient implements Llm
             }
         }
 
-        return ['text' => $text, 'input' => $input, 'output' => $output, 'error' => $error];
+        return [
+            'text'        => $text,
+            'input'       => $input,
+            'output'      => $output,
+            'error'       => $error,
+            'stop_reason' => $stopReason,
+        ];
     }
 
     private static function truncate(string $s, int $max = 300): string

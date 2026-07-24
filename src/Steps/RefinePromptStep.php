@@ -25,6 +25,10 @@ use Automattic\SiteBuild\StepDeclaration;
  * later step (site-spec onward) reads `meta.json`'s `prompt`, so improving it
  * here lifts the quality of the whole build with no downstream changes.
  *
+ * The page-scope rule mirrors meta.json `multi_page`: single-page builds keep
+ * the classic "one landing page" instruction; multi-page builds must not
+ * collapse named destinations (Home / Menu / About, …) into one scroll.
+ *
  * Deliberately forgiving: if the model returns nothing usable, the original
  * prompt is kept and the build proceeds. A weak refinement must never be able
  * to block a site from being built.
@@ -32,6 +36,27 @@ use Automattic\SiteBuild\StepDeclaration;
 final class RefinePromptStep implements Step
 {
     use LlmOptions;
+
+    /**
+     * {{page_scope_rule}} when multi_page is off (the default). Forces the
+     * refined brief to describe one scrollable home page only.
+     */
+    public const SINGLE_PAGE_SCOPE_RULE = 'The site is a single landing page — one strong, scrollable'
+        . ' home page, not a multi-page site — so describe everything that page should convey; do not'
+        . ' imply separate pages or navigation to other destinations. If the request names separate pages'
+        . ' (e.g. Home, Menu, About), preserve each page\'s name and intended content within this one-page'
+        . ' brief: treat Home as the page itself and turn the others into clearly named on-page sections,'
+        . ' not separate routes.';
+
+    /**
+     * {{page_scope_rule}} when multi_page is on. Site-spec still decides the
+     * final tree; this only stops refine from rewriting multi-page intent away.
+     */
+    public const MULTI_PAGE_SCOPE_RULE = 'This build can produce multiple pages when the request'
+        . ' warrants it. If the user named distinct pages (e.g. Home, Menu, About) or clearly wants a'
+        . ' multi-page site, keep those as separate destinations in the brief — do not collapse them into'
+        . ' one scrollable landing page. If the request is clearly a single landing page, describe that'
+        . ' page only.';
 
     public function __construct(
         private Llm $llm,
@@ -69,7 +94,11 @@ final class RefinePromptStep implements Step
             throw new \RuntimeException('meta.json has no "prompt"');
         }
 
-        $rendered = $this->renderer->render('refine-prompt.md', ['user_prompt' => $prompt]);
+        $multiPage = (bool) ($meta['multi_page'] ?? false);
+        $rendered = $this->renderer->render('refine-prompt.md', [
+            'user_prompt'      => $prompt,
+            'page_scope_rule'  => $multiPage ? self::MULTI_PAGE_SCOPE_RULE : self::SINGLE_PAGE_SCOPE_RULE,
+        ]);
 
         // The improved brief IS the whole response — a single paragraph of text,
         // so ask for it verbatim (no JSON wrapper to escape, parse, or fail on).

@@ -75,10 +75,10 @@ final class ScaffoldPluginStep implements Step
             exit;
         }
 
-        define('BUILDER_CONTENT_STATE_OPTION', 'builder_content_state');
+        define('{{CONST_PREFIX}}_CONTENT_STATE_OPTION', '{{FN_PREFIX}}_content_state');
 
-        register_activation_hook(__FILE__, 'builder_content_activate');
-        register_deactivation_hook(__FILE__, 'builder_content_deactivate');
+        register_activation_hook(__FILE__, '{{FN_PREFIX}}_content_activate');
+        register_deactivation_hook(__FILE__, '{{FN_PREFIX}}_content_deactivate');
 
         /**
          * Create every page listed in pages.json from its pages/<slug>.html
@@ -87,8 +87,8 @@ final class ScaffoldPluginStep implements Step
          * Re-activating while the state option exists is a no-op, so a double
          * activation never duplicates pages.
          */
-        function builder_content_activate() {
-            if (get_option(BUILDER_CONTENT_STATE_OPTION)) {
+        function {{FN_PREFIX}}_content_activate() {
+            if (get_option({{CONST_PREFIX}}_CONTENT_STATE_OPTION)) {
                 return;
             }
 
@@ -119,7 +119,7 @@ final class ScaffoldPluginStep implements Step
             // Content images are content: import the bundled files into the
             // media library FIRST — the attachment ids the markup needs exist
             // only after this import, never at build time.
-            $image_map = builder_content_import_images($state['attachment_ids']);
+            $image_map = {{FN_PREFIX}}_content_import_images($state['attachment_ids']);
 
             // The page markup is generated content, not user input from this
             // site — but kses would mangle its block comments when activation
@@ -127,7 +127,7 @@ final class ScaffoldPluginStep implements Step
             // blueprint step). So ONLY the post-content kses filter is
             // suspended around the inserts (titles, excerpts, and everything
             // else stay filtered), and every page passes through
-            // builder_content_sanitize() below — the same script-stripping
+            // {{FN_PREFIX}}_content_sanitize() below — the same script-stripping
             // rules the build applies — before it is stored.
             $kses_filtered = has_filter('content_save_pre', 'wp_filter_post_kses') !== false;
             if ($kses_filtered) {
@@ -147,13 +147,13 @@ final class ScaffoldPluginStep implements Step
                 // Point the markup at the imported media (attachment ids +
                 // upload URLs), then resolve anything left — an image the
                 // build never generated — against the ACTIVE theme's assets.
-                $content = builder_content_resolve_images($content, $image_map);
+                $content = {{FN_PREFIX}}_content_resolve_images($content, $image_map);
                 $content = str_replace(
                     'theme:./assets/',
                     trailingslashit(get_stylesheet_directory_uri()) . 'assets/',
                     $content
                 );
-                $content = builder_content_sanitize($content);
+                $content = {{FN_PREFIX}}_content_sanitize($content);
 
                 $parent_slug = isset($page['parent']) ? (string) $page['parent'] : '';
                 $id = wp_insert_post(array(
@@ -188,7 +188,7 @@ final class ScaffoldPluginStep implements Step
                 $state['changed_front'] = true;
             }
 
-            update_option(BUILDER_CONTENT_STATE_OPTION, $state);
+            update_option({{CONST_PREFIX}}_CONTENT_STATE_OPTION, $state);
             flush_rewrite_rules();
         }
 
@@ -200,7 +200,7 @@ final class ScaffoldPluginStep implements Step
          * state option can undo the import on deactivation. A file the build
          * never shipped is skipped — its markup falls back to the theme.
          */
-        function builder_content_import_images(&$attachment_ids) {
+        function {{FN_PREFIX}}_content_import_images(&$attachment_ids) {
             if (!is_file(__DIR__ . '/images.json')) {
                 return array();
             }
@@ -210,14 +210,31 @@ final class ScaffoldPluginStep implements Step
                 : array();
 
             $map = array();
+            $images_dir = realpath(__DIR__ . '/images');
             foreach ($images as $image) {
+                if (!is_array($image)) {
+                    continue;
+                }
                 $filename = isset($image['filename']) ? (string) $image['filename'] : '';
-                $path = __DIR__ . '/images/' . $filename;
-                if ($filename === '' || !is_file($path)) {
+                // Basename only, same charset CollectImagesStep accepts — reject
+                // path segments so a crafted images.json cannot escape plugin/images/.
+                if ($filename === '' || $filename !== basename($filename)
+                    || !preg_match('/^[a-z0-9-]+\.(?:jpe?g|png)$/i', $filename)) {
+                    continue;
+                }
+                if ($images_dir === false) {
+                    continue;
+                }
+                $path = $images_dir . DIRECTORY_SEPARATOR . $filename;
+                if (!is_file($path)) {
+                    continue;
+                }
+                $real = realpath($path);
+                if ($real === false || strpos($real, $images_dir . DIRECTORY_SEPARATOR) !== 0) {
                     continue;
                 }
 
-                $upload = wp_upload_bits($filename, null, (string) file_get_contents($path));
+                $upload = wp_upload_bits($filename, null, (string) file_get_contents($real));
                 if (!empty($upload['error'])) {
                     continue;
                 }
@@ -259,7 +276,7 @@ final class ScaffoldPluginStep implements Step
          * keeps the block attrs and HTML in agreement. Placeholders not in
          * the map are left for the caller's theme fallback.
          */
-        function builder_content_resolve_images($content, $map) {
+        function {{FN_PREFIX}}_content_resolve_images($content, $map) {
             if ($map === array()) {
                 return $content;
             }
@@ -305,7 +322,7 @@ final class ScaffoldPluginStep implements Step
          * and activation. wp_kses() is not usable for this — it mangles the
          * block comments the content is made of.
          */
-        function builder_content_sanitize($content) {
+        function {{FN_PREFIX}}_content_sanitize($content) {
             $content = (string) preg_replace('#<script\b[^>]*>.*?</script\s*>#is', '', $content);
             $content = (string) preg_replace('#</?(script|iframe|object|embed|applet|base)\b[^>]*>#i', '', $content);
             // Event handlers are matched only inside tags so prose is never touched.
@@ -324,8 +341,8 @@ final class ScaffoldPluginStep implements Step
          * the front-page options it changed; leaves anything the user created
          * alone.
          */
-        function builder_content_deactivate() {
-            $state = get_option(BUILDER_CONTENT_STATE_OPTION);
+        function {{FN_PREFIX}}_content_deactivate() {
+            $state = get_option({{CONST_PREFIX}}_CONTENT_STATE_OPTION);
             if (!is_array($state)) {
                 return;
             }
@@ -351,7 +368,7 @@ final class ScaffoldPluginStep implements Step
                 update_option('page_on_front', (int) $state['page_on_front']);
             }
 
-            delete_option(BUILDER_CONTENT_STATE_OPTION);
+            delete_option({{CONST_PREFIX}}_CONTENT_STATE_OPTION);
             flush_rewrite_rules();
         }
 

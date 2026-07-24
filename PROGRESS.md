@@ -37,7 +37,7 @@ The pipeline (current — see **Phase 3** below for the design-half refactor):
 | 3 | apply-identity   | det | siteSpec → filled style.css/readme.txt |
 | 4a | theme-json    | LLM | meta.json prompt + siteSpec → theme/theme.json (v3); **design decisions made inline** (no design.md) |
 | 4b | section-plan  | LLM | meta.json prompt + siteSpec → sections.json (ordered section briefs). **Runs concurrently with theme-json** (`ConcurrentGroup`, one batched call) |
-| 5 | sections        | LLM | siteSpec + theme.json + sections.json → parts/{header,footer,section-*}.html. **One concurrent batch — every part generated in parallel** (with AI_IMAGE placeholders) |
+| 5 | sections        | LLM | siteSpec + theme.json + sections.json → parts/{header,footer,section-*}.html. **One warm-up probe primes the prompt cache, then one concurrent batch — every part generated in parallel** (with AI_IMAGE placeholders) |
 | 6 | assemble-landing-page | det | sections.json + parts/ → templates/{front-page,index}.html (compose template parts in order) + theme.json templateParts |
 | 7 | collect-images  | det | parts/ + templates/ → images.json (parse AI_IMAGE placeholders; before fix-blocks) |
 | 8 | fix-blocks      | det | templates/ + parts/ → same files re-serialized (block validation) |
@@ -66,16 +66,15 @@ This overlaps theme-json beside the section plan, and generates every landing-pa
 part (header, footer, each section) at once — replacing the old single
 landing-page mega-call that dominated build time.
 
-**Block validation fixer** (`bin/block-fixer/`, step 8): a verbatim copy of telex's
-`server/scripts/block-fixer` lib (`blockFixer.js` + `paragraphFixer.js`) plus a
-one-shot CLI (`fix-templates.js`). AI-generated block markup often carries
-style/attribute/element-order mismatches that trigger "unexpected or invalid
-content" in the editor/Playground; the fixer parses each `templates/*.html` and
-`parts/*.html` with `@wordpress/blocks` and re-serializes it to match WordPress
-`save()` exactly. `FixBlocksStep` shells out to Node (`node_modules` is gitignored;
-telex runs the same lib as a warm HTTP sidecar). Re-serialization is idempotent.
+**Block validation fixer** (`PhpBlockFixer`, step 8): a dependency-free PHP 8.1
+parser and serializer canonicalizes AI-generated block markup so its saved HTML
+matches the registered WordPress block contracts. The implementation preserves
+JavaScript JSON/comment semantics, applies reviewed block supports and
+deprecations, fails closed for unsupported registered inputs, and stages all
+files before committing changes. A public invocation runs to a fixed point and
+is idempotent; production builds require neither Node nor `node_modules`.
 
-**Tests: 62 unit + 2 integration = 64 passing.** Run with
+**Tests: 725 unit + 2 integration = 727 passing.** Run with
 `php tests/run.php` and `php tests/run-integration.php`. The integration test
 runs the real `Pipeline` with a `FakeLlm` and asserts the output passes
 `ThemeValidator` (files present, theme.json v3, balanced block grammar, no

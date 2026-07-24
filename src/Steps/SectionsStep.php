@@ -7,6 +7,7 @@ use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\FooterUnit;
@@ -41,6 +42,8 @@ use Automattic\SiteBuild\Units\SectionUnit;
  */
 final class SectionsStep implements Step
 {
+    private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
+
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
 
@@ -61,6 +64,17 @@ final class SectionsStep implements Step
         . ' Either omit navigation entirely (the wordmark carries the header) or hand-author a small `wp:navigation`'
         . ' of `wp:navigation-link` items targeting section anchors from the HOMEPAGE OUTLINE (each outline line ends'
         . ' with its [#anchor]; a link\'s "url" is that anchor, e.g. href="#menu-highlights").';
+
+    /**
+     * {{nav_rule}} text for header generation given how many pages the plan has.
+     *
+     * Public so host adapters (e.g. wpcom queue phase) share the same source of
+     * truth as jobs() — do not re-mirror the private constants.
+     */
+    public static function navRuleFor(int $pageCount): string
+    {
+        return $pageCount > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE;
+    }
 
     private SectionUnit $sectionUnit;
     private HeaderUnit $headerUnit;
@@ -131,7 +145,9 @@ final class SectionsStep implements Step
     public function run(Project $project): void
     {
         $jobs = $this->jobs($project);
-        $parts = $this->llm->completeBatch(self::requestsFor($jobs));
+        $requests = self::requestsFor($jobs);
+        $this->warmSectionCache($requests);
+        $parts = $this->llm->completeBatch($requests);
 
         // Validate EVERY part before writing any, so one bad part doesn't leave
         // a half-written set of files on disk (the build aborts either way).
@@ -152,7 +168,7 @@ final class SectionsStep implements Step
      * Ask each job's unit to render its self-contained LLM request.
      *
      * @param array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}> $jobs
-     * @return array<string,array{prompt:string,model?:string,temperature?:float}>
+     * @return array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}>
      */
     private static function requestsFor(array $jobs): array
     {
@@ -161,6 +177,35 @@ final class SectionsStep implements Step
             $requests[$key] = $job['unit']->request($job['input']);
         }
         return $requests;
+    }
+
+    /**
+     * Warm the exact cached context used by the deterministic first section.
+     * A failed probe only forfeits first-window cache hits; it must not abort
+     * the build or change the subsequent concurrent fan-out.
+     *
+     * @param array<string,array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}> $requests
+     */
+    private function warmSectionCache(array $requests): void
+    {
+        foreach ($requests as $request) {
+            if (!isset($request['cached_prefixes'])) {
+                continue;
+            }
+
+            $opts = $request;
+            unset($opts['prompt']);
+            $opts['max_tokens'] = 1;
+            $opts['tolerate_empty'] = true;
+            $opts['log_label'] = 'section-cache-warm';
+
+            try {
+                $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
+            } catch (\Throwable $e) {
+                fwrite(STDERR, "    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+            }
+            return;
+        }
     }
 
     /**
@@ -189,7 +234,7 @@ final class SectionsStep implements Step
                 'input' => $common + [
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
-                    'nav_rule'   => count($pages) > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE,
+                    'nav_rule'   => self::navRuleFor(count($pages)),
                     'archetype_assignment' => self::headerAssignment($frontSections, DesignDirectionStep::canvasFor($project), count($pages)),
                 ],
                 'file'  => 'parts/header.html',
@@ -206,6 +251,21 @@ final class SectionsStep implements Step
             // A compact outline of THIS page, so each section knows its place.
             $outline = self::outline($sections);
             foreach ($sections as $i => $section) {
+                $role = trim((string) ($section['role'] ?? ''));
+                $expectedRole = SectionRole::forPosition($i, count($sections));
+                if ($role !== $expectedRole) {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    throw new \RuntimeException(
+                        "sections: page '{$page['slug']}' section '{$slug}' has role '{$role}', expected '{$expectedRole}'"
+                    );
+                }
+                $type = trim((string) ($section['type'] ?? ''));
+                if ($type === '') {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    throw new \RuntimeException(
+                        "sections: page '{$page['slug']}' section '{$slug}' has missing semantic type"
+                    );
+                }
                 $input = $common + [
                     'outline'   => $outline,
                     'page'      => [
@@ -221,8 +281,7 @@ final class SectionsStep implements Step
                     'unit'  => $this->sectionUnit,
                     'input' => $input,
                     'file'  => 'parts/' . $key . '.html',
-                ];
-            }
+                ];            }
         }
 
         return $jobs;
@@ -345,7 +404,10 @@ final class SectionsStep implements Step
         }
 
         $lines = [];
-        foreach (['title' => 'Title', 'type' => 'Type', 'purpose' => 'Purpose', 'content_notes' => 'Notes'] as $key => $label) {
+        foreach (
+            ['title' => 'Title', 'role' => 'Role', 'type' => 'Type', 'purpose' => 'Purpose', 'content_notes' => 'Notes']
+            as $key => $label
+        ) {
             $value = trim((string) ($hero[$key] ?? ''));
             if ($value !== '') {
                 $lines[] = "{$label}: {$value}";
@@ -355,8 +417,9 @@ final class SectionsStep implements Step
     }
 
     /**
-     * The planned hero section, falling back to the first section when the plan
-     * has no hero-typed one.
+     * The planned section with the structural hero ROLE — the semantic type is
+     * free-form and a `type: hero` elsewhere on the page must not win. No
+     * fallback: a plan without a hero role has no hero.
      *
      * @param array<int,array<string,mixed>> $sections
      * @return array<string,mixed>|null
@@ -364,12 +427,11 @@ final class SectionsStep implements Step
     private static function heroSection(array $sections): ?array
     {
         foreach ($sections as $s) {
-            if ((string) ($s['type'] ?? '') === 'hero') {
+            if ((string) ($s['role'] ?? '') === SectionRole::HERO) {
                 return $s;
             }
         }
-        $first = $sections[0] ?? null;
-        return is_array($first) ? $first : null;
+        return null;
     }
 
     /**
