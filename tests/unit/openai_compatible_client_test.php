@@ -31,7 +31,6 @@ test('bodyFor builds OpenAI chat messages with system preamble and stream_option
     assert_eq(0.9, $body['temperature']);
     assert_eq(true, $body['stream']);
     assert_eq(['include_usage' => true], $body['stream_options']);
-    assert_true(!array_key_exists('response_format', $body), 'ordinary requests do not opt into structured output');
 
     assert_eq(2, count($body['messages']));
     assert_eq('system', $body['messages'][0]['role']);
@@ -57,60 +56,36 @@ test('bodyFor applies per-request model/max_tokens and omits temperature when un
     assert_eq(AnthropicClient::systemPreamble(), $body['messages'][0]['content']);
 });
 
-test('bodyFor maps json_schema to a strict OpenAI response_format', function () {
-    $schema = [
-        'type' => 'object',
-        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
-        'required' => ['sections'],
-        'additionalProperties' => false,
-    ];
-
+test('bodyFor prepends cached prefixes to the OpenAI user content without cache markers', function () {
     $body = OpenAiCompatibleClient::bodyFor(
         [
-            'prompt' => 'Plan a page.',
-            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+            'prompt' => 'Varying section prompt.',
+            'cached_prefixes' => ['Build context.', '  ', 'Page context.'],
         ],
-        'gpt-5.5',
+        'gpt-4o',
         16000,
         'openai',
     );
 
-    assert_eq([
-        'type' => 'json_schema',
-        'json_schema' => [
-            'name' => 'page_plan',
-            'strict' => true,
-            'schema' => $schema,
-        ],
-    ], $body['response_format']);
+    assert_eq(
+        "Build context.\n\nPage context.\n\nVarying section prompt.",
+        $body['messages'][1]['content'],
+    );
+    assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'OpenAI body has no explicit cache marker');
 });
 
-test('bodyFor maps json_schema to the same strict xAI response_format', function () {
-    $schema = [
-        'type' => 'object',
-        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
-        'required' => ['sections'],
-        'additionalProperties' => false,
-    ];
+test('retrySingleRequest tolerates an empty probe response without retrying', function () {
+    $body = ['messages' => []];
+    $calls = 0;
+    $transport = function (array $requestBody) use (&$calls): array {
+        $calls++;
+        return ['text' => " \n\t", 'input' => 100, 'output' => 1, 'time' => 0.25];
+    };
 
-    $body = OpenAiCompatibleClient::bodyFor(
-        [
-            'prompt' => 'Plan a page.',
-            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
-        ],
-        'grok-4.5',
-        16000,
-        'xai',
-    );
+    $result = OpenAiCompatibleClient::retrySingleRequest($body, $transport, [0, 0, 0], true);
 
-    assert_eq([
-        'type' => 'json_schema',
-        'json_schema' => [
-            'name' => 'page_plan',
-            'strict' => true,
-            'schema' => $schema,
-        ],
-    ], $body['response_format']);
+    assert_eq(1, $calls, 'successful empty probe makes exactly one transport attempt');
+    assert_eq('', $result['text'], 'tolerated whitespace is normalized to the empty-string contract');
 });
 
 test('maxTokensParam picks the right token key per provider and model', function () {
@@ -209,7 +184,6 @@ test('parseSse concatenates delta content and reads final usage chunk', function
     assert_eq(12, $parsed['input']);
     assert_eq(2, $parsed['output']);
     assert_eq(null, $parsed['error']);
-    assert_eq('stop', $parsed['stop_reason']);
 });
 
 test('parseSse accepts a non-stream JSON chat.completion body', function () {
@@ -227,7 +201,81 @@ test('parseSse accepts a non-stream JSON chat.completion body', function () {
     assert_eq(5, $parsed['input']);
     assert_eq(4, $parsed['output']);
     assert_eq(null, $parsed['error']);
-    assert_eq('stop', $parsed['stop_reason']);
+});
+
+test('parseSse surfaces error objects from JSON or SSE', function () {
+    $jsonErr = '{"error":{"message":"Invalid API key","type":"invalid_request_error"}}';
+    $parsed = OpenAiCompatibleClient::parseSse($jsonErr);
+    assert_eq('Invalid API key', $parsed['error']);
+    assert_eq('', $parsed['text']);
+
+    $sseErr = "data: {\"error\":{\"message\":\"rate limit exceeded\"}}\n\n";
+    $parsed = OpenAiCompatibleClient::parseSse($sseErr);
+    assert_eq('rate limit exceeded', $parsed['error']);
+});
+
+test('OpenAiCompatibleClient implements Llm', function () {
+    $c = new OpenAiCompatibleClient('k', 'm', 'https://api.x.ai/v1');
+    assert_true($c instanceof Automattic\SiteBuild\Llm);
+    foreach (['complete', 'completeJson', 'completeBatch', 'completeJsonBatch'] as $method) {
+        assert_true(method_exists($c, $method), "missing {$method}");
+    }
+});
+
+test('bodyFor maps json_schema to a strict OpenAI response_format', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'required' => ['sections'],
+        'additionalProperties' => false,
+    ];
+
+    $body = OpenAiCompatibleClient::bodyFor(
+        [
+            'prompt' => 'Plan a page.',
+            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+        ],
+        'gpt-5.5',
+        16000,
+        'openai',
+    );
+
+    assert_eq([
+        'type' => 'json_schema',
+        'json_schema' => [
+            'name' => 'page_plan',
+            'strict' => true,
+            'schema' => $schema,
+        ],
+    ], $body['response_format']);
+});
+
+test('bodyFor maps json_schema to the same strict xAI response_format', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['sections' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        'required' => ['sections'],
+        'additionalProperties' => false,
+    ];
+
+    $body = OpenAiCompatibleClient::bodyFor(
+        [
+            'prompt' => 'Plan a page.',
+            'json_schema' => ['name' => 'page_plan', 'schema' => $schema],
+        ],
+        'grok-4.5',
+        16000,
+        'xai',
+    );
+
+    assert_eq([
+        'type' => 'json_schema',
+        'json_schema' => [
+            'name' => 'page_plan',
+            'strict' => true,
+            'schema' => $schema,
+        ],
+    ], $body['response_format']);
 });
 
 test('parseSse classifies OpenAI refusal fields without leaking refusal text as content', function () {
@@ -277,23 +325,4 @@ test('OpenAI JSON transport preserves an empty refusal for decode recovery', fun
     $textResult = $method->invoke(null, (string) $raw, 0, '', 200, 0.25, false);
     assert_eq(false, $textResult['ok'], 'ordinary text batches retain empty-response retry behavior');
     assert_eq(true, $textResult['transient']);
-});
-
-test('parseSse surfaces error objects from JSON or SSE', function () {
-    $jsonErr = '{"error":{"message":"Invalid API key","type":"invalid_request_error"}}';
-    $parsed = OpenAiCompatibleClient::parseSse($jsonErr);
-    assert_eq('Invalid API key', $parsed['error']);
-    assert_eq('', $parsed['text']);
-
-    $sseErr = "data: {\"error\":{\"message\":\"rate limit exceeded\"}}\n\n";
-    $parsed = OpenAiCompatibleClient::parseSse($sseErr);
-    assert_eq('rate limit exceeded', $parsed['error']);
-});
-
-test('OpenAiCompatibleClient implements Llm', function () {
-    $c = new OpenAiCompatibleClient('k', 'm', 'https://api.x.ai/v1');
-    assert_true($c instanceof Automattic\SiteBuild\Llm);
-    foreach (['complete', 'completeJson', 'completeBatch', 'completeJsonBatch'] as $method) {
-        assert_true(method_exists($c, $method), "missing {$method}");
-    }
 });

@@ -91,9 +91,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.'],
         ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.'],
     ]]);
-    // sections (raw markup) — header, footer, then home's parts, then menu's, in requests() order
+    // sections (raw markup) — disposable cache probe, then header, footer,
+    // home's parts, and menu's parts in requests() order
     $hdr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
     $ftr = '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>(c) Hearth</p><!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $llm->queueText('OK');
     $llm->queueText($hdr);
     $llm->queueText($ftr);
     $llm->queueText(

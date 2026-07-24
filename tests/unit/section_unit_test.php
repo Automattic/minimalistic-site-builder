@@ -37,6 +37,12 @@ function section_unit_input(): array
     ];
 }
 
+/** Reconstruct the logical prompt text from a layered LLM request. */
+function section_unit_request_text(array $request): string
+{
+    return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
+}
+
 test('SectionUnit generates normalized markup from self-contained input', function () {
     $llm = new FakeLlm();
     $llm->queueText(
@@ -60,7 +66,9 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq(0.42, $llm->calls[0]['opts']['temperature'] ?? null);
     assert_eq('page-unit-page--unit-section', $llm->calls[0]['opts']['log_label'] ?? null);
 
-    $prompt = $llm->calls[0]['prompt'];
+    $sent = $llm->calls[0]['opts'] + ['prompt' => $llm->calls[0]['prompt']];
+    assert_eq(2, count($sent['cached_prefixes'] ?? []), 'direct execution forwards both cache layers');
+    $prompt = section_unit_request_text($sent);
     assert_contains('Role:     hero', $prompt);
     foreach ([
         'UNIT-SPEC-SENTINEL',
@@ -101,11 +109,51 @@ test('SectionUnit request preparation does not call the LLM', function () {
 
     $request = $unit->request($input);
 
-    assert_contains('UNIT-TITLE-SENTINEL', $request['prompt']);
-    assert_contains('DECODED-SPEC-SENTINEL', $request['prompt']);
-    assert_contains('decoded-theme-sentinel', $request['prompt']);
+    $prompt = section_unit_request_text($request);
+    assert_contains('UNIT-TITLE-SENTINEL', $prompt);
+    assert_contains('DECODED-SPEC-SENTINEL', $prompt);
+    assert_contains('decoded-theme-sentinel', $prompt);
     assert_eq(0, $llm->completeCalls);
     assert_eq(0, $llm->completeBatchCalls);
+});
+
+test('SectionUnit layered request loses only cache marker separators', function () {
+    $input = section_unit_input();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $request = (new SectionUnit(new FakeLlm(), $renderer))->request($input);
+
+    $composition = $renderer->render('section-composition.md', [
+        'layout_archetype' => $input['section']['layout_archetype'],
+        'background'       => $input['section']['background'],
+        'vertical_density' => $input['section']['vertical_density'],
+        'handoff'          => $input['section']['handoff'],
+        'neighbors'        => $input['neighbors'],
+    ]);
+    $rendered = $renderer->render('section.md', [
+        'site_spec'         => $input['site_spec'],
+        'language'          => $input['language'],
+        'theme_json'        => $input['theme_json'],
+        'design_direction'  => $input['design_direction'],
+        'outline'           => $input['outline'],
+        'site_pages'        => $input['site_pages'],
+        'page_title'        => $input['page']['title'],
+        'page_path'         => $input['page']['path'],
+        'section_title'     => $input['section']['title'],
+        'section_slug'      => $input['section']['slug'],
+        'section_role'      => $input['section']['role'],
+        'section_type'      => $input['section']['type'],
+        'section_purpose'   => $input['section']['purpose'],
+        'content_notes'     => $input['section']['content_notes'],
+        'composition'       => $composition,
+        'image_instructions' => $renderer->render('image-generation.md', []),
+    ]);
+    $withoutMarkers = rtrim(str_replace([
+        "<!-- section-cache-layer:build -->\n",
+        "<!-- section-cache-layer:page -->\n",
+        "<!-- section-cache-layer:brief -->\n",
+    ], '', $rendered), "\r\n");
+
+    assert_eq($withoutMarkers, section_unit_request_text($request));
 });
 
 test('SectionUnit rejects malformed nested HTTP input before calling the LLM', function () {

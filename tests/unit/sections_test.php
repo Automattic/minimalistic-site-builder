@@ -43,12 +43,21 @@ function sections_fixture(): array
     return [$project, $tmp];
 }
 
+/** Reconstruct the logical prompt text from a possibly layered request. */
+function sections_request_text(array $request): string
+{
+    return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
+}
+
 test('sections requests one part per header/footer/page-section', function () {
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_eq(['header', 'footer', 'page-home--hero', 'page-home--about'], array_keys($reqs));
+    assert_true(!array_key_exists('cached_prefixes', $reqs['header']), 'header is not cached');
+    assert_true(!array_key_exists('cached_prefixes', $reqs['footer']), 'footer is not cached');
+    assert_eq(2, count($reqs['page-home--hero']['cached_prefixes'] ?? []), 'sections carry both cache layers');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -71,13 +80,19 @@ test('sections fans out across every page and gives each section its own page co
         array_keys($reqs)
     );
 
+    $homePrefixes = $reqs['page-home--hero']['cached_prefixes'] ?? [];
+    $menuPrefixes = $reqs['page-menu--menu-hero']['cached_prefixes'] ?? [];
+    assert_eq($homePrefixes[0] ?? null, $menuPrefixes[0] ?? null, 'build layer is byte-identical across pages');
+    assert_true(($homePrefixes[1] ?? null) !== ($menuPrefixes[1] ?? null), 'page layer differs across pages');
+
     // Each section sees ITS page's outline, not another page's.
-    assert_contains('1. Menu Hero (menu-introduction)', $reqs['page-menu--breads']['prompt']);
-    assert_true(!str_contains($reqs['page-menu--breads']['prompt'], '1. Hero (hero)'), 'menu section not given the home outline');
-    assert_contains('"Menu"', $reqs['page-menu--breads']['prompt']);
+    $menuBreads = sections_request_text($reqs['page-menu--breads']);
+    assert_contains('1. Menu Hero (menu-introduction)', $menuBreads);
+    assert_true(!str_contains($menuBreads, '1. Hero (hero)'), 'menu section not given the home outline');
+    assert_contains('"Menu"', $menuBreads);
 
     // Every part knows the whole site's page list (for internal links / nav).
-    assert_contains('/menu/', $reqs['page-home--hero']['prompt']);
+    assert_contains('/menu/', sections_request_text($reqs['page-home--hero']));
     assert_contains('/menu/', $reqs['header']['prompt']);
     assert_contains('/menu/', $reqs['footer']['prompt']);
 
@@ -119,7 +134,7 @@ test('sections wires the spec language into every part prompt', function () {
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     foreach (['header', 'footer', 'page-home--hero', 'page-home--about'] as $key) {
-        assert_contains('in es-AR', $reqs[$key]['prompt']);
+        assert_contains('in es-AR', sections_request_text($reqs[$key]));
     }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -129,7 +144,7 @@ test('sections falls back to a descriptive language phrase for specs without one
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    assert_contains('in the language the user prompt is written in', $reqs['page-home--hero']['prompt']);
+    assert_contains('in the language the user prompt is written in', sections_request_text($reqs['page-home--hero']));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -138,7 +153,7 @@ test('sections passes each part its assigned composition and its neighbors\' ass
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    $hero = $reqs['page-home--hero']['prompt'];
+    $hero = sections_request_text($reqs['page-home--hero']);
     assert_true((bool) preg_match('/Layout archetype:\s+full-bleed-cover/', $hero), 'hero archetype in prompt');
     assert_true((bool) preg_match('/Background:\s+image/', $hero), 'hero background in prompt');
     assert_true((bool) preg_match('/Vertical density:\s+standard/', $hero), 'hero density in prompt');
@@ -147,7 +162,7 @@ test('sections passes each part its assigned composition and its neighbors\' ass
     assert_contains('Below: "About" — asymmetric-split on base background, standard vertical density', $hero);
     assert_contains('If SECTION Notes mention a different layout or background', $hero);
 
-    $about = $reqs['page-home--about']['prompt'];
+    $about = sections_request_text($reqs['page-home--about']);
     assert_true((bool) preg_match('/Layout archetype:\s+asymmetric-split/', $about), 'about archetype in prompt');
     assert_contains('Above: "Hero" — full-bleed-cover on image background, standard vertical density', $about);
     assert_contains('Below: the site footer (this is the last section)', $about);
@@ -227,6 +242,7 @@ test('heroBrief selects only the structural hero role, not the semantic type', f
 test('sections writes header, footer and a part per page section', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -236,7 +252,7 @@ test('sections writes header, footer and a part per page section', function () {
     (new SectionsStep($llm, $renderer))->run($project);
 
     assert_eq(1, $llm->completeBatchCalls, 'all parts sent through one concurrent batch');
-    assert_eq(0, $llm->completeCalls, 'step never falls back to sequential single calls');
+    assert_eq(1, $llm->completeCalls, 'step sends exactly one single cache warm-up probe');
     foreach (['parts/header.html', 'parts/footer.html', 'parts/page-home--hero.html', 'parts/page-home--about.html'] as $rel) {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
         assert_contains('wp:', $project->readText('theme/' . $rel));
@@ -271,6 +287,7 @@ test('constrainedPart leaves an explicit layout and non-group markup alone', fun
 test('sections writes header AND footer with a constrained layout when the model omits one', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group {"className":"header-overlay"} --><!-- wp:site-title /--><!-- /wp:group -->');
     // The naturaleza6 failure: footer group with align:full but no layout —
     // flow, not constrained, so its text ran edge-to-edge at the viewport.
@@ -341,6 +358,7 @@ test('normalizePresetRefs leaves unknown refs and CSS custom properties untouche
 test('sections strips a stray markdown code fence from a part response', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
+    $llm->queueText('OK');
     $llm->queueText("```html\n<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->\n```");
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -358,6 +376,7 @@ test('sections strips a stray markdown code fence from a part response', functio
 test('sections throws when a part has no block markup', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('just text, no blocks'); // hero — invalid
@@ -373,6 +392,7 @@ test('sections throws when a part has no block markup', function () {
 test('sections writes nothing when any part is invalid (no partial output)', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
+    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header — valid
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
     $llm->queueText('just text, no blocks');                               // page-home--hero — invalid
@@ -416,7 +436,7 @@ test('section prompts carry the slug as the anchor and the outline exposes it', 
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    $about = $reqs['page-home--about']['prompt'];
+    $about = sections_request_text($reqs['page-home--about']);
     assert_contains('"anchor":"about"', $about);
     assert_contains('id="about"', $about);
     assert_contains('[#about]', $about); // its own outline line ends with the anchor

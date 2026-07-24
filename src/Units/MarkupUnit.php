@@ -18,7 +18,7 @@ interface MarkupUnit
     /**
      * Render one self-contained LLM request without calling the LLM.
      *
-     * @return array{prompt:string,model?:string,temperature?:float}
+     * @return array{prompt:string,model?:string,temperature?:float,cached_prefixes?:list<string>}
      */
     public function request(array $input): array;
 
