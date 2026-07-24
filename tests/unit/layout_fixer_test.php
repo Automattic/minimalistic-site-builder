@@ -359,6 +359,21 @@ test('layout fixer folds top-level border and typography attributes into style',
     assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
 });
 
+test('layout fixer preserves support-named attributes on unregistered blocks', function () {
+    // The serializer deliberately preserves custom/missing blocks raw. Their
+    // own registry may define these as real top-level attributes, so only the
+    // pinned core registry can authorize the style-support repair.
+    $markup = '<!-- wp:vendor/card {"spacing":{"density":"compact"},"border":{"variant":"soft"},"typography":{"scale":"display"}} -->'
+        . '<div class="vendor-card">Card</div><!-- /wp:vendor/card -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq([], $r['notes']);
+    assert_eq($markup, $r['markup']);
+
+    $serialized = (new \Automattic\SiteBuild\BlockSerializer\Serializer())->transform($r['markup'])->html;
+    assert_contains('wp:vendor/card {"spacing":{"density":"compact"},"border":{"variant":"soft"},"typography":{"scale":"display"}}', $serialized);
+    assert_true(!str_contains($serialized, '"style"'), 'the missing-block fallback must keep the custom attribute domain raw');
+});
+
 test('layout fixer merges a top-level spacing family without overriding the canonical one', function () {
     // The canonical style.spacing members win; only missing ones are adopted.
     $markup = '<!-- wp:group {"spacing":{"padding":{"top":"4rem"},"blockGap":"var:preset|spacing|sm"},"style":{"spacing":{"padding":{"top":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
@@ -368,6 +383,31 @@ test('layout fixer merges a top-level spacing family without overriding the cano
     assert_true(!str_contains($r['markup'], '4rem'), 'the canonical padding must win over the misplaced value');
     assert_contains('merged blockGap into style.spacing', implode("\n", $r['notes']));
     assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer recursively merges split support members and the block fixer drops nothing', function () {
+    // Canonical values win at conflicts (padding.top), while missing nested
+    // members from both padding and blockGap are still recovered.
+    $pre = '<!-- wp:group {"spacing":{"padding":{"top":"4rem","bottom":"var:preset|spacing|md"},"blockGap":{"top":"var:preset|spacing|lg"}},"style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","left":"var:preset|spacing|sm"},"blockGap":{"left":"var:preset|spacing|xs"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="padding-top:var(--wp--preset--spacing--xl);padding-left:var(--wp--preset--spacing--sm);padding-bottom:var(--wp--preset--spacing--md)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($pre, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"padding":{"top":"var:preset|spacing|xl","left":"var:preset|spacing|sm","bottom":"var:preset|spacing|md"}', $r['markup']);
+    assert_contains('"blockGap":{"left":"var:preset|spacing|xs","top":"var:preset|spacing|lg"}', $r['markup']);
+    assert_true(!str_contains($r['markup'], '4rem'), 'the canonical nested padding.top must win');
+    assert_contains('merged padding.bottom/blockGap.top into style.spacing', implode("\n", $r['notes']));
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+
+    $theme = php_block_fixer_test_theme(['parts/split-support-members.html' => $r['markup']]);
+    try {
+        $report = (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme);
+        assert_contains('0 style/class value(s) dropped', $report);
+        $written = file_get_contents($theme . '/parts/split-support-members.html');
+        assert_contains('"padding":{"top":"var:preset|spacing|xl","left":"var:preset|spacing|sm","bottom":"var:preset|spacing|md"}', $written);
+        assert_contains('"blockGap":{"left":"var:preset|spacing|xs","top":"var:preset|spacing|lg"}', $written);
+        assert_contains('padding-bottom:var(--wp--preset--spacing--md)', $written);
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
 });
 
 test('layout fixer composes the top-level fold with the style.padding canonicalization', function () {
@@ -387,6 +427,28 @@ test('layout fixer leaves a non-object top-level support key for the gate', func
     $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
     assert_eq([], $r['notes']);
     assert_eq($markup, $r['markup']);
+});
+
+test('layout fixer leaves explicit non-object style shapes for the gate', function () {
+    foreach (['null', '"invalid"', '[]'] as $styleJson) {
+        $markup = '<!-- wp:group {"style":' . $styleJson . ',"spacing":{"padding":{"left":"1rem"}},"layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group" style="padding-left:1rem"></div><!-- /wp:group -->';
+        $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+        assert_eq([], $r['notes']);
+        assert_eq($markup, $r['markup']);
+    }
+
+    $markup = '<!-- wp:group {"style":null,"spacing":{"padding":{"left":"1rem"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="padding-left:1rem"></div><!-- /wp:group -->';
+    $theme = php_block_fixer_test_theme(['parts/invalid-style-shape.html' => $markup]);
+    try {
+        $error = php_block_fixer_test_exception(
+            static fn () => (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme)
+        );
+        assert_contains("Unsupported comment attribute 'spacing' for core/group", $error->getMessage());
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
 });
 
 test('normalize-layout repair lets the PHP block fixer serialize the atlas repro it rejected', function () {

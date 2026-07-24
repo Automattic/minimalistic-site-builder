@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
+
 /**
  * Deterministic width/rhythm normalization for generated block markup.
  *
@@ -211,15 +213,7 @@ final class LayoutFixer
         return false;
     }
 
-    /**
-     * Style-support families a model may hoist to the top level of the
-     * comment attributes. Safe to fold into style.* unconditionally: no
-     * block in the pinned registry (generated-registry.php, checked across
-     * its registered/supported/observed sections) registers a comment
-     * ATTRIBUTE named "spacing", "border" or "typography" — those names
-     * occur only under each block's "supports" — so a top-level spelling
-     * can never be a real attribute this fold would shadow.
-     */
+    /** Style-support families a model may hoist beside the style attribute. */
     private const TOP_LEVEL_SUPPORT_KEYS = ['spacing', 'border', 'typography'];
 
     /**
@@ -233,9 +227,13 @@ final class LayoutFixer
      * the nesting is wrong — so move the family under style. Runs before
      * canonicalizeSpacingAttributes so a folded spacing family and a
      * misplaced style.padding/style.margin both end at style.spacing.*.
-     * Families already declared at the canonical path win: only members
-     * missing from style.{key} are adopted, mirroring the spacing merge
-     * below. Non-object shapes are left for the gate.
+     * The pinned registry owns the safety boundary: unregistered blocks keep
+     * their attributes byte-for-byte, a block without a registered "style"
+     * destination is not touched, and a future real top-level attribute with
+     * one of these names takes precedence over this repair. Families already
+     * declared at the canonical path win at every conflict; missing object
+     * members are adopted recursively. Non-object family/style shapes are
+     * left for the gate.
      *
      * @param object[] $all
      * @param string[] $notes
@@ -243,23 +241,30 @@ final class LayoutFixer
     private static function canonicalizeTopLevelSupportKeys(array $all, array &$notes): void
     {
         foreach ($all as $node) {
+            $schemas = self::registeredAttributesFor($node->name);
+            if ($schemas === null || !array_key_exists('style', $schemas)) {
+                continue;
+            }
+            $hasStyle = property_exists($node->attrs, 'style');
+            $style = $hasStyle ? $node->attrs->style : null;
+            if ($hasStyle && !$style instanceof \stdClass) {
+                continue; // explicit invalid style shape — leave every family for the gate
+            }
+
             foreach (self::TOP_LEVEL_SUPPORT_KEYS as $key) {
-                if (!property_exists($node->attrs, $key)) {
+                if (array_key_exists($key, $schemas) || !property_exists($node->attrs, $key)) {
                     continue;
                 }
                 $misplaced = $node->attrs->{$key};
                 if (!$misplaced instanceof \stdClass) {
                     continue; // unrecognizable family shape — leave it for the gate
                 }
-                $style = $node->attrs->style ?? null;
-                if ($style !== null && !$style instanceof \stdClass) {
-                    continue; // unrecognizable style shape — leave it for the gate
-                }
                 unset($node->attrs->{$key});
                 $node->dirty = true;
 
-                if ($style === null) {
+                if (!$hasStyle) {
                     $style = $node->attrs->style = new \stdClass();
+                    $hasStyle = true;
                 }
                 if (!property_exists($style, $key)) {
                     $style->{$key} = $misplaced;
@@ -268,13 +273,7 @@ final class LayoutFixer
                 }
                 $canonical = $style->{$key};
                 if ($canonical instanceof \stdClass) {
-                    $adopted = [];
-                    foreach (get_object_vars($misplaced) as $member => $value) {
-                        if (!property_exists($canonical, $member)) {
-                            $canonical->{$member} = $value;
-                            $adopted[] = $member;
-                        }
-                    }
+                    $adopted = self::mergeMissingObjectMembers($canonical, $misplaced);
                     $notes[] = $adopted === []
                         ? "wp:{$node->name} declared \"{$key}\" at the top level of its attributes — dropped it in favor of the existing style.{$key}"
                         : "wp:{$node->name} declared \"{$key}\" at the top level of its attributes where WordPress ignores it — merged " . implode('/', $adopted) . " into style.{$key}";
@@ -283,6 +282,51 @@ final class LayoutFixer
                 $notes[] = "wp:{$node->name} declared \"{$key}\" at the top level of its attributes — dropped it in favor of the existing style.{$key}";
             }
         }
+    }
+
+    /**
+     * Resolve a serialized block name against the frozen registry. WordPress
+     * omits the core/ namespace in block comments, while custom names retain
+     * their namespace.
+     *
+     * @return array<string,array<string,mixed>>|null
+     */
+    private static function registeredAttributesFor(string $serializedName): ?array
+    {
+        static $registry = null;
+        $registry ??= new BlockRegistry();
+        $name = str_contains($serializedName, '/') ? $serializedName : 'core/' . $serializedName;
+        return $registry->isRegistered($name) ? $registry->attributes($name) : null;
+    }
+
+    /**
+     * Merge only absent members, descending when both sides are objects.
+     * Existing canonical values win at every scalar or shape conflict.
+     *
+     * @return string[] dotted paths adopted from $misplaced
+     */
+    private static function mergeMissingObjectMembers(
+        \stdClass $canonical,
+        \stdClass $misplaced,
+        string $prefix = '',
+    ): array
+    {
+        $adopted = [];
+        foreach (get_object_vars($misplaced) as $member => $value) {
+            $path = $prefix === '' ? $member : $prefix . '.' . $member;
+            if (!property_exists($canonical, $member)) {
+                $canonical->{$member} = $value;
+                $adopted[] = $path;
+                continue;
+            }
+            if ($canonical->{$member} instanceof \stdClass && $value instanceof \stdClass) {
+                $adopted = array_merge(
+                    $adopted,
+                    self::mergeMissingObjectMembers($canonical->{$member}, $value, $path),
+                );
+            }
+        }
+        return $adopted;
     }
 
     /**
