@@ -3,15 +3,45 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Json;
 
-/** Small recursive-descent JSON.parse compatibility decoder. */
+/**
+ * Small recursive-descent JSON.parse compatibility decoder.
+ *
+ * By default duplicate object keys follow JSON.parse exactly: the last
+ * declaration wins wholesale. Block comment attributes opt into
+ * $mergeDuplicateObjectKeys instead, because a model that emits
+ * {"style":{...}},"style":{...}} plainly meant one object — deep-merging
+ * object values (last wins on non-object conflicts) preserves every member
+ * the last-wins collapse would silently drop, and the merged key paths stay
+ * reviewable through mergedDuplicateKeyPaths().
+ */
 final class JsonDecoder
 {
     private int $offset = 0;
     private int $length;
 
-    public function __construct(private string $source)
-    {
+    /** @var list<string> dotted key path of the object member being parsed */
+    private array $keyPath = [];
+
+    /** @var list<string> */
+    private array $mergedKeyPaths = [];
+
+    public function __construct(
+        private string $source,
+        private bool $mergeDuplicateObjectKeys = false,
+    ) {
         $this->length = strlen($source);
+    }
+
+    /**
+     * Dotted key paths (array indices contribute no segment) whose duplicate
+     * declarations were merged by the last decode() call. Empty unless
+     * $mergeDuplicateObjectKeys was requested and duplicates existed.
+     *
+     * @return list<string>
+     */
+    public function mergedDuplicateKeyPaths(): array
+    {
+        return array_values(array_unique($this->mergedKeyPaths));
     }
 
     public function decode(): JsonValue
@@ -59,7 +89,14 @@ final class JsonDecoder
                 $this->fail("Expected ':' after object key");
             }
             $this->whitespace();
-            $object->set($key, $this->value());
+            $this->keyPath[] = $key;
+            $value = $this->value();
+            array_pop($this->keyPath);
+            if ($this->mergeDuplicateObjectKeys && $object->has($key)) {
+                $this->mergedKeyPaths[] = implode('.', [...$this->keyPath, $key]);
+                $value = self::mergeValues($object->get($key), $value);
+            }
+            $object->set($key, $value);
             $this->whitespace();
             if ($this->consume('}')) {
                 return $object;
@@ -69,6 +106,27 @@ final class JsonDecoder
             }
             $this->whitespace();
         }
+    }
+
+    /**
+     * Deterministic duplicate-declaration merge: two objects merge member by
+     * member (recursively), anything else resolves exactly as JSON.parse
+     * would — the later declaration wins.
+     */
+    private static function mergeValues(?JsonValue $existing, JsonValue $incoming): JsonValue
+    {
+        if (!$existing instanceof JsonObject || !$incoming instanceof JsonObject) {
+            return $incoming;
+        }
+        foreach ($incoming->entries() as $entry) {
+            $existing->set(
+                $entry['key'],
+                $existing->has($entry['key'])
+                    ? self::mergeValues($existing->get($entry['key']), $entry['value'])
+                    : $entry['value']
+            );
+        }
+        return $existing;
     }
 
     private function array(): JsonArray

@@ -19,7 +19,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * the duplicate edge between consecutive sections on the same background.
  * Every page in pages.json is rewritten independently — adjacency only exists
  * within one rendered page, and the footer (which renders on every page)
- * supplies each page's following surface.
+ * supplies each page's following surface. Image bands that cannot safely own
+ * cover spacing are delivered with solid-band spacing and recorded as durable
+ * warnings; ordinary deterministic spacing adjustments are not warnings.
  */
 final class SectionRhythmStep implements Step
 {
@@ -39,7 +41,7 @@ final class SectionRhythmStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['pages.json', 'theme/parts/*'],
-            writes: ['theme/parts/*'],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -52,6 +54,7 @@ final class SectionRhythmStep implements Step
         $footerSurface = self::footerSurface($project);
         $writes = [];
         $adjustments = 0;
+        $degradationWarnings = [];
         foreach (self::pages($project) as $page) {
             [$entries, $rels] = self::planEntries($project, $page);
             $result = SectionRhythm::rewrite($entries, $footerSurface);
@@ -59,12 +62,23 @@ final class SectionRhythmStep implements Step
                 $writes['theme/' . $rel] = $result['markups'][$i];
             }
             $adjustments += count($result['notes']);
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            foreach ($result['degradations'] as $degradation) {
+                if ($degradation['newlyDetected']) {
+                    $degradationWarnings[] = "page '{$pageSlug}', {$degradation['message']}";
+                }
+            }
         }
         foreach ($writes as $path => $markup) {
             $project->writeText($path, $markup);
         }
+        $project->addWarnings($this->id(), $degradationWarnings);
 
         echo "  section rhythm: {$adjustments} root spacing adjustment(s)\n";
+        if ($degradationWarnings !== []) {
+            echo '  [section-rhythm] warning: ' . count($degradationWarnings)
+                . " degraded image section(s) recorded in warnings.json\n";
+        }
     }
 
     /**

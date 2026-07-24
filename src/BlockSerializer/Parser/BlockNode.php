@@ -16,6 +16,15 @@ final class BlockNode implements DocumentNode
 
     public string $innerHTML = '';
     public string $rawSource = '';
+
+    /**
+     * Dotted comment-attribute key paths whose duplicate JSON declarations
+     * were deep-merged during tokenization (see JsonDecoder's opt-in
+     * duplicate-key merge). Empty for well-formed authored JSON.
+     *
+     * @var list<string>
+     */
+    public array $mergedAttributeKeyPaths = [];
     public ?string $closingDelimiter = null;
     public ?int $closingStart = null;
     public ?int $closingEnd = null;

@@ -38,6 +38,17 @@ final class AttributeNormalizer
         $schemas = $this->registry->attributes($node->name);
         $repairRows = [];
 
+        // Duplicate comment-JSON keys were deep-merged during tokenization
+        // (last-wins would silently drop the earlier declaration's members
+        // while the saved HTML still carries them). Surface each merge as a
+        // repair row so the fixer report shows what was recovered.
+        foreach ($node->mergedAttributeKeyPaths as $mergedPath) {
+            $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                'duplicate-attribute-merged:' . $mergedPath,
+                $blockPath,
+            );
+        }
+
         // Invented style keys — authored paths that exist neither in the
         // reviewed tree nor in the pinned runtime — are deleted from the raw
         // comment state before sourcing and validation, so the serialized

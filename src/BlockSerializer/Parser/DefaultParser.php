@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Parser;
 
+use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
-use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 
 /**
  * Port of the pinned @wordpress/block-serialization-default-parser state
@@ -136,7 +136,7 @@ final class DefaultParser
     }
 
     /**
-     * @return array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,start:int,length:int,raw:string}
+     * @return array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,mergedAttributeKeys:list<string>,start:int,length:int,raw:string}
      */
     private function nextToken(): array
     {
@@ -152,6 +152,7 @@ final class DefaultParser
                 'name' => '',
                 'attributes' => null,
                 'rawAttributes' => null,
+                'mergedAttributeKeys' => [],
                 'start' => 0,
                 'length' => 0,
                 'raw' => '',
@@ -168,9 +169,20 @@ final class DefaultParser
         $name = $namespace . $matches['name'][0];
         $rawAttributes = ($matches['attrs'][1] ?? -1) >= 0 ? $matches['attrs'][0] : null;
         $attributes = new JsonObject();
+        $mergedAttributeKeys = [];
         if ($rawAttributes !== null) {
-            $parsed = JsonValue::tryParse($rawAttributes);
+            // Duplicate keys in authored comment JSON deep-merge here instead
+            // of collapsing last-wins: the saved HTML already reflects every
+            // duplicate's members, so dropping the earlier ones would strand
+            // unreproducible inline state and fail the whole file (BIGR-719).
+            $decoder = new JsonDecoder($rawAttributes, mergeDuplicateObjectKeys: true);
+            try {
+                $parsed = $decoder->decode();
+            } catch (\InvalidArgumentException) {
+                $parsed = null;
+            }
             $attributes = $parsed instanceof JsonObject ? $parsed : null;
+            $mergedAttributeKeys = $attributes !== null ? $decoder->mergedDuplicateKeyPaths() : [];
         }
 
         // nextToken() gives void precedence even for the malformed `/wp:x /-->
@@ -185,16 +197,17 @@ final class DefaultParser
             'name' => $name,
             'attributes' => $attributes,
             'rawAttributes' => $rawAttributes,
+            'mergedAttributeKeys' => $mergedAttributeKeys,
             'start' => $start,
             'length' => strlen($raw),
             'raw' => $raw,
         ];
     }
 
-    /** @param array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,start:int,length:int,raw:string} $token */
+    /** @param array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,mergedAttributeKeys:list<string>,start:int,length:int,raw:string} $token */
     private function blockFromToken(array $token, bool $void): BlockNode
     {
-        return new BlockNode(
+        $block = new BlockNode(
             name: $token['name'],
             attributes: $token['attributes'],
             void: $void,
@@ -204,6 +217,8 @@ final class DefaultParser
             openingEnd: $token['start'] + $token['length'],
             sourceStart: $token['start'],
         );
+        $block->mergedAttributeKeyPaths = $token['mergedAttributeKeys'];
+        return $block;
     }
 
     private function addFreeform(?int $rawLength = null): void
@@ -243,7 +258,7 @@ final class DefaultParser
     }
 
     /**
-     * @param array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,start:int,length:int,raw:string}|null $closer
+     * @param array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,mergedAttributeKeys:list<string>,start:int,length:int,raw:string}|null $closer
      */
     private function addBlockFromStack(?int $endOffset = null, ?array $closer = null): void
     {
@@ -270,7 +285,7 @@ final class DefaultParser
         $this->output[] = $frame['block'];
     }
 
-    /** @param array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,start:int,length:int,raw:string} $closer */
+    /** @param array{type:string,name:string,attributes:?JsonObject,rawAttributes:?string,mergedAttributeKeys:list<string>,start:int,length:int,raw:string} $closer */
     private function closeBlock(BlockNode $block, array $closer): void
     {
         $block->closingDelimiter = $closer['raw'];
