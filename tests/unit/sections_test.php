@@ -515,3 +515,37 @@ test('section prompts carry the slug as the anchor and the outline exposes it', 
     assert_contains('[#hero]', $reqs['header']['prompt']); // the header sees the anchors too
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('sections salvages a truncated section part instead of failing the build', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK'); // cache warm-up probe
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    // The BIGR-716 portfolio2 shape: the about section's stream was cut off
+    // inside a paragraph's comment JSON, leaving two groups unclosed.
+    $llm->queueText(<<<HTML
+<!-- wp:group {"layout":{"type":"constrained"}} -->
+<div class="wp-block-group">
+<!-- wp:heading --><h2 class="wp-block-heading">About</h2><!-- /wp:heading -->
+<!-- wp:group {"layout":{"type":"flex"}} -->
+<div class="wp-block-group">
+<!-- wp:paragraph --><p>Complete.</p><!-- /wp:paragraph -->
+<!-- wp:paragraph {"style":{"typography":{"textTransform":"
+HTML);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    $about = $project->readText('theme/parts/page-home--about.html');
+    assert_true(!str_contains($about, 'textTransform'), 'the half-written delimiter is trimmed');
+    assert_contains('<p>Complete.</p>', $about, 'the last complete block survives');
+    assert_eq(
+        substr_count($about, '<!-- wp:group'),
+        substr_count($about, '<!-- /wp:group -->'),
+        'every group opener has a closer',
+    );
+    assert_eq(substr_count($about, '<div'), substr_count($about, '</div>'), 'the div stack is rebalanced');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

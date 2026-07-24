@@ -137,7 +137,11 @@ final class OpenAiCompatibleClient implements Llm
 
     public function completeBatch(array $requests): array
     {
-        return $this->textBatch($requests, false);
+        return TextBatchRecovery::run(
+            $requests,
+            fn (array $subset): array => $this->responseBatch($subset, false),
+            defaultMaxTokens: $this->defaultMaxTokens,
+        );
     }
 
     /**
@@ -166,7 +170,7 @@ final class OpenAiCompatibleClient implements Llm
 
         $results = AnthropicClient::retryTextBatch(
             $bodies,
-            fn (array $subset): array => $this->streamMulti($subset, $json),
+            fn (array $subset): array => $this->streamMulti($subset),
             [2, 5, 12],
             function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
                 LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
@@ -182,19 +186,6 @@ final class OpenAiCompatibleClient implements Llm
             $res['log_path'] = LlmLogger::log($labelFor($key), $bodies[$key], $res, $res['time']);
             $res['model'] = (string) $bodies[$key]['model'];
             $out[$key] = $res;
-        }
-        return $out;
-    }
-
-    /**
-     * @param array<array-key,array<string,mixed>> $requests
-     * @return array<array-key,string>
-     */
-    private function textBatch(array $requests, bool $json): array
-    {
-        $out = [];
-        foreach ($this->responseBatch($requests, $json) as $key => $response) {
-            $out[$key] = (string) $response['text'];
         }
         return $out;
     }
@@ -307,11 +298,11 @@ final class OpenAiCompatibleClient implements Llm
      * @param array<array-key,array<string,mixed>> $bodies
      * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
      */
-    private function streamMulti(array $bodies, bool $allowEmptyTerminal = false): array
+    private function streamMulti(array $bodies): array
     {
         $out = [];
         foreach (AnthropicClient::concurrencyWindows($bodies) as $chunk) {
-            $out += $this->streamChunk($chunk, $allowEmptyTerminal);
+            $out += $this->streamChunk($chunk);
         }
         return $out;
     }
@@ -320,7 +311,7 @@ final class OpenAiCompatibleClient implements Llm
      * @param array<array-key,array<string,mixed>> $bodies
      * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
      */
-    private function streamChunk(array $bodies, bool $allowEmptyTerminal = false): array
+    private function streamChunk(array $bodies): array
     {
         $multi = curl_multi_init();
         $handles = [];
@@ -365,7 +356,6 @@ final class OpenAiCompatibleClient implements Llm
                 $error,
                 $httpStatus,
                 $time,
-                $allowEmptyTerminal,
             );
         }
 
@@ -382,7 +372,6 @@ final class OpenAiCompatibleClient implements Llm
         string $error,
         int $status,
         float $time = 0.0,
-        bool $allowEmptyTerminal = false,
     ): array
     {
         if ($errno !== 0) {
@@ -403,10 +392,12 @@ final class OpenAiCompatibleClient implements Llm
                 || str_contains(strtolower($parsed['error']), 'rate limit');
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
         }
-        if (trim($parsed['text']) === '' && !(
-            $allowEmptyTerminal
-            && JsonBatchRecovery::terminationError($parsed['stop_reason']) !== null
-        )) {
+        // Preserve recognized abnormal terminal responses (including empty
+        // refusals and zero-token truncations) for the batch recovery layer.
+        // An ordinary successful empty response remains transient.
+        if (trim($parsed['text']) === ''
+            && JsonBatchRecovery::terminationError($parsed['stop_reason']) === null
+        ) {
             return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response', 'time' => $time];
         }
         return [
