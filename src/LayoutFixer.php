@@ -1061,16 +1061,14 @@ final class LayoutFixer
                 continue;
             }
             $json = $t[3][0];
-            if (!json_decode($json) instanceof \stdClass || !self::hasSameDepthDuplicateKeys($json)) {
-                continue;
-            }
             $decoder = new JsonDecoder($json, mergeDuplicateObjectKeys: true);
             try {
                 $merged = $decoder->decode();
             } catch (\InvalidArgumentException) {
                 continue;
             }
-            if (!$merged instanceof JsonObject) {
+            $mergedKeys = $decoder->mergedDuplicateKeyPaths();
+            if (!$merged instanceof JsonObject || $mergedKeys === []) {
                 continue;
             }
             $markup = substr_replace(
@@ -1079,7 +1077,7 @@ final class LayoutFixer
                 $t[3][1],
                 strlen($json),
             );
-            $keys = implode(', ', $decoder->mergedDuplicateKeyPaths());
+            $keys = implode(', ', $mergedKeys);
             $notes[] = "wp:{$t[2][0]} attributes declared \"{$keys}\" more than once — deep-merged the duplicate "
                 . 'declarations so re-serialization keeps every member instead of only the last';
         }
@@ -1207,43 +1205,21 @@ final class LayoutFixer
     }
 
     /**
-     * Whether a syntactically valid JSON payload declares the same key twice
-     * in one object. PHP's json_decode accepts duplicates and keeps the last,
-     * so this must be detected on the raw text before trusting a candidate.
-     * Assumes valid JSON (candidates are checked with json_decode first).
+     * Whether a syntactically valid JSON payload declares the same decoded key
+     * twice in one object. JSON key identity is based on the decoded string, so
+     * raw spellings such as "style" and "\u0073tyle" are duplicates too.
+     * Reuse the same decoder as the canonical merge path so malformed-closer
+     * ambiguity checks cannot drift from the repair semantics.
      */
     private static function hasSameDepthDuplicateKeys(string $json): bool
     {
-        $frames = []; // one key-set per open object; null marks an array
-        $length = strlen($json);
-        for ($i = 0; $i < $length; $i++) {
-            $char = $json[$i];
-            if ($char === '"') {
-                $start = ++$i;
-                while ($i < $length && $json[$i] !== '"') {
-                    $i += $json[$i] === '\\' ? 2 : 1;
-                }
-                $next = $i + 1;
-                while ($next < $length && trim($json[$next]) === '') {
-                    $next++;
-                }
-                $top = count($frames) - 1;
-                if (($json[$next] ?? '') === ':' && $top >= 0 && $frames[$top] !== null) {
-                    $key = substr($json, $start, $i - $start);
-                    if (isset($frames[$top][$key])) {
-                        return true;
-                    }
-                    $frames[$top][$key] = true;
-                }
-            } elseif ($char === '{') {
-                $frames[] = [];
-            } elseif ($char === '[') {
-                $frames[] = null;
-            } elseif ($char === '}' || $char === ']') {
-                array_pop($frames);
-            }
+        $decoder = new JsonDecoder($json, mergeDuplicateObjectKeys: true);
+        try {
+            $decoder->decode();
+        } catch (\InvalidArgumentException) {
+            return false;
         }
-        return false;
+        return $decoder->mergedDuplicateKeyPaths() !== [];
     }
 
     /**

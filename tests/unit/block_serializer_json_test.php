@@ -90,6 +90,20 @@ test('duplicate-key merge handles nested duplicates, scalar conflicts, and tripl
     assert_eq([], $clean->mergedDuplicateKeyPaths());
 });
 
+test('duplicate-key merge compares decoded key identity', function () {
+    $decoder = new JsonDecoder(
+        '{"style":{"spacing":{"margin":{"top":"0"}}},'
+            . '"\u0073tyle":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}}',
+        mergeDuplicateObjectKeys: true,
+    );
+    assert_eq(
+        '{"style":{"spacing":{"margin":{"top":"0"}},'
+            . '"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}}',
+        JsJsonEncoder::stringify($decoder->decode()),
+    );
+    assert_eq(['style'], $decoder->mergedDuplicateKeyPaths());
+});
+
 test('typed JSON rejects invalid syntax instead of silently coercing it', function () {
     foreach (['', '{', '{"a":}', '[1,]', '01', 'true false', '"unterminated'] as $invalid) {
         assert_eq(null, JsonValue::tryParse($invalid), "invalid vector: {$invalid}");

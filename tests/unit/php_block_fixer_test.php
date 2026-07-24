@@ -5,6 +5,7 @@ use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\StagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\TemplateTransformer;
 use Automattic\SiteBuild\BlockSerializer\TransformResult;
+use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhpBlockFixer;
 
 /** Deterministic injectable transform with a reviewable call log. */
@@ -610,6 +611,36 @@ test('PhpBlockFixer deep-merges duplicate comment JSON keys instead of failing t
     } finally {
         php_block_fixer_test_remove(dirname($theme));
         php_block_fixer_test_remove(dirname($collapsedTheme));
+    }
+});
+
+test('escaped-equivalent duplicate keys survive LayoutFixer and block re-serialization', function () {
+    $original = '<!-- wp:group {"style":{"elements":{"link":{"color":{"text":"var:preset|color|accent"}}}},'
+        . '"\u0073tyle":{"color":{"background":"#123456"}},'
+        . '"layout":{"type":"flex","justifyContent":"flex-start"}} -->'
+        . '<div class="wp-block-group has-background has-link-color" style="background-color:#123456">'
+        . '<!-- wp:paragraph --><p><a href="#">Link</a></p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $normalized = LayoutFixer::fix($original, LayoutFixer::ROLE_SECTION, 860.0);
+    $theme = php_block_fixer_test_theme(['parts/escaped-duplicate.html' => $normalized['markup']]);
+
+    try {
+        assert_contains('attributes declared "style" more than once', implode("\n", $normalized['notes']));
+        assert_contains('"justifyContent":"left"', $normalized['markup'], 'a later rule dirties the merged node');
+
+        $report = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/escaped-duplicate.html');
+
+        assert_true(is_string($fixed));
+        assert_contains(
+            '"elements":{"link":{"color":{"text":"var:preset|color|accent"}}}',
+            $fixed,
+            'the first raw spelling survives'
+        );
+        assert_contains('"color":{"background":"#123456"}', $fixed, 'the escaped spelling survives');
+        assert_contains('0 style/class value(s) dropped', $report);
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
     }
 });
 
