@@ -18,7 +18,7 @@ final class GeneratedMarkup
      */
     public static function normalize(string $text, string $key): string
     {
-        $markup = self::stripFences(trim($text));
+        $markup = self::stripWrapper(self::stripFences(trim($text)));
         if ($markup === '' || !str_contains($markup, 'wp:')) {
             throw new \RuntimeException("part '{$key}' is not block markup");
         }
@@ -93,5 +93,30 @@ final class GeneratedMarkup
             $text = preg_replace('/\n```$/', '', (string) $text);
         }
         return trim((string) $text);
+    }
+
+    /**
+     * Drop any wrapper the model put around the block markup: a sentence of
+     * reasoning before the first delimiter ("Looking at the notes… Let me
+     * build the contrast band…"), or a leftover code fence / prose after the
+     * last one. Both survive fence-stripping — which only fires when the text
+     * *starts* with a fence, so a preamble ahead of the opening ``` defeats
+     * it — and leave the part with content outside its root block, which the
+     * section-rhythm gate rejects ("malformed root wp:group opener" /
+     * "content outside its top-level wp:group"), failing the whole build.
+     *
+     * Text with no block delimiter is left untouched for the caller's "not
+     * block markup" guard to reject.
+     */
+    private static function stripWrapper(string $text): string
+    {
+        if (preg_match('/<!--\s*wp:/', $text, $m, PREG_OFFSET_CAPTURE) === 1) {
+            $text = substr($text, $m[0][1]);
+        }
+        $lastClose = strrpos($text, '-->');
+        if ($lastClose !== false) {
+            $text = substr($text, 0, $lastClose + 3);
+        }
+        return trim($text);
     }
 }
