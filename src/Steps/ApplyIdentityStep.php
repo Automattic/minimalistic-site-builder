@@ -54,6 +54,16 @@ final class ApplyIdentityStep implements Step
             'AUTHOR'      => (string) ($spec['author'] ?? 'Builder'),
         ]);
 
+        // The content plugin defines global functions and a constant. Two
+        // generated sites on one host would collide on those names (a fatal
+        // "cannot redeclare"), and — since every generated plugin's function
+        // bodies are byte-identical and read their own __DIR__ — a bare
+        // function_exists guard would silently run one site's seeder against
+        // another's directory. So the symbols are namespaced per slug.
+        $prefix = self::identifierPrefix((string) $spec['slug']);
+        $vars['FN_PREFIX']    = $prefix;
+        $vars['CONST_PREFIX'] = strtoupper($prefix);
+
         // The content plugin's header carries the same identity; it may be
         // absent in compositions that build a theme only.
         $files = ['theme/style.css', 'theme/readme.txt'];
@@ -83,6 +93,21 @@ final class ApplyIdentityStep implements Step
             $value = str_replace('*/', '', $value);
         }
         return $value;
+    }
+
+    /**
+     * A slug reduced to a valid, collision-resistant PHP identifier prefix:
+     * lowercased, every non-[a-z0-9] run folded to one underscore, and a
+     * leading letter guaranteed (a slug may start with a digit, which no PHP
+     * function or constant name may).
+     */
+    public static function identifierPrefix(string $slug): string
+    {
+        $prefix = trim((string) preg_replace('/[^a-z0-9]+/', '_', strtolower($slug)), '_');
+        if ($prefix === '' || !ctype_alpha($prefix[0])) {
+            $prefix = 'builder_' . $prefix;
+        }
+        return $prefix;
     }
 
     /**
