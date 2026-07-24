@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
@@ -348,8 +349,8 @@ test('spacing warnings accept a coverless image section the build pass degraded'
         ]],
     ]]);
 
-    // The gate re-runs rewrite() with the plan still saying 'image'; the
-    // degradation must be re-derived identically so no note (= drift) appears.
+    // The validator re-runs rewrite() with the plan still saying 'image'; the
+    // persisted fallback marker keeps that decision stable.
     $raw = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group"><!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph --></div>'
         . '<!-- /wp:group -->';
@@ -365,5 +366,43 @@ test('spacing warnings accept a coverless image section the build pass degraded'
     $joined = implode(' ', ThemeValidator::spacingWarnings($project));
     assert_contains('section root spacing drift', $joined);
     assert_contains('degraded to solid-band', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('degraded image spacing survives FixBlocks before the final validator', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson(
+        'theme/theme.json',
+        ThemeJsonStep::normalizeSpacingSettings(['version' => 3])
+    );
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'bad-cover', 'background' => 'image', 'vertical_density' => 'compact'],
+        ]],
+    ]]);
+
+    // Production order: rhythm sees invalid cover JSON and falls back; the
+    // serializer repairs that opener into an attr-less valid cover; only the
+    // persisted root marker prevents the validator from switching treatments.
+    $raw = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:cover {"dimRatio": nope} --><div class="wp-block-cover">'
+        . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $degraded = SectionRhythm::rewrite([[
+        'slug' => 'bad-cover', 'markup' => $raw, 'density' => 'compact', 'background' => 'image',
+    ]]);
+    assert_eq('invalid-cover-attributes', $degraded['degradations'][0]['code']);
+    $project->writeText('theme/parts/page-home--bad-cover.html', $degraded['markups'][0]);
+
+    (new PhpBlockFixer())->fix($project->themePath());
+    $fixed = $project->readText('theme/parts/page-home--bad-cover.html');
+    assert_contains('site-build-section-rhythm-degraded-image', $fixed);
+    assert_contains('<!-- wp:cover -->', $fixed, 'FixBlocks repaired the formerly invalid opener');
+
+    // AssemblePages inlines this final fixed markup into plugin/pages/home.html.
+    $project->writeText('plugin/pages/home.html', $fixed);
+    assert_eq([], ThemeValidator::spacingWarnings($project));
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });

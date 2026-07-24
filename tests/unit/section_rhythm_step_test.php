@@ -14,6 +14,11 @@ function rhythm_step_part(): string
 test('section rhythm step rewrites every planned part atomically in page order', function () {
     $tmp = sys_get_temp_dir() . '/builder_rhythm_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
+    assert_eq(
+        ['theme/parts/*', 'warnings.json'],
+        (new SectionRhythmStep())->declaration()->writes,
+        'degradations are durable project warnings',
+    );
     $project->writeJson('pages.json', ['pages' => [
         ['slug' => 'home', 'front' => true, 'sections' => [
             ['slug' => 'one', 'background' => 'base', 'vertical_density' => 'compact'],
@@ -38,6 +43,43 @@ test('section rhythm step rewrites every planned part atomically in page order',
     assert_eq('0', $oneAttrs['style']['spacing']['padding']['bottom']);
     assert_eq('var:preset|spacing|xl', $twoAttrs['style']['spacing']['padding']['top']);
     assert_eq('0', $twoAttrs['style']['spacing']['padding']['bottom'], 'same-surface footer owns the final seam');
+    assert_true(!$project->exists('warnings.json'), 'ordinary spacing adjustments are not warnings');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('section rhythm step records only image degradations as durable warnings', function () {
+    $tmp = sys_get_temp_dir() . '/builder_rhythm_degraded_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'image-band', 'background' => 'image', 'vertical_density' => 'compact'],
+            ['slug' => 'ordinary', 'background' => 'base', 'vertical_density' => 'standard'],
+        ]],
+    ]]);
+    $coverless = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph --></div>'
+        . '<!-- /wp:group -->';
+    $project->writeText('theme/parts/page-home--image-band.html', $coverless);
+    $project->writeText('theme/parts/page-home--ordinary.html', rhythm_step_part());
+
+    (new SectionRhythmStep())->run($project);
+
+    $warnings = $project->readJson('warnings.json');
+    assert_eq(['section-rhythm'], array_keys($warnings));
+    assert_eq(1, count($warnings['section-rhythm']), 'the ordinary spacing adjustment is not recorded');
+    $warning = $warnings['section-rhythm'][0];
+    assert_contains("page 'home'", $warning);
+    assert_contains("section 'image-band'", $warning);
+    assert_contains('missing-direct-cover', $warning);
+    assert_contains('solid-band rhythm', $warning);
+    $attrs = BlockMarkup::parse(
+        $project->readText('theme/parts/page-home--image-band.html')
+    )->attrs(0);
+    assert_contains('site-build-section-rhythm-degraded-image', $attrs['className'] ?? '');
+
+    (new SectionRhythmStep())->run($project);
+    assert_eq($warnings, $project->readJson('warnings.json'), 'a repeated pass does not duplicate degradation warnings');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -45,20 +87,35 @@ test('section rhythm step rewrites every planned part atomically in page order',
 test('section rhythm step writes nothing when one section root is invalid', function () {
     $tmp = sys_get_temp_dir() . '/builder_rhythm_bad_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $original = rhythm_step_part();
+    $original = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>No cover</p><!-- /wp:paragraph --></div>'
+        . '<!-- /wp:group -->';
     $project->writeJson('pages.json', ['pages' => [
         ['slug' => 'home', 'front' => true, 'sections' => [
-            ['slug' => 'good', 'background' => 'base', 'vertical_density' => 'standard'],
+            ['slug' => 'degradable', 'background' => 'image', 'vertical_density' => 'standard'],
         ]],
         ['slug' => 'visit', 'front' => false, 'sections' => [
-            ['slug' => 'bad', 'background' => 'contrast', 'vertical_density' => 'compact'],
+            ['slug' => 'bad', 'background' => 'image', 'vertical_density' => 'compact'],
         ]],
     ]]);
-    $project->writeText('theme/parts/page-home--good.html', $original);
-    $project->writeText('theme/parts/page-visit--bad.html', '<!-- wp:heading --><h2>Bad</h2><!-- /wp:heading -->');
+    $project->writeText('theme/parts/page-home--degradable.html', $original);
+    $project->writeText(
+        'theme/parts/page-visit--bad.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+            . '<!-- wp:cover [] --><div class="wp-block-cover"></div><!-- /wp:cover -->'
+            . '</div><!-- /wp:group -->',
+    );
 
     assert_throws(static fn () => (new SectionRhythmStep())->run($project));
-    assert_eq($original, $project->readText('theme/parts/page-home--good.html'), 'no page written when a sibling page is invalid');
+    assert_eq(
+        $original,
+        $project->readText('theme/parts/page-home--degradable.html'),
+        'an earlier degradable part remains untouched when a later root is fatal',
+    );
+    assert_true(
+        !$project->exists('warnings.json'),
+        'the staged degradation warning is not committed when a later root is fatal',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -42,6 +42,13 @@ final class SectionRhythm
     /** Utilities whose vertical effect conflicts with page-owned wrapper margins. */
     private const FORBIDDEN_OWNED_WRAPPER_CLASSES = ['overlap-up'];
 
+    /**
+     * Serializer-preserved state for an image section that had to use solid
+     * outer spacing. FixBlocks may repair an unusable cover opener into a valid
+     * cover, so markup shape alone cannot reproduce the original decision.
+     */
+    private const DEGRADED_IMAGE_CLASS = 'site-build-section-rhythm-degraded-image';
+
     /** Inline spacing spellings always superseded by the owned declarations. */
     private const SUPERSEDED_WRAPPER_PROPERTIES = [
         'padding',
@@ -69,7 +76,13 @@ final class SectionRhythm
      * a last section on that same solid surface does not keep a duplicate edge.
      *
      * @param list<array{markup:string,density:string,background:string,slug?:string}> $entries
-     * @return array{markups:list<string>,notes:list<string>}
+     * @return array{
+     *     markups:list<string>,
+     *     notes:list<string>,
+     *     degradations:list<array{
+     *         section:string,code:string,reason:string,message:string,newlyDetected:bool
+     *     }>
+     * }
      */
     public static function rewrite(array $entries, ?string $followingBackground = null): array
     {
@@ -118,6 +131,7 @@ final class SectionRhythm
 
         $markups = [];
         $notes = [];
+        $degradations = [];
         foreach ($normalized as $i => $entry) {
             $preset = self::DENSITY_PRESETS[$entry['density']];
             $next = $normalized[$i + 1] ?? null;
@@ -125,7 +139,7 @@ final class SectionRhythm
             $sharedSeam = is_string($nextBackground)
                 && self::sharesContinuousSurface($entry['background'], $nextBackground);
 
-            [$markup, $changed, $degraded] = self::rewriteOne(
+            [$markup, $changed, $degradation] = self::rewriteOne(
                 $entry['markup'],
                 $preset,
                 $sharedSeam,
@@ -134,11 +148,25 @@ final class SectionRhythm
             );
             $markups[] = $markup;
 
+            $bottom = $sharedSeam ? '0' : $preset;
+            $degradationRecord = null;
+            if ($degradation !== null) {
+                $message = "{$entry['label']}: planned image background degraded to solid-band rhythm"
+                    . " ({$degradation['code']}: {$degradation['reason']});"
+                    . " outer padding top={$preset}, bottom={$bottom}; outer margins=0";
+                $degradationRecord = [
+                    'section' => $entry['label'],
+                    'code' => $degradation['code'],
+                    'reason' => $degradation['reason'],
+                    'message' => $message,
+                    'newlyDetected' => $degradation['newlyDetected'],
+                ];
+                $degradations[] = $degradationRecord;
+            }
+
             if ($changed) {
-                $bottom = $sharedSeam ? '0' : $preset;
                 $note = match (true) {
-                    $degraded => "{$entry['label']}: image background lacks exactly one usable direct wp:cover;"
-                        . " degraded to solid-band outer padding top={$preset}, bottom={$bottom}; outer margins=0",
+                    $degradationRecord !== null => $degradationRecord['message'],
                     $entry['background'] === 'image' =>
                         "{$entry['label']}: set root padding=0 and image-cover padding top={$preset}, bottom={$preset}; outer margins=0",
                     default => "{$entry['label']}: set outer padding top={$preset}, bottom={$bottom}; outer margins=0",
@@ -151,7 +179,7 @@ final class SectionRhythm
             }
         }
 
-        return ['markups' => $markups, 'notes' => $notes];
+        return ['markups' => $markups, 'notes' => $notes, 'degradations' => $degradations];
     }
 
     /** Base and contrast are exact solid surfaces; tinted/image are not. */
@@ -171,7 +199,13 @@ final class SectionRhythm
             : 'section ' . ($i + 1);
     }
 
-    /** @return array{string,bool,bool} rewritten markup, whether it changed, whether an image band was degraded to solid */
+    /**
+     * @return array{
+     *     string,
+     *     bool,
+     *     array{code:string,reason:string,newlyDetected:bool}|null
+     * } rewritten markup, whether it changed, and image degradation metadata
+     */
     private static function rewriteOne(
         string $markup,
         string $preset,
@@ -181,6 +215,14 @@ final class SectionRhythm
     ): array {
         $originalMarkup = $markup;
         [$attrs, $openingOffset, $openingLength] = self::rootGroup($markup, $label);
+        $degradation = $background === 'image' && self::hasClassToken($attrs, self::DEGRADED_IMAGE_CLASS)
+            ? [
+                'code' => 'persisted-fallback',
+                'reason' => 'a prior rhythm pass marked this section for stable solid-band fallback',
+                'newlyDetected' => false,
+            ]
+            : null;
+        $spacingBackground = $degradation === null ? $background : 'base';
         $before = self::encodeAttrs($attrs);
         $markup = self::stripOwnedWrapperClasses(
             $attrs,
@@ -200,8 +242,8 @@ final class SectionRhythm
             $margin,
             $label,
         );
-        $padding->top = $background === 'image' ? '0' : self::presetRef($preset);
-        $padding->bottom = $background === 'image' || $sharedSeam ? '0' : self::presetRef($preset);
+        $padding->top = $spacingBackground === 'image' ? '0' : self::presetRef($preset);
+        $padding->bottom = $spacingBackground === 'image' || $sharedSeam ? '0' : self::presetRef($preset);
 
         $margin->top = '0';
         $margin->bottom = '0';
@@ -219,9 +261,9 @@ final class SectionRhythm
             $rewritten = substr_replace($rewritten, $opening, $openingOffset, $openingLength);
         }
 
-        if ($background === 'image') {
-            $withCover = self::rewriteImageCover($rewritten, $preset, $label);
-            if ($withCover === null) {
+        if ($background === 'image' && $degradation === null) {
+            $coverResult = self::rewriteImageCover($rewritten, $preset, $label);
+            if ($coverResult['degradation'] !== null) {
                 // The plan promised an image band but the markup cannot honor
                 // it (zero or multiple direct covers, or a cover opener this
                 // pass cannot safely edit). Degrade to the solid-band
@@ -230,27 +272,33 @@ final class SectionRhythm
                 // background would. Seam semantics stay 'image' — adjacency
                 // was already decided against 'image', which never shares a
                 // continuous surface, so this section's $sharedSeam and its
-                // neighbours' bottom edges remain exactly as planned, and the
-                // fallback stays a pure function of markup+plan (the build
-                // pass and the validator drift gate can never disagree).
+                // neighbours' bottom edges remain exactly as planned. Mark
+                // the root before applying base spacing so FixBlocks cannot
+                // repair the cover into a different validator decision.
                 // 'base' below only selects solid padding placement.
-                [$fallback, $changed] = self::rewriteOne($originalMarkup, $preset, $sharedSeam, 'base', $label);
-                return [$fallback, $changed, true];
+                $marked = self::markDegradedImage($coverResult['markup'], $label);
+                [$fallback] = self::rewriteOne($marked, $preset, $sharedSeam, 'base', $label);
+                return [$fallback, $fallback !== $originalMarkup, $coverResult['degradation']];
             }
-            $rewritten = $withCover;
+            $rewritten = $coverResult['markup'];
         }
 
-        return [$rewritten, $rewritten !== $originalMarkup, false];
+        return [$rewritten, $rewritten !== $originalMarkup, $degradation];
     }
 
     /**
      * Put image-band breathing room inside its one direct cover, never outside
-     * it. Returns null when the root does not contain exactly one direct
-     * wp:cover with an opener this pass can rewrite — the caller degrades the
-     * section instead of failing the build for one broken section model.
+     * it. Cover-local failures are returned as structured degradation metadata
+     * so the caller can safely fall back without swallowing root/plan errors.
+     *
+     * @return array{
+     *     markup:string,
+     *     degradation:array{code:string,reason:string,newlyDetected:bool}|null
+     * }
      */
-    private static function rewriteImageCover(string $markup, string $preset, string $label): ?string
+    private static function rewriteImageCover(string $markup, string $preset, string $label): array
     {
+        $originalMarkup = $markup;
         $doc = BlockMarkup::parse($markup);
         $roots = array_values(array_filter(
             $doc->indices(),
@@ -261,8 +309,57 @@ final class SectionRhythm
             $doc->children($root),
             static fn (int $i): bool => $doc->name($i) === 'cover',
         ));
+        if ($covers === []) {
+            return self::imageCoverFailure($markup, 'missing-direct-cover', 'root contains no direct wp:cover');
+        }
         if (count($covers) !== 1) {
-            return null;
+            // Delivery still passes through FixBlocks. Even though multiple
+            // direct covers already force solid-band fallback, sanitize every
+            // parseable opener so one serializer-fatal cover cannot abort that
+            // fallback before the persisted marker reaches validation.
+            $coverIssuesByPosition = [];
+            foreach (array_reverse($covers, true) as $coverPosition => $coverIndex) {
+                $coverOffset = $doc->openingOffset($coverIndex);
+                $coverLength = $doc->openingLength($coverIndex);
+                $rawOpening = substr($markup, $coverOffset, $coverLength);
+                if (preg_match('/\A<!--\s+wp:cover(?<tail>(?:(?!-->).)*)-->\z/s', $rawOpening, $opening) !== 1) {
+                    continue;
+                }
+                $tail = trim((string) ($opening['tail'] ?? ''));
+                if ($tail === '') {
+                    $coverAttrs = new \stdClass();
+                } else {
+                    $coverAttrs = json_decode($tail);
+                    if (!$coverAttrs instanceof \stdClass || json_last_error() !== JSON_ERROR_NONE) {
+                        continue;
+                    }
+                }
+
+                $before = self::encodeAttrs($coverAttrs);
+                foreach (self::sanitizeCoverFallbackAttributes($coverAttrs) as $issue) {
+                    $coverIssuesByPosition[$coverPosition][] = $issue;
+                }
+                if (self::encodeAttrs($coverAttrs) !== $before) {
+                    $newOpening = '<!-- wp:cover ' . self::encodeAttrs($coverAttrs) . ' -->';
+                    $markup = substr_replace($markup, $newOpening, $coverOffset, $coverLength);
+                }
+            }
+            ksort($coverIssuesByPosition);
+            $coverIssues = [];
+            foreach ($coverIssuesByPosition as $coverPosition => $issues) {
+                foreach ($issues as $issue) {
+                    $coverIssues[] = 'direct cover ' . ($coverPosition + 1) . ": {$issue}";
+                }
+            }
+            $reason = 'root contains ' . count($covers) . ' direct wp:cover blocks';
+            if ($coverIssues !== []) {
+                $reason .= '; ' . implode('; ', $coverIssues);
+            }
+            return self::imageCoverFailure(
+                $markup,
+                'multiple-direct-covers',
+                $reason,
+            );
         }
 
         $cover = $covers[0];
@@ -270,54 +367,184 @@ final class SectionRhythm
         $length = $doc->openingLength($cover);
         $rawOpening = substr($markup, $offset, $length);
         if (preg_match('/\A<!--\s+wp:cover(?<tail>(?:(?!-->).)*)-->\z/s', $rawOpening, $opening) !== 1) {
-            return null;
+            return self::imageCoverFailure(
+                $markup,
+                'unusable-cover-opener',
+                'direct wp:cover opener is malformed',
+            );
         }
         $tail = trim((string) ($opening['tail'] ?? ''));
         if ($tail === '') {
             $attrs = new \stdClass();
         } else {
             if (!str_starts_with($tail, '{') || !str_ends_with($tail, '}')) {
-                return null;
+                return self::imageCoverFailure(
+                    $markup,
+                    'unusable-cover-opener',
+                    'direct wp:cover opener does not contain an attribute object',
+                );
             }
             $attrs = json_decode($tail);
             if (!$attrs instanceof \stdClass || json_last_error() !== JSON_ERROR_NONE) {
-                return null;
+                return self::imageCoverFailure(
+                    $markup,
+                    'invalid-cover-attributes',
+                    'direct wp:cover attributes are not valid object JSON',
+                );
             }
         }
-        $before = self::encodeAttrs($attrs);
-        $markup = self::stripOwnedWrapperClasses(
-            $attrs,
-            $markup,
-            $offset + $length,
-            $label . ' direct cover',
-        );
-        $style = self::objectProperty($attrs, 'style', $label, 'cover style');
-        $spacing = self::objectProperty($style, 'spacing', $label, 'cover style.spacing');
-        $padding = self::boxProperty($spacing, 'padding', $label, 'cover style.spacing.padding');
-        $margin = self::boxProperty($spacing, 'margin', $label, 'cover style.spacing.margin');
-        $shorthandProperties = self::preserveWrapperHorizontalSpacing(
-            $markup,
-            $offset + $length,
-            $padding,
-            $margin,
-            $label . ' direct cover',
-        );
-        $padding->top = self::presetRef($preset);
-        $padding->bottom = self::presetRef($preset);
-        $margin->top = '0';
-        $margin->bottom = '0';
 
-        $patched = self::patchWrapperStyle($markup, $offset + $length, [
-            'margin-top'     => '0',
-            'margin-bottom'  => '0',
-            'padding-top'    => self::cssSpacingValue($padding->top),
-            'padding-bottom' => self::cssSpacingValue($padding->bottom),
-        ], $shorthandProperties);
-        if (self::encodeAttrs($attrs) !== $before) {
-            $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
-            $patched = substr_replace($patched, $newOpening, $offset, $length);
+        $beforeSanitation = self::encodeAttrs($attrs);
+        $sanitized = self::sanitizeCoverFallbackAttributes($attrs);
+        if ($sanitized !== []) {
+            $fallbackMarkup = $originalMarkup;
+            if (self::encodeAttrs($attrs) !== $beforeSanitation) {
+                $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
+                $fallbackMarkup = substr_replace($originalMarkup, $newOpening, $offset, $length);
+            }
+            return self::imageCoverFailure(
+                $fallbackMarkup,
+                'unusable-cover-attributes',
+                implode('; ', $sanitized),
+            );
         }
-        return $patched;
+
+        try {
+            $before = self::encodeAttrs($attrs);
+            $markup = self::stripOwnedWrapperClasses(
+                $attrs,
+                $markup,
+                $offset + $length,
+                $label . ' direct cover',
+            );
+            $style = self::objectProperty($attrs, 'style', $label, 'cover style');
+            $spacing = self::objectProperty($style, 'spacing', $label, 'cover style.spacing');
+            $padding = self::boxProperty($spacing, 'padding', $label, 'cover style.spacing.padding');
+            $margin = self::boxProperty($spacing, 'margin', $label, 'cover style.spacing.margin');
+            $shorthandProperties = self::preserveWrapperHorizontalSpacing(
+                $markup,
+                $offset + $length,
+                $padding,
+                $margin,
+                $label . ' direct cover',
+            );
+            $padding->top = self::presetRef($preset);
+            $padding->bottom = self::presetRef($preset);
+            $margin->top = '0';
+            $margin->bottom = '0';
+
+            $patched = self::patchWrapperStyle($markup, $offset + $length, [
+                'margin-top'     => '0',
+                'margin-bottom'  => '0',
+                'padding-top'    => self::cssSpacingValue($padding->top),
+                'padding-bottom' => self::cssSpacingValue($padding->bottom),
+            ], $shorthandProperties);
+            if (self::encodeAttrs($attrs) !== $before) {
+                $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
+                $patched = substr_replace($patched, $newOpening, $offset, $length);
+            }
+        } catch (\RuntimeException $error) {
+            return self::imageCoverFailure(
+                $originalMarkup,
+                'unusable-cover-attributes',
+                preg_replace('/\Asection-rhythm:\s*/', '', $error->getMessage()) ?? $error->getMessage(),
+            );
+        }
+        return ['markup' => $patched, 'degradation' => null];
+    }
+
+    /**
+     * Inspect cover-local state this rhythm pass cannot safely edit, removing
+     * only shapes that would also make the block serializer abort. Returning
+     * issues makes either an unsafe-but-preserved value or actual sanitation a
+     * degradation trigger; fully valid cover state stays on the image path.
+     *
+     * @return list<string> descriptions of unsafe state and whether it was
+     *                      removed or preserved
+     */
+    private static function sanitizeCoverFallbackAttributes(\stdClass $attrs): array
+    {
+        $issues = [];
+        if (property_exists($attrs, 'className') && !is_string($attrs->className)) {
+            $issues[] = 'direct wp:cover className was not a string and was preserved for FixBlocks';
+        }
+
+        if (!property_exists($attrs, 'style')) {
+            return $issues;
+        }
+        if (!$attrs->style instanceof \stdClass) {
+            if (is_array($attrs->style) && $attrs->style === []) {
+                $issues[] = 'direct wp:cover style was an empty list and was preserved for FixBlocks';
+            } else {
+                unset($attrs->style);
+                $issues[] = 'direct wp:cover style was a serializer-fatal non-object and was removed';
+            }
+            return $issues;
+        }
+
+        $style = $attrs->style;
+        if (!property_exists($style, 'spacing')) {
+            return $issues;
+        }
+        if (!$style->spacing instanceof \stdClass) {
+            if (is_array($style->spacing) && $style->spacing === []) {
+                $issues[] = 'direct wp:cover style.spacing was an empty list and was preserved for FixBlocks';
+            } else {
+                unset($style->spacing);
+                $issues[] = 'direct wp:cover style.spacing was a serializer-fatal non-object and was removed';
+            }
+            return $issues;
+        }
+
+        $spacing = $style->spacing;
+        foreach (['padding', 'margin'] as $property) {
+            if (!property_exists($spacing, $property)) {
+                continue;
+            }
+            $value = $spacing->{$property};
+            if (is_string($value)) {
+                if (self::expandBoxShorthand($value, $property, true) === null) {
+                    $issues[] = "direct wp:cover style.spacing.{$property}"
+                        . ' was an unparseable shorthand and was preserved for FixBlocks';
+                }
+                continue;
+            }
+            if (!$value instanceof \stdClass) {
+                if (is_array($value) && $value !== []) {
+                    unset($spacing->{$property});
+                    $issues[] = "direct wp:cover style.spacing.{$property}"
+                        . ' was a serializer-fatal nonempty list and was removed';
+                } else {
+                    $issues[] = "direct wp:cover style.spacing.{$property}"
+                        . ' was not an object and was preserved for FixBlocks';
+                }
+                continue;
+            }
+            foreach (['top', 'right', 'bottom', 'left'] as $side) {
+                if (property_exists($value, $side)
+                    && (is_array($value->{$side}) || $value->{$side} instanceof \stdClass)
+                ) {
+                    unset($value->{$side});
+                    $issues[] = "direct wp:cover style.spacing.{$property}.{$side}"
+                        . ' was a serializer-fatal object/list and was removed';
+                }
+            }
+        }
+        return $issues;
+    }
+
+    /**
+     * @return array{
+     *     markup:string,
+     *     degradation:array{code:string,reason:string,newlyDetected:bool}
+     * }
+     */
+    private static function imageCoverFailure(string $markup, string $code, string $reason): array
+    {
+        return [
+            'markup' => $markup,
+            'degradation' => ['code' => $code, 'reason' => $reason, 'newlyDetected' => true],
+        ];
     }
 
     /**
@@ -491,6 +718,36 @@ final class SectionRhythm
             $tokens,
             static fn (string $class): bool => $class !== $remove,
         )));
+    }
+
+    /** Whether a valid string className contains one exact token. */
+    private static function hasClassToken(\stdClass $attrs, string $token): bool
+    {
+        if (!property_exists($attrs, 'className') || !is_string($attrs->className)) {
+            return false;
+        }
+        $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($attrs->className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return in_array($token, $tokens, true);
+    }
+
+    /**
+     * Persist the fallback decision in the root group's supported className
+     * attribute. Gutenberg carries custom classes through re-serialization.
+     */
+    private static function markDegradedImage(string $markup, string $label): string
+    {
+        [$attrs, $openingOffset, $openingLength] = self::rootGroup($markup, $label);
+        if (property_exists($attrs, 'className') && !is_string($attrs->className)) {
+            throw new \RuntimeException("section-rhythm: {$label} has a non-string className attribute");
+        }
+        if (self::hasClassToken($attrs, self::DEGRADED_IMAGE_CLASS)) {
+            return $markup;
+        }
+
+        $className = property_exists($attrs, 'className') ? trim($attrs->className) : '';
+        $attrs->className = trim($className . ' ' . self::DEGRADED_IMAGE_CLASS);
+        $opening = '<!-- wp:group ' . self::encodeAttrs($attrs) . ' -->';
+        return substr_replace($markup, $opening, $openingOffset, $openingLength);
     }
 
     /**
@@ -945,6 +1202,11 @@ final class SectionRhythm
     private static function rootGroup(string $markup, string $label): array
     {
         $doc = BlockMarkup::parse($markup);
+        if ($doc->hasMismatchedDelimiters() || $doc->unclosedIndices() !== []) {
+            throw new \RuntimeException(
+                "section-rhythm: {$label} has unbalanced or mismatched block delimiters"
+            );
+        }
         $roots = array_values(array_filter(
             $doc->indices(),
             static fn (int $i): bool => $doc->parent($i) === null,

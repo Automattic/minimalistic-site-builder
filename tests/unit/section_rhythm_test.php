@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\Serializer;
 use Automattic\SiteBuild\SectionRhythm;
 
 /** @param array<mixed> $attrs */
@@ -116,6 +117,7 @@ test('section rhythm puts image density inside the direct cover, not outside the
     assert_contains('"metadata":{}', $result['markups'][0]);
     assert_contains('"allowedBlocks":[]', $result['markups'][0]);
     assert_contains('image-cover padding', implode("\n", $result['notes']));
+    assert_eq([], $result['degradations']);
 });
 
 test('section rhythm degrades a coverless image section to solid-band spacing', function () {
@@ -135,17 +137,18 @@ test('section rhythm degrades a coverless image section to solid-band spacing', 
     assert_eq('var:preset|spacing|xl', $attrs['style']['spacing']['padding']['bottom']);
     assert_eq('0', $attrs['style']['spacing']['margin']['top']);
     assert_eq('0', $attrs['style']['spacing']['margin']['bottom']);
-    assert_eq(
-        ["section 'lugar-ubicacion': image background lacks exactly one usable direct wp:cover;"
-            . ' degraded to solid-band outer padding top=xl, bottom=xl; outer margins=0'],
-        $result['notes']
-    );
+    assert_contains('site-build-section-rhythm-degraded-image', $attrs['className']);
+    assert_eq('missing-direct-cover', $result['degradations'][0]['code']);
+    assert_contains('solid-band rhythm', $result['degradations'][0]['message']);
+    assert_eq([$result['degradations'][0]['message']], $result['notes']);
 });
 
 test('section rhythm degrades multi-cover and uneditable-cover image sections', function () {
     $cover = '<!-- wp:cover {"dimRatio":50,"style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"}}}} -->'
         . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container"><p>Band</p></div></div><!-- /wp:cover -->';
-    $twoCovers = sr_section(['layout' => ['type' => 'constrained']], $cover . $cover);
+    $fatalCover = '<!-- wp:cover {"style":"broken"} -->'
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container"><p>Band</p></div></div><!-- /wp:cover -->';
+    $twoCovers = sr_section(['layout' => ['type' => 'constrained']], $cover . $fatalCover);
     $result = SectionRhythm::rewrite([[
         'slug' => 'double', 'markup' => $twoCovers, 'density' => 'compact', 'background' => 'image',
     ]]);
@@ -158,6 +161,19 @@ test('section rhythm degrades multi-cover and uneditable-cover image sections', 
         'ambiguous covers are left untouched — density moves to the root'
     );
     assert_contains('degraded to solid-band', implode("\n", $result['notes']));
+    assert_eq('multiple-direct-covers', $result['degradations'][0]['code']);
+    assert_contains('direct cover 2', $result['degradations'][0]['reason']);
+    assert_contains('serializer-fatal non-object and was removed', $result['degradations'][0]['reason']);
+    assert_true(
+        !str_contains($result['markups'][0], '"style":"broken"'),
+        'every parseable direct cover is sanitized before multi-cover fallback',
+    );
+    $serialized = (new Serializer())->transform($result['markups'][0])->html;
+    $again = SectionRhythm::rewrite([[
+        'slug' => 'double', 'markup' => $serialized, 'density' => 'compact', 'background' => 'image',
+    ]]);
+    assert_eq($serialized, $again['markups'][0], 'multi-cover fallback survives block serialization');
+    assert_eq([], $again['notes']);
 
     $badCover = sr_section(
         ['layout' => ['type' => 'constrained']],
@@ -172,6 +188,7 @@ test('section rhythm degrades multi-cover and uneditable-cover image sections', 
         'an uneditable cover opener degrades instead of aborting the build'
     );
     assert_contains('degraded to solid-band', implode("\n", $result['notes']));
+    assert_eq('invalid-cover-attributes', $result['degradations'][0]['code']);
 });
 
 test('section rhythm degraded image output is idempotent so the validator gate stays clean', function () {
@@ -190,6 +207,101 @@ test('section rhythm degraded image output is idempotent so the validator gate s
     $second = SectionRhythm::rewrite([$entry($first['markups'][0])]);
     assert_eq($first['markups'], $second['markups']);
     assert_eq([], $second['notes']);
+    assert_eq('persisted-fallback', $second['degradations'][0]['code']);
+    assert_eq(false, $second['degradations'][0]['newlyDetected']);
+});
+
+test('section rhythm safely degrades covers with unusable nested spacing state', function () {
+    $cases = [
+        'non-object-style' => [
+            '{"style":"broken"}',
+            '',
+            '"style":"broken"',
+            null,
+            'was removed',
+        ],
+        'non-object-spacing' => [
+            '{"style":{"spacing":"broken"}}',
+            '',
+            '"spacing":"broken"',
+            null,
+            'was removed',
+        ],
+        'non-object-padding' => [
+            '{"style":{"spacing":{"padding":["x"]}}}',
+            '',
+            '"padding":["x"]',
+            null,
+            'was removed',
+        ],
+        'unparseable-padding' => [
+            '{"style":{"spacing":{"padding":"var(--ambiguous-padding)"}}}',
+            '',
+            null,
+            '"padding":"var(--ambiguous-padding)"',
+            'was preserved',
+        ],
+        'non-object-margin' => [
+            '{"style":{"spacing":{"margin":42}}}',
+            '',
+            null,
+            '"margin":42',
+            'was preserved',
+        ],
+        'unsafe-wrapper-spacing' => [
+            '{"dimRatio":50}',
+            ' style="padding:var(--ambiguous-padding)"',
+            null,
+            'style="padding:var(--ambiguous-padding)"',
+            'unparseable inline padding shorthand',
+        ],
+    ];
+
+    foreach ($cases as $slug => [$coverJson, $wrapperAttrs, $removed, $preserved, $reasonNeedle]) {
+        $cover = "<!-- wp:cover {$coverJson} -->"
+            . "<div class=\"wp-block-cover\"{$wrapperAttrs}>"
+            . '<div class="wp-block-cover__inner-container"><p>Band</p></div></div><!-- /wp:cover -->';
+        $markup = sr_section(['layout' => ['type' => 'constrained']], $cover);
+
+        $result = SectionRhythm::rewrite([[
+            'slug' => $slug, 'markup' => $markup, 'density' => 'compact', 'background' => 'image',
+        ]]);
+
+        $root = sr_root_attrs($result['markups'][0]);
+        assert_eq('var:preset|spacing|lg', $root['style']['spacing']['padding']['top']);
+        assert_contains('site-build-section-rhythm-degraded-image', $root['className']);
+        assert_eq('unusable-cover-attributes', $result['degradations'][0]['code']);
+        assert_contains($reasonNeedle, $result['degradations'][0]['reason']);
+        if ($removed !== null) {
+            assert_true(!str_contains($result['markups'][0], $removed), "{$slug}: fatal state was removed");
+        }
+        if ($preserved !== null) {
+            assert_contains($preserved, $result['markups'][0], "{$slug}: serializer-safe state was preserved");
+        }
+
+        $serialized = (new Serializer())->transform($result['markups'][0])->html;
+        $again = SectionRhythm::rewrite([[
+            'slug' => $slug, 'markup' => $serialized, 'density' => 'compact', 'background' => 'image',
+        ]]);
+        assert_eq($serialized, $again['markups'][0], "{$slug}: fallback survives block serialization");
+        assert_eq([], $again['notes'], "{$slug}: validator sees no false spacing drift");
+    }
+
+    $numericSide = sr_section(
+        ['layout' => ['type' => 'constrained']],
+        '<!-- wp:cover {"style":{"spacing":{"padding":{"right":0}}}} -->'
+            . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container"><p>Band</p></div></div>'
+            . '<!-- /wp:cover -->',
+    );
+    $numericResult = SectionRhythm::rewrite([[
+        'slug' => 'numeric-side',
+        'markup' => $numericSide,
+        'density' => 'compact',
+        'background' => 'image',
+    ]]);
+    assert_eq([], $numericResult['degradations'], 'serializer-safe numeric side values do not trigger fallback');
+    assert_eq(0, sr_first_attrs($numericResult['markups'][0], 'cover')['style']['spacing']['padding']['right']);
+    (new Serializer())->transform($numericResult['markups'][0]);
 });
 
 test('a degraded image section keeps image seam semantics for its neighbours', function () {
@@ -338,17 +450,23 @@ test('section rhythm rejects non-group and malformed section roots', function ()
         '<!-- wp:paragraph --><p>Not a group</p><!-- /wp:paragraph -->',
         '<!-- wp:group {"style": nope} --><div class="wp-block-group"></div><!-- /wp:group -->',
         '<!-- wp:group --><div class="wp-block-group">Never closed</div>',
+        sr_section(
+            ['layout' => ['type' => 'constrained']],
+            '<!-- wp:cover [] --><div class="wp-block-cover"></div><!-- /wp:cover -->',
+        ),
         sr_section() . sr_section(),
         sr_section() . '<p>Content outside the group</p>',
     ];
 
     foreach ($badMarkups as $markup) {
-        assert_throws(static fn () => SectionRhythm::rewrite([[
-            'slug' => 'broken',
-            'markup' => $markup,
-            'density' => 'compact',
-            'background' => 'base',
-        ]]));
+        foreach (['base', 'image'] as $background) {
+            assert_throws(static fn () => SectionRhythm::rewrite([[
+                'slug' => 'broken',
+                'markup' => $markup,
+                'density' => 'compact',
+                'background' => $background,
+            ]]), "a malformed root remains fatal for {$background} sections");
+        }
     }
 });
 
