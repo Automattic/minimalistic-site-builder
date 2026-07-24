@@ -334,6 +334,94 @@ test('validator layout warnings report what the fixer would change', function ()
 
 // ── Spacing-attribute canonicalization & rhythm mirror-copy (BIGR-674 case 1) ──
 
+// ── Top-level support-key canonicalization (BIGR-718) ────────────────────
+
+test('layout fixer folds a top-level spacing attribute into style.spacing', function () {
+    // atlas page-home--trust-builders, verbatim: "spacing" written as a
+    // SIBLING of "style". It is not a registered core/group attribute, so
+    // the serializer's closed comment-attribute domain failed the build.
+    $markup = '<!-- wp:group {"style":{"border":{"radius":"18px","width":"1px","color":"#dce4de"}},"spacing":{"padding":{"left":"var:preset|spacing|md"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color" style="border-color:#dce4de;border-width:1px;border-radius:18px;padding-left:var(--wp--preset--spacing--md)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"style":{"border":{"radius":"18px","width":"1px","color":"#dce4de"},"spacing":{"padding":{"left":"var:preset|spacing|md"}}}', $r['markup']);
+    assert_eq(1, substr_count($r['markup'], '"spacing"'), 'the top-level spacing key should be gone');
+    assert_contains('wp:group declared "spacing" at the top level of its attributes where WordPress ignores it — moved to style.spacing', implode("\n", $r['notes']));
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer folds top-level border and typography attributes into style', function () {
+    $markup = '<!-- wp:heading {"level":2,"typography":{"fontWeight":"600"},"border":{"radius":"4px"}} -->'
+        . '<h2 class="wp-block-heading" style="border-radius:4px;font-weight:600">Title</h2><!-- /wp:heading -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"style":{"border":{"radius":"4px"},"typography":{"fontWeight":"600"}}', $r['markup']);
+    assert_contains('moved to style.typography', implode("\n", $r['notes']));
+    assert_contains('moved to style.border', implode("\n", $r['notes']));
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer merges a top-level spacing family without overriding the canonical one', function () {
+    // The canonical style.spacing members win; only missing ones are adopted.
+    $markup = '<!-- wp:group {"spacing":{"padding":{"top":"4rem"},"blockGap":"var:preset|spacing|sm"},"style":{"spacing":{"padding":{"top":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="padding-top:var(--wp--preset--spacing--xl)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"style":{"spacing":{"padding":{"top":"var:preset|spacing|xl"},"blockGap":"var:preset|spacing|sm"}}', $r['markup']);
+    assert_true(!str_contains($r['markup'], '4rem'), 'the canonical padding must win over the misplaced value');
+    assert_contains('merged blockGap into style.spacing', implode("\n", $r['notes']));
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer composes the top-level fold with the style.padding canonicalization', function () {
+    // Both misspellings on one block: the top-level family folds first, then
+    // the style.padding sibling merges into the same style.spacing.padding.
+    $markup = '<!-- wp:group {"spacing":{"padding":{"top":"var:preset|spacing|lg"}},"style":{"padding":{"bottom":"var:preset|spacing|md"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="padding-top:var(--wp--preset--spacing--lg);padding-bottom:var(--wp--preset--spacing--md)"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_contains('"style":{"spacing":{"padding":{"top":"var:preset|spacing|lg","bottom":"var:preset|spacing|md"}}}', $r['markup']);
+    assert_eq(1, substr_count($r['markup'], '"padding"'), 'both misplaced spellings should collapse into one canonical box');
+    assert_eq([], LayoutFixer::fix($r['markup'], LayoutFixer::ROLE_SECTION, 860.0)['notes']);
+});
+
+test('layout fixer leaves a non-object top-level support key for the gate', function () {
+    $markup = '<!-- wp:group {"spacing":"compact","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->';
+    $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
+    assert_eq([], $r['notes']);
+    assert_eq($markup, $r['markup']);
+});
+
+test('normalize-layout repair lets the PHP block fixer serialize the atlas repro it rejected', function () {
+    // End-to-end story for BIGR-718: the raw markup fails fix-blocks closed
+    // ("Unsupported comment attribute"), the LayoutFixer repair re-nests the
+    // family, and the same serializer then accepts the file byte-cleanly —
+    // the inline CSS the model wrote survives with zero dropped values.
+    // (Theme fixture helpers live in php_block_fixer_test.php; the runner
+    // loads every test file before executing any case.)
+    $pre = '<!-- wp:group {"style":{"border":{"radius":"18px","width":"1px","color":"#dce4de"}},"spacing":{"padding":{"left":"var:preset|spacing|md"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color" style="border-color:#dce4de;border-width:1px;border-radius:18px;padding-left:var(--wp--preset--spacing--md)"></div><!-- /wp:group -->';
+
+    $theme = php_block_fixer_test_theme(['parts/page-home--trust-builders.html' => $pre]);
+    try {
+        $error = php_block_fixer_test_exception(
+            static fn () => (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme)
+        );
+        assert_contains("Unsupported comment attribute 'spacing' for core/group", $error->getMessage());
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
+
+    $post = LayoutFixer::fix($pre, LayoutFixer::ROLE_SECTION, 860.0)['markup'];
+    $theme = php_block_fixer_test_theme(['parts/page-home--trust-builders.html' => $post]);
+    try {
+        $report = (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme);
+        assert_contains('0 style/class value(s) dropped', (string) $report);
+        $written = file_get_contents($theme . '/parts/page-home--trust-builders.html');
+        assert_contains('"style":{"border":{"radius":"18px","width":"1px","color":"#dce4de"},"spacing":{"padding":{"left":"var:preset|spacing|md"}}}', $written);
+        assert_contains('padding-left:var(--wp--preset--spacing--md)', $written);
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
+});
+
 test('layout fixer moves a style.margin sibling of style.spacing into style.spacing.margin', function () {
     // tbilisi25 signature-dishes cards: margin authored as a SIBLING of
     // spacing — WordPress ignores that path, so re-serialization dropped

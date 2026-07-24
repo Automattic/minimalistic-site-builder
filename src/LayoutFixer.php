@@ -92,6 +92,7 @@ final class LayoutFixer
         }
 
         $htmlEdits = [];
+        self::canonicalizeTopLevelSupportKeys($all, $notes);
         self::canonicalizeSpacingAttributes($all, $notes);
         self::repairBareSlugSpacing($markup, $all, $notes, $spacingSlugs);
         self::canonicalizeLayoutVocabulary($all, $notes);
@@ -208,6 +209,80 @@ final class LayoutFixer
             }
         }
         return false;
+    }
+
+    /**
+     * Style-support families a model may hoist to the top level of the
+     * comment attributes. Safe to fold into style.* unconditionally: no
+     * block in the pinned registry (generated-registry.php, checked across
+     * its registered/supported/observed sections) registers a comment
+     * ATTRIBUTE named "spacing", "border" or "typography" — those names
+     * occur only under each block's "supports" — so a top-level spelling
+     * can never be a real attribute this fold would shadow.
+     */
+    private const TOP_LEVEL_SUPPORT_KEYS = ['spacing', 'border', 'typography'];
+
+    /**
+     * A support family written as a SIBLING of "style" instead of a member
+     * of it styles nothing: WordPress reads every style support from
+     * style.*, it is not a registered attribute (see TOP_LEVEL_SUPPORT_KEYS),
+     * and the serializer's closed comment-attribute domain fails the whole
+     * build on the unknown key (atlas wrote {"spacing":{"padding":...}}
+     * beside "style" and fix-blocks rejected parts/page-home--trust-builders,
+     * BIGR-718). The intent is unambiguous — the value was declared, only
+     * the nesting is wrong — so move the family under style. Runs before
+     * canonicalizeSpacingAttributes so a folded spacing family and a
+     * misplaced style.padding/style.margin both end at style.spacing.*.
+     * Families already declared at the canonical path win: only members
+     * missing from style.{key} are adopted, mirroring the spacing merge
+     * below. Non-object shapes are left for the gate.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function canonicalizeTopLevelSupportKeys(array $all, array &$notes): void
+    {
+        foreach ($all as $node) {
+            foreach (self::TOP_LEVEL_SUPPORT_KEYS as $key) {
+                if (!property_exists($node->attrs, $key)) {
+                    continue;
+                }
+                $misplaced = $node->attrs->{$key};
+                if (!$misplaced instanceof \stdClass) {
+                    continue; // unrecognizable family shape — leave it for the gate
+                }
+                $style = $node->attrs->style ?? null;
+                if ($style !== null && !$style instanceof \stdClass) {
+                    continue; // unrecognizable style shape — leave it for the gate
+                }
+                unset($node->attrs->{$key});
+                $node->dirty = true;
+
+                if ($style === null) {
+                    $style = $node->attrs->style = new \stdClass();
+                }
+                if (!property_exists($style, $key)) {
+                    $style->{$key} = $misplaced;
+                    $notes[] = "wp:{$node->name} declared \"{$key}\" at the top level of its attributes where WordPress ignores it — moved to style.{$key}";
+                    continue;
+                }
+                $canonical = $style->{$key};
+                if ($canonical instanceof \stdClass) {
+                    $adopted = [];
+                    foreach (get_object_vars($misplaced) as $member => $value) {
+                        if (!property_exists($canonical, $member)) {
+                            $canonical->{$member} = $value;
+                            $adopted[] = $member;
+                        }
+                    }
+                    $notes[] = $adopted === []
+                        ? "wp:{$node->name} declared \"{$key}\" at the top level of its attributes — dropped it in favor of the existing style.{$key}"
+                        : "wp:{$node->name} declared \"{$key}\" at the top level of its attributes where WordPress ignores it — merged " . implode('/', $adopted) . " into style.{$key}";
+                    continue;
+                }
+                $notes[] = "wp:{$node->name} declared \"{$key}\" at the top level of its attributes — dropped it in favor of the existing style.{$key}";
+            }
+        }
     }
 
     /**
