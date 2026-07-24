@@ -77,6 +77,12 @@ interface Llm
      * markup), so the model returns it verbatim instead of escaping it inside a
      * JSON string (which is brittle and wastes tokens).
      *
+     * Implementations detect abnormal termination (max_tokens truncation, a
+     * refusal) per member and regenerate only that member — a truncation with
+     * a doubled output budget (TextBatchRecovery). A member that still
+     * terminates abnormally after the retry is returned as-is (best effort)
+     * rather than aborting the batch; callers own any structural salvage.
+     *
      * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
      *        cached_prefixes are ordered reusable text layers prepended before
      *        the varying prompt; blank layers are ignored and callers may

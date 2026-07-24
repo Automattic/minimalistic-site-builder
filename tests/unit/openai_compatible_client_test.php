@@ -305,7 +305,7 @@ test('parseSse classifies OpenAI refusal fields without leaking refusal text as 
     assert_eq('refusal', $parsed['stop_reason'], 'a later finish_reason does not erase the refusal classification');
 });
 
-test('OpenAI JSON transport preserves an empty refusal for decode recovery', function () {
+test('OpenAI batch transport preserves abnormal empty responses but retries ordinary empty successes', function () {
     $raw = json_encode([
         'choices' => [[
             'message' => ['role' => 'assistant', 'content' => null, 'refusal' => 'I cannot help with that.'],
@@ -317,12 +317,19 @@ test('OpenAI JSON transport preserves an empty refusal for decode recovery', fun
     $method = new ReflectionMethod(OpenAiCompatibleClient::class, 'interpretStream');
     $method->setAccessible(true);
 
-    $jsonResult = $method->invoke(null, (string) $raw, 0, '', 200, 0.25, true);
-    assert_eq(true, $jsonResult['ok'], 'JSON recovery receives the refusal without transport retries');
-    assert_eq('', $jsonResult['text']);
-    assert_eq('refusal', $jsonResult['stop_reason']);
+    $abnormal = $method->invoke(null, (string) $raw, 0, '', 200, 0.25);
+    assert_eq(true, $abnormal['ok'], 'raw-text recovery receives the refusal without transport retries');
+    assert_eq('', $abnormal['text']);
+    assert_eq('refusal', $abnormal['stop_reason']);
 
-    $textResult = $method->invoke(null, (string) $raw, 0, '', 200, 0.25, false);
-    assert_eq(false, $textResult['ok'], 'ordinary text batches retain empty-response retry behavior');
-    assert_eq(true, $textResult['transient']);
+    $ordinaryRaw = json_encode([
+        'choices' => [[
+            'message' => ['role' => 'assistant', 'content' => null],
+            'finish_reason' => 'stop',
+        ]],
+        'usage' => ['prompt_tokens' => 8, 'completion_tokens' => 0],
+    ], JSON_UNESCAPED_SLASHES);
+    $ordinary = $method->invoke(null, (string) $ordinaryRaw, 0, '', 200, 0.25);
+    assert_eq(false, $ordinary['ok'], 'ordinary empty successes retain transport retry behavior');
+    assert_eq(true, $ordinary['transient']);
 });

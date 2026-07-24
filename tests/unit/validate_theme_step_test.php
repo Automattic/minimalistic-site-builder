@@ -60,7 +60,7 @@ test('validate-theme passes and logs a completed contract-valid theme', function
     }
 });
 
-test('validate-theme fails with a durable report for malformed preset references', function () {
+test('validate-theme records problems as warnings and still delivers the theme', function () {
     [$project, $tmp] = final_validation_project();
     $project->writeText(
         'theme/parts/bad.html',
@@ -69,10 +69,33 @@ test('validate-theme fails with a durable report for malformed preset references
     );
 
     try {
-        assert_throws(fn () => (new ValidateThemeStep())->run($project));
+        (new ValidateThemeStep())->run($project);
+
         $log = $project->readText('logs/validate-theme.log');
+        assert_contains('theme delivered anyway', $log);
         assert_contains('malformed preset reference', $log);
         assert_contains('var:preset|spacing--xl', $log);
+
+        $warnings = $project->readJson('warnings.json');
+        assert_true(isset($warnings['validate-theme']), 'warnings.json groups problems by step id');
+        assert_contains('var:preset|spacing--xl', implode("\n", $warnings['validate-theme']));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('addWarnings accumulates across steps and dedupes within a step', function () {
+    [$project, $tmp] = final_validation_project();
+    try {
+        $project->addWarnings('validate-theme', ['a button link has no href']);
+        $project->addWarnings('validate-theme', ['a button link has no href', 'a link has an empty href']);
+        $project->addWarnings('fix-blocks', ['dropped vertical rhythm CSS']);
+        $project->addWarnings('fix-blocks', []);
+
+        assert_eq([
+            'validate-theme' => ['a button link has no href', 'a link has an empty href'],
+            'fix-blocks' => ['dropped vertical rhythm CSS'],
+        ], $project->readJson('warnings.json'));
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
