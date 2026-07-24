@@ -128,3 +128,20 @@ test('MarkupSalvage throws when nothing complete remains to keep', function () {
 
     assert_throws(fn () => MarkupSalvage::repair($markup));
 });
+
+test('MarkupSalvage rejects an outer closer that crosses an unclosed paragraph', function () {
+    $markup = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>cut off'
+        . '<!-- /wp:group -->';
+
+    assert_throws(fn () => MarkupSalvage::repair($markup));
+});
+
+test('MarkupSalvage rejects a columns closer that crosses an unclosed paragraph at EOF', function () {
+    $markup = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:paragraph --><p>cut off'
+        . '<!-- /wp:columns -->';
+
+    assert_throws(fn () => MarkupSalvage::repair($markup));
+});

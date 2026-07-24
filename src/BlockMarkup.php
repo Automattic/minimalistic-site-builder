@@ -39,11 +39,14 @@ final class BlockMarkup
      *                    children:list<int>, offset:int, length:int,
      *                    innerStart:int, innerEnd:int}> $nodes
      * @param list<int> $unclosed indices of blocks still open at end of document
+     * @param bool $mismatchedDelimiters whether a closer crossed an open block
+     *                                  or had no matching opener
      */
     private function __construct(
         private string $source,
         private array $nodes,
         private array $unclosed = [],
+        private bool $mismatchedDelimiters = false,
     ) {}
 
     /** @var array<int,array<mixed>> node index => replacement attrs */
@@ -56,6 +59,7 @@ final class BlockMarkup
     {
         $nodes = [];
         $stack = []; // node indices of currently open blocks
+        $mismatchedDelimiters = false;
 
         if (preg_match_all(self::DELIMITER, $source, $matches, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
             foreach ($matches as $m) {
@@ -67,13 +71,24 @@ final class BlockMarkup
 
                 if ($isCloser) {
                     // Close the nearest open block with this name; tolerate
-                    // stray closers in malformed LLM output by ignoring them.
+                    // malformed LLM output so editing callers can still
+                    // inspect its healthy blocks. Record crossed and stray
+                    // closers so strict callers do not mistake it for a
+                    // balanced document.
+                    $matched = false;
                     for ($i = count($stack) - 1; $i >= 0; $i--) {
                         if ($nodes[$stack[$i]]['name'] === $name) {
+                            if ($i !== count($stack) - 1) {
+                                $mismatchedDelimiters = true;
+                            }
                             $nodes[$stack[$i]]['innerEnd'] = $offset;
                             array_splice($stack, $i);
+                            $matched = true;
                             break;
                         }
+                    }
+                    if (!$matched) {
+                        $mismatchedDelimiters = true;
                     }
                     continue;
                 }
@@ -113,7 +128,7 @@ final class BlockMarkup
             $nodes[$i]['innerEnd'] = $end;
         }
 
-        return new self($source, $nodes, array_values($stack));
+        return new self($source, $nodes, array_values($stack), $mismatchedDelimiters);
     }
 
     /**
@@ -126,6 +141,18 @@ final class BlockMarkup
     public function unclosedIndices(): array
     {
         return $this->unclosed;
+    }
+
+    /**
+     * Whether a closing delimiter failed to match the innermost open block.
+     *
+     * Parsing remains intentionally tolerant for editing callers, but a
+     * crossed or stray closer means the source is not structurally balanced
+     * even when unclosedIndices() is empty.
+     */
+    public function hasMismatchedDelimiters(): bool
+    {
+        return $this->mismatchedDelimiters;
     }
 
     /** @return list<int> all node indices, in document order */

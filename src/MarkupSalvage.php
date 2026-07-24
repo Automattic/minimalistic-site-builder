@@ -42,8 +42,11 @@ final class MarkupSalvage
         $doc = BlockMarkup::parse($markup);
         $open = $doc->unclosedIndices();
         $dangling = self::danglingDelimiterOffset($markup);
-        if ($open === [] && $dangling === null) {
+        if ($open === [] && $dangling === null && !$doc->hasMismatchedDelimiters()) {
             return ['markup' => $markup, 'notes' => []];
+        }
+        if ($doc->hasMismatchedDelimiters()) {
+            throw new \RuntimeException('markup has mismatched block delimiters and cannot be safely salvaged');
         }
 
         // Walk the open chain from the innermost block outward. The first
@@ -74,6 +77,7 @@ final class MarkupSalvage
         if (trim($salvaged) === ''
             || $reparsed->indices() === []
             || $reparsed->unclosedIndices() !== []
+            || $reparsed->hasMismatchedDelimiters()
         ) {
             throw new \RuntimeException('markup is truncated beyond salvage (no complete block to keep)');
         }

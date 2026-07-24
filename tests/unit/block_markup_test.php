@@ -36,6 +36,24 @@ test('void blocks and attr-less blocks parse', function () {
     assert_eq('paragraph', $doc->name(1));
 });
 
+test('parse flags a closer that crosses a still-open child block', function () {
+    $doc = BlockMarkup::parse(
+        '<!-- wp:group --><!-- wp:paragraph --><p>cut<!-- /wp:group -->'
+    );
+
+    assert_true($doc->hasMismatchedDelimiters());
+    assert_eq([], $doc->unclosedIndices(), 'the tolerant parser consumed both frames');
+});
+
+test('parse flags a nested crossed closer even when an ancestor remains open', function () {
+    $doc = BlockMarkup::parse(
+        '<!-- wp:group --><!-- wp:columns --><!-- wp:paragraph --><p>cut<!-- /wp:columns -->'
+    );
+
+    assert_true($doc->hasMismatchedDelimiters());
+    assert_eq([0], $doc->unclosedIndices(), 'the root remains independently unclosed');
+});
+
 test('render is byte-identical without mutations', function () {
     $src = '<!-- wp:group {"align":"full"} --><div class="wp-block-group">x</div><!-- /wp:group -->';
     assert_eq($src, BlockMarkup::parse($src)->render());
