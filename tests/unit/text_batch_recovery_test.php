@@ -58,7 +58,7 @@ test('TextBatchRecovery regenerates only the truncated sibling with a doubled bu
     );
 });
 
-test('TextBatchRecovery defaults a truncated retry to twice the 16k client default', function () {
+test('TextBatchRecovery doubles the calling client configurable default for a truncated retry', function () {
     $requests = ['part' => ['prompt' => 'Generate the part']];
     $budgets = [];
 
@@ -69,23 +69,107 @@ test('TextBatchRecovery defaults a truncated retry to twice the 16k client defau
             : ['part' => ['text' => '<!-- wp:group --><!-- /wp:group -->', 'stop_reason' => 'end_turn']];
     };
 
-    TextBatchRecovery::run($requests, $send);
-    assert_eq([null, 32000], $budgets);
+    TextBatchRecovery::run($requests, $send, defaultMaxTokens: 4096);
+    assert_eq([null, 8192], $budgets);
 });
 
-test('TextBatchRecovery keeps the partial text when regeneration is still truncated', function () {
+test('TextBatchRecovery keeps a salvageable initial response over a worse abnormal retry', function () {
     $requests = ['part' => ['prompt' => 'Generate the part']];
     $rounds = 0;
+    $initial = "<!-- wp:group --><div class=\"wp-block-group\"></div><!-- /wp:group -->\n<!-- wp:paragraph";
+    $longerButUnsalvageable = '<!-- wp:group --><div>' . str_repeat('cut ', 1000);
 
-    $send = function (array $subset) use (&$rounds): array {
+    $send = function (array $subset) use (&$rounds, $initial, $longerButUnsalvageable): array {
         $rounds++;
-        return ['part' => ['text' => "<!-- wp:group {\"round\":{$rounds}", 'stop_reason' => 'max_tokens']];
+        return $rounds === 1
+            ? ['part' => ['text' => $initial, 'stop_reason' => 'max_tokens']]
+            : ['part' => ['text' => $longerButUnsalvageable, 'stop_reason' => 'max_tokens']];
     };
 
     $out = TextBatchRecovery::run($requests, $send);
 
     assert_eq(2, $rounds, 'the configured one regeneration is honored');
-    assert_eq('<!-- wp:group {"round":2', $out['part'], 'the last best-effort text is returned, not an exception');
+    assert_true(strlen($longerButUnsalvageable) > strlen($initial), 'the bad retry is deliberately longer');
+    assert_eq($initial, $out['part'], 'the earlier salvageable markup is not overwritten by the worse retry');
+});
+
+test('TextBatchRecovery upgrades an empty truncation to a non-empty abnormal retry', function () {
+    $requests = ['part' => ['prompt' => 'Generate the part']];
+    $rounds = 0;
+    $retry = '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->';
+
+    $send = function (array $subset) use (&$rounds, $retry): array {
+        $rounds++;
+        return ['part' => [
+            'text' => $rounds === 1 ? '' : $retry,
+            'stop_reason' => 'max_tokens',
+        ]];
+    };
+
+    $out = TextBatchRecovery::run($requests, $send);
+
+    assert_eq(2, $rounds);
+    assert_eq($retry, $out['part'], 'a real partial response improves on an empty first attempt');
+});
+
+test('TextBatchRecovery keeps a prior abnormal candidate when regeneration throws', function () {
+    $requests = ['part' => ['prompt' => 'Generate the part']];
+    $rounds = 0;
+    $initial = '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group --><!-- wp:para';
+
+    $send = function (array $subset) use (&$rounds, $initial): array {
+        $rounds++;
+        if ($rounds === 1) {
+            return ['part' => ['text' => $initial, 'stop_reason' => 'max_tokens']];
+        }
+        throw new RuntimeException('retry budget exceeds model limit');
+    };
+
+    $out = TextBatchRecovery::run($requests, $send);
+
+    assert_eq(2, $rounds);
+    assert_eq($initial, $out['part'], 'a retry transport exception does not discard the paid-for candidate');
+});
+
+test('TextBatchRecovery isolates retry failures so a successful sibling is retained and accounted', function () {
+    $requests = [
+        'broken' => ['prompt' => 'Generate broken'],
+        'healthy' => ['prompt' => 'Generate healthy'],
+    ];
+    $calls = [];
+    $accounted = [];
+    $brokenInitial = '<!-- wp:group --><div></div><!-- /wp:group --><!-- wp:para';
+
+    $send = function (array $subset) use (&$calls, &$accounted, $brokenInitial): array {
+        $keys = array_keys($subset);
+        $calls[] = $keys;
+        if (count($keys) === 2) {
+            return [
+                'broken' => ['text' => $brokenInitial, 'stop_reason' => 'max_tokens'],
+                'healthy' => ['text' => '<!-- wp:group {"cut', 'stop_reason' => 'max_tokens'],
+            ];
+        }
+        if ($keys === ['broken']) {
+            throw new RuntimeException('retry rejected by model');
+        }
+
+        $accounted[] = 'healthy';
+        return ['healthy' => [
+            'text' => '<!-- wp:group --><div>complete</div><!-- /wp:group -->',
+            'stop_reason' => 'end_turn',
+        ]];
+    };
+
+    $out = TextBatchRecovery::run($requests, $send);
+
+    assert_eq(
+        [['broken', 'healthy'], ['broken'], ['healthy']],
+        $calls,
+        'the initial request remains batched while regenerations get independent accounting boundaries',
+    );
+    assert_eq(['healthy'], $accounted, 'the successful sibling retry completes its transport accounting path');
+    assert_eq($brokenInitial, $out['broken'], 'the failed retry falls back to its original candidate');
+    assert_contains('complete', $out['healthy'], 'the successful sibling retry is returned');
 });
 
 test('TextBatchRecovery regenerates a refusal without touching the budget', function () {

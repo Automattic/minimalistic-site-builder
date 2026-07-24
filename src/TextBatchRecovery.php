@@ -18,10 +18,14 @@ namespace Automattic\SiteBuild;
  * (repairing at the same cap re-truncates by construction); a refusal is
  * regenerated cleanly. Unlike the JSON path, a member that STILL terminates
  * abnormally after regeneration is returned as-is rather than aborting the
- * batch: truncated markup is salvageable downstream (MarkupSalvage trims it
- * back to the last complete block), and degrading one section beats rejecting
- * the entire theme. The transport callback owns the real calls, usage
- * accounting and logging; this orchestrator is pure apart from STDERR notes.
+ * batch. The best abnormal candidate is retained, so a shorter response or a
+ * failed regeneration cannot destroy useful earlier output. Regeneration
+ * calls are isolated per member: the initial fan-out remains concurrent, but
+ * one failed retry cannot prevent a successful sibling retry from being
+ * logged and accounted by the transport. Degrading one section beats
+ * rejecting the entire theme. The transport callback owns the real calls,
+ * usage accounting and logging; this orchestrator is pure apart from STDERR
+ * notes.
  */
 final class TextBatchRecovery
 {
@@ -30,38 +34,66 @@ final class TextBatchRecovery
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>|string> $send
      * @return array<array-key,string> raw text keyed and ordered as the input
      */
-    public static function run(array $requests, callable $send, int $maxRetries = 1): array
+    public static function run(
+        array $requests,
+        callable $send,
+        int $maxRetries = 1,
+        int $defaultMaxTokens = 16000,
+    ): array
     {
         if ($maxRetries < 0) {
             throw new \InvalidArgumentException('maxRetries must be zero or greater');
+        }
+        if ($defaultMaxTokens < 1) {
+            throw new \InvalidArgumentException('defaultMaxTokens must be greater than zero');
         }
         if ($requests === []) {
             return [];
         }
 
         $texts = [];
+        /** @var array<array-key,array<string,mixed>> $candidates */
+        $candidates = [];
         $pending = $requests;
         $attempt = 0;
 
         while ($pending !== []) {
-            $responses = $send($pending);
-            if (!is_array($responses)) {
-                throw new \RuntimeException('text batch transport returned a non-array result');
-            }
-
-            $unexpected = array_diff_key($responses, $pending);
-            if ($unexpected !== []) {
-                throw new \RuntimeException(
-                    'text batch transport returned unexpected key(s): ' . self::keys(array_keys($unexpected))
-                );
+            $active = $pending;
+            if ($attempt === 0) {
+                // Keep the initial fan-out concurrent. There is no prior
+                // candidate to retain if this all-or-nothing call fails.
+                $responses = self::responseSet($send($pending), $pending);
+            } else {
+                // A shared retry responseBatch can perform successful sibling
+                // calls and then throw on one permanent failure before it logs
+                // or accounts any result. Isolate regeneration calls so every
+                // successful response reaches the client's accounting path.
+                $responses = [];
+                foreach ($pending as $key => $_request) {
+                    try {
+                        $single = $send([$key => $pending[$key]]);
+                    } catch (\Throwable $e) {
+                        if (!array_key_exists($key, $candidates)) {
+                            throw $e;
+                        }
+                        $texts[$key] = (string) $candidates[$key]['text'];
+                        unset($active[$key]);
+                        $message = str_replace(["\r", "\n"], ' ', $e->getMessage());
+                        fwrite(
+                            STDERR,
+                            "    (regeneration failed for batch request '{$key}'"
+                                . ($message !== '' ? ": {$message}" : '')
+                                . '; keeping the best prior partial response for salvage)' . "\n"
+                        );
+                        continue;
+                    }
+                    $single = self::responseSet($single, [$key => $pending[$key]]);
+                    $responses[$key] = $single[$key];
+                }
             }
 
             $retry = [];
-            foreach ($pending as $key => $_request) {
-                if (!array_key_exists($key, $responses)) {
-                    throw new \RuntimeException("text batch transport omitted request '{$key}'");
-                }
-
+            foreach ($active as $key => $_request) {
                 $response = self::responseRecord($responses[$key], $key);
                 $error = JsonBatchRecovery::terminationError($response['stop_reason'] ?? null);
                 if ($error === null) {
@@ -69,8 +101,15 @@ final class TextBatchRecovery
                     continue;
                 }
 
+                self::retainBestCandidate($candidates, $key, $response);
                 if ($attempt < $maxRetries) {
-                    $retry[$key] = self::regenerateRequest($key, $requests[$key], $response, $error);
+                    $retry[$key] = self::regenerateRequest(
+                        $key,
+                        $requests[$key],
+                        $response,
+                        $error,
+                        $defaultMaxTokens,
+                    );
                     continue;
                 }
 
@@ -79,8 +118,8 @@ final class TextBatchRecovery
                 // an incomplete response to its last complete block, so a
                 // persistent truncation degrades one part, not the build.
                 fwrite(STDERR, "    (batch request '{$key}' still incomplete after {$attempt} regeneration(s) — "
-                    . "{$error}; keeping the partial response for salvage)\n");
-                $texts[$key] = (string) $response['text'];
+                    . "{$error}; keeping the best partial response for salvage)\n");
+                $texts[$key] = (string) $candidates[$key]['text'];
             }
 
             if ($retry === []) {
@@ -90,7 +129,7 @@ final class TextBatchRecovery
             $attempt++;
             fwrite(
                 STDERR,
-                '    (incomplete response in ' . count($retry) . ' batch request(s); regenerating only: '
+                '    (incomplete response in ' . count($retry) . ' batch request(s); regenerating independently: '
                     . self::keys(array_keys($retry)) . ")\n"
             );
             $pending = $retry;
@@ -120,6 +159,7 @@ final class TextBatchRecovery
         array $request,
         array $response,
         string $error,
+        int $defaultMaxTokens,
     ): array {
         $label = (string) ($request['log_label'] ?? $key);
         $retry = $request;
@@ -127,11 +167,11 @@ final class TextBatchRecovery
         $prompt = (string) ($request['prompt'] ?? '');
 
         if (JsonBatchRecovery::isTruncation($response['stop_reason'] ?? null)) {
-            // Twice the explicit budget, or twice the clients' 16k default
-            // when the request relied on it.
+            // Twice the explicit budget, or twice the calling client's
+            // effective configurable default when the request relied on it.
             $retry['max_tokens'] = isset($request['max_tokens'])
                 ? ((int) $request['max_tokens']) * 2
-                : 32000;
+                : $defaultMaxTokens * 2;
             $retry['prompt'] = $prompt
                 . "\n\nYOUR PREVIOUS RESPONSE WAS CUT OFF BY THE OUTPUT LENGTH LIMIT ({$error}). "
                 . 'Regenerate the COMPLETE response from scratch, as compactly as the instructions above allow, '
@@ -143,6 +183,65 @@ final class TextBatchRecovery
             . "\n\nYOUR PREVIOUS ATTEMPT RETURNED NO USABLE CONTENT ({$error}). "
             . 'Answer again, returning only the content the instructions above describe.';
         return $retry;
+    }
+
+    /**
+     * Retain the safest provider-generic fallback. Once a non-empty truncated
+     * payload exists, a later abnormal regeneration cannot prove that it is
+     * structurally better, so keep the earlier one. A later candidate only
+     * replaces an empty response, or upgrades a refusal/filter to real partial
+     * output. A normally terminated regeneration bypasses this fallback and
+     * always wins in the main loop.
+     *
+     * @param array<array-key,array<string,mixed>> $candidates
+     * @param array<string,mixed> $candidate
+     */
+    private static function retainBestCandidate(array &$candidates, string|int $key, array $candidate): void
+    {
+        if (!array_key_exists($key, $candidates)
+            || self::isBetterCandidate($candidate, $candidates[$key])
+        ) {
+            $candidates[$key] = $candidate;
+        }
+    }
+
+    /** @param array<string,mixed> $candidate @param array<string,mixed> $current */
+    private static function isBetterCandidate(array $candidate, array $current): bool
+    {
+        $candidateText = trim((string) $candidate['text']);
+        if ($candidateText === '') {
+            return false;
+        }
+        if (trim((string) $current['text']) === '') {
+            return true;
+        }
+        return JsonBatchRecovery::isTruncation($candidate['stop_reason'] ?? null)
+            && !JsonBatchRecovery::isTruncation($current['stop_reason'] ?? null);
+    }
+
+    /**
+     * Validate one transport result against the exact subset it was sent.
+     *
+     * @param array<array-key,array<string,mixed>> $expected
+     * @return array<array-key,array<string,mixed>|string>
+     */
+    private static function responseSet(mixed $responses, array $expected): array
+    {
+        if (!is_array($responses)) {
+            throw new \RuntimeException('text batch transport returned a non-array result');
+        }
+        $unexpected = array_diff_key($responses, $expected);
+        if ($unexpected !== []) {
+            throw new \RuntimeException(
+                'text batch transport returned unexpected key(s): ' . self::keys(array_keys($unexpected))
+            );
+        }
+        foreach ($expected as $key => $_request) {
+            if (!array_key_exists($key, $responses)) {
+                throw new \RuntimeException("text batch transport omitted request '{$key}'");
+            }
+        }
+        return $responses;
     }
 
     /** @return array<string,mixed> */
