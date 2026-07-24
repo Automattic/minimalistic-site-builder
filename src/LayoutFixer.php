@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild;
 use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
 
 /**
  * Deterministic width/rhythm normalization for generated block markup.
@@ -97,6 +98,7 @@ final class LayoutFixer
         }
 
         $htmlEdits = [];
+        self::canonicalizeTopLevelSupportKeys($all, $notes);
         self::canonicalizeSpacingAttributes($all, $notes);
         self::repairBareSlugSpacing($markup, $all, $notes, $spacingSlugs);
         self::canonicalizeLayoutVocabulary($all, $notes);
@@ -213,6 +215,122 @@ final class LayoutFixer
             }
         }
         return false;
+    }
+
+    /** Style-support families a model may hoist beside the style attribute. */
+    private const TOP_LEVEL_SUPPORT_KEYS = ['spacing', 'border', 'typography'];
+
+    /**
+     * A support family written as a SIBLING of "style" instead of a member
+     * of it styles nothing: WordPress reads every style support from
+     * style.*, it is not a registered attribute (see TOP_LEVEL_SUPPORT_KEYS),
+     * and the serializer's closed comment-attribute domain fails the whole
+     * build on the unknown key (atlas wrote {"spacing":{"padding":...}}
+     * beside "style" and fix-blocks rejected parts/page-home--trust-builders,
+     * BIGR-718). The intent is unambiguous — the value was declared, only
+     * the nesting is wrong — so move the family under style. Runs before
+     * canonicalizeSpacingAttributes so a folded spacing family and a
+     * misplaced style.padding/style.margin both end at style.spacing.*.
+     * The pinned registry owns the safety boundary: unregistered blocks keep
+     * their attributes byte-for-byte, a block without a registered "style"
+     * destination is not touched, and a future real top-level attribute with
+     * one of these names takes precedence over this repair. Families already
+     * declared at the canonical path win at every conflict; missing object
+     * members are adopted recursively. Non-object family/style shapes are
+     * left for the gate.
+     *
+     * @param object[] $all
+     * @param string[] $notes
+     */
+    private static function canonicalizeTopLevelSupportKeys(array $all, array &$notes): void
+    {
+        foreach ($all as $node) {
+            $schemas = self::registeredAttributesFor($node->name);
+            if ($schemas === null || !array_key_exists('style', $schemas)) {
+                continue;
+            }
+            $hasStyle = property_exists($node->attrs, 'style');
+            $style = $hasStyle ? $node->attrs->style : null;
+            if ($hasStyle && !$style instanceof \stdClass) {
+                continue; // explicit invalid style shape — leave every family for the gate
+            }
+
+            foreach (self::TOP_LEVEL_SUPPORT_KEYS as $key) {
+                if (array_key_exists($key, $schemas) || !property_exists($node->attrs, $key)) {
+                    continue;
+                }
+                $misplaced = $node->attrs->{$key};
+                if (!$misplaced instanceof \stdClass) {
+                    continue; // unrecognizable family shape — leave it for the gate
+                }
+                unset($node->attrs->{$key});
+                $node->dirty = true;
+
+                if (!$hasStyle) {
+                    $style = $node->attrs->style = new \stdClass();
+                    $hasStyle = true;
+                }
+                if (!property_exists($style, $key)) {
+                    $style->{$key} = $misplaced;
+                    $notes[] = "wp:{$node->name} declared \"{$key}\" at the top level of its attributes where WordPress ignores it — moved to style.{$key}";
+                    continue;
+                }
+                $canonical = $style->{$key};
+                if ($canonical instanceof \stdClass) {
+                    $adopted = self::mergeMissingObjectMembers($canonical, $misplaced);
+                    $notes[] = $adopted === []
+                        ? "wp:{$node->name} declared \"{$key}\" at the top level of its attributes — dropped it in favor of the existing style.{$key}"
+                        : "wp:{$node->name} declared \"{$key}\" at the top level of its attributes where WordPress ignores it — merged " . implode('/', $adopted) . " into style.{$key}";
+                    continue;
+                }
+                $notes[] = "wp:{$node->name} declared \"{$key}\" at the top level of its attributes — dropped it in favor of the existing style.{$key}";
+            }
+        }
+    }
+
+    /**
+     * Resolve a serialized block name against the frozen registry. WordPress
+     * omits the core/ namespace in block comments, while custom names retain
+     * their namespace.
+     *
+     * @return array<string,array<string,mixed>>|null
+     */
+    private static function registeredAttributesFor(string $serializedName): ?array
+    {
+        static $registry = null;
+        $registry ??= new BlockRegistry();
+        $name = str_contains($serializedName, '/') ? $serializedName : 'core/' . $serializedName;
+        return $registry->isRegistered($name) ? $registry->attributes($name) : null;
+    }
+
+    /**
+     * Merge only absent members, descending when both sides are objects.
+     * Existing canonical values win at every scalar or shape conflict.
+     *
+     * @return string[] dotted paths adopted from $misplaced
+     */
+    private static function mergeMissingObjectMembers(
+        \stdClass $canonical,
+        \stdClass $misplaced,
+        string $prefix = '',
+    ): array
+    {
+        $adopted = [];
+        foreach (get_object_vars($misplaced) as $member => $value) {
+            $path = $prefix === '' ? $member : $prefix . '.' . $member;
+            if (!property_exists($canonical, $member)) {
+                $canonical->{$member} = $value;
+                $adopted[] = $path;
+                continue;
+            }
+            if ($canonical->{$member} instanceof \stdClass && $value instanceof \stdClass) {
+                $adopted = array_merge(
+                    $adopted,
+                    self::mergeMissingObjectMembers($canonical->{$member}, $value, $path),
+                );
+            }
+        }
+        return $adopted;
     }
 
     /**
