@@ -107,6 +107,31 @@ test('validate accepts a well-formed fonts.php that covers the scan', function (
     assert_eq([], FontsPhpStep::validate($php, ['Oswald' => ['weights' => [400, 700], 'italic' => false]]));
 });
 
+test('validate rejects require/include — a runtime fatal php -l cannot see', function () {
+    $req = ['Oswald' => ['weights' => [400, 700], 'italic' => false]];
+
+    // The real failure: a self-inclusion "guard" whose precedence makes it
+    // `require_once ''`, fataling on every load once the theme is active.
+    $withGuard = str_replace(
+        '<?php',
+        "<?php\nrequire_once __DIR__ . '/fonts.php' === __FILE__ ? '' : '';",
+        fp_valid_php(FontsPhpStep::googleFontsUrl($req))
+    );
+    assert_true(
+        in_array('must not require or include anything', FontsPhpStep::validate($withGuard, $req), true),
+        'self-inclusion guard rejected'
+    );
+
+    foreach (["require 'x.php';", "include_once __DIR__ . '/x.php';"] as $statement) {
+        $php = str_replace('<?php', "<?php\n{$statement}", fp_valid_php(FontsPhpStep::googleFontsUrl($req)));
+        assert_true([] !== FontsPhpStep::validate($php, $req), "rejected: {$statement}");
+    }
+
+    // Words that merely contain them stay valid.
+    $benign = str_replace('<?php', "<?php\n// requirements: the scanned floor.", fp_valid_php(FontsPhpStep::googleFontsUrl($req)));
+    assert_eq([], FontsPhpStep::validate($benign, $req));
+});
+
 test('validate enforces the scan as a floor', function () {
     // Scanned weight 300 missing from the URL — the exact issue #49 bug.
     $php = fp_valid_php('https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap');

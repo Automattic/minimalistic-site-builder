@@ -136,6 +136,16 @@ final class FontsPhpStep implements Step
             $problems[] = 'missing wp_enqueue_style';
         }
 
+        // This module only enqueues styles — it has nothing to include, and a
+        // generated include is a runtime fatal `php -l` cannot see. One build
+        // emitted `require_once __DIR__ . '/fonts.php' === __FILE__ ? '' : '';`
+        // as a self-inclusion guard: operator precedence makes that
+        // `require_once ''`, which fatals on every load and takes the whole
+        // site down with it once the theme is active.
+        if (preg_match('/(?<![\w$>-])(?:require|include)(?:_once)?\b/i', $php) === 1) {
+            $problems[] = 'must not require or include anything';
+        }
+
         // The only hook allowed is enqueue_block_assets (front end + editor).
         if (preg_match_all('/add_action\s*\(\s*[\'"]([^\'"]+)[\'"]/', $php, $m) > 0) {
             foreach (array_unique($m[1]) as $hook) {
