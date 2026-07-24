@@ -139,7 +139,7 @@ test('FixBlocksStep does not fail for unrelated dropped image styles', function 
         (new FixBlocksStep($fake))->run($project);
         $log = $project->readText('logs/fix-blocks.log');
         assert_contains('DROPPED style `height:200px`', $log);
-        assert_true(!str_contains($log, '[rhythm] build rejected'), 'unrelated loss stays a warning');
+        assert_true(!str_contains($log, '[rhythm]'), 'unrelated loss does not trigger the rhythm warning');
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
