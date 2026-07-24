@@ -148,13 +148,25 @@ if (!function_exists('get_option')) {
     }
 }
 
+/** The generated content plugin's function name for a slug (namespaced per site). */
+function content_fn(string $slug, string $suffix): string
+{
+    return \Automattic\SiteBuild\Steps\ApplyIdentityStep::identifierPrefix($slug) . '_content_' . $suffix;
+}
+
+test('identifierPrefix always yields a valid PHP identifier', function () {
+    assert_eq('hearth_crumb', ApplyIdentityStep::identifierPrefix('hearth-crumb'));
+    // A slug may start with a digit, which no PHP function/constant name may.
+    assert_eq('builder_24_hour_diner', ApplyIdentityStep::identifierPrefix('24-hour-diner'));
+});
+
 /** Scaffold + identity-fill a project and return it (plugin ready to include). */
-function scaffold_plugin_fixture(): array
+function scaffold_plugin_fixture(string $slug = 'hearth-crumb'): array
 {
     $tmp = sys_get_temp_dir() . '/builder_plug_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('siteSpec.json', [
-        'name' => 'Hearth & Crumb', 'slug' => 'hearth-crumb',
+        'name' => 'Hearth & Crumb', 'slug' => $slug,
         'description' => 'Artisan bread.', 'language' => 'en',
     ]);
     (new ScaffoldThemeStep())->run($project);
@@ -183,7 +195,8 @@ test('scaffold-plugin writes the static seeder with identity placeholders', func
 });
 
 test('content plugin skips path-shaped image filenames from images.json', function () {
-    [$project, $tmp] = scaffold_plugin_fixture();
+    $slug = 'skips-images';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
 
     $project->writeJson('plugin/pages.json', ['pages' => [
         ['slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0, 'parent' => null],
@@ -199,7 +212,7 @@ test('content plugin skips path-shaped image filenames from images.json', functi
 
     wp_stub_reset();
     require_once $project->pluginPath('site-content.php');
-    builder_content_activate();
+    (content_fn($slug, 'activate'))();
 
     assert_eq(0, count($GLOBALS['wp_attachments']), 'path-shaped or invalid filenames never imported');
 
@@ -220,8 +233,30 @@ test('apply-identity fills the plugin header and the code lints', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('two generated sites define disjoint symbols and can coexist on one host', function () {
+    // The real failure: two generated content plugins on one WordPress host
+    // both defined builder_content_activate() → fatal redeclare, and the
+    // second site's pages were seeded from the first site's directory.
+    $a = scaffold_plugin_fixture('roastery-niebla');
+    $b = scaffold_plugin_fixture('pottery-barro');
+
+    require_once $a[0]->pluginPath('site-content.php');
+    require_once $b[0]->pluginPath('site-content.php'); // would fatal on a shared name
+
+    assert_true(function_exists(content_fn('roastery-niebla', 'activate')), 'site A seeder defined');
+    assert_true(function_exists(content_fn('pottery-barro', 'activate')), 'site B seeder defined under a different name');
+    assert_true(
+        content_fn('roastery-niebla', 'activate') !== content_fn('pottery-barro', 'activate'),
+        'the two sites name their seeders differently'
+    );
+
+    exec('rm -rf ' . escapeshellarg($a[1]));
+    exec('rm -rf ' . escapeshellarg($b[1]));
+});
+
 test('the seeder plugin creates, fronts, and removes the site pages', function () {
-    [$project, $tmp] = scaffold_plugin_fixture();
+    $slug = 'seeder-pages';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
 
     // Hand-written content bundle (assemble-pages writes these in a real build).
     $project->writeJson('plugin/pages.json', ['pages' => [
@@ -260,7 +295,7 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     require_once $project->pluginPath('site-content.php');
 
     // ── Activation seeds every page in manifest order. ──
-    builder_content_activate();
+    (content_fn($slug, 'activate'))();
 
     $posts = $GLOBALS['wp_posts'];
     assert_eq(4, count($posts)); // sample page + 3 seeded
@@ -312,7 +347,7 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // The seeded homepage became the front page; previous options snapshotted.
     assert_eq('page', get_option('show_on_front'));
     assert_eq($byName['home']['id'], get_option('page_on_front'));
-    $state = get_option(BUILDER_CONTENT_STATE_OPTION);
+    $state = get_option(\Automattic\SiteBuild\Steps\ApplyIdentityStep::identifierPrefix($slug) . '_content_state');
     assert_eq('posts', $state['show_on_front']);
     assert_eq($ids, $state['page_ids']);
     assert_eq([$attId], $state['attachment_ids'], 'imported attachments recorded');
@@ -326,21 +361,21 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_eq(10, has_filter('content_save_pre', 'wp_filter_post_kses'));
 
     // ── A second activation is a no-op (no duplicate pages or attachments). ──
-    builder_content_activate();
+    (content_fn($slug, 'activate'))();
     assert_eq(4, count($GLOBALS['wp_posts']), 'no duplicates on re-activation');
     assert_eq(1, count($GLOBALS['wp_attachments']), 'no duplicate imports on re-activation');
 
     // ── Deactivation deletes exactly what was created and restores the rest. ──
-    builder_content_deactivate();
+    (content_fn($slug, 'deactivate'))();
     assert_eq([2], array_keys($GLOBALS['wp_posts']), 'only the sample page survives');
     assert_eq('publish', $GLOBALS['wp_posts'][2]['post_status'], 'sample page republished');
     assert_eq([], $GLOBALS['wp_attachments'], 'imported media removed');
     assert_eq('posts', get_option('show_on_front'));
     assert_eq(0, get_option('page_on_front'));
-    assert_eq(false, get_option(BUILDER_CONTENT_STATE_OPTION));
+    assert_eq(false, get_option(\Automattic\SiteBuild\Steps\ApplyIdentityStep::identifierPrefix($slug) . '_content_state'));
 
     // Deactivating again (state gone) is harmless.
-    builder_content_deactivate();
+    (content_fn($slug, 'deactivate'))();
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
