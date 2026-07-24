@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonArray;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonBoolean;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonNull;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonNumber;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
@@ -34,6 +35,59 @@ test('typed JSON decoder follows JSON.parse number, duplicate-key, and negative-
     $minus = $root->get('minus');
     assert_true($minus instanceof JsonNumber && $minus->isNegativeZero());
     assert_eq('{"a":3,"b":2,"large":9007199254740992,"minus":0}', JsJsonEncoder::stringify($root));
+});
+
+test('opt-in duplicate-key merge deep-merges objects while default decode keeps JSON.parse parity', function () {
+    // The naturaleza shape (BIGR-719): two "style" declarations whose merge
+    // is the object the model plainly meant.
+    $naturaleza = '{"style":{"spacing":{"margin":{"top":"0"}}},'
+        . '"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}}';
+    $decoder = new JsonDecoder($naturaleza, mergeDuplicateObjectKeys: true);
+    $merged = $decoder->decode();
+    assert_true($merged instanceof JsonObject);
+    assert_eq(
+        '{"style":{"spacing":{"margin":{"top":"0"}},'
+            . '"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}}',
+        JsJsonEncoder::stringify($merged)
+    );
+    assert_eq(['style'], $decoder->mergedDuplicateKeyPaths());
+
+    // The same source without the flag keeps last-wins JSON.parse parity.
+    $strict = JsonValue::parse($naturaleza);
+    assert_true($strict instanceof JsonObject);
+    assert_eq(
+        '{"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}}',
+        JsJsonEncoder::stringify($strict)
+    );
+});
+
+test('duplicate-key merge handles nested duplicates, scalar conflicts, and triple duplicates', function () {
+    // Nested duplicates merge at their own depth and report a dotted path.
+    $nested = new JsonDecoder(
+        '{"style":{"spacing":{"margin":{"top":"1rem"}},"spacing":{"padding":{"top":"2rem"}}}}',
+        mergeDuplicateObjectKeys: true,
+    );
+    assert_eq(
+        '{"style":{"spacing":{"margin":{"top":"1rem"},"padding":{"top":"2rem"}}}}',
+        JsJsonEncoder::stringify($nested->decode())
+    );
+    assert_eq(['style.spacing'], $nested->mergedDuplicateKeyPaths());
+
+    // Non-object conflicts resolve exactly as JSON.parse would: last wins,
+    // at the root and on conflicting paths inside merged objects alike.
+    $scalar = new JsonDecoder('{"a":1,"a":2,"o":{"k":"x","keep":true},"o":{"k":"y"}}', mergeDuplicateObjectKeys: true);
+    assert_eq('{"a":2,"o":{"k":"y","keep":true}}', JsJsonEncoder::stringify($scalar->decode()));
+    assert_eq(['a', 'o'], $scalar->mergedDuplicateKeyPaths());
+
+    // Triple duplicates fold left deterministically, reporting the path once.
+    $triple = new JsonDecoder('{"s":{"a":1},"s":{"b":2},"s":{"c":3}}', mergeDuplicateObjectKeys: true);
+    assert_eq('{"s":{"a":1,"b":2,"c":3}}', JsJsonEncoder::stringify($triple->decode()));
+    assert_eq(['s'], $triple->mergedDuplicateKeyPaths());
+
+    // Well-formed JSON reports no merges even with the flag enabled.
+    $clean = new JsonDecoder('{"a":{"b":1},"c":2}', mergeDuplicateObjectKeys: true);
+    assert_eq('{"a":{"b":1},"c":2}', JsJsonEncoder::stringify($clean->decode()));
+    assert_eq([], $clean->mergedDuplicateKeyPaths());
 });
 
 test('typed JSON rejects invalid syntax instead of silently coercing it', function () {

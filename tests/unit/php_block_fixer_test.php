@@ -561,6 +561,58 @@ test('PhpBlockFixer carries inert unimplemented style families without failing',
     }
 });
 
+test('PhpBlockFixer deep-merges duplicate comment JSON keys instead of failing the theme', function () {
+    // Verbatim naturaleza repro (BIGR-719): the model declared "style" twice.
+    // Last-wins parsing kept only the elements object, the saved HTML still
+    // carried style="margin-top:0", and the unmirrored declaration hit the
+    // deprecation gate as a fatal unknown signature.
+    $original = '<!-- wp:paragraph {"style":{"spacing":{"margin":{"top":"0"}}},'
+        . '"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}} -->'
+        . "\n" . '<p style="margin-top:0">'
+        . '<a href="mailto:reservas@naturalezasabia.com.ar">reservas@naturalezasabia.com.ar</a></p>'
+        . "\n" . '<!-- /wp:paragraph -->';
+    // The pre-fix behavior, pinned: the same block after the last-wins
+    // collapse (only the second "style" survives) is exactly what the parser
+    // used to hand the normalizer, and it still fails closed today.
+    $collapsed = '<!-- wp:paragraph {"style":{"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}}} -->'
+        . "\n" . '<p style="margin-top:0">'
+        . '<a href="mailto:reservas@naturalezasabia.com.ar">reservas@naturalezasabia.com.ar</a></p>'
+        . "\n" . '<!-- /wp:paragraph -->';
+
+    $collapsedTheme = php_block_fixer_test_theme(['parts/page-home--contact-and-location.html' => $collapsed]);
+    $theme = php_block_fixer_test_theme(['parts/page-home--contact-and-location.html' => $original]);
+    try {
+        $error = php_block_fixer_test_exception(
+            static fn () => (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($collapsedTheme)
+        );
+        assert_contains('Unsupported deprecated core/paragraph style signature', $error->getMessage());
+        assert_contains('margin-top', $error->getMessage());
+
+        $report = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
+        $fixed = file_get_contents($theme . '/parts/page-home--contact-and-location.html');
+
+        assert_true(is_string($fixed));
+        assert_eq(1, substr_count($fixed, '"style"'), 'the duplicate style keys collapse into one declaration');
+        assert_contains('"spacing":{"margin":{"top":"0"}}', $fixed, 'the first duplicate\'s spacing survives');
+        assert_contains(
+            '"elements":{"link":{"color":{"text":"var:preset|color|contrast"}}}',
+            $fixed,
+            'the second duplicate\'s link color survives'
+        );
+        assert_contains('style="margin-top:0"', $fixed, 'the authored inline margin keeps rendering');
+        assert_contains('mailto:reservas@naturalezasabia.com.ar', $fixed);
+        assert_contains('  FIXED  parts/page-home--contact-and-location.html', $report);
+        assert_contains('REPAIR duplicate-attribute-merged:style at 0', $report);
+        assert_true(!str_contains($report, 'DROPPED style'), 'no rhythm CSS is dropped by the merge');
+
+        $second = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
+        assert_contains('  ok     parts/page-home--contact-and-location.html', $second, 'merged output is a fixed point');
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+        php_block_fixer_test_remove(dirname($collapsedTheme));
+    }
+});
+
 test('PhpBlockFixer prunes invented style keys, reports each removal, and converges', function () {
     $original = '<!-- wp:group {"style":{"spacing":'
         . '{"mediaPadding":{"top":"0","right":"0","bottom":"0","left":"0"},"margin":{"top":"2rem"}},'

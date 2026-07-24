@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+
 /**
  * Deterministic width/rhythm normalization for generated block markup.
  *
@@ -75,6 +79,7 @@ final class LayoutFixer
     {
         $notes = [];
         $markup = self::repairMalformedAttributes($markup, $notes);
+        $markup = self::mergeDuplicateAttributeKeys($markup, $notes);
         $parsed = self::parse($markup);
         if ($parsed === null) {
             return ['markup' => $markup, 'notes' => $notes];
@@ -1023,6 +1028,60 @@ final class LayoutFixer
             }
             $markup = substr_replace($markup, $repaired, $t[3][1], strlen($json));
             $notes[] = "wp:{$t[2][0]} attributes closed their JSON object early — removed the stray closer(s) so the declared attributes parse instead of being erased";
+        }
+        return $markup;
+    }
+
+    /**
+     * Deep-merge duplicate same-depth keys in otherwise valid comment JSON.
+     *
+     * A model that writes {"style":{...},"style":{...}} meant one object: the
+     * saved HTML already carries both declarations' members, but every
+     * json_decode downstream (this fixer's own parse/re-render included)
+     * keeps only the last duplicate, silently deleting the earlier members —
+     * and fix-blocks then fails the whole build because the surviving inline
+     * CSS has no attribute mirror (naturaleza, BIGR-719). The merge is
+     * deterministic: object values merge member by member, non-object
+     * conflicts resolve last-wins exactly as JSON.parse would, so no member
+     * is guessed and no last-wins outcome changes — earlier non-conflicting
+     * members are simply no longer dropped. Rewriting the delimiter text here
+     * means LayoutFixer, the block serializer, and WordPress itself all read
+     * the same clean JSON. Idempotent: merged output has no duplicates left.
+     *
+     * @param string[] $notes
+     */
+    private static function mergeDuplicateAttributeKeys(string $markup, array &$notes): string
+    {
+        if (preg_match_all(self::TOKEN_RE, $markup, $tokens, PREG_OFFSET_CAPTURE | PREG_SET_ORDER) === false) {
+            return $markup;
+        }
+        for ($i = count($tokens) - 1; $i >= 0; $i--) {
+            $t = $tokens[$i];
+            if (!isset($t[3]) || $t[3][1] === -1 || $t[3][0] === '') {
+                continue;
+            }
+            $json = $t[3][0];
+            if (!json_decode($json) instanceof \stdClass || !self::hasSameDepthDuplicateKeys($json)) {
+                continue;
+            }
+            $decoder = new JsonDecoder($json, mergeDuplicateObjectKeys: true);
+            try {
+                $merged = $decoder->decode();
+            } catch (\InvalidArgumentException) {
+                continue;
+            }
+            if (!$merged instanceof JsonObject) {
+                continue;
+            }
+            $markup = substr_replace(
+                $markup,
+                JsJsonEncoder::serializeAttributes($merged),
+                $t[3][1],
+                strlen($json),
+            );
+            $keys = implode(', ', $decoder->mergedDuplicateKeyPaths());
+            $notes[] = "wp:{$t[2][0]} attributes declared \"{$keys}\" more than once — deep-merged the duplicate "
+                . 'declarations so re-serialization keeps every member instead of only the last';
         }
         return $markup;
     }
