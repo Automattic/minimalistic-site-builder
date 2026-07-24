@@ -84,6 +84,22 @@ test('validate-theme records problems as warnings and still delivers the theme',
     }
 });
 
+test('validate-theme clears its stale warnings when a re-run passes', function () {
+    [$project, $tmp] = final_validation_project();
+    try {
+        $project->addWarnings('validate-theme', ['a problem fixed since the last run']);
+        $project->addWarnings('fix-blocks', ['dropped vertical rhythm CSS']);
+
+        (new ValidateThemeStep())->run($project);
+
+        $warnings = $project->readJson('warnings.json');
+        assert_true(!isset($warnings['validate-theme']), 'resolved validate-theme warnings are cleared');
+        assert_eq(['dropped vertical rhythm CSS'], $warnings['fix-blocks'], 'other steps\' warnings survive');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('addWarnings accumulates across steps and dedupes within a step', function () {
     [$project, $tmp] = final_validation_project();
     try {

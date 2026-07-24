@@ -67,6 +67,7 @@ final class ValidateThemeStep implements Step
         );
         $problems = array_values(array_unique($problems));
 
+        $project->clearWarnings($this->id());
         if ($problems !== []) {
             $project->addWarnings($this->id(), $problems);
             $report = 'Final theme validation found ' . count($problems)

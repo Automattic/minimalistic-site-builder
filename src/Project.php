@@ -110,9 +110,7 @@ final class Project
      * deliver through rather than fail on, grouped by the reporting step's id.
      * A later repair pass (BIGR-722) consumes this file to fix each problem.
      * Repeated calls append; duplicate messages within a step are dropped.
-     * Projects are built once, so there is no cross-run cleanup: any future
-     * resume/rebuild feature must clear stale entries or this file drifts
-     * from the theme's actual state.
+     * Unlocked read-modify-write: only call from non-concurrent steps.
      *
      * @param list<string> $messages
      */
@@ -123,6 +121,23 @@ final class Project
         }
         $warnings = $this->exists('warnings.json') ? $this->readJson('warnings.json') : [];
         $warnings[$stepId] = array_values(array_unique(array_merge($warnings[$stepId] ?? [], $messages)));
+        $this->writeJson('warnings.json', $warnings);
+    }
+
+    /**
+     * Drop a step's warnings.json entry. Re-runnable steps call this before
+     * re-recording so resolved problems don't linger across runs.
+     */
+    public function clearWarnings(string $stepId): void
+    {
+        if (!$this->exists('warnings.json')) {
+            return;
+        }
+        $warnings = $this->readJson('warnings.json');
+        if (!array_key_exists($stepId, $warnings)) {
+            return;
+        }
+        unset($warnings[$stepId]);
         $this->writeJson('warnings.json', $warnings);
     }
 
