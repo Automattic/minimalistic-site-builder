@@ -104,6 +104,25 @@ final class Project
         );
     }
 
+    /**
+     * Record non-fatal problems in warnings.json at the project root: the
+     * durable, machine-readable place for every defect the build chose to
+     * deliver through rather than fail on, grouped by the reporting step's id.
+     * A later repair pass (BIGR-722) consumes this file to fix each problem.
+     * Repeated calls append; duplicate messages within a step are dropped.
+     *
+     * @param list<string> $messages
+     */
+    public function addWarnings(string $stepId, array $messages): void
+    {
+        if ($messages === []) {
+            return;
+        }
+        $warnings = $this->exists('warnings.json') ? $this->readJson('warnings.json') : [];
+        $warnings[$stepId] = array_values(array_unique(array_merge($warnings[$stepId] ?? [], $messages)));
+        $this->writeJson('warnings.json', $warnings);
+    }
+
     /** @return array<mixed> */
     public function readJson(string $rel): array
     {
