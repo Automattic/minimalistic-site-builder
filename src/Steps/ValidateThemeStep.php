@@ -10,9 +10,14 @@ use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
 
 /**
- * Final deterministic build gate for contracts that downstream serializers
- * can invalidate: block structure, layout normalization, preset references,
- * and page-owned vertical rhythm.
+ * Final deterministic validation pass for contracts that downstream
+ * serializers can invalidate: block structure, layout normalization, preset
+ * references, and page-owned vertical rhythm.
+ *
+ * Not a gate: by the time this runs the theme is fully built, and rejecting
+ * it over a residual defect would leave the user with no site at all. Every
+ * problem is recorded in warnings.json (see Project::addWarnings) and the
+ * theme is delivered anyway.
  */
 final class ValidateThemeStep implements Step
 {
@@ -45,7 +50,9 @@ final class ValidateThemeStep implements Step
                 'theme/templates/*',
                 'plugin/pages/*',
             ],
-            writes: [],
+            writes: [
+                'warnings.json',
+            ],
             concurrent: false,
         );
     }
@@ -61,11 +68,14 @@ final class ValidateThemeStep implements Step
         $problems = array_values(array_unique($problems));
 
         if ($problems !== []) {
-            $report = "Final theme validation failed:\n- " . implode("\n- ", $problems) . "\n";
+            $project->addWarnings($this->id(), $problems);
+            $report = 'Final theme validation found ' . count($problems)
+                . " problem(s); theme delivered anyway, problems recorded in warnings.json:\n- "
+                . implode("\n- ", $problems) . "\n";
             $project->writeText('logs/' . self::LOG_FILE, $report);
-            throw new \RuntimeException(
-                'validate-theme: ' . count($problems) . ' problem(s); see logs/' . self::LOG_FILE
-            );
+            echo '  [validate-theme] warning: ' . count($problems)
+                . ' problem(s) recorded in warnings.json; see logs/' . self::LOG_FILE . "\n";
+            return;
         }
 
         $project->writeText('logs/' . self::LOG_FILE, "Final theme validation passed.\n");
