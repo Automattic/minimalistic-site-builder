@@ -90,7 +90,7 @@ test('parseSse surfaces a stream error', function () {
     assert_eq('overloaded_error', $p['error_type']);
 });
 
-test('Anthropic JSON transport preserves an empty max_tokens response for decode recovery', function () {
+test('Anthropic batch transport preserves abnormal empty responses but retries ordinary empty successes', function () {
     $sse = implode("\n", [
         'data: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}',
         'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":9}}',
@@ -101,12 +101,12 @@ test('Anthropic JSON transport preserves an empty max_tokens response for decode
     $method = new ReflectionMethod(AnthropicClient::class, 'interpretStream');
     $method->setAccessible(true);
 
-    $jsonResult = $method->invoke(null, $sse, 0, '', 200, 0.25, true);
-    assert_eq(true, $jsonResult['ok'], 'JSON recovery receives the terminal response without transport retries');
-    assert_eq('', $jsonResult['text']);
-    assert_eq('max_tokens', $jsonResult['stop_reason']);
+    $abnormal = $method->invoke(null, $sse, 0, '', 200, 0.25);
+    assert_eq(true, $abnormal['ok'], 'raw-text recovery receives the terminal response without transport retries');
+    assert_eq('', $abnormal['text']);
+    assert_eq('max_tokens', $abnormal['stop_reason']);
 
-    $textResult = $method->invoke(null, $sse, 0, '', 200, 0.25, false);
-    assert_eq(false, $textResult['ok'], 'ordinary text batches retain empty-response retry behavior');
-    assert_eq(true, $textResult['transient']);
+    $ordinary = $method->invoke(null, str_replace('max_tokens', 'end_turn', $sse), 0, '', 200, 0.25);
+    assert_eq(false, $ordinary['ok'], 'ordinary empty successes retain transport retry behavior');
+    assert_eq(true, $ordinary['transient']);
 });
