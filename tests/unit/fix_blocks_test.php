@@ -80,7 +80,7 @@ test('the rhythm gate ignores dropped declarations whose value was never valid C
     ], FixBlocksStep::droppedVerticalRhythmStyles($report));
 });
 
-test('FixBlocksStep logs and fails when block repair drops vertical rhythm CSS', function () {
+test('FixBlocksStep warns but does not fail when block repair drops vertical rhythm CSS', function () {
     $fake = new class implements BlockFixer {
         public function fix(string $themeDir): string
         {
@@ -105,11 +105,12 @@ test('FixBlocksStep logs and fails when block repair drops vertical rhythm CSS',
             $thrown = $e;
         }
 
-        assert_true($thrown instanceof RuntimeException, 'vertical rhythm loss must fail the step');
-        assert_contains('padding-top:8rem', $thrown->getMessage());
+        // A cosmetic spacing regression in one theme must not cost the user the
+        // whole build — the loss is flagged, the build continues.
+        assert_eq(null, $thrown, 'vertical rhythm loss is a warning, not a build failure');
         $log = $project->readText('logs/fix-blocks.log');
         assert_contains('DROPPED style `padding-top:8rem`', $log);
-        assert_contains('[rhythm] build rejected', $log, 'failure reason is logged before the exception');
+        assert_contains('[rhythm] WARNING', $log, 'the loss is recorded as a prominent warning');
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
