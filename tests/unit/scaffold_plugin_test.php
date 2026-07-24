@@ -154,6 +154,12 @@ function content_fn(string $slug, string $suffix): string
     return \Automattic\SiteBuild\Steps\ApplyIdentityStep::identifierPrefix($slug) . '_content_' . $suffix;
 }
 
+test('identifierPrefix always yields a valid PHP identifier', function () {
+    assert_eq('hearth_crumb', ApplyIdentityStep::identifierPrefix('hearth-crumb'));
+    // A slug may start with a digit, which no PHP function/constant name may.
+    assert_eq('builder_24_hour_diner', ApplyIdentityStep::identifierPrefix('24-hour-diner'));
+});
+
 /** Scaffold + identity-fill a project and return it (plugin ready to include). */
 function scaffold_plugin_fixture(string $slug = 'hearth-crumb'): array
 {
