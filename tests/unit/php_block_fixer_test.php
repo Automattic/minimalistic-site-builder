@@ -482,7 +482,10 @@ test('PhpBlockFixer rejects a current-key historical style signature before stag
 });
 
 test('PhpBlockFixer rejects an unsupported block-support family before staging', function () {
-    $original = '<!-- wp:group {"style":{"filter":{"blur":"2px"}}} -->'
+    // background is the one pinned-unimplemented family that stays
+    // fail-closed: StyleEngine consumes style.background wholesale, so an
+    // unreviewed shape could change the emitted bytes.
+    $original = '<!-- wp:group {"style":{"background":{"backgroundImage":{"id":42}}}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
     $writer = new PhpBlockFixerTestWriter();
@@ -493,7 +496,7 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
         );
 
         assert_contains(
-            "Unsupported block-support path 'style.filter' for core/group at 0",
+            "Unsupported block-support path 'style.background.backgroundImage.id' for core/group at 0",
             $error->getMessage(),
         );
         assert_eq(0, $writer->stageCalls);
@@ -504,30 +507,54 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
     }
 });
 
-test('PhpBlockFixer rejects nested style and layout variants before staging', function () {
+test('PhpBlockFixer rejects unreviewed layout variants before staging', function () {
+    $original = '<!-- wp:group {"layout":{"type":"grid"}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->';
+    $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
+    $writer = new PhpBlockFixerTestWriter();
+    try {
+        php_block_fixer_test_exception(
+            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
+        );
+        assert_eq(0, $writer->stageCalls);
+        assert_eq(0, $writer->replaceCalls);
+        assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
+});
+
+test('PhpBlockFixer carries inert unimplemented style families without failing', function () {
+    // Carried pinned-unimplemented families (css, filter, duotone, layout,
+    // …) have no save-path consumer, so the pinned runtime keeps them
+    // verbatim in the delimiter and the saved markup is unchanged: canonical
+    // input is already a fixed point, and nothing fails.
     $cases = [
-        // color.duotone is a real pinned support this pipeline does not
-        // implement, so it must fail closed rather than be pruned.
         '<!-- wp:group {"style":{"color":{"duotone":"var:preset|duotone|dark"}}} -->'
-            . '<div class="wp-block-group"></div><!-- /wp:group -->',
-        // Unreviewed elements paths are carried per block, but real
-        // unimplemented style families like per-block CSS still fail closed.
+            . "\n" . '<div class="wp-block-group"></div>'
+            . "\n" . '<!-- /wp:group -->',
         '<!-- wp:group {"style":{"css":"color:red"}} -->'
-            . '<div class="wp-block-group"></div><!-- /wp:group -->',
-        '<!-- wp:group {"layout":{"type":"grid"}} -->'
-            . '<div class="wp-block-group"></div><!-- /wp:group -->',
+            . "\n" . '<div class="wp-block-group"></div>'
+            . "\n" . '<!-- /wp:group -->',
+        '<!-- wp:group {"style":{"filter":{"blur":"2px"}}} -->'
+            . "\n" . '<div class="wp-block-group"></div>'
+            . "\n" . '<!-- /wp:group -->',
+        // Verbatim tbilisi60 signature: constrained width misplaced under
+        // style.layout while the real top-level layout attribute is present.
+        '<!-- wp:group {"style":{"layout":{"contentSize":"720px"}},"layout":{"type":"constrained"}} -->'
+            . "\n" . '<div class="wp-block-group"></div>'
+            . "\n" . '<!-- /wp:group -->',
     ];
 
     foreach ($cases as $original) {
-        $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
-        $writer = new PhpBlockFixerTestWriter();
+        $theme = php_block_fixer_test_theme(['parts/carried.html' => $original]);
         try {
-            php_block_fixer_test_exception(
-                static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
+            (new PhpBlockFixer())->fix($theme);
+            assert_eq(
+                $original,
+                file_get_contents($theme . '/parts/carried.html'),
+                'carried style state keeps its authored bytes'
             );
-            assert_eq(0, $writer->stageCalls);
-            assert_eq(0, $writer->replaceCalls);
-            assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
         } finally {
             php_block_fixer_test_remove(dirname($theme));
         }

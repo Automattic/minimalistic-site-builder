@@ -63,6 +63,13 @@ final class DeprecationAdapters
             // createBlock path drops it while retaining the paragraph's
             // current spacing and typography attributes.
             'layout' => true,
+            // AI-authored alias for style.typography.fontStyle observed in
+            // tbilisi60 ({"fontStyle":"italic"} with a font-style:italic
+            // root declaration). The pinned createBlock path drops the
+            // unregistered delimiter key; the authored italic survives via
+            // the selector-less deprecation's root carryover, the same path
+            // pinned by paragraph-inline-color-carryover.
+            'fontStyle' => true,
         ],
         'core/site-title' => [
             // Deprecated version 0; exercised by tbilisi25-footer-fixed-point.

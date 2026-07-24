@@ -743,6 +743,25 @@ decision, not an accident:
   fail-closed. Pinned by `cases/carried-elements-signatures`; the prompts
   were tightened in the same change so the generator routes hover intent to
   theme.json.
+- The carried-elements policy was generalized to every save-inert
+  pinned-unimplemented style family (July 2026, tbilisi60): a generated
+  `core/group` carried `style.layout.contentSize` — a misplaced spelling of
+  the top-level `layout.contentSize` the block already had — and the guard
+  failed the whole theme for a key nothing consumes. Unknown keys at or under
+  `css`, `filter`, `color.duotone`, `variation`, `elements`, `layout`, and
+  `position` are now carried per block; the byte-safety argument is
+  structural rather than per-family: `StyleEngine`/`SupportEngine` fetch
+  exact reviewed paths only, so a key outside the reviewed tree in these
+  families cannot reach the emitted markup. `style.background` deliberately
+  stays fail-closed — the engine consumes it wholesale (an url-less
+  `backgroundImage` object reaches a branch never certified against the
+  pinned JS), so unreviewed shapes there could change saved bytes. Reviewed
+  paths inside carried families keep strict value validation. The same
+  change admits the AI-authored `core/paragraph` `fontStyle` comment key as
+  a reviewed-legacy drop (the authored `font-style:italic` root declaration
+  survives via the selector-less deprecation's root carryover). Both pinned
+  end-to-end by `cases/tbilisi60-traditional-offerings-fixed-point`, the
+  verbatim failing part.
 
 ---
 

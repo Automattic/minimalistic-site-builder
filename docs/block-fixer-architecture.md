@@ -79,14 +79,22 @@ One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
      what `useBlockProps.save()` would add — `SupportEngine` and `StyleEngine`
      derive the preset classes and `style` declarations from the registry
      `supports`, and `SupportDomainGuard` fails closed on any style path
-     outside the reviewed tree. One deliberate exception: unreviewed
-     `style.elements` paths are **carried per block** — kept verbatim in the
-     delimiter and hidden from validation — instead of failing the file,
-     because at the pinned save hooks the only saved-markup effect of
-     `style.elements` is the `has-link-color` class from
-     `elements.link.color`, which the renderers implement (certified against
-     `block-editor@15.15.0`; pinned by `cases/carried-elements-signatures`).
-     Reviewed elements paths keep strict value validation. `Html/HtmlSerializer` emits the bytes.
+     outside the reviewed tree. One deliberate exception: unreviewed keys at
+     or under a **carried** pinned-unimplemented family (`css`, `filter`,
+     `color.duotone`, `variation`, `elements`, `layout`, `position`) are
+     carried per block — kept verbatim in the delimiter and hidden from
+     validation — instead of failing the file, because no save-path consumer
+     reads those families: the engines fetch exact reviewed paths only, so at
+     the pinned save hooks everything there is render-time (or dead) state
+     with no saved-markup effect (the one such effect, the `has-link-color`
+     class from `elements.link.color`, is implemented by the renderers).
+     Certified against `block-editor@15.15.0`; pinned by
+     `cases/carried-elements-signatures` and
+     `cases/tbilisi60-traditional-offerings-fixed-point`. Reviewed paths
+     inside carried families keep strict value validation, and
+     `style.background` stays fail-closed — `StyleEngine` consumes it
+     wholesale, so an unreviewed shape could change the emitted bytes.
+     `Html/HtmlSerializer` emits the bytes.
    - `CommentSerializer` writes the delimiter: attributes ordered by the
      registry `attributeOrder`, encoded by `Json/JsJsonEncoder` +
      `JsStringCodec`, which reproduce Gutenberg's exact escaping (including
