@@ -84,9 +84,12 @@ test('JsonBatchRecovery retries multiple malformed siblings together', function 
         $rounds[] = array_keys($subset);
         if (count($rounds) === 1) {
             return [
+                // Both malformed shapes must be ones JsonDecoder cannot repair
+                // locally, or they never reach a repair round: unescaped inner
+                // quotes now decode on their own.
                 'home'    => ['text' => '{"sections":[}'],
                 'theme'   => ['text' => '{"ok":"theme"}'],
-                'contact' => ['text' => '{"heading":"Say "hello""}'],
+                'contact' => ['text' => '{"title":"Reservations" "sections":[]}'],
             ];
         }
 

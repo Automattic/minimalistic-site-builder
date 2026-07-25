@@ -9,8 +9,10 @@ namespace Automattic\SiteBuild;
  * Provider-native structured output is the primary correctness mechanism, but
  * defensive decoding still helps with providers/models that ignore it and with
  * historical prompt-only calls. Repairs here are deliberately syntax-safe:
- * unwrap one outer Markdown fence and remove trailing commas while leaving all
- * prose inside JSON strings untouched.
+ * unwrap one outer Markdown fence, remove trailing commas, and escape quotes
+ * the model left unescaped inside a string. Each pass runs only after a strict
+ * decode fails and is kept only if the result then parses, so a payload that
+ * was already valid is never reshaped.
  */
 final class JsonDecoder
 {
@@ -28,17 +30,28 @@ final class JsonDecoder
     public static function decodeResult(string $text): array
     {
         $json = self::stripEnvelope($text);
-        $first = self::decodeStrict($json);
-        if ($first['data'] !== null) {
-            return $first;
+        $result = self::decodeStrict($json);
+        if ($result['data'] !== null) {
+            return $result;
         }
 
         $repaired = self::stripTrailingCommas($json);
         if ($repaired !== $json) {
-            return self::decodeStrict($repaired);
+            $result = self::decodeStrict($repaired);
+            if ($result['data'] !== null) {
+                return $result;
+            }
         }
 
-        return $first;
+        $escaped = self::escapeInnerQuotes($repaired);
+        if ($escaped !== $repaired) {
+            $escapedResult = self::decodeStrict($escaped);
+            if ($escapedResult['data'] !== null) {
+                return $escapedResult;
+            }
+        }
+
+        return $result;
     }
 
     /** @return array{data:?array,error:?string} */
@@ -109,6 +122,53 @@ final class JsonDecoder
                 }
             }
             $out .= $ch;
+        }
+        return $out;
+    }
+
+    /**
+     * Escape quotes the model left unescaped inside a string value. A quote
+     * closes its string only when the next non-space byte continues the
+     * grammar (, } ] : or end of input); anything else means it was a literal
+     * quote in prose. At a comma boundary, a literal quote may be taken as
+     * closing, yielding a value with that quote dropped. This repair only
+     * inserts backslashes, so it cannot add or drop structural members;
+     * malformed structure still fails parsing.
+     */
+    private static function escapeInnerQuotes(string $json): string
+    {
+        $out = '';
+        $len = strlen($json);
+        $inString = false;
+        for ($i = 0; $i < $len; $i++) {
+            $ch = $json[$i];
+            if (!$inString) {
+                $out .= $ch;
+                if ($ch === '"') {
+                    $inString = true;
+                }
+                continue;
+            }
+            if ($ch === '\\' && $i + 1 < $len) {
+                $out .= $ch . $json[++$i];
+                continue;
+            }
+            if ($ch !== '"') {
+                $out .= $ch;
+                continue;
+            }
+
+            $j = $i + 1;
+            while ($j < $len && ctype_space($json[$j])) {
+                $j++;
+            }
+            $next = $j < $len ? $json[$j] : '';
+            if ($next === '' || $next === ',' || $next === '}' || $next === ']' || $next === ':') {
+                $out .= '"';
+                $inString = false;
+                continue;
+            }
+            $out .= '\\"';
         }
         return $out;
     }
