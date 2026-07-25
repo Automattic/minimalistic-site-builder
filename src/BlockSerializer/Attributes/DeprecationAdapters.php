@@ -75,6 +75,11 @@ final class DeprecationAdapters
             // Deprecated version 0; exercised by tbilisi25-footer-fixed-point.
             'textAlign' => true,
         ],
+        'core/site-tagline' => [
+            // Mirrors core/site-title: same deprecated version-0 legacy, the
+            // top-level textAlign comment key the pinned createBlock path drops.
+            'textAlign' => true,
+        ],
     ];
 
     public function isReviewedLegacyCommentAttribute(string $name, string $key): bool
