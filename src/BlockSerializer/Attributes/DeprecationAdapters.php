@@ -77,6 +77,19 @@ final class DeprecationAdapters
         ],
     ];
 
+    /**
+     * Root inline-style properties an AI-authored core/paragraph carries that
+     * the block does not implement, so the pinned current save drops them. The
+     * drop is safe and the best user outcome: the paragraph renders at full
+     * opacity — readable — instead of failing the whole build.
+     */
+    private const REVIEWED_INERT_PARAGRAPH_ROOT_STYLES = [
+        // opacity is a separator/cover support, not a paragraph one; a
+        // generated `style="opacity:…"` on a paragraph has no current save
+        // consumer and is dropped.
+        'opacity' => true,
+    ];
+
     public function isReviewedLegacyCommentAttribute(string $name, string $key): bool
     {
         return isset(self::REVIEWED_LEGACY_COMMENT_KEYS[$name][$key]);
@@ -106,6 +119,9 @@ final class DeprecationAdapters
         }
         $current = $this->effectiveRootStyles($currentContent);
         foreach ($actual as $property => $value) {
+            if (isset(self::REVIEWED_INERT_PARAGRAPH_ROOT_STYLES[$property])) {
+                continue;
+            }
             if (!array_key_exists($property, $current) || $current[$property] !== $value) {
                 throw new \RuntimeException(
                     "Unsupported deprecated core/paragraph style signature at {$blockPath}: {$property}; "
