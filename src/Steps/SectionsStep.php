@@ -42,7 +42,7 @@ use Automattic\SiteBuild\Units\SectionUnit;
  */
 final class SectionsStep implements Step
 {
-    private const CACHE_WARM_PROMPT = 'This is a cache warm-up probe only. Do not build a section. Reply with exactly: OK';
+    private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
 
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
@@ -149,35 +149,16 @@ final class SectionsStep implements Step
         $this->warmSectionCache($requests);
         $parts = $this->llm->completeBatch($requests);
 
-        // Normalize and semantically validate EVERY part before writing any.
-        // Keep valid siblings, then give only the rejected subset one bounded
-        // concurrent repair round with its exact failure and previous output.
-        [$files, $failures] = self::finishParts($jobs, $parts);
-        if ($failures !== []) {
-            $repairRequests = self::repairRequests($requests, $parts, $failures);
-            fwrite(
-                STDERR,
-                '    (invalid markup in ' . count($repairRequests) . ' part(s); repairing only: '
-                    . implode(', ', array_keys($repairRequests)) . ")\n"
-            );
-            $repairedParts = $this->llm->completeBatch($repairRequests);
-            $repairJobs = array_intersect_key($jobs, $repairRequests);
-            [$repairedFiles, $repairFailures] = self::finishParts($repairJobs, $repairedParts);
-            if ($repairFailures !== []) {
-                $details = [];
-                foreach ($repairFailures as $key => $message) {
-                    $details[] = "{$key}: {$message}";
-                }
-                throw new \RuntimeException(
-                    "sections: markup repair failed after one attempt:\n- " . implode("\n- ", $details)
-                );
+        // Validate EVERY part before writing any, so one bad part doesn't leave
+        // a half-written set of files on disk (the build aborts either way).
+        $files = [];
+        foreach ($jobs as $key => $job) {
+            if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
+                throw new \RuntimeException("sections: missing result for part '{$key}'");
             }
-            foreach ($repairedFiles as $rel => $markup) {
-                $files[$rel] = $markup;
-            }
+            $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input']);
         }
 
-        // The first write happens only after every initial/repair result passed.
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
@@ -196,60 +177,6 @@ final class SectionsStep implements Step
             $requests[$key] = $job['unit']->request($job['input']);
         }
         return $requests;
-    }
-
-    /**
-     * Normalize and validate one response set without writing Project state.
-     *
-     * @param array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}> $jobs
-     * @param array<array-key,mixed> $parts
-     * @return array{0:array<string,string>,1:array<string,string>} files, failures keyed by request key
-     */
-    private static function finishParts(array $jobs, array $parts): array
-    {
-        $files = [];
-        $failures = [];
-        foreach ($jobs as $key => $job) {
-            if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
-                throw new \RuntimeException("sections: missing result for part '{$key}'");
-            }
-            try {
-                $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input']);
-            } catch (\RuntimeException $error) {
-                $failures[$key] = $error->getMessage();
-            }
-        }
-        return [$files, $failures];
-    }
-
-    /**
-     * Build one targeted retry request per invalid response. The original
-     * request metadata (including section cache layers, model, temperature,
-     * and output budget) is preserved; only the varying prompt and log label
-     * change. All invalid keys are sent together by completeBatch().
-     *
-     * @param array<string,array<string,mixed>> $requests
-     * @param array<array-key,mixed> $parts
-     * @param array<string,string> $failures
-     * @return array<string,array<string,mixed>>
-     */
-    private static function repairRequests(array $requests, array $parts, array $failures): array
-    {
-        $repairs = [];
-        foreach ($failures as $key => $error) {
-            $request = $requests[$key];
-            $previous = (string) $parts[$key];
-            $request['log_label'] = "{$key}-markup-repair";
-            $request['prompt'] = (string) $request['prompt']
-                . "\n\nYOUR PREVIOUS BLOCK MARKUP WAS REJECTED:\n{$error}\n\n"
-                . "Return the complete corrected block markup. Fix every rejection above while preserving the "
-                . "copy, links, layout intent, image placeholders (including every AI_IMAGE alt), and all valid "
-                . "attributes. Use only presets declared in THEME TOKENS. Output only the markup, starting with "
-                . "\"<!-- wp:\" — no prose or code fence.\n"
-                . "<previous_response>\n{$previous}\n</previous_response>";
-            $repairs[$key] = $request;
-        }
-        return $repairs;
     }
 
     /**

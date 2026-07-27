@@ -9,7 +9,7 @@ use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\SectionUnit;
 
-const SECTION_CACHE_PROBE_PROMPT = 'This is a cache warm-up probe only. Do not build a section. Reply with exactly: OK';
+const SECTION_CACHE_PROBE_PROMPT = 'Warm the cached section context.';
 
 /** @return array<string,mixed> */
 function section_cache_input(string $slug = 'hero', string $title = 'Hero'): array
@@ -178,7 +178,7 @@ test('sections warms the exact first section prefixes before the concurrent fan-
         $llm->calls[0]['opts']['cached_prefixes'] ?? null,
         'probe reuses the first section request prefixes byte-for-byte',
     );
-    assert_eq(SECTION_CACHE_PROBE_PROMPT, $llm->calls[0]['prompt'], 'probe is first in call history');
+    assert_eq('Warm the cached section context.', $llm->calls[0]['prompt'], 'probe is first in call history');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
