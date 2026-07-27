@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 
 function collect_fixture(): array
@@ -13,7 +14,7 @@ function collect_fixture(): array
 
 test('collect-images parses img alt placeholders into specs', function () {
     [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/templates/page.html',
+    $project->writeText('theme/parts/page-home--hero.html',
         '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/hero-dawn.jpg" '
         . 'alt="AI_IMAGE: A misty valley at dawn, soft light | full-bleed hero with text overlay | photorealistic | landscape"/></figure><!-- /wp:image -->'
     );
@@ -76,30 +77,42 @@ test('collect-images recovers an AI_IMAGE spec left in a cover url', function ()
 
     $images = $project->readJson('images.json');
     assert_eq(1, count($images));
-    // The exact placeholder string is the src to rewrite.
-    assert_eq('AI_IMAGE:dense fog over the dunes at golden hour|ratio:21:9|role:hero', $images[0]['src']);
+    // Recovery immediately installs a serializer-stable canonical path.
+    assert_eq('theme:./assets/' . $images[0]['filename'], $images[0]['src']);
     assert_contains('dense fog over the dunes', $images[0]['subject']);
-    assert_eq('21:9', $images[0]['aspectRatio']);
+    assert_eq('16:9', $images[0]['aspectRatio']);
     assert_eq('.jpg', substr($images[0]['filename'], -4));
+    $markup = $project->readText('theme/parts/hero.html');
+    assert_contains($images[0]['src'], $markup);
+    assert_true(!str_contains($markup, '"url":"AI_IMAGE:'), 'raw prompt removed from cover url');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('collect-images recovers a cover url and its background img as one image', function () {
+test('collect-images decodes serializer-equivalent cover values into one canonical image', function () {
     [$project, $tmp] = collect_fixture();
-    $spec = 'AI_IMAGE:a misty valley at dawn|ratio:16:9|role:hero';
     $project->writeText('theme/parts/hero.html',
-        '<!-- wp:cover {"url":"' . $spec . '"} -->'
-        . '<img class="wp-block-cover__image-background" alt="" src="' . $spec . '"/>'
+        '<!-- wp:cover {"url":"AI_IMAGE:coffee \u0026 croissant at dawn|ratio:21:9|role:hero"} -->'
+        . '<img class="wp-block-cover__image-background" alt="" '
+        . 'src="AI_IMAGE:coffee &amp; croissant at dawn|ratio:21:9|role:hero"/>'
         . '<!-- /wp:cover -->'
     );
 
     (new CollectImagesStep())->run($project);
 
     $images = $project->readJson('images.json');
-    // The url and its background img share the placeholder — one image.
+    // JSON \u0026 and HTML &amp; represent the same prompt — one image/path.
     assert_eq(1, count($images));
     assert_eq('16:9', $images[0]['aspectRatio']);
+    $markup = $project->readText('theme/parts/hero.html');
+    assert_eq(2, substr_count($markup, $images[0]['src']));
+    assert_true(!str_contains($markup, 'AI_IMAGE:'), 'both malformed source contexts normalized');
+
+    // Once canonicalized, the normal content-image manifest path sees it.
+    assert_eq([[
+        'filename' => $images[0]['filename'],
+        'title' => 'coffee & croissant at dawn',
+    ]], AssemblePagesStep::contentImages(['home' => $markup], $images));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -117,13 +130,16 @@ test('collect-images recovers a bare img src placeholder with no ratio', functio
     assert_contains('roasted coffee beans', $images[0]['subject']);
     // Defaults to landscape when no ratio is named.
     assert_eq('landscape', $images[0]['aspectRatio']);
+    $markup = $project->readText('theme/parts/band.html');
+    assert_contains($images[0]['src'], $markup);
+    assert_true(!str_contains($markup, 'src="AI_IMAGE:'), 'bare src normalized');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('collect-images ignores plain images with no AI_IMAGE marker', function () {
     [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/templates/index.html',
+    $project->writeText('theme/parts/plain-image.html',
         '<img src="theme:./assets/x.jpg" alt="just a normal alt"/>'
     );
 
@@ -136,7 +152,7 @@ test('collect-images ignores plain images with no AI_IMAGE marker', function () 
 
 test('collect-images keeps subject pipes and parses the three trailing fields', function () {
     [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/templates/page.html',
+    $project->writeText('theme/parts/page-home--combo.html',
         '<img src="theme:./assets/combo.jpg" alt="AI_IMAGE: Coffee | tea | pastries on a table | menu item card | flat-design | square"/>'
     );
 

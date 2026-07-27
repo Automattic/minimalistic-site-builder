@@ -125,17 +125,33 @@ test('validator flags bad theme.json and leftover placeholders', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('validator flags an unresolved AI_IMAGE placeholder that reached final markup', function () {
+test('image source validator flags unresolved AI_IMAGE values in JSON and HTML sources', function () {
     [$project, $tmp] = validator_project();
-    // A cover whose url kept the raw AI_IMAGE spec — collect/generate never
-    // resolved it, so the prompt text would ship as the image URL.
     $project->writeText('plugin/pages/home.html',
         '<!-- wp:cover {"url":"AI_IMAGE:dense fog over the dunes|ratio:21:9|role:hero"} -->'
-        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="AI_IMAGE:dense fog over the dunes|ratio:21:9|role:hero" alt=""/></div>'
+        . '<!-- /wp:cover -->'
     );
-    $joined = implode(' ', ThemeValidator::validate($project));
+    $joined = implode(' ', ThemeValidator::unresolvedImageSourceProblems($project));
     assert_contains('plugin/pages/home.html', $joined);
     assert_contains('AI_IMAGE', $joined);
+    assert_contains('block JSON', $joined);
+    assert_contains('HTML src', $joined);
+    assert_contains('plugin/pages/home.html', implode(' ', ThemeValidator::validate($project)));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('image source validator ignores the documented AI_IMAGE alt after generation', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="/wp-content/themes/demo/assets/coffee.jpg" '
+        . 'alt="AI_IMAGE: coffee and croissants | hero | photo | landscape"/>'
+        . '</figure><!-- /wp:image -->'
+    );
+    assert_eq([], ThemeValidator::unresolvedImageSourceProblems($project));
+    assert_eq([], ThemeValidator::validate($project));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
