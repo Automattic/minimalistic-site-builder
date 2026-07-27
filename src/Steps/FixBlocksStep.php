@@ -46,7 +46,7 @@ final class FixBlocksStep implements Step
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
             reads: ['theme/theme.json', 'theme/parts/*'],
-            writes: ['theme/parts/*'],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -102,7 +102,35 @@ final class FixBlocksStep implements Step
                 . implode("\n  ", $rhythmDrops);
             echo '  [rhythm] warning: dropped ' . implode(', ', $rhythmDrops) . "\n";
         }
+
+        // An attribute the block does not register is dropped rather than
+        // failing the build, so warnings.json is the only durable record that
+        // authored intent went missing — the repair pass reads it. Renames are
+        // deliberately not recorded there: the attribute survived under its
+        // correct name, so there is no defect left to repair.
+        $renames = self::renamedAttributes($summary);
+        $drops = self::droppedAttributes($summary);
+        if ($drops !== []) {
+            $project->addWarnings($this->id(), $drops);
+        }
+        if ($renames !== []) {
+            $summary .= "\n[attributes] " . count($renames) . " misnamed attribute(s) renamed:\n  "
+                . implode("\n  ", $renames);
+        }
+        if ($drops !== []) {
+            $summary .= "\n[attributes] WARNING: " . count($drops)
+                . " unregistered attribute(s) dropped (recorded in warnings.json):\n  "
+                . implode("\n  ", $drops);
+        }
         $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
+
+        if ($renames !== []) {
+            echo '  attributes: ' . count($renames) . " misnamed attribute(s) renamed\n";
+        }
+        if ($drops !== []) {
+            echo '  [attributes] warning: ' . count($drops)
+                . " unregistered attribute(s) dropped; see warnings.json\n";
+        }
 
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert
@@ -208,6 +236,72 @@ final class FixBlocksStep implements Step
             }
         }
         return $dropped;
+    }
+
+    /**
+     * Attributes the normalizer renamed onto the registered name they misspelt,
+     * as one report line per distinct rename with its occurrence count.
+     *
+     * @return string[]
+     */
+    public static function renamedAttributes(string $report): array
+    {
+        return self::summarizeAttributeRepairs(
+            $report,
+            'attribute-renamed',
+            static fn (string $subject, int $count): string => sprintf(
+                "renamed '%s' to '%s' on %d block(s)",
+                (string) strtok($subject, '>'),
+                substr($subject, (int) strpos($subject, '>') + 1),
+                $count,
+            ),
+        );
+    }
+
+    /**
+     * Attributes dropped because the block does not register them and no
+     * registered name was a close enough match to rename onto. These are the
+     * lines recorded in warnings.json.
+     *
+     * @return string[]
+     */
+    public static function droppedAttributes(string $report): array
+    {
+        return self::summarizeAttributeRepairs(
+            $report,
+            'unknown-attribute-dropped',
+            static fn (string $subject, int $count): string => sprintf(
+                "dropped unregistered attribute '%s' from %s on %d block(s); the block does not implement it",
+                substr($subject, (int) strrpos($subject, '.') + 1),
+                substr($subject, 0, (int) strrpos($subject, '.')),
+                $count,
+            ),
+        );
+    }
+
+    /**
+     * Collapse `REPAIR <code>:<subject> at <path>` rows into one line per
+     * distinct subject, counting the blocks each affected. Report order is
+     * preserved so the output is deterministic.
+     *
+     * @param callable(string,int):string $format
+     * @return string[]
+     */
+    private static function summarizeAttributeRepairs(string $report, string $code, callable $format): array
+    {
+        $pattern = '/\bREPAIR\s+' . preg_quote($code, '/') . ':(\S+)\s+at\s+/';
+        if (preg_match_all($pattern, $report, $matches) < 1) {
+            return [];
+        }
+        $counts = [];
+        foreach ($matches[1] as $subject) {
+            $counts[$subject] = ($counts[$subject] ?? 0) + 1;
+        }
+        $lines = [];
+        foreach ($counts as $subject => $count) {
+            $lines[] = $format((string) $subject, $count);
+        }
+        return $lines;
     }
 
     /** @return string[] parts/*.html and templates/*.html, theme-relative */

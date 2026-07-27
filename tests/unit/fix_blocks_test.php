@@ -116,6 +116,72 @@ test('FixBlocksStep warns but does not fail when block repair drops vertical rhy
     }
 });
 
+test('FixBlocksStep records dropped attributes in warnings.json and renames only in the log', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return "  FIXED  parts/section.html\n"
+                . "         - REPAIR unknown-attribute-dropped:core/group.verticalAlignment at 0/1\n"
+                . "         - REPAIR unknown-attribute-dropped:core/group.verticalAlignment at 0/2\n"
+                . "         - REPAIR attribute-renamed:vertical_alignment>verticalAlignment at 0/3\n"
+                . '[fix-templates] 1/1 file(s) re-serialized, 0 style/class value(s) dropped';
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/builder_fix_attrs_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group"></div><!-- /wp:group -->'
+    );
+
+    try {
+        (new FixBlocksStep($fake))->run($project);
+
+        // A dropped attribute is authored intent the build delivered without,
+        // so it belongs in the durable record the repair pass reads. The two
+        // occurrences of one key collapse into a single counted line.
+        $warnings = $project->readJson('warnings.json');
+        assert_eq(1, count($warnings['fix-blocks']), 'one line per distinct attribute');
+        assert_contains("dropped unregistered attribute 'verticalAlignment'", $warnings['fix-blocks'][0]);
+        assert_contains('core/group', $warnings['fix-blocks'][0]);
+        assert_contains('2 block(s)', $warnings['fix-blocks'][0]);
+        assert_true(
+            !str_contains(json_encode($warnings), 'renamed'),
+            'a rename left nothing to repair, so it is not a warning',
+        );
+
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains("renamed 'vertical_alignment' to 'verticalAlignment' on 1 block(s)", $log);
+        assert_contains('[attributes] WARNING', $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep writes no warnings when nothing was dropped', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return '[fix-templates] 1/1 file(s) re-serialized, 0 style/class value(s) dropped';
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/builder_fix_clean_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group"></div><!-- /wp:group -->'
+    );
+
+    try {
+        (new FixBlocksStep($fake))->run($project);
+        assert_true(!$project->exists('warnings.json'), 'a clean run leaves no warnings file');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('FixBlocksStep does not fail for unrelated dropped image styles', function () {
     $fake = new class implements BlockFixer {
         public function fix(string $themeDir): string

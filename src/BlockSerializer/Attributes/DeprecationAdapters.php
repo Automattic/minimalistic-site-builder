@@ -20,6 +20,14 @@ final class DeprecationAdapters
      * Legacy-only comment keys whose pinned migration is covered by a golden.
      * The current-schema overlay deliberately omits these keys after the
      * adapter has admitted the signature.
+     *
+     * Since AttributeNormalizer began dropping unregistered keys instead of
+     * rejecting them, this list no longer gates anything — every key here would
+     * be dropped anyway. What it still does is mark those drops as reviewed and
+     * expected, so they are omitted from the repair report. Everything else
+     * earns an `unknown-attribute-dropped` row and a line in warnings.json.
+     * Adding an entry is therefore a decision about reporting noise, not about
+     * whether a build survives.
      */
     private const REVIEWED_LEGACY_COMMENT_KEYS = [
         'core/button' => [

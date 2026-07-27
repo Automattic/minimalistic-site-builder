@@ -44,11 +44,63 @@ test('missing-block fallback cannot tunnel a registered unsupported child past t
     assert_throws(static fn () => (new Serializer())->transform($input));
 });
 
-test('registered blocks reject comment keys outside the current schema', function () {
+test('registered blocks drop comment keys outside the current schema, keeping the authored styling', function () {
+    // customTextColor is a genuine historical paragraph attribute with no
+    // current registration and no name close enough to rename onto. Dropping
+    // the delimiter key is what createBlock does anyway; the authored red
+    // survives in the saved HTML, so the page still renders as written.
     $legacy = '<!-- wp:paragraph {"customTextColor":"#ff0000"} -->'
         . '<p style="color:#ff0000">Legacy</p><!-- /wp:paragraph -->';
 
-    assert_throws(static fn () => (new Serializer())->transform($legacy));
+    $result = (new Serializer())->transform($legacy);
+    assert_true(!str_contains($result->html, 'customTextColor'), 'the unregistered key is gone');
+    assert_contains('style="color:#ff0000"', $result->html);
+    assert_true(
+        in_array(
+            'unknown-attribute-dropped:core/paragraph.customTextColor',
+            array_map(static fn ($r): string => $r->code, $result->repairs),
+            true,
+        ),
+        'the drop is reported',
+    );
+});
+
+test('a misnamed comment key is renamed onto the attribute it meant', function () {
+    // The shape differs, the name does not: verticalAlignment is registered on
+    // core/columns, so the authored intent is recoverable rather than lost —
+    // and the recovery is visible in the save, which now emits the alignment
+    // class the raw key never would have produced.
+    $shape = '<!-- wp:columns {"vertical_alignment":"center"} -->'
+        . '<div class="wp-block-columns"></div><!-- /wp:columns -->';
+
+    $result = (new Serializer())->transform($shape);
+    assert_contains('"verticalAlignment":"center"', $result->html);
+    assert_contains('are-vertically-aligned-center', $result->html);
+    assert_eq(
+        ['attribute-renamed:vertical_alignment>verticalAlignment'],
+        array_map(static fn ($r): string => $r->code, $result->repairs),
+    );
+});
+
+test('an unregistered attribute on a block that never had it is dropped, not renamed', function () {
+    // The failure this policy was written for: the generator carries
+    // verticalAlignment from core/columns (where it is real) onto core/group
+    // (where it is not). No registered group attribute is near enough to be a
+    // plausible correction, so the key is dropped and the block serializes.
+    $group = '<!-- wp:group {"verticalAlignment":"stretch","layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph -->' . "\n"
+        . '<p>Kept</p>' . "\n"
+        . '<!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+
+    $result = (new Serializer())->transform($group);
+    assert_true(!str_contains($result->html, 'verticalAlignment'), 'the stray key is gone');
+    assert_contains('<p>Kept</p>', $result->html);
+    assert_contains('"layout":{"type":"constrained"}', $result->html);
+    assert_eq(
+        ['unknown-attribute-dropped:core/group.verticalAlignment'],
+        array_map(static fn ($r): string => $r->code, $result->repairs),
+    );
 });
 
 test('registered blocks reject recognizable unreviewed current-key deprecations', function () {

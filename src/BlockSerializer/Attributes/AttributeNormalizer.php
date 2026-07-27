@@ -68,6 +68,16 @@ final class AttributeNormalizer
 
         // Keep stdClass identity at the sourcing boundary. Rendering receives
         // arrays only after the typed recreation below.
+        // An unregistered comment key is either a misspelling of a real
+        // attribute or a key this block does not implement. Blocks gain and
+        // lose attributes over time and the generator invents plausible ones,
+        // so neither case can be treated as a build-stopping defect: the
+        // recoverable ones are renamed onto the attribute they meant, and the
+        // rest are dropped with a repair row naming what was lost. Dropping is
+        // what the createBlock recreation below does to an unregistered key
+        // anyway — the difference is that it is now recorded rather than
+        // rejected. Reviewed legacy keys drop silently; they are already known
+        // to be inert, so a row for each would be noise.
         $comment = [];
         $rawComment = [];
         foreach ($node->attributes?->entries() ?? [] as $entry) {
@@ -79,15 +89,21 @@ final class AttributeNormalizer
                 )) {
                     continue;
                 }
-                // Historical Gutenberg versions can leave attributes which
-                // are no longer present in the current registered schema.
-                // Silently dropping one would disguise an unimplemented
-                // deprecation migration (and can lose authored bytes), so the
-                // closed PHP domain rejects that signature before staging.
-                throw new \RuntimeException(
-                    "Unsupported comment attribute '{$entry['key']}' for {$node->name}; "
-                    . 'a reviewed deprecation adapter is required'
+                $native = $entry['value']->toNative();
+                $corrected = AttributeNameResolver::resolve($entry['key'], $native, $schemas, $comment);
+                if ($corrected !== null) {
+                    $comment[$corrected] = $native;
+                    $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                        'attribute-renamed:' . $entry['key'] . '>' . $corrected,
+                        $blockPath,
+                    );
+                    continue;
+                }
+                $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                    'unknown-attribute-dropped:' . $node->name . '.' . $entry['key'],
+                    $blockPath,
                 );
+                continue;
             }
             $comment[$entry['key']] = $entry['value']->toNative();
         }

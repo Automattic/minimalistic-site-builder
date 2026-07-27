@@ -442,20 +442,28 @@ test('layout fixer leaves explicit non-object style shapes for the gate', functi
         . '<div class="wp-block-group" style="padding-left:1rem"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/invalid-style-shape.html' => $markup]);
     try {
+        // The misplaced `spacing` sibling is now dropped rather than rejected,
+        // so what reaches the gate is the explicit non-object `style` this test
+        // is about — still fail-closed, because a scalar where the block-support
+        // tree expects an object is a shape the save path cannot reason about.
         $error = php_block_fixer_test_exception(
             static fn () => (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme)
         );
-        assert_contains("Unsupported comment attribute 'spacing' for core/group", $error->getMessage());
+        assert_contains('Unsupported block-support scalar at core/group', $error->getMessage());
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('normalize-layout repair lets the PHP block fixer serialize the atlas repro it rejected', function () {
-    // End-to-end story for BIGR-718: the raw markup fails fix-blocks closed
-    // ("Unsupported comment attribute"), the LayoutFixer repair re-nests the
-    // family, and the same serializer then accepts the file byte-cleanly —
-    // the inline CSS the model wrote survives with zero dropped values.
+test('normalize-layout repair preserves padding the raw markup would otherwise lose', function () {
+    // End-to-end story for BIGR-718, restated for the forgiving attribute
+    // policy. The raw markup no longer fails fix-blocks closed — the misplaced
+    // `spacing` sibling is dropped and reported — but dropping it loses the
+    // authored padding. Running the LayoutFixer repair first re-nests the
+    // family under style, and the same serializer then accepts the file
+    // byte-cleanly with the inline CSS intact and zero dropped values. The
+    // ordering in FixBlocksStep (normalizeLayouts before the fixer) is what
+    // keeps the padding, so this documents why that order matters.
     // (Theme fixture helpers live in php_block_fixer_test.php; the runner
     // loads every test file before executing any case.)
     $pre = '<!-- wp:group {"style":{"border":{"radius":"18px","width":"1px","color":"#dce4de"}},"spacing":{"padding":{"left":"var:preset|spacing|md"}},"layout":{"type":"constrained"}} -->'
@@ -463,10 +471,13 @@ test('normalize-layout repair lets the PHP block fixer serialize the atlas repro
 
     $theme = php_block_fixer_test_theme(['parts/page-home--trust-builders.html' => $pre]);
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme)
+        $report = (string) (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme);
+        assert_contains('REPAIR unknown-attribute-dropped:core/group.spacing', $report);
+        $written = (string) file_get_contents($theme . '/parts/page-home--trust-builders.html');
+        assert_true(
+            !str_contains($written, 'padding-left:var(--wp--preset--spacing--md)'),
+            'without the repair the authored padding is lost with the dropped key',
         );
-        assert_contains("Unsupported comment attribute 'spacing' for core/group", $error->getMessage());
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
