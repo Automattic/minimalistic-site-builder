@@ -421,7 +421,11 @@ test('PhpBlockFixer preflights the real registry guard before staging any file',
     }
 });
 
-test('PhpBlockFixer rejects an unknown deprecation signature before staging any file', function () {
+test('PhpBlockFixer drops an unregistered comment attribute and still delivers every file', function () {
+    // An unregistered attribute used to abort the whole theme before any file
+    // was staged. One stray key on one block is not worth discarding a build,
+    // so it is now dropped and reported: the neighbouring file is written as
+    // usual and the affected file keeps everything the block does implement.
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:paragraph {"customTextColor":"#ff0000"} -->'
         . '<p style="color:#ff0000">Legacy</p><!-- /wp:paragraph -->';
@@ -429,22 +433,15 @@ test('PhpBlockFixer rejects an unknown deprecation signature before staging any 
         'parts/a.html' => $aOriginal,
         'parts/b.html' => $bOriginal,
     ]);
-    $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (string) (new PhpBlockFixer())->fix($theme);
 
-        assert_contains(
-            "Unsupported comment attribute 'customTextColor' for core/paragraph",
-            $error->getMessage(),
-        );
-        assert_contains('a reviewed deprecation adapter is required', $error->getMessage());
-        assert_eq(0, $writer->stageCalls, 'deprecation preflight must finish before the first stage');
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
-        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
+        assert_contains('REPAIR unknown-attribute-dropped:{"block":"core/paragraph","key":"customTextColor"', $report);
+        $b = (string) file_get_contents($theme . '/parts/b.html');
+        assert_true(!str_contains($b, 'customTextColor'), 'the unregistered key is gone');
+        assert_contains('style="color:#ff0000"', $b);
+        assert_contains('Legacy', $b);
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }

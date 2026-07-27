@@ -46,7 +46,7 @@ final class FixBlocksStep implements Step
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
             reads: ['theme/theme.json', 'theme/parts/*'],
-            writes: ['theme/parts/*'],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -102,7 +102,35 @@ final class FixBlocksStep implements Step
                 . implode("\n  ", $rhythmDrops);
             echo '  [rhythm] warning: dropped ' . implode(', ', $rhythmDrops) . "\n";
         }
+
+        // An attribute the block does not register is dropped rather than
+        // failing the build, so warnings.json is the only durable record that
+        // authored intent went missing — the repair pass reads it. Renames are
+        // deliberately not recorded there: the attribute survived under its
+        // correct name, so there is no defect left to repair.
+        $renames = self::renamedAttributes($summary);
+        $drops = self::droppedAttributes($summary);
+        if ($drops !== []) {
+            $project->addWarnings($this->id(), $drops);
+        }
+        if ($renames !== []) {
+            $summary .= "\n[attributes] " . count($renames) . " misnamed attribute(s) renamed:\n  "
+                . implode("\n  ", $renames);
+        }
+        if ($drops !== []) {
+            $summary .= "\n[attributes] WARNING: " . count($drops)
+                . " unregistered attribute(s) dropped (recorded in warnings.json):\n  "
+                . implode("\n  ", $drops);
+        }
         $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
+
+        if ($renames !== []) {
+            echo '  attributes: ' . count($renames) . " misnamed attribute(s) renamed\n";
+        }
+        if ($drops !== []) {
+            echo '  [attributes] warning: ' . count($drops)
+                . " unregistered attribute(s) dropped; see warnings.json\n";
+        }
 
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert
@@ -208,6 +236,121 @@ final class FixBlocksStep implements Step
             }
         }
         return $dropped;
+    }
+
+    /** Most warning lines emitted for one distinct attribute before they are summarized. */
+    private const MAX_WARNING_LINES_PER_ATTRIBUTE = 20;
+
+    /**
+     * Attributes the normalizer renamed onto the registered name whose shape
+     * they varied, one line per distinct rename with its occurrence count.
+     * These stay out of warnings.json: the value survived under its correct
+     * name, so there is no defect for the repair pass to act on.
+     *
+     * @return string[]
+     */
+    public static function renamedAttributes(string $report): array
+    {
+        $counts = [];
+        foreach (self::attributeRepairs($report, 'attribute-renamed') as $row) {
+            $key = ($row['from'] ?? '') . "\0" . ($row['to'] ?? '');
+            $counts[$key] = ($counts[$key] ?? 0) + 1;
+        }
+        $lines = [];
+        foreach ($counts as $key => $count) {
+            [$from, $to] = explode("\0", (string) $key, 2);
+            $lines[] = sprintf("renamed '%s' to '%s' on %d block(s)", $from, $to, $count);
+        }
+        return $lines;
+    }
+
+    /**
+     * Attributes dropped because the block does not register them and no
+     * registered name matched. Each line names the file and block path so the
+     * repair pass documented on Project::addWarnings can find the block again,
+     * and carries the dropped value so it can restore it. Structural drops —
+     * where the block ended up without what it needs to render at all — lead,
+     * and are labelled so they are not lost among alignment nits.
+     *
+     * @return string[]
+     */
+    public static function droppedAttributes(string $report): array
+    {
+        $lines = [];
+        foreach (['structural-attribute-dropped', 'unknown-attribute-dropped'] as $code) {
+            $structural = $code === 'structural-attribute-dropped';
+            $seen = [];
+            foreach (self::attributeRepairs($report, $code) as $row) {
+                $key = (string) ($row['key'] ?? '');
+                $seen[$key] = ($seen[$key] ?? 0) + 1;
+                if ($seen[$key] > self::MAX_WARNING_LINES_PER_ATTRIBUTE) {
+                    continue;
+                }
+                $lines[] = sprintf(
+                    "%s%s block %s: dropped unregistered attribute '%s' (value %s) from %s%s",
+                    $structural ? 'BROKEN: ' : '',
+                    $row['file'],
+                    $row['blockPath'],
+                    $key,
+                    json_encode((string) ($row['value'] ?? ''), JSON_UNESCAPED_SLASHES),
+                    (string) ($row['block'] ?? 'unknown block'),
+                    $structural
+                        ? ' — the block cannot render without it'
+                        : '; the block does not implement it',
+                );
+            }
+            foreach ($seen as $key => $count) {
+                if ($count > self::MAX_WARNING_LINES_PER_ATTRIBUTE) {
+                    $lines[] = sprintf(
+                        "...and %d further block(s) with '%s' dropped (listed in logs/%s)",
+                        $count - self::MAX_WARNING_LINES_PER_ATTRIBUTE,
+                        $key,
+                        self::LOG_FILE,
+                    );
+                }
+            }
+        }
+        return $lines;
+    }
+
+    /**
+     * Every `REPAIR <code>:<json> at <path>` row in the report, decoded, with
+     * the file it appeared under attached.
+     *
+     * The payload is JSON rather than delimiter-packed text because the fields
+     * are model-authored and can contain any character a delimiter might use.
+     * Rows whose payload does not decode are skipped rather than guessed at.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private static function attributeRepairs(string $report, string $code): array
+    {
+        $rows = [];
+        $file = 'unknown file';
+        $marker = '- REPAIR ' . $code . ':';
+        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
+            if (preg_match('/^\s{2}(?:FIXED|ok|skip)\s+(\S+)$/', $line, $m) === 1) {
+                $file = $m[1];
+                continue;
+            }
+            $at = strpos($line, $marker);
+            if ($at === false) {
+                continue;
+            }
+            $rest = substr($line, $at + strlen($marker));
+            $split = strrpos($rest, ' at ');
+            if ($split === false) {
+                continue;
+            }
+            $decoded = json_decode(substr($rest, 0, $split), true);
+            if (!is_array($decoded)) {
+                continue;
+            }
+            $decoded['file'] = $file;
+            $decoded['blockPath'] = trim(substr($rest, $split + 4));
+            $rows[] = $decoded;
+        }
+        return $rows;
     }
 
     /** @return string[] parts/*.html and templates/*.html, theme-relative */

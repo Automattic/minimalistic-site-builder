@@ -68,28 +68,73 @@ final class AttributeNormalizer
 
         // Keep stdClass identity at the sourcing boundary. Rendering receives
         // arrays only after the typed recreation below.
+        // An unregistered comment key is either a misspelling of a real
+        // attribute or a key this block does not implement. Blocks gain and
+        // lose attributes over time and the generator invents plausible ones,
+        // so neither case can be treated as a build-stopping defect: the
+        // recoverable ones are renamed onto the attribute they meant, and the
+        // rest are dropped with a repair row naming what was lost. Dropping is
+        // what the createBlock recreation below does to an unregistered key
+        // anyway — the difference is that it is now recorded rather than
+        // rejected. Reviewed legacy keys drop silently; they are already known
+        // to be inert, so a row for each would be noise.
+        //
+        // Registered keys bind in this first pass so nothing below depends on
+        // the order the author happened to write the delimiter in: a stray key
+        // sitting before its correctly-spelled twin must not win a race against
+        // it. Unknown keys are then resolved against that complete picture.
         $comment = [];
         $rawComment = [];
+        $unknown = [];
         foreach ($node->attributes?->entries() ?? [] as $entry) {
             $rawComment[$entry['key']] = $entry['value']->toNative();
-            if (!array_key_exists($entry['key'], $schemas)) {
-                if ($this->deprecations->isReviewedLegacyCommentAttribute(
-                    $node->name,
-                    $entry['key'],
-                )) {
-                    continue;
-                }
-                // Historical Gutenberg versions can leave attributes which
-                // are no longer present in the current registered schema.
-                // Silently dropping one would disguise an unimplemented
-                // deprecation migration (and can lose authored bytes), so the
-                // closed PHP domain rejects that signature before staging.
-                throw new \RuntimeException(
-                    "Unsupported comment attribute '{$entry['key']}' for {$node->name}; "
-                    . 'a reviewed deprecation adapter is required'
-                );
+            if (array_key_exists($entry['key'], $schemas)) {
+                $comment[$entry['key']] = $entry['value']->toNative();
+                continue;
             }
-            $comment[$entry['key']] = $entry['value']->toNative();
+            if ($this->deprecations->isReviewedLegacyCommentAttribute($node->name, $entry['key'])) {
+                continue;
+            }
+            $unknown[$entry['key']] = $entry['value']->toNative();
+        }
+
+        // Two stray keys pointing at the same attribute are as ambiguous as two
+        // registered names a single key could mean: there is no principled way
+        // to pick a winner, so neither is applied and both are reported.
+        $renameTo = [];
+        $claims = [];
+        foreach ($unknown as $key => $native) {
+            $target = AttributeNameResolver::resolve((string) $key, $native, $schemas, $comment);
+            if ($target !== null) {
+                $renameTo[$key] = $target;
+                $claims[$target] = ($claims[$target] ?? 0) + 1;
+            }
+        }
+        // The authored key is untrusted model text, so it is carried as a JSON
+        // payload rather than packed between delimiters it could itself
+        // contain. Readers json_decode it and get exact fields — there is no
+        // split direction to get wrong, and no key that can forge a row.
+        $droppedRows = [];
+        foreach ($unknown as $key => $native) {
+            $target = $renameTo[$key] ?? null;
+            if ($target !== null && $claims[$target] === 1) {
+                $comment[$target] = $native;
+                $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                    'attribute-renamed:' . self::payload(['from' => (string) $key, 'to' => $target]),
+                    $blockPath,
+                );
+                continue;
+            }
+            $row = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                'unknown-attribute-dropped:' . self::payload([
+                    'block' => $node->name,
+                    'key'   => (string) $key,
+                    'value' => $native,
+                ]),
+                $blockPath,
+            );
+            $droppedRows[] = count($repairRows);
+            $repairRows[] = $row;
         }
         $commentValues = $this->renderValues($comment);
         $rawCommentValues = $this->renderValues($rawComment);
@@ -191,6 +236,23 @@ final class AttributeNormalizer
         }
 
         $finalAttributes = JsonNative::objectToArray($typed);
+
+        // Re-tag drops now that the final attributes are known: a dropped key
+        // only counts as structural when the block genuinely ended up without
+        // what it needs to render.
+        if ($droppedRows !== [] && self::isStructurallyBroken($node->name, $finalAttributes)) {
+            foreach ($droppedRows as $index) {
+                $repairRows[$index] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                    str_replace(
+                        'unknown-attribute-dropped:',
+                        'structural-attribute-dropped:',
+                        $repairRows[$index]->code,
+                    ),
+                    $repairRows[$index]->blockPath,
+                );
+            }
+        }
+
         $this->deprecations->assertNoUnknownSignature(
             $node->name,
             $commentValues,
@@ -249,6 +311,65 @@ final class AttributeNormalizer
             $unique[$row->blockPath . "\0" . $row->code] = $row;
         }
         return array_values($unique);
+    }
+
+    /**
+     * Blocks that render nothing useful without one identity or destination
+     * attribute. Dropping the key that was meant to supply it produces a page
+     * that is visibly broken rather than cosmetically off — a header part that
+     * renders empty, a nav item that goes nowhere — so those drops are tagged
+     * and surfaced separately instead of sitting in a list of alignment nits.
+     */
+    private const RENDER_BLOCKING_ATTRIBUTES = [
+        'core/template-part'      => 'slug',
+        'core/navigation-link'    => 'url',
+        'core/navigation-submenu' => 'url',
+        'core/image'              => 'url',
+        'core/video'              => 'src',
+    ];
+
+    /**
+     * Whether the block ended up without the attribute it cannot render
+     * without. Checked against the final attributes rather than the authored
+     * ones, so a drop is only called structural when the page is actually
+     * broken — an image whose `src` was sourced from the saved HTML is fine.
+     *
+     * @param array<string,mixed> $finalAttributes
+     */
+    private static function isStructurallyBroken(string $name, array $finalAttributes): bool
+    {
+        $required = self::RENDER_BLOCKING_ATTRIBUTES[$name] ?? null;
+        if ($required === null) {
+            return false;
+        }
+        $value = $finalAttributes[$required] ?? null;
+        return $value === null || $value === '';
+    }
+
+    /**
+     * Encode a repair payload as compact JSON, safe to embed in a one-line
+     * report row.
+     *
+     * The values are untrusted model text reaching the fixer report, the build
+     * log and warnings.json (which a later repair pass reads). Whitespace
+     * collapses so one repair is always one row; backticks go because the
+     * rhythm-drop reader uses them as its delimiter and a crafted key would
+     * otherwise forge a `DROPPED style` warning; control characters go because
+     * they corrupt the log; and each string is capped so one absurd key or
+     * value cannot dominate a report.
+     *
+     * @param array<string,mixed> $fields
+     */
+    private static function payload(array $fields): string
+    {
+        $clean = [];
+        foreach ($fields as $name => $value) {
+            $encoded = is_string($value) ? $value : json_encode($value);
+            $encoded = (string) preg_replace('/[\p{C}`]+/u', '', (string) preg_replace('/\s+/', ' ', (string) $encoded));
+            $encoded = trim($encoded);
+            $clean[$name] = strlen($encoded) > 120 ? substr($encoded, 0, 117) . '...' : $encoded;
+        }
+        return (string) json_encode($clean, JSON_UNESCAPED_SLASHES);
     }
 
     private function jsTrim(string $value): string

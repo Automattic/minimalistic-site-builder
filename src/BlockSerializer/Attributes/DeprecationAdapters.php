@@ -20,6 +20,22 @@ final class DeprecationAdapters
      * Legacy-only comment keys whose pinned migration is covered by a golden.
      * The current-schema overlay deliberately omits these keys after the
      * adapter has admitted the signature.
+     *
+     * Since AttributeNormalizer began dropping unregistered keys instead of
+     * rejecting them, this list no longer decides whether a build survives —
+     * an absent key is dropped rather than rejected. It now does two things,
+     * and only the first is cosmetic:
+     *
+     * 1. Marks the drop as reviewed and expected, keeping it out of the repair
+     *    report; everything else earns an `unknown-attribute-dropped` row and a
+     *    line in warnings.json.
+     * 2. Suppresses the rename attempt entirely — an entry here short-circuits
+     *    before AttributeNameResolver runs. This is load-bearing. `core/button`
+     *    lists `href` precisely because the resolver would otherwise rename it
+     *    onto `rel`, turning an authored destination into a link relation.
+     *
+     * So adding an entry is a reporting decision, but REMOVING one is not:
+     * it can turn a silent, correct drop into a silent, wrong rename.
      */
     private const REVIEWED_LEGACY_COMMENT_KEYS = [
         'core/button' => [
