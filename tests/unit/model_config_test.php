@@ -23,8 +23,6 @@ test('ModelConfig reads the packaged provider matrix', function () {
     assert_eq('claude-haiku-4-5', ModelConfig::tierModel('anthropic', 'small'));
     assert_eq('moonshotai/kimi-k3', ModelConfig::tierModel('openrouter', 'large'));
     assert_eq('moonshotai/kimi-k2.5:nitro', ModelConfig::tierModel('openrouter', 'small'));
-    assert_eq('moonshotai/kimi-k2.5:nitro', ModelConfig::stepModel('openrouter', 'sections'));
-    assert_eq(null, ModelConfig::stepModel('openrouter', 'design-direction'));
 
     $tiers = ModelConfig::stepTiers();
     assert_eq('small', $tiers['site-spec']);
@@ -82,36 +80,22 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
     }
 });
 
-test('StepDefaults applies OpenRouter step models while keeping K3 for creative direction', function () {
+test('StepDefaults uses K3 for OpenRouter quality steps and K2.5 for structural steps', function () {
     putenv('LLM_PROVIDER=openrouter');
     try {
         $models = StepDefaults::models();
-        assert_eq('moonshotai/kimi-k3', $models['design-direction']);
-        foreach (array_diff(array_keys($models), ['design-direction']) as $step) {
+        foreach (ModelConfig::stepTiers() as $step => $tier) {
+            $expected = $tier === 'large'
+                ? 'moonshotai/kimi-k3'
+                : 'moonshotai/kimi-k2.5:nitro';
             assert_eq(
-                'moonshotai/kimi-k2.5:nitro',
+                $expected,
                 $models[$step],
-                "{$step} uses the non-reasoning throughput model",
+                "{$step} follows its configured {$tier} tier",
             );
         }
     } finally {
         putenv('LLM_PROVIDER');
-    }
-});
-
-test('global and per-step env models override provider step models', function () {
-    putenv('LLM_PROVIDER=openrouter');
-    putenv('LLM_MODEL=override-large');
-    putenv('LLM_MODEL_SECTIONS=override-sections');
-    try {
-        $models = StepDefaults::models();
-        assert_eq('override-large', $models['theme-json'], 'large-tier env beats provider step model');
-        assert_eq('override-sections', $models['sections'], 'per-step env wins over everything');
-        assert_eq('moonshotai/kimi-k2.5:nitro', $models['site-spec'], 'unoverridden small tier stays configured');
-    } finally {
-        putenv('LLM_PROVIDER');
-        putenv('LLM_MODEL');
-        putenv('LLM_MODEL_SECTIONS');
     }
 });
 

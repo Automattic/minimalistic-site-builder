@@ -9,11 +9,11 @@ namespace Automattic\SiteBuild;
  * including hosts that only load autoload.php. CLI helpers step_models() /
  * step_temperatures() delegate here.
  *
- * Models come from the active provider's large/small tiers and optional
- * per-step model map in config/models.json (see ModelConfig). Env overrides
- * still win, in order: LLM_MODEL_<STEP> (one step, any model) > LLM_MODEL /
- * LLM_MODEL_SMALL (the run-wide large / small tier) > provider step model >
- * provider tier default.
+ * Models come from the active provider's large/small tiers in config/models.json
+ * (see ModelConfig): the provider is chosen by LLM_PROVIDER (which `--provider`
+ * sets), and each step uses its configured tier. Env overrides still win, in
+ * order: LLM_MODEL_<STEP> (one step, any model) > LLM_MODEL / LLM_MODEL_SMALL
+ * (the run-wide large / small tier) > the provider tier default.
  *
  * Env overrides: LLM_PROVIDER, LLM_MODEL, LLM_MODEL_SMALL, LLM_MODEL_<STEP>,
  * LLM_TEMPERATURE, LLM_TEMPERATURE_<STEP>.
@@ -51,17 +51,13 @@ final class StepDefaults
      */
     public static function models(): array
     {
-        $provider = self::provider();
-        $largeOverride = Env::get('LLM_MODEL');
-        $smallOverride = Env::get('LLM_MODEL_SMALL');
+        $large = self::model();
+        $small = self::smallModel();
 
         $out = [];
         foreach (ModelConfig::stepTiers() as $step => $tier) {
             $envKey = 'LLM_MODEL_' . strtoupper(str_replace('-', '_', $step));
-            $tierOverride = $tier === 'small' ? $smallOverride : $largeOverride;
-            $configured = ModelConfig::stepModel($provider, $step)
-                ?? ModelConfig::tierModel($provider, $tier);
-            $out[$step] = Env::get($envKey) ?? $tierOverride ?? $configured;
+            $out[$step] = Env::get($envKey, $tier === 'small' ? $small : $large);
         }
         return $out;
     }

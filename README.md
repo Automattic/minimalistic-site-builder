@@ -73,13 +73,14 @@ one step (any model id, wins over the config):
 - `LLM_MODEL` / `LLM_MODEL_SMALL` — the run-wide large / small tier
 - `LLM_MODEL_<STEP>` — a single step, e.g. `LLM_MODEL_SITE_SPEC=gpt-5.5`
 
-Kimi K3 currently defaults to maximum-effort reasoning, whose tokens come from
-the same budget as its visible answer, so the OpenRouter profile reserves it
-for `design-direction`. High-volume JSON/code/markup steps use the
-throughput-routed K2.5 `:nitro` variant with optional reasoning disabled.
-OpenRouter demo batches run up to three sites in parallel and bound each site's
-internal request fan-out at four; pass `--parallel=<n>` to override the site
-cap.
+The OpenRouter profile uses K3 for every quality-critical large-tier step:
+`design-direction`, `theme-json`, `sections`, `page-styles`, `custom-motion`,
+and `fonts-php`. Fast K2.5 `:nitro`, with optional reasoning disabled, is
+reserved for the small structural steps. K3's maximum-effort reasoning shares
+its completion budget with the visible answer, so the transport gives it a
+larger token budget and timeout. OpenRouter demo batches run up to three sites
+in parallel and bound each site's internal request fan-out at four; pass
+`--parallel=<n>` to override the site cap.
 
 Output lands in `projects/<slug>/`. Each build also writes a run overview —
 per-step times and token spend, totals, and the image tally — to
