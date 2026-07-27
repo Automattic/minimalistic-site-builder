@@ -136,7 +136,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     $llm->queueText(
         '<!-- wp:group --><div class="wp-block-group">'
         . '<!-- wp:heading --><h2>Breads</h2><!-- /wp:heading -->'
-        . '<!-- wp:paragraph --><p>See you at <a href="/">home</a>.</p><!-- /wp:paragraph -->'
+        // Exact BIGR-728 reproduction: contradictory legacy/current paragraph
+        // alignment must degrade with a warning, not abort this full pipeline.
+        . '<!-- wp:paragraph {"align":"center","style":{"typography":{"textAlign":"justify"}}} -->'
+        . '<p class="has-text-align-center" style="text-align:justify">'
+        . 'See you at <a href="/">home</a>.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->'
     );
     // page-styles (text) — runs after assemble-pages, sees only overlap-up as a
@@ -181,6 +185,17 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_contains('>Hero<', $home);
     assert_true(strpos($home, 'Hero') < strpos($home, 'Specials'), 'home sections in plan order');
     assert_contains('>Breads<', $project->readText('plugin/pages/menu.html'));
+    assert_contains(
+        'See you at <a href="/">home</a>.',
+        $project->readText('plugin/pages/menu.html'),
+        'the conflicting paragraph keeps its content through final validation',
+    );
+    $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+    assert_contains(
+        'core/paragraph style "text-align" could not be preserved',
+        implode("\n", $warnings),
+        'the exact BIGR-728 degradation reaches the durable warnings artifact',
+    );
     assert_true(!$project->exists('theme/parts/page-home--hero.html'), 'transient parts removed from the theme');
     assert_true($project->exists('theme/parts/header.html'), 'chrome parts stay in the theme');
 

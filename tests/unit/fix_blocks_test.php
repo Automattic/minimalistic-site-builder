@@ -33,6 +33,11 @@ test('FixBlocksStep delegates repair to the injected BlockFixer', function () {
     assert_eq($project->themePath(), $fake->calls[0], 'given the theme dir');
 });
 
+test('FixBlocksStep declares its durable warnings artifact', function () {
+    $writes = (new FixBlocksStep(new PhpBlockFixer()))->declaration()->writes;
+    assert_true(in_array('warnings.json', $writes, true));
+});
+
 test('FixBlocksStep classifies only dropped styles that affect vertical rhythm', function () {
     $report = implode("\n", [
         '         ! DROPPED style `padding:4rem 2rem` — not mirrored',
@@ -111,6 +116,208 @@ test('FixBlocksStep warns but does not fail when block repair drops vertical rhy
         $log = $project->readText('logs/fix-blocks.log');
         assert_contains('DROPPED style `padding-top:8rem`', $log);
         assert_contains('[rhythm] WARNING', $log, 'the loss is recorded as a prominent warning');
+        $warnings = $project->readJson('warnings.json');
+        assert_contains(
+            'dropped vertical rhythm CSS `padding-top:8rem`',
+            implode("\n", $warnings['fix-blocks'] ?? []),
+            'the non-fatal defect is durable, not only present in the human log',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep degrades reviewed paragraph styles and records actionable warnings', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_paragraph_styles_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/aligned-opacity.html',
+        '<!-- wp:paragraph {"align":"center"} -->'
+            . '<p class="has-text-align-center" style="opacity:0.35 ; ">Readable</p>'
+            . '<!-- /wp:paragraph -->',
+    );
+    $project->writeText(
+        'theme/parts/hidden-opacity.html',
+        '<!-- wp:paragraph --><p title="1 &gt; 0" style="opacity:0;">Still present</p><!-- /wp:paragraph -->',
+    );
+    $project->writeText(
+        'theme/parts/conflicting-align.html',
+        '<!-- wp:paragraph {"align":"center","style":{"typography":{"textAlign":"justify"}}} -->'
+            . '<p class="has-text-align-center" style="text-align:justify">Conflicting but readable</p>'
+            . '<!-- /wp:paragraph -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        foreach ([
+            'aligned-opacity.html' => 'Readable',
+            'conflicting-align.html' => 'Conflicting but readable',
+            'hidden-opacity.html' => 'Still present',
+        ] as $file => $copy) {
+            $fixed = $project->readText('theme/parts/' . $file);
+            assert_contains($copy, $fixed, "{$file} keeps its content");
+            assert_true(!str_contains($fixed, 'opacity:'), "{$file} has no unsupported opacity");
+        }
+
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        assert_eq(3, count($warnings), 'each reviewed degradation gets one repairable warning');
+        $joined = implode("\n", $warnings);
+        assert_contains('parts/aligned-opacity.html block 0', $joined);
+        assert_contains('parts/conflicting-align.html block 0', $joined);
+        assert_contains('parts/hidden-opacity.html block 0', $joined);
+        assert_contains('style "opacity"', $joined);
+        assert_contains('style "text-align"', $joined);
+        assert_contains('core/paragraph has no opacity save consumer', $joined);
+        assert_contains('center and justify alignment has no unambiguous winner', $joined);
+        assert_contains('authored "0"', $joined, 'the hidden-content value is retained for repair');
+        assert_contains(
+            'title="1 > 0"',
+            $project->readText('theme/parts/hidden-opacity.html'),
+            'unrelated root attributes survive the reviewed opacity fallback',
+        );
+
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('REPAIR paragraph-style-degraded:', $log);
+        assert_contains('[paragraph-styles] WARNING: 3 unsupported style(s) degraded', $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep keeps unreviewed validation failures fatal', function () {
+    $cases = [
+        'unsupported-block' => '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->',
+        'unreviewed-style' => '<!-- wp:paragraph {"align":"center"} -->'
+            . '<p class="has-text-align-center" style="transform:scale(.9)">Scaled</p>'
+            . '<!-- /wp:paragraph -->',
+        'unknown-comment-attribute' => '<!-- wp:paragraph {"customTextColor":"#f00"} -->'
+            . '<p style="color:#f00">Legacy</p><!-- /wp:paragraph -->',
+        'malformed-style' => '<!-- wp:paragraph --><p style="opacity">Copy</p><!-- /wp:paragraph -->',
+        'commented-opacity' => '<!-- wp:paragraph --><p style="opacity/**/:0">Copy</p><!-- /wp:paragraph -->',
+        'escaped-opacity' => '<!-- wp:paragraph --><p style="op\\61 city:0">Copy</p><!-- /wp:paragraph -->',
+        'empty-opacity' => '<!-- wp:paragraph --><p style="opacity:">Copy</p><!-- /wp:paragraph -->',
+        'unbalanced-opacity' =>
+            '<!-- wp:paragraph --><p style="opacity:calc(0">Copy</p><!-- /wp:paragraph -->',
+        'unterminated-opacity-comment' =>
+            '<!-- wp:paragraph --><p style="opacity:0/*">Copy</p><!-- /wp:paragraph -->',
+        'empty-opacity-after-comment' =>
+            '<!-- wp:paragraph --><p style="opacity:/**/">Copy</p><!-- /wp:paragraph -->',
+        'complex-style-carryover' =>
+            '<!-- wp:paragraph --><p style="--label:&quot;a; b:c&quot;;opacity:0">Copy</p>'
+            . '<!-- /wp:paragraph -->',
+        'wrong-opacity-root' =>
+            '<!-- wp:paragraph --><div style="opacity:0">Copy</div><!-- /wp:paragraph -->',
+        'opacity-extra-sibling' =>
+            '<!-- wp:paragraph --><p style="opacity:0">One</p><span>Two</span><!-- /wp:paragraph -->',
+        'opacity-leading-text' =>
+            '<!-- wp:paragraph -->Leading<p style="opacity:0">Copy</p><!-- /wp:paragraph -->',
+        'ambiguous-align-class' =>
+            '<!-- wp:paragraph {"align":"center","style":{"typography":{"textAlign":"justify"}}} -->'
+            . '<p class="has-text-align-center has-text-align-right" style="text-align:justify">'
+            . 'Copy</p><!-- /wp:paragraph -->',
+        'conflicting-align-extra-attribute' =>
+            '<!-- wp:paragraph {"align":"center","style":{"typography":{"textAlign":"justify"}}} -->'
+            . '<p lang="fr" class="has-text-align-center" style="text-align:justify">'
+            . 'Copie</p><!-- /wp:paragraph -->',
+    ];
+
+    foreach ($cases as $name => $original) {
+        $tmp = sys_get_temp_dir() . '/builder_fix_strict_' . $name . '_' . uniqid();
+        $project = new Project($tmp);
+        $project->writeText('theme/parts/section.html', $original);
+        try {
+            assert_throws(
+                static fn () => (new FixBlocksStep(new PhpBlockFixer()))->run($project),
+                "{$name} must stay outside the reviewed warning-backed domain",
+            );
+            assert_eq($original, $project->readText('theme/parts/section.html'));
+            assert_true(
+                !$project->exists('warnings.json'),
+                "{$name} must not be mislabeled as an accepted degradation",
+            );
+        } finally {
+            exec('rm -rf ' . escapeshellarg($tmp));
+        }
+    }
+});
+
+test('FixBlocksStep keeps operational fixer failures fatal', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            throw new RuntimeException('injected staging I/O failure');
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/builder_fix_operational_failure_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group"></div><!-- /wp:group -->',
+    );
+
+    try {
+        assert_throws(static fn () => (new FixBlocksStep($fake))->run($project));
+        assert_true(
+            !$project->exists('warnings.json'),
+            'an infrastructure failure is not mislabeled as a content warning',
+        );
+        assert_contains('injected staging I/O failure', $project->readText('logs/fix-blocks.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep rolls layout normalization back when strict validation fails', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_strict_rollback_' . uniqid();
+    $project = new Project($tmp);
+    $layoutOriginal = '<!-- wp:group {"align":"full"} -->'
+        . '<div class="wp-block-group alignfull"></div><!-- /wp:group -->';
+    $unsupportedOriginal = '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->';
+    $project->writeText('theme/parts/a-layout.html', $layoutOriginal);
+    $project->writeText('theme/parts/b-unsupported.html', $unsupportedOriginal);
+
+    try {
+        assert_throws(static fn () => (new FixBlocksStep(new PhpBlockFixer()))->run($project));
+        assert_eq($layoutOriginal, $project->readText('theme/parts/a-layout.html'));
+        assert_eq($unsupportedOriginal, $project->readText('theme/parts/b-unsupported.html'));
+        assert_true(!$project->exists('warnings.json'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep rolls the first fixer pass back when its strict follow-up fails', function () {
+    $fake = new class implements BlockFixer {
+        public int $calls = 0;
+
+        public function fix(string $themeDir): string
+        {
+            $this->calls++;
+            if ($this->calls === 1) {
+                file_put_contents(
+                    $themeDir . '/parts/section.html',
+                    '<!-- wp:group {"align":"full"} -->'
+                        . '<div class="wp-block-group alignfull"></div><!-- /wp:group -->',
+                );
+                return '[fix-templates] first pass repaired malformed group';
+            }
+            throw new RuntimeException('injected strict follow-up failure');
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/builder_fix_followup_rollback_' . uniqid();
+    $project = new Project($tmp);
+    $original = '<!-- wp:group {"align":"full"} --><div>';
+    $project->writeText('theme/parts/section.html', $original);
+
+    try {
+        assert_throws(static fn () => (new FixBlocksStep($fake))->run($project));
+        assert_eq(2, $fake->calls);
+        assert_eq($original, $project->readText('theme/parts/section.html'));
+        assert_true(!$project->exists('warnings.json'));
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
@@ -167,7 +374,12 @@ test('FixBlocksStep normalizes markup exposed by structural repair and re-serial
             }
 
             assert_contains('"layout":{"type":"constrained"}', $markup);
-            return '[fix-templates] second pass re-serialized normalized group';
+            return "  FIXED  parts/section with space.html\n"
+                . '         - REPAIR paragraph-style-degraded:'
+                . '{"property":"opacity","authored":"0.4","delivered":null,'
+                . '"disposition":"removed; core/paragraph has no opacity save consumer",'
+                . '"reviewed":true} at 0'
+                . "\n[fix-templates] second pass re-serialized normalized group";
         }
     };
 
@@ -188,6 +400,12 @@ test('FixBlocksStep normalizes markup exposed by structural repair and re-serial
         assert_contains('first pass repaired malformed group', $log);
         assert_contains('second pass re-serialized normalized group', $log);
         assert_contains('post-repair normalization required a second block-fixer pass', $log);
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        assert_contains(
+            'parts/section with space.html block 0',
+            implode("\n", $warnings),
+            'an indented follow-up report keeps its file attribution',
+        );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }

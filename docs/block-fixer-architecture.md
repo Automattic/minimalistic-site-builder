@@ -43,6 +43,21 @@ non-convergence throws), and only then writes — every changed file is staged
 beside its target by `NativeStagedFileWriter` and committed as a sequence of
 atomic renames. Any failure before commit leaves every input untouched.
 
+### Reviewed degradation boundary
+
+The serializer first attempts bounded deterministic repairs. An exact,
+regression-tested incompatibility may return usable canonical output with a
+typed `Repair` row even when a style value cannot be preserved. `FixBlocksStep`
+promotes those reviewed loss rows into actionable
+`warnings.json["fix-blocks"]` entries and lets site generation continue.
+
+That boundary is intentionally narrow. Unknown deprecation signatures,
+malformed block structure or CSS, unsupported registered blocks/support shapes,
+possible content loss, and non-convergence still throw before staging. I/O,
+commit, frozen-artifact, and programming failures also remain fatal. The step
+does not catch a generic validator exception and relabel unchecked input as a
+warning.
+
 One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
 
 1. **Paragraph pre/post pass** — `ParagraphFixer` repairs nested-paragraph
@@ -65,9 +80,15 @@ One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
      `Validation/Validator` token-compares the block's actual HTML against the
      canonical render for the current attributes, and on mismatch the reviewed
      `DeprecationAdapters` / `CompatibilityRepairs` are consulted (each
-     acceptance emits a typed `Repair` row). Unknown legacy paragraph
-     signatures throw; the paragraph-only scope of that guard is a recorded
-     decision (plan addendum).
+     acceptance emits a typed `Repair` row). Two exact paragraph degradations
+     are reviewed: unsupported root `opacity` is stripped to readable full
+     opacity, including selector-less deprecation carryovers; and BIGR-728's
+     contradictory legacy `align=center`/root center class plus current
+     `style.typography.textAlign=justify` drops the ambiguous rendered
+     alignment. Both emit `paragraph-style-degraded` rows. Every other residual
+     root style still throws. `FixBlocksStep` routes reviewed losses to
+     `warnings.json` with file, block path, property, authored value, and
+     delivered disposition.
    - `Save/SaveStrategyRegistry` dispatches on the block's `SaveStrategy`:
      `DYNAMIC_NULL` → empty save, `INNER_BLOCKS` → inner content only,
      `RAW_CONTENT` (core/html) → attribute bytes, `CONDITIONAL`
@@ -94,6 +115,8 @@ One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
      inside carried families keep strict value validation, and
      `style.background` stays fail-closed — `StyleEngine` consumes it
      wholesale, so an unreviewed shape could change the emitted bytes.
+     That fail-closed result aborts the transaction before it writes guessed
+     bytes; it is not converted into a warning.
      `Html/HtmlSerializer` emits the bytes.
    - `CommentSerializer` writes the delimiter: attributes ordered by the
      registry `attributeOrder`, encoded by `Json/JsJsonEncoder` +
@@ -104,6 +127,8 @@ One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
    lost values; `FixerReport` normalizes to the frozen grammar: totals
    `N` (changed files), `M` (eligible files), `D` (drops), `T` (themes),
    per-file status `ok`/`FIXED`/`skip`, plus `K` reviewed repair rows.
+   `FixBlocksStep` keeps the full human report in `logs/fix-blocks.log` and
+   promotes reviewed degradation rows into the durable warnings artifact.
 
 ## Golden fixture cases
 

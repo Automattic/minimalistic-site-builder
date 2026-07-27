@@ -46,18 +46,19 @@ final class FixBlocksStep implements Step
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
             reads: ['theme/theme.json', 'theme/parts/*'],
-            writes: ['theme/parts/*'],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
 
     public function run(Project $project): void
     {
-        $layoutNotes = self::normalizeLayouts($project);
-
+        $beforeInitialPass = self::snapshotThemeFiles($project);
         try {
+            $layoutNotes = self::normalizeLayouts($project);
             $summary = $this->fixer->fix($project->themePath());
         } catch (\RuntimeException $e) {
+            self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
             throw $e;
         }
@@ -67,23 +68,27 @@ final class FixBlocksStep implements Step
         // contract one more chance, then re-serialize only when that pass
         // actually changed comment attributes so the authored HTML stays in
         // sync with them.
-        $postRepairLayoutNotes = self::normalizeLayouts($project);
-        $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
-        if ($postRepairLayoutNotes !== []) {
-            try {
+        try {
+            $postRepairLayoutNotes = self::normalizeLayouts($project);
+            $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
+            if ($postRepairLayoutNotes !== []) {
                 $followUpSummary = $this->fixer->fix($project->themePath());
-            } catch (\RuntimeException $e) {
-                $summary .= "\n[layout] post-repair normalization required a second block-fixer pass, which failed:\n  "
-                    . str_replace("\n", "\n  ", $e->getMessage());
-                if ($layoutNotes !== []) {
-                    $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  "
-                        . implode("\n  ", $layoutNotes);
-                }
-                $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
-                throw $e;
+                $summary .= "\n[layout] post-repair normalization required a second block-fixer pass:\n  "
+                    . str_replace("\n", "\n  ", $followUpSummary);
             }
-            $summary .= "\n[layout] post-repair normalization required a second block-fixer pass:\n  "
-                . str_replace("\n", "\n  ", $followUpSummary);
+        } catch (\RuntimeException $e) {
+            // The public step is one transaction even though structural
+            // repair can require two fixer passes. A failed follow-up must not
+            // leave the first pass committed as a partial step result.
+            self::restoreThemeFiles($project, $beforeInitialPass);
+            $summary .= "\n[layout] post-repair normalization required a second block-fixer pass, which failed:\n  "
+                . str_replace("\n", "\n  ", $e->getMessage());
+            if ($layoutNotes !== []) {
+                $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  "
+                    . implode("\n  ", $layoutNotes);
+            }
+            $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
+            throw $e;
         }
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
@@ -101,6 +106,26 @@ final class FixBlocksStep implements Step
             $summary .= "\n[rhythm] WARNING: block re-serialization dropped vertical rhythm CSS:\n  "
                 . implode("\n  ", $rhythmDrops);
             echo '  [rhythm] warning: dropped ' . implode(', ', $rhythmDrops) . "\n";
+        }
+
+        // A residual paragraph style reaches this report only after current
+        // validation, compatibility repair, and reviewed deprecation adapters
+        // all had a chance to preserve it. The current-schema save is the
+        // deterministic fallback; keep that usable output, but make every loss
+        // durable for the later repair pass rather than hiding it in this log.
+        $paragraphStyleWarnings = self::degradedParagraphStyles($summary);
+        $warnings = $paragraphStyleWarnings;
+        foreach ($rhythmDrops as $drop) {
+            $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
+                . 'see logs/' . self::LOG_FILE;
+        }
+        $project->addWarnings($this->id(), $warnings);
+        if ($paragraphStyleWarnings !== []) {
+            $summary .= "\n[paragraph-styles] WARNING: " . count($paragraphStyleWarnings)
+                . " unsupported style(s) degraded (recorded in warnings.json):\n  "
+                . implode("\n  ", $paragraphStyleWarnings);
+            echo '  [paragraph-styles] warning: ' . count($paragraphStyleWarnings)
+                . " unsupported style(s) degraded; see warnings.json\n";
         }
         $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
 
@@ -208,6 +233,85 @@ final class FixBlocksStep implements Step
             }
         }
         return $dropped;
+    }
+
+    /**
+     * Decode paragraph-style degradation repair rows with their file and block
+     * path so warnings.json is actionable for a later repair pass.
+     *
+     * @return string[]
+     */
+    public static function degradedParagraphStyles(string $report): array
+    {
+        $warnings = [];
+        $file = 'unknown file';
+        $marker = '- REPAIR paragraph-style-degraded:';
+        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
+            if (preg_match('/^\s+(?:FIXED|ok|skip)\s+(.+?)\s*$/', $line, $match) === 1) {
+                $file = trim($match[1]);
+                continue;
+            }
+            $offset = strpos($line, $marker);
+            if ($offset === false) {
+                continue;
+            }
+            $rest = substr($line, $offset + strlen($marker));
+            $split = strrpos($rest, ' at ');
+            if ($split === false) {
+                continue;
+            }
+            $payload = json_decode(substr($rest, 0, $split), true);
+            if (!is_array($payload)) {
+                continue;
+            }
+            $property = json_encode(
+                (string) ($payload['property'] ?? ''),
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            );
+            $authored = json_encode(
+                (string) ($payload['authored'] ?? ''),
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            );
+            $delivered = array_key_exists('delivered', $payload) && $payload['delivered'] !== null
+                ? json_encode(
+                    (string) $payload['delivered'],
+                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+                )
+                : null;
+            $disposition = is_string($payload['disposition'] ?? null)
+                ? $payload['disposition']
+                : ($delivered === null
+                    ? 'removed by the reviewed deterministic fallback'
+                    : 'delivered as ' . $delivered);
+            $warnings[] = sprintf(
+                '%s block %s: core/paragraph style %s could not be preserved '
+                    . '(authored %s; %s); deterministic current-schema output delivered',
+                $file,
+                trim(substr($rest, $split + 4)),
+                $property === false ? '""' : $property,
+                $authored === false ? '""' : $authored,
+                $disposition,
+            );
+        }
+        return array_values(array_unique($warnings));
+    }
+
+    /** @return array<string,string> theme-relative path => exact bytes */
+    private static function snapshotThemeFiles(Project $project): array
+    {
+        $snapshot = [];
+        foreach (self::themeFiles($project) as $relative) {
+            $snapshot[$relative] = $project->readText('theme/' . $relative);
+        }
+        return $snapshot;
+    }
+
+    /** @param array<string,string> $snapshot */
+    private static function restoreThemeFiles(Project $project, array $snapshot): void
+    {
+        foreach ($snapshot as $relative => $markup) {
+            $project->writeText('theme/' . $relative, $markup);
+        }
     }
 
     /** @return string[] parts/*.html and templates/*.html, theme-relative */

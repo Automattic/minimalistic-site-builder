@@ -4,7 +4,9 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\BlockSerializer\Attributes;
 
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\BlockSerializer\Html\RichText;
+use Automattic\SiteBuild\BlockSerializer\ParagraphFixer;
 use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\Supports\SupportEngine;
 
@@ -78,15 +80,24 @@ final class DeprecationAdapters
     ];
 
     /**
-     * Root inline-style properties an AI-authored core/paragraph carries that
-     * the block does not implement, so the pinned current save drops them. The
-     * drop is safe and the best user outcome: the paragraph renders at full
-     * opacity — readable — instead of failing the whole build.
+     * Root inline-style properties an AI-authored core/paragraph carries even
+     * though the block does not implement them. Strip these from selector-less
+     * deprecation carryovers as well as current-save output, then report the
+     * deterministic degradation instead of failing the whole build.
      */
-    private const REVIEWED_INERT_PARAGRAPH_ROOT_STYLES = [
+    private const STRIPPED_INERT_PARAGRAPH_ROOT_STYLES = [
         // opacity is a separator/cover support, not a paragraph one; a
-        // generated `style="opacity:…"` on a paragraph has no current save
-        // consumer and is dropped.
+        // generated `style="opacity:…"` on a paragraph has no save consumer.
+        // Full opacity is the safest readable fallback.
+        'opacity' => true,
+    ];
+
+    /**
+     * Residual style dispositions reviewed against generated build failures.
+     * Every other residual property remains fail-closed until its exact
+     * signature and semantics-safe fallback are reviewed separately.
+     */
+    private const REVIEWED_PARAGRAPH_STYLE_DEGRADATIONS = [
         'opacity' => true,
     ];
 
@@ -96,39 +107,178 @@ final class DeprecationAdapters
     }
 
     /**
-     * Reject recognizable historical signatures which are outside the
-     * reviewed adapter set. This runs after current-schema recreation, while
-     * the original saved HTML is still available, and therefore prevents a
-     * lossy current renderer from disguising an unported deprecation match.
+     * Report explicitly reviewed root-style degradations after every adapter
+     * has had a chance to preserve them. Unknown residual styles still throw:
+     * current-schema output is only a safe fallback for signatures whose
+     * content and disposition have been reviewed and regression-tested.
      *
      * @param array<string,mixed> $commentAttributes
+     * @return list<Repair>
      */
-    public function assertNoUnknownSignature(
+    public function residualParagraphStyleRepairs(
         string $name,
         array $commentAttributes,
         string $originalContent,
         string $currentContent,
         string $blockPath,
-    ): void {
+    ): array {
         if ($name !== 'core/paragraph') {
-            return;
+            return [];
         }
         $actual = $this->rootStyles($originalContent);
         if ($actual === []) {
-            return;
+            return [];
         }
         $current = $this->effectiveRootStyles($currentContent);
+        $repairs = [];
         foreach ($actual as $property => $value) {
-            if (isset(self::REVIEWED_INERT_PARAGRAPH_ROOT_STYLES[$property])) {
+            if (array_key_exists($property, $current) && $current[$property] === $value) {
                 continue;
             }
-            if (!array_key_exists($property, $current) || $current[$property] !== $value) {
+            if (!$this->isReviewedParagraphStyleDegradation(
+                $property,
+                $value,
+                $commentAttributes,
+                $originalContent,
+                $currentContent,
+            )) {
                 throw new \RuntimeException(
                     "Unsupported deprecated core/paragraph style signature at {$blockPath}: {$property}; "
                     . 'a reviewed deprecation adapter is required'
                 );
             }
+            $payload = json_encode([
+                'property' => $property,
+                'authored' => $value,
+                'delivered' => $current[$property] ?? null,
+                'disposition' => $property === 'opacity'
+                    ? 'removed; core/paragraph has no opacity save consumer'
+                    : 'removed; conflicting center and justify alignment has no unambiguous winner',
+                'reviewed' => true,
+            ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            $repairs[] = new Repair(
+                'paragraph-style-degraded:' . ($payload === false ? '{}' : $payload),
+                $blockPath,
+            );
         }
+        return $repairs;
+    }
+
+    /**
+     * @param array<string,mixed> $commentAttributes
+     */
+    private function isReviewedParagraphStyleDegradation(
+        string $property,
+        string $value,
+        array $commentAttributes,
+        string $originalContent,
+        string $currentContent,
+    ): bool {
+        $originalRoot = $this->soleParagraphRoot($originalContent);
+        $currentRoot = $this->projectedCurrentParagraphRoot($currentContent);
+        if ($originalRoot === null
+            || $currentRoot === null
+            || $originalRoot->innerHtml() !== $currentRoot->innerHtml()) {
+            return false;
+        }
+
+        $originalAttributes = $this->attributeMap($originalRoot);
+        $currentAttributes = $this->attributeMap($currentRoot);
+        unset($originalAttributes['style'], $currentAttributes['style']);
+
+        $originalStyles = $this->rootStyles($originalRoot->outerHtml());
+        $currentStyles = $this->rootStyles($currentRoot->outerHtml());
+        unset($originalStyles[$property]);
+        if ($originalStyles !== $currentStyles) {
+            return false;
+        }
+
+        if (isset(self::REVIEWED_PARAGRAPH_STYLE_DEGRADATIONS[$property])) {
+            if (preg_match(
+                '/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?%?$/',
+                $value,
+            ) !== 1) {
+                return false;
+            }
+            return $originalAttributes === $currentAttributes;
+        }
+
+        // BIGR-728 is deliberately signature-specific. A legacy center class
+        // contradicting current justify attributes has no unambiguous winner;
+        // dropping only that rendered class and declaration keeps the copy and
+        // every unrelated attribute/style byte.
+        if ($property !== 'text-align'
+            || $value !== 'justify'
+            || ($commentAttributes['align'] ?? null) !== 'center'
+            || ($commentAttributes['style']['typography']['textAlign'] ?? null) !== 'justify') {
+            return false;
+        }
+        $classes = preg_split(
+            '/\s+/',
+            trim((string) ($originalAttributes['class'] ?? '')),
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        ) ?: [];
+        $alignmentClasses = array_values(array_filter(
+            $classes,
+            static fn (string $class): bool => str_starts_with($class, 'has-text-align-'),
+        ));
+        if ($alignmentClasses !== ['has-text-align-center']) {
+            return false;
+        }
+        $expectedClasses = array_values(array_filter(
+            $classes,
+            static fn (string $class): bool => $class !== 'has-text-align-center',
+        ));
+        if ($expectedClasses === []) {
+            unset($originalAttributes['class']);
+        } else {
+            $originalAttributes['class'] = implode(' ', $expectedClasses);
+        }
+        if (($currentAttributes['class'] ?? '') === '') {
+            unset($currentAttributes['class']);
+        }
+        return $originalAttributes === $currentAttributes;
+    }
+
+    private function soleParagraphRoot(string $html): ?HtmlNode
+    {
+        $paragraph = null;
+        foreach (HtmlFragment::parse($html)->root()->children() as $child) {
+            if ($child->isText() && trim($child->textContent()) === '') {
+                continue;
+            }
+            if (!$child->isElement() || $child->tagName() !== 'p' || $paragraph !== null) {
+                return null;
+            }
+            $paragraph = $child;
+        }
+        return $paragraph;
+    }
+
+    private function projectedCurrentParagraphRoot(string $currentContent): ?HtmlNode
+    {
+        $open = '<!-- wp:paragraph -->';
+        $close = '<!-- /wp:paragraph -->';
+        $fixed = (new ParagraphFixer())->fix($open . $currentContent . $close)->html;
+        if (!str_starts_with($fixed, $open) || !str_ends_with($fixed, $close)) {
+            return null;
+        }
+        return $this->soleParagraphRoot(substr(
+            $fixed,
+            strlen($open),
+            strlen($fixed) - strlen($open) - strlen($close),
+        ));
+    }
+
+    /** @return array<string,string> */
+    private function attributeMap(HtmlNode $root): array
+    {
+        $attributes = [];
+        foreach ($root->attributes() as $attribute) {
+            $attributes[$attribute['name']] = $attribute['value'];
+        }
+        return $attributes;
     }
 
     /**
@@ -655,7 +805,7 @@ final class DeprecationAdapters
                 // font-size support would add a class absent from the input.
                 // The observed selector-less version sources the entire root,
                 // which creates the nested paragraph repaired post-save.
-                $attributes['content'] = $root->outerHtml();
+                $attributes['content'] = $this->paragraphCarryoverContent($root);
                 unset($attributes['className']);
                 return $attributes;
             }
@@ -740,17 +890,80 @@ final class DeprecationAdapters
         // (paragraph-inline-color-carryover).
         if (!$currentCandidateValid) {
             $matched = true;
-            $attributes['content'] = $root->outerHtml();
+            $attributes['content'] = $this->paragraphCarryoverContent($root);
             unset($attributes['className']);
         }
         return $attributes;
     }
 
     /**
+     * Selector-less paragraph deprecations carry the authored root element as
+     * rich-text content. Remove reviewed inert styles before that carryover so
+     * every migration path reaches the same readable current-schema fallback.
+     */
+    private function paragraphCarryoverContent(HtmlNode $root): string
+    {
+        $style = $root->attribute('style');
+        if ($style === null || $style === '') {
+            return $root->outerHtml();
+        }
+
+        $kept = [];
+        $removed = false;
+        foreach ($this->styleDeclarations($style) as $declaration) {
+            if (trim($declaration) === '') {
+                continue;
+            }
+            $parts = explode(':', $declaration, 2);
+            if (count($parts) !== 2 || trim($parts[0]) === '') {
+                // rootStyles() owns malformed-style validation; retaining the
+                // declaration here keeps this helper side-effect-free.
+                $kept[] = trim($declaration);
+                continue;
+            }
+            if (isset(self::STRIPPED_INERT_PARAGRAPH_ROOT_STYLES[strtolower(trim($parts[0]))])) {
+                $removed = true;
+                continue;
+            }
+            $kept[] = trim($declaration);
+        }
+        if (!$removed) {
+            return $root->outerHtml();
+        }
+
+        // Re-serialize the parsed root structurally. A string search for the
+        // opening tag is not safe because HTML permits `>` inside a quoted
+        // attribute value (for example, title="1 > 0").
+        $tag = (string) $root->tagName();
+        $html = '<' . $tag;
+        foreach ($root->attributes() as $attribute) {
+            if ($attribute['name'] === 'style') {
+                if ($kept === []) {
+                    continue;
+                }
+                $value = implode(';', $kept);
+            } else {
+                $value = $attribute['value'];
+            }
+            $html .= ' ' . $attribute['name'] . '="' . self::htmlAttributeValue($value) . '"';
+        }
+        return $html . '>' . $root->innerHtml() . '</' . $tag . '>';
+    }
+
+    private static function htmlAttributeValue(string $value): string
+    {
+        return str_replace(
+            ['&', "\u{00A0}", '"'],
+            ['&amp;', '&nbsp;', '&quot;'],
+            $value,
+        );
+    }
+
+    /**
      * Selector-less paragraph deprecations preserve authored styles that are
      * absent from the comment. Do not let the earlier align migration win
      * when it would discard one of these reviewed generated-theme properties.
-     * The final signature guard still rejects any other unmirrored style.
+     * The final signature pass still rejects every unreviewed unmirrored style.
      *
      * @param array<string,mixed> $attributes
      */
@@ -882,15 +1095,103 @@ final class DeprecationAdapters
             return [];
         }
         $declarations = [];
-        foreach (explode(';', $style) as $declaration) {
+        foreach ($this->styleDeclarations($style) as $declaration) {
+            if (trim($declaration) === '') {
+                continue;
+            }
             $parts = explode(':', $declaration, 2);
-            if (count($parts) !== 2 || trim($parts[0]) === '') {
+            $propertyToken = trim($parts[0] ?? '');
+            if (count($parts) !== 2
+                || $propertyToken === ''
+                || str_contains($propertyToken, '/*')
+                || str_contains($propertyToken, '*/')
+                || str_contains($propertyToken, '\\')) {
                 throw new \RuntimeException('Unsupported malformed paragraph style declaration');
             }
-            $property = strtolower(trim($parts[0]));
+            $property = strtolower($propertyToken);
             $value = preg_replace('/\s+/', ' ', trim($parts[1])) ?? trim($parts[1]);
+            if ($value === '') {
+                throw new \RuntimeException('Unsupported malformed paragraph style declaration');
+            }
             $declarations[$property] = $value;
         }
+        return $declarations;
+    }
+
+    /**
+     * Split a style attribute without treating semicolons inside strings,
+     * comments, escapes, or function parentheses as declaration boundaries.
+     *
+     * @return list<string>
+     */
+    private function styleDeclarations(string $style): array
+    {
+        $declarations = [];
+        $start = 0;
+        $quote = null;
+        $parentheses = 0;
+        $inComment = false;
+        $length = strlen($style);
+
+        for ($index = 0; $index < $length; $index++) {
+            $character = $style[$index];
+            if ($inComment) {
+                if ($character === '*' && ($style[$index + 1] ?? '') === '/') {
+                    $inComment = false;
+                    $index++;
+                }
+                continue;
+            }
+            if ($quote !== null) {
+                if ($character === '\\') {
+                    if ($index + 1 >= $length) {
+                        throw new \RuntimeException('Unsupported malformed paragraph style declaration');
+                    }
+                    $index++;
+                    continue;
+                }
+                if ($character === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($character === '/' && ($style[$index + 1] ?? '') === '*') {
+                $inComment = true;
+                $index++;
+                continue;
+            }
+            if ($character === '"' || $character === "'") {
+                $quote = $character;
+                continue;
+            }
+            if ($character === '\\') {
+                if ($index + 1 >= $length) {
+                    throw new \RuntimeException('Unsupported malformed paragraph style declaration');
+                }
+                $index++;
+                continue;
+            }
+            if ($character === '(') {
+                $parentheses++;
+                continue;
+            }
+            if ($character === ')') {
+                if ($parentheses === 0) {
+                    throw new \RuntimeException('Unsupported malformed paragraph style declaration');
+                }
+                $parentheses--;
+                continue;
+            }
+            if ($character === ';' && $parentheses === 0) {
+                $declarations[] = substr($style, $start, $index - $start);
+                $start = $index + 1;
+            }
+        }
+
+        if ($quote !== null || $inComment || $parentheses !== 0) {
+            throw new \RuntimeException('Unsupported malformed paragraph style declaration');
+        }
+        $declarations[] = substr($style, $start);
         return $declarations;
     }
 }

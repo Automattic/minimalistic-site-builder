@@ -40,3 +40,13 @@ test('ParagraphFixer ports nested paragraph attribute merging', function () {
         $result->html
     );
 });
+
+test('ParagraphFixer keeps greater-than characters inside quoted attributes', function () {
+    $input = '<!-- wp:paragraph --><p><p title="1 > 0">Hi</p></p><!-- /wp:paragraph -->';
+    $result = (new ParagraphFixer())->fix($input);
+    assert_eq(1, $result->count);
+    assert_eq(
+        '<!-- wp:paragraph --><p title="1 > 0">Hi</p><!-- /wp:paragraph -->',
+        $result->html,
+    );
+});

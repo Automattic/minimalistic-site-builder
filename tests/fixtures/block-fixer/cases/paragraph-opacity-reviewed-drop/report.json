@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 2,
+    "M": 2,
+    "D": 2,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/hidden-opacity.html",
+      "status": "FIXED",
+      "dropped": [
+        {
+          "kind": "style",
+          "value": "opacity:0",
+          "lost": 1,
+          "line": "DROPPED style `opacity:0` \u2014 not mirrored in the block comment JSON attributes"
+        }
+      ]
+    },
+    {
+      "path": "parts/opacity.html",
+      "status": "FIXED",
+      "dropped": [
+        {
+          "kind": "style",
+          "value": "opacity:0.35",
+          "lost": 1,
+          "line": "DROPPED style `opacity:0.35` \u2014 not mirrored in the block comment JSON attributes"
+        }
+      ]
+    }
+  ]
+}

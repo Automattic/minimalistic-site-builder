@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "reviewed": true,
+  "k": 3,
+  "repairs": [
+    {
+      "file": "parts/hidden-opacity.html",
+      "blockPath": "0",
+      "code": "paragraph-style-degraded:{\"property\":\"opacity\",\"authored\":\"0\",\"delivered\":null,\"disposition\":\"removed; core/paragraph has no opacity save consumer\",\"reviewed\":true}"
+    },
+    {
+      "file": "parts/hidden-opacity.html",
+      "blockPath": "document",
+      "code": "nested-paragraph"
+    },
+    {
+      "file": "parts/opacity.html",
+      "blockPath": "0",
+      "code": "paragraph-style-degraded:{\"property\":\"opacity\",\"authored\":\"0.35\",\"delivered\":null,\"disposition\":\"removed; core/paragraph has no opacity save consumer\",\"reviewed\":true}"
+    }
+  ],
+  "secondInvocation": {
+    "k": 0,
+    "repairs": []
+  }
+}

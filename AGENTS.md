@@ -14,6 +14,17 @@ Issues for this repo are tracked in the Linear project **[Generated themes: repl
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.
 
+## Generated-content validation: repair, warn, and deliver
+
+`warnings.json` is the shared record of non-fatal defects in output the build still delivered. For mutating deterministic repair or serialization steps, validation is repair-first: an explicitly reviewed content incompatibility must not withhold the entire generated site when a deterministic, semantics-safe usable fallback exists.
+
+1. Attempt a bounded, semantics-safe deterministic repair first. Successful repairs should be represented in the step/fixer report and covered by a regression test.
+2. If the exact defect signature and fallback have been reviewed, but the fallback cannot preserve every authored value, deliver the usable fallback, emit a typed repair/report row, record an actionable defect with `Project::addWarnings(<step-id>, ...)` in the project-root `warnings.json`, write the detailed evidence to the step log, and continue the build.
+3. Any step that can add durable warnings must declare `warnings.json` in `StepDeclaration::writes`.
+4. Do not treat an arbitrary validator exception as permission for a mutating step to ship unchecked transformations. Unknown or unreviewed signatures, malformed block structure or CSS, unsupported registered blocks/support shapes, transformations with possible content loss, and non-convergence remain fatal, as do I/O failures, missing required inputs, corrupt artifacts, and programming invariants.
+5. Advisory validators that inspect an already usable final artifact without mutating it (for example, `ValidateThemeStep`) may record residual problems as warnings and deliver the artifact; make that non-mutating boundary explicit.
+6. Tests for mutating repair steps must cover both sides of the boundary: the exact reviewed degradation must retain content, reach a fixed point, continue the build, and write actionable file/block/value/disposition context to `warnings.json`; representative near misses and unsupported inputs must still throw without partial writes.
+
 ## Posting screenshots / images in PR & issue comments
 
 Verification screenshots and other throwaway proof belong in **PR/issue comments, not committed to trunk or the PR branch** — they bloat git history. Only commit lightweight, reproducible fixtures (the HTML/script that regenerates the evidence), never the generated PNGs.

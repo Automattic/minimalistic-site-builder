@@ -70,11 +70,16 @@ landing-page mega-call that dominated build time.
 parser and serializer canonicalizes AI-generated block markup so its saved HTML
 matches the registered WordPress block contracts. The implementation preserves
 JavaScript JSON/comment semantics, applies reviewed block supports and
-deprecations, fails closed for unsupported registered inputs, and stages all
-files before committing changes. A public invocation runs to a fixed point and
-is idempotent; production builds require neither Node nor `node_modules`.
+deprecations, and stages all files before committing changes. Its transaction
+fails closed before writing guessed output. Explicitly reviewed, semantics-safe
+style degradations are returned as repair rows; `FixBlocksStep` records those
+losses in `warnings.json` and continues with the canonical usable output.
+Unsupported or malformed input, unreviewed content loss, non-convergence, I/O,
+and internal-integrity failures remain fatal. A public invocation runs to a
+fixed point and is idempotent; production builds require neither Node nor
+`node_modules`.
 
-**Tests: 725 unit + 2 integration = 727 passing.** Run with
+**Tests: 869 unit + 2 integration = 871 passing.** Run with
 `php tests/run.php` and `php tests/run-integration.php`. The integration test
 runs the real `Pipeline` with a `FakeLlm` and asserts the output passes
 `ThemeValidator` (files present, theme.json v3, balanced block grammar, no
