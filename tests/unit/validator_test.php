@@ -125,6 +125,20 @@ test('validator flags bad theme.json and leftover placeholders', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator flags an unresolved AI_IMAGE placeholder that reached final markup', function () {
+    [$project, $tmp] = validator_project();
+    // A cover whose url kept the raw AI_IMAGE spec — collect/generate never
+    // resolved it, so the prompt text would ship as the image URL.
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:cover {"url":"AI_IMAGE:dense fog over the dunes|ratio:21:9|role:hero"} -->'
+        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+    );
+    $joined = implode(' ', ThemeValidator::validate($project));
+    assert_contains('plugin/pages/home.html', $joined);
+    assert_contains('AI_IMAGE', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator checks the content plugin pages for balance and placeholders', function () {
     [$project, $tmp] = validator_project();
     $project->writeText('plugin/pages/home.html', '<!-- wp:group --><div>oops, never closed</div>');

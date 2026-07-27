@@ -70,6 +70,17 @@ final class ThemeValidator
             }
         }
 
+        // An AI_IMAGE spec that survived to the final markup: collect-images
+        // could not see it (the model emitted it somewhere neither the alt
+        // convention nor the recovery pass reads), so generate-images never
+        // filled it. Shipping one bakes the raw prompt text in as the image
+        // URL — fail the build instead.
+        foreach ($checked as $rel) {
+            if ($project->exists($rel) && str_contains($project->readText($rel), 'AI_IMAGE:')) {
+                $problems[] = "{$rel}: contains an unresolved AI_IMAGE: placeholder";
+            }
+        }
+
         // Raw form controls are dead UI: nothing generated serves a submission,
         // so a section that emits them silently discards whatever visitors type.
         foreach ($checked as $rel) {

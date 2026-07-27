@@ -65,6 +65,62 @@ test('collect-images collects .png placeholders (transparent-background assets)'
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images recovers an AI_IMAGE spec left in a cover url', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/hero.html',
+        '<!-- wp:cover {"url":"AI_IMAGE:dense fog over the dunes at golden hour|ratio:21:9|role:hero","dimRatio":40} -->'
+        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    // The exact placeholder string is the src to rewrite.
+    assert_eq('AI_IMAGE:dense fog over the dunes at golden hour|ratio:21:9|role:hero', $images[0]['src']);
+    assert_contains('dense fog over the dunes', $images[0]['subject']);
+    assert_eq('21:9', $images[0]['aspectRatio']);
+    assert_eq('.jpg', substr($images[0]['filename'], -4));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images recovers a cover url and its background img as one image', function () {
+    [$project, $tmp] = collect_fixture();
+    $spec = 'AI_IMAGE:a misty valley at dawn|ratio:16:9|role:hero';
+    $project->writeText('theme/parts/hero.html',
+        '<!-- wp:cover {"url":"' . $spec . '"} -->'
+        . '<img class="wp-block-cover__image-background" alt="" src="' . $spec . '"/>'
+        . '<!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    // The url and its background img share the placeholder — one image.
+    assert_eq(1, count($images));
+    assert_eq('16:9', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images recovers a bare img src placeholder with no ratio', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/band.html',
+        '<img src="AI_IMAGE:roasted coffee beans on a wooden table"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_contains('roasted coffee beans', $images[0]['subject']);
+    // Defaults to landscape when no ratio is named.
+    assert_eq('landscape', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images ignores plain images with no AI_IMAGE marker', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/templates/index.html',

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 
@@ -27,6 +28,11 @@ use Automattic\SiteBuild\StepDeclaration;
  * It runs BEFORE fix-blocks on purpose: the block re-serializer strips the alt
  * from wp:cover background images, so the AI_IMAGE spec is only intact in the raw
  * section markup. images.json is then the durable record of what to generate.
+ *
+ * The model sometimes drops the "AI_IMAGE:" spec straight into a wp:cover "url"
+ * or a bare <img> src instead of the alt convention; parseRecovered() collects
+ * those too, so they still generate rather than shipping as raw prompt text (a
+ * leak that survives to the final markup is caught by ThemeValidator).
  */
 final class CollectImagesStep implements Step
 {
@@ -104,9 +110,7 @@ final class CollectImagesStep implements Step
         // alt=(quote)AI_IMAGE: ... (same quote). Backreference \1 matches the
         // opening quote type so quotes inside the alt don't truncate the match.
         $pattern = '/<img[^>]+alt=(["\'])AI_IMAGE:\s*(.*?)\1[^>]*>/is';
-        if (!preg_match_all($pattern, $content, $matches, PREG_SET_ORDER)) {
-            return [];
-        }
+        preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
 
         $images = [];
         foreach ($matches as $match) {
@@ -143,6 +147,84 @@ final class CollectImagesStep implements Step
                 'aspectRatio' => $aspectRatio,
             ];
         }
+
+        return array_merge($images, self::parseRecovered($content));
+    }
+
+    /**
+     * Recover AI_IMAGE specs the model placed where a resolved asset path
+     * belongs — a wp:cover block's "url" or a bare <img> src — instead of the
+     * documented "<img alt=\"AI_IMAGE: …\" src=\"theme:./assets/…\">" form.
+     * Each becomes a spec whose `src` is the exact placeholder string, so
+     * GenerateImagesStep rewrites every occurrence (cover url + inner img src
+     * share the same string) to the served URL. Deduped by that string, so a
+     * cover and its background <img> collapse to one image.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private static function parseRecovered(string $content): array
+    {
+        // The placeholder as a JSON "url" value, or as a bare src attribute.
+        $patterns = [
+            '/"url"\s*:\s*"(?P<lit>AI_IMAGE:(?:[^"\\\\]|\\\\.)*)"/is',
+            '/\bsrc=(["\'])(?P<lit>AI_IMAGE:.*?)\1/is',
+        ];
+
+        $images = [];
+        $seen   = [];
+        foreach ($patterns as $pattern) {
+            preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
+            foreach ($matches as $match) {
+                $literal = $match['lit'];
+                if (isset($seen[$literal])) {
+                    continue; // same placeholder from the cover url and its <img>
+                }
+                $seen[$literal] = true;
+
+                $body    = trim(html_entity_decode(substr($literal, strlen('AI_IMAGE:')), ENT_QUOTES | ENT_HTML5));
+                $subject = trim(explode('|', $body, 2)[0]);
+                if ('' === $subject) {
+                    continue;
+                }
+
+                $images[] = [
+                    'filename'    => self::synthesizeFilename($subject, $literal),
+                    'src'         => $literal,
+                    'subject'     => $subject,
+                    'pageContext' => '',
+                    'style'       => '',
+                    'aspectRatio' => self::sniffAspectRatio($body),
+                ];
+            }
+        }
         return $images;
+    }
+
+    /**
+     * A deterministic "<subject-slug>-<hash>.jpg" filename for a recovered
+     * placeholder. The hash keys on the exact placeholder string, so identical
+     * placeholders (a cover url and its background img) share a filename and
+     * dedupe, while distinct ones never collide.
+     */
+    private static function synthesizeFilename(string $subject, string $literal): string
+    {
+        $slug = rtrim(substr(ProjectStore::slugify($subject), 0, 40), '-') ?: 'image';
+        return $slug . '-' . substr(sha1($literal), 0, 8) . '.jpg';
+    }
+
+    /**
+     * The aspect ratio named anywhere in a recovered spec — an explicit
+     * "ratio:16:9", a bare "W:H", or a "landscape"/"portrait"/"square" word.
+     * The "ratio:" prefix wins over a bare token so it can't be pre-empted by a
+     * stray one earlier in the string. Defaults to landscape, the full-bleed default.
+     */
+    private static function sniffAspectRatio(string $body): string
+    {
+        if (preg_match('/ratio:\s*(\d+:\d+|square|portrait|landscape)/i', $body, $m)
+            || preg_match('/\b(\d+:\d+|square|portrait|landscape)\b/i', $body, $m)
+        ) {
+            return strtolower($m[1]);
+        }
+        return 'landscape';
     }
 }
