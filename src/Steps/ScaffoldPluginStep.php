@@ -319,7 +319,10 @@ final class ScaffoldPluginStep implements Step
             $self_closing = false;
             $length = strlen($html);
             if (preg_match(
-                '/\A<[\x09\x0A\x0C\x0D\x20]*\/?[\x09\x0A\x0C\x0D\x20]*[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
+                // The name follows `<` (or `</`) with no space between, the
+                // same boundary the build-side scanner uses. Browsers emit
+                // `< b` and `</ b>` as text/bogus comments, never as tags.
+                '/\A<\/?[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
                 substr($html, $start),
                 $opening
             ) !== 1) {
@@ -609,7 +612,10 @@ final class ScaffoldPluginStep implements Step
         function {{FN_PREFIX}}_content_script_keyword_at($html, $offset, $closer) {
             $keyword = $closer ? '</script' : '<script';
             $keyword_length = strlen($keyword);
-            if (strtolower(substr($html, $offset, $keyword_length)) !== $keyword) {
+            // strncasecmp, not strtolower: before PHP 8.2 strtolower honors
+            // LC_CTYPE, so under a Turkish locale `<SCRIPT` lowercases to
+            // `<scrıpt` and the script element never finds its end.
+            if (strncasecmp(substr($html, $offset, $keyword_length), $keyword, $keyword_length) !== 0) {
                 return false;
             }
             $delimiter = isset($html[$offset + $keyword_length])
@@ -679,7 +685,7 @@ final class ScaffoldPluginStep implements Step
             $nestable = array('object', 'applet', 'template', 'code', 'pre');
             if (!in_array($name, $nestable, true)) {
                 if (preg_match(
-                    '#</[\x09\x0A\x0C\x0D\x20]*' . preg_quote($name, '#') . '(?=[\x09\x0A\x0C\x0D\x20/>])#i',
+                    '#</' . preg_quote($name, '#') . '(?=[\x09\x0A\x0C\x0D\x20/>])#i',
                     $html,
                     $close,
                     PREG_OFFSET_CAPTURE,
@@ -1244,11 +1250,20 @@ final class ScaffoldPluginStep implements Step
                 'script', 'iframe', 'object', 'applet',
                 'noembed', 'noframes', 'noscript',
             );
-            $content = {{FN_PREFIX}}_content_remove_elements($content, $containers);
-            $content = {{FN_PREFIX}}_content_remove_tags(
-                $content,
-                array_merge($containers, array('embed', 'base'))
-            );
+            // `meta` carries no content but http-equiv="refresh" redirects
+            // every visitor to a model-chosen URL.
+            $tags = array_merge($containers, array('embed', 'base', 'meta'));
+
+            // Removal splices the bytes on either side of a deleted tag
+            // together, and that seam can spell a new tag: `<<base>script>`
+            // becomes a live `<script>` a browser would never have parsed
+            // from the input. Repeat until stable — this terminates because
+            // a pass that changes anything strictly shortens the content.
+            do {
+                $before = $content;
+                $content = {{FN_PREFIX}}_content_remove_elements($content, $containers);
+                $content = {{FN_PREFIX}}_content_remove_tags($content, $tags);
+            } while ($content !== $before);
             return {{FN_PREFIX}}_content_rewrite_opening_tags($content, function ($tag) {
                 return {{FN_PREFIX}}_content_sanitize_opening_tag($tag);
             });

@@ -102,7 +102,13 @@ final class HtmlBlockContext
     {
         $view ??= self::delimiterView($html);
         $hidden = [];
-        if (preg_match_all('/<!--\s*\/?wp:/', $html, $markers, PREG_OFFSET_CAPTURE)) {
+        $found = preg_match_all('/<!--\s*\/?wp:/', $html, $markers, PREG_OFFSET_CAPTURE);
+        if ($found === false) {
+            // Fail closed: an empty list reads as "nothing hidden" and passes
+            // the document through assertComplete().
+            throw new \RuntimeException('could not scan for hidden block delimiters');
+        }
+        if ($found > 0) {
             foreach ($markers[0] as $marker) {
                 $offset = $marker[1];
                 if (substr($view, $offset, strlen($marker[0])) !== $marker[0]) {
@@ -302,9 +308,9 @@ final class HtmlBlockContext
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
             if ($start === false) {
-                return self::isWhitespace(substr($html, $offset)) ? $tags : null;
+                return self::isInsignificant(substr($html, $offset)) ? $tags : null;
             }
-            if (!self::isWhitespace(substr($html, $offset, $start - $offset))) {
+            if (!self::isInsignificant(substr($html, $offset, $start - $offset))) {
                 return null;
             }
 
@@ -369,6 +375,21 @@ final class HtmlBlockContext
     public static function isWhitespace(string $text): bool
     {
         return preg_match('/\A[\x09\x0A\x0C\x0D\x20]*\z/D', $text) === 1;
+    }
+
+    /**
+     * Whitespace plus the invisible characters models sprinkle between blocks:
+     * NBSP, zero-width space, and a stray BOM. None of them is HTML
+     * inter-element whitespace, so isWhitespace() must keep rejecting them —
+     * but as the gap between two sibling blocks they are not prose either, and
+     * treating them as content fails an otherwise-clean document.
+     */
+    public static function isInsignificant(string $text): bool
+    {
+        return preg_match(
+            '/\A(?:[\x09\x0A\x0C\x0D\x20]|\xC2\xA0|\xE2\x80\x8B|\xEF\xBB\xBF)*\z/D',
+            $text,
+        ) === 1;
     }
 
     /**
@@ -787,8 +808,12 @@ final class HtmlBlockContext
         if ($name === 'script') {
             return self::scriptClosingTagAt($html, $contentStart);
         }
+        // No whitespace after `</`: a browser reads `</ style>` as a bogus
+        // comment, not a closer. Matching it here and then rejecting it in
+        // tagAt() left the element running to EOF on this side only, while
+        // the seeder's copy ended it — the two must agree on the boundary.
         if (preg_match(
-            '#</[\x09\x0A\x0C\x0D\x20]*' . preg_quote($name, '#')
+            '#</' . preg_quote($name, '#')
                 . '(?=[\x09\x0A\x0C\x0D\x20/>])#i',
             $html,
             $close,
@@ -885,6 +910,33 @@ final class HtmlBlockContext
     }
 
     /**
+     * Offset of the last `</name` spelling in the document, or null for none.
+     *
+     * Deliberately looser than tagAt(): it may report a spelling that is not a
+     * real closer (one inside an attribute, say). Over-reporting only costs a
+     * full scan that would have run anyway, while under-reporting would end an
+     * element early — so this errs toward "a closer might exist".
+     */
+    private static function lastClosingTagOffset(string $html, string $name): ?int
+    {
+        $needle = '</' . $name;
+        $found = null;
+        $from = 0;
+        while (($at = stripos($html, $needle, $from)) !== false) {
+            $next = $html[$at + strlen($needle)] ?? '';
+            if ($next === ''
+                || $next === '/'
+                || $next === '>'
+                || self::isSpaceByte($next)
+            ) {
+                $found = $at;
+            }
+            $from = $at + 1;
+        }
+        return $found;
+    }
+
+    /**
      * Find the matching closer for a normal/inert opaque element. Unlike raw
      * text, these elements can nest; comments, declarations, quoted tag
      * attributes, and other opaque descendants must not supply a fake closer.
@@ -903,6 +955,18 @@ final class HtmlBlockContext
         $key = $name . ':' . $contentStart . ':' . ($toEofWhenUnclosed ? '1' : '0');
         if (isset($memo[$key])) {
             return $memo[$key];
+        }
+
+        // Depth can only reach zero where a closer exists. With none left at
+        // or after $contentStart the answer is "unclosed" without scanning —
+        // otherwise N openers of one name each walk to EOF on their own key,
+        // and the per-offset memo never hits (quadratic in the response size).
+        // -1 means "no closer anywhere"; ??= would treat a cached null as a
+        // miss and rescan on exactly the input this fast path exists for.
+        $lastKey = "\0last:" . $name;
+        $memo[$lastKey] ??= self::lastClosingTagOffset($html, $name) ?? -1;
+        if ($memo[$lastKey] < $contentStart) {
+            return $memo[$key] = $toEofWhenUnclosed ? strlen($html) : $contentStart;
         }
         $memo[$key] = strlen($html);
 

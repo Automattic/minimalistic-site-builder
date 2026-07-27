@@ -36,11 +36,20 @@ final class MarkupSanitizer
             'script', 'iframe', 'object', 'applet',
             'noembed', 'noframes', 'noscript',
         ];
-        $markup = HtmlBlockContext::removeElements($markup, $containers);
-        $markup = HtmlBlockContext::removeTags(
-            $markup,
-            array_merge($containers, ['embed', 'base']),
-        );
+        // `meta` carries no content but http-equiv="refresh" redirects every
+        // visitor to a model-chosen URL, which no later pass would catch.
+        $tags = array_merge($containers, ['embed', 'base', 'meta']);
+
+        // Removal splices the bytes on either side of a deleted tag together,
+        // and that seam can spell a new tag: `<<base>script>` becomes a live
+        // `<script>` a browser would never have parsed from the input. Repeat
+        // until stable. This terminates because a pass that changes anything
+        // strictly shortens the markup.
+        do {
+            $before = $markup;
+            $markup = HtmlBlockContext::removeElements($markup, $containers);
+            $markup = HtmlBlockContext::removeTags($markup, $tags);
+        } while ($markup !== $before);
         // Attribute tokens follow browser-like quote, whitespace, and slash
         // states. This matters for malformed-but-active forms such as
         // `<svg/onload=...>` and for `/` inside an unquoted ordinary value.

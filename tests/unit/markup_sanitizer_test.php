@@ -227,3 +227,45 @@ test('GeneratedMarkup::normalize sanitizes the part at intake', function () {
     assert_true(!str_contains($out, '<script'), 'script stripped at the intake choke point');
     assert_contains('<!-- wp:paragraph -->', $out);
 });
+
+test('sanitize does not splice a live script out of inert neighbours', function () {
+    // Removing a tag joins the bytes on either side of it. `<` + `script>`
+    // spells a script element a browser would never have parsed from the
+    // input, so removal has to repeat until the markup stops changing.
+    foreach ([
+        '<<base>script>alert(1)<</base>/script>',
+        '<</script>script>alert(1)<</base>/script>',
+        '<<embed>script>alert(1)<</embed>/script>',
+        '<<meta>script>alert(1)<</meta>/script>',
+    ] as $input) {
+        $out = MarkupSanitizer::sanitize($input);
+        assert_true(!str_contains($out, '<script'), "no script spliced from: {$input}");
+        assert_true(!str_contains($out, 'alert('), "no script body left from: {$input}");
+    }
+});
+
+test('normalize does not publish a spliced script', function () {
+    $out = GeneratedMarkup::normalize(
+        "<!-- wp:paragraph -->\n<p>Hi<</base>script>alert(1)<</base>/script></p>\n<!-- /wp:paragraph -->",
+        'section-test'
+    );
+    assert_true(!str_contains($out, '<script'), 'no script reaches the theme part');
+    assert_contains('<p>Hi</p>', $out);
+});
+
+test('sanitize removes meta so http-equiv refresh cannot redirect visitors', function () {
+    $out = MarkupSanitizer::sanitize(
+        '<meta http-equiv="refresh" content="0;url=https://evil.example">'
+        . '<!-- wp:paragraph --><p>Kept.</p><!-- /wp:paragraph -->'
+    );
+    assert_true(!str_contains($out, '<meta'), 'meta tag removed');
+    assert_contains('<p>Kept.</p>', $out);
+});
+
+test('sanitize treats a spaced closer as text, not a raw-text boundary', function () {
+    // `</ style>` is a bogus comment to a browser, so the element runs on and
+    // its body stays inert. The seeder's copy of this scanner must agree.
+    $out = MarkupSanitizer::sanitize('<style>a</ style><img src=x onerror=alert(1)>');
+    assert_eq('<style>a</ style><img src=x onerror=alert(1)>', $out);
+    assert_eq('', MarkupSanitizer::sanitize('<iframe>x</ iframe><img src=x onerror=alert(1)>'));
+});

@@ -62,7 +62,11 @@ final class BlockMarkup
     /** @var array<int,array<mixed>> node index => replacement attrs */
     private array $mutations = [];
 
-    /** @var list<array{start:int, end:int, search:string, replace:string}> */
+    /**
+     * @var list<array{start:int, end:int, search:string, replace:string, token:?string}>
+     *      a non-null token means "remove this class token"; search/replace are
+     *      then unused, and vice versa
+     */
     private array $innerEdits = [];
 
     /**

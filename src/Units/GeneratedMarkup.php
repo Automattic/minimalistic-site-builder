@@ -22,10 +22,14 @@ final class GeneratedMarkup
         // Sanitize the whole response before looking for a document boundary:
         // block-looking comments inside a script body are not payload.
         $text = MarkupSanitizer::sanitize(self::stripFences(trim($text)));
+        $recoveryNotes = [];
         try {
-            $markup = BlockDocumentRecovery::recover($text);
+            $markup = BlockDocumentRecovery::recover($text, $recoveryNotes);
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
+        }
+        foreach ($recoveryNotes as $note) {
+            fwrite(STDERR, "    (part '{$key}': {$note})\n");
         }
         $markup = self::normalizePresetRefs(rtrim($markup));
 

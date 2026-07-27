@@ -499,3 +499,43 @@ test('recovery accepts CR-only wrappers and a UTF-8 BOM', function () {
 test('normalize still rejects text with no block markup at all', function () {
     assert_throws(fn () => GeneratedMarkup::normalize('Just prose, no blocks here.', 'p'));
 });
+
+test('recovery tolerates invisible characters between sibling blocks', function () {
+    // NBSP / zero-width space are not HTML inter-element whitespace, but as
+    // the gap between two children they are not prose either.
+    foreach (["\u{00A0}", "\u{200B}", "\u{FEFF}"] as $gap) {
+        $markup = '<!-- wp:group --><div class="wp-block-group">'
+            . '<!-- wp:paragraph --><p>a</p><!-- /wp:paragraph -->' . $gap
+            . '<!-- wp:paragraph --><p>b</p><!-- /wp:paragraph -->'
+            . '</div><!-- /wp:group -->';
+        assert_eq($markup, GeneratedMarkup::normalize($markup, 'p'));
+    }
+});
+
+test('recovery ignores a backticked opener quoted after the document', function () {
+    $text = GM_ROOT . "\n\nI used `<!-- wp:group -->` as the root.";
+    assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
+});
+
+test('recovery reports a complete block it drops before the document', function () {
+    $lead = '<!-- wp:paragraph --><p>SECTION A</p><!-- /wp:paragraph -->';
+    ob_start();
+    $out = GeneratedMarkup::normalize("Here: {$lead}\n" . GM_ROOT, 'p');
+    ob_end_clean();
+
+    assert_eq(GM_ROOT, $out, 'still recovers the line-standing document');
+    // The drop is by design; going silent about it is what loses a section.
+    $notes = [];
+    \Automattic\SiteBuild\BlockDocumentRecovery::recover("Here: {$lead}\n" . GM_ROOT, $notes);
+    assert_eq(1, count($notes), 'one note for the dropped block');
+    assert_contains('SECTION A', $notes[0]);
+});
+
+test('recovery stays linear on a run of unclosed opaque elements', function () {
+    // A model stuck in a repetition loop until the output ceiling used to
+    // cost O(n^2) here: 24 KB took over six seconds.
+    $text = GM_ROOT . "\n" . str_repeat('<code>', 4000);
+    $start = microtime(true);
+    assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
+    assert_true(microtime(true) - $start < 1.0, 'scans 24 KB of unclosed <code> in under a second');
+});

@@ -30,7 +30,8 @@ final class BlockDocumentRecovery
         'template', 'code', 'pre', 'plaintext',
     ];
 
-    public static function recover(string $text): string
+    /** @param list<string> $notes out-param for recoveries worth reporting */
+    public static function recover(string $text, array &$notes = []): string
     {
         if ($text === '') {
             throw new \RuntimeException('is not block markup');
@@ -75,6 +76,7 @@ final class BlockDocumentRecovery
         // child zone is not a safe document boundary either. Keep it as an
         // ancestor blocker, but do not publish the contaminated outer frame.
         $contaminatedClosed = [];
+        $contaminated = [];
         foreach (array_keys($closed) as $idx) {
             if (self::isBlockOnlyContainer($doc, $idx)
                 && $doc->children($idx) !== []
@@ -82,10 +84,11 @@ final class BlockDocumentRecovery
             ) {
                 $contaminatedClosed[$idx] = true;
                 $blocking[$idx] = true;
+                $contaminated[] = "wp:{$doc->name($idx)} at offset {$doc->openingOffset($idx)}";
             }
         }
 
-        /** @var list<array{start:int,end:int}> $components */
+        /** @var list<array{start:int,end:int,complete:bool}> $components */
         $components = [];
         foreach ($closed as $idx => $span) {
             if (array_key_exists($idx, $contaminatedClosed)
@@ -94,6 +97,7 @@ final class BlockDocumentRecovery
             ) {
                 continue;
             }
+            $span['complete'] = true;
             $components[] = $span;
         }
         foreach ($doc->unclosedIndices() as $idx) {
@@ -104,8 +108,9 @@ final class BlockDocumentRecovery
                 continue;
             }
             $components[] = [
-                'start' => $doc->openingOffset($idx),
-                'end'   => strlen($text),
+                'start'    => $doc->openingOffset($idx),
+                'end'      => strlen($text),
+                'complete' => false,
             ];
         }
 
@@ -118,12 +123,17 @@ final class BlockDocumentRecovery
             if ($doc->parent($idx) !== null
                 || array_key_exists($idx, $salvageable)
                 || self::hasCompleteDirectChild($doc, $idx)
+                // A backticked lone opener is Markdown for "here is an
+                // example". Admitting it here made it a second run, so the
+                // exemption below at the malformed/unclosed checks never ran.
+                || self::isInlineCodeDelimiter($doc, $text, $idx)
             ) {
                 continue;
             }
             $components[] = [
-                'start' => $doc->openingOffset($idx),
-                'end'   => strlen($text),
+                'start'    => $doc->openingOffset($idx),
+                'end'      => strlen($text),
+                'complete' => false,
             ];
         }
 
@@ -131,20 +141,47 @@ final class BlockDocumentRecovery
         // before BlockMarkup can create a node for it.
         $dangling = self::danglingBlockDelimiterOffset($delimiterView);
         if ($dangling !== null) {
-            $components[] = ['start' => $dangling, 'end' => strlen($text)];
+            $components[] = [
+                'start'    => $dangling,
+                'end'      => strlen($text),
+                'complete' => false,
+            ];
         }
 
         usort($components, static function (array $a, array $b): int {
             return $a['start'] <=> $b['start'] ?: $b['end'] <=> $a['end'];
         });
-        $runs = self::documentRuns($text, $components);
+        ['runs' => $runs, 'skipped' => $skipped] = self::documentRuns($text, $components);
         if ($runs === []) {
-            throw new \RuntimeException('does not contain a standalone block document');
+            // Name what disqualified the candidates. Without it the build log
+            // says only that a section failed, with nothing to grep for.
+            throw new \RuntimeException(
+                'does not contain a standalone block document'
+                . ($contaminated !== []
+                    ? ' (non-block content in the child zone of '
+                        . implode(', ', array_slice($contaminated, 0, 3)) . ')'
+                    : ' (response begins: ' . self::snippet($text, 0, strlen($text)) . ')')
+            );
         }
         if (count($runs) !== 1) {
             throw new \RuntimeException(
-                'contains ambiguous block markup (multiple block documents)'
+                'contains ambiguous block markup (' . count($runs) . ' block documents; '
+                . 'the second begins at offset ' . $runs[1]['start'] . ': '
+                . self::snippet($text, $runs[1]['start'], $runs[1]['end']) . ')'
             );
+        }
+
+        // Components before the first line-standing root are examples and are
+        // dropped by design. A *complete* one may still be real content the
+        // model prefixed with a stray character, and a trailing extra root
+        // throws where this one vanishes — so at least say it happened.
+        foreach ($skipped as $component) {
+            if ($component['complete']
+                && !self::isBacktickWrapped($text, $component['start'], $component['end'])
+            ) {
+                $notes[] = 'dropped a complete block before the recovered document: '
+                    . self::snippet($text, $component['start'], $component['end']);
+            }
         }
 
         $run = $runs[0];
@@ -189,8 +226,12 @@ final class BlockDocumentRecovery
     public static function assertComplete(string $markup): void
     {
         $delimiterView = HtmlBlockContext::delimiterView($markup);
-        if (HtmlBlockContext::hiddenDelimiterOffsets($markup, $delimiterView) !== []) {
-            throw new \RuntimeException('contains block delimiters hidden inside HTML context');
+        $hidden = HtmlBlockContext::hiddenDelimiterOffsets($markup, $delimiterView);
+        if ($hidden !== []) {
+            throw new \RuntimeException(
+                'contains block delimiters hidden inside HTML context (offset '
+                . $hidden[0] . ': ' . self::snippet($markup, $hidden[0], strlen($markup)) . ')'
+            );
         }
 
         $doc = BlockMarkup::parse($markup, $delimiterView);
@@ -215,7 +256,10 @@ final class BlockDocumentRecovery
                 && $doc->children($idx) !== []
                 && !self::hasCleanCompleteChildZone($doc, $markup, $idx)
             ) {
-                throw new \RuntimeException('contains non-block content in a block child zone');
+                throw new \RuntimeException(
+                    "contains non-block content in the child zone of wp:{$doc->name($idx)}"
+                    . ' at offset ' . $doc->openingOffset($idx)
+                );
             }
         }
 
@@ -224,7 +268,7 @@ final class BlockDocumentRecovery
             $start = $doc->openingOffset($idx);
             $end = $doc->endOffset($idx);
             if ($end === null
-                || !HtmlBlockContext::isWhitespace(
+                || !HtmlBlockContext::isInsignificant(
                     substr($markup, $cursor, $start - $cursor)
                 )
             ) {
@@ -232,7 +276,7 @@ final class BlockDocumentRecovery
             }
             $cursor = $end;
         }
-        if (!HtmlBlockContext::isWhitespace(substr($markup, $cursor))) {
+        if (!HtmlBlockContext::isInsignificant(substr($markup, $cursor))) {
             throw new \RuntimeException('has content outside its top-level blocks');
         }
     }
@@ -248,7 +292,7 @@ final class BlockDocumentRecovery
         $own = $doc->ownHtml($idx);
         if (HtmlBlockContext::isWhitespace($own)) {
             return $doc->children($idx) !== []
-                && HtmlBlockContext::isWhitespace(
+                && HtmlBlockContext::isInsignificant(
                     substr($text, 0, $doc->openingOffset($idx))
                 );
         }
@@ -299,7 +343,7 @@ final class BlockDocumentRecovery
                 $start = $doc->openingOffset($child);
                 $gap = substr($text, (int) $previousEnd, $start - (int) $previousEnd);
                 if ($dynamic) {
-                    if (!HtmlBlockContext::isWhitespace($gap)) {
+                    if (!HtmlBlockContext::isInsignificant($gap)) {
                         return false;
                     }
                 } else {
@@ -319,7 +363,7 @@ final class BlockDocumentRecovery
         }
         $suffix = substr($text, $previousEnd, $innerEnd - $previousEnd);
         if ($dynamic) {
-            return HtmlBlockContext::isWhitespace($suffix);
+            return HtmlBlockContext::isInsignificant($suffix);
         }
         $stack = self::advanceCleanWrapperStack($suffix, $stack, true);
         return $stack === [];
@@ -354,7 +398,7 @@ final class BlockDocumentRecovery
             $start = $doc->openingOffset($children[$i]);
             $gap = substr($text, $previousEnd, $start - $previousEnd);
             if ($dynamic) {
-                if (!HtmlBlockContext::isWhitespace($gap)) {
+                if (!HtmlBlockContext::isInsignificant($gap)) {
                     return false;
                 }
             } else {
@@ -461,17 +505,21 @@ final class BlockDocumentRecovery
      * even when prose shares its line; silently dropping it could select the
      * wrong answer.
      *
-     * @param list<array{start:int,end:int}> $components
-     * @return list<array{start:int,end:int}>
+     * @param list<array{start:int,end:int,complete:bool}> $components
+     * @return array{runs:list<array{start:int,end:int,complete:bool}>,
+     *               skipped:list<array{start:int,end:int,complete:bool}>}
      */
     private static function documentRuns(string $text, array $components): array
     {
         $runs = [];
+        $skipped = [];
         $current = null;
         foreach ($components as $component) {
             if ($current === null) {
                 if (self::isLineStart($text, $component['start'])) {
                     $current = $component;
+                } else {
+                    $skipped[] = $component;
                 }
                 continue;
             }
@@ -482,7 +530,7 @@ final class BlockDocumentRecovery
             }
 
             $gap = substr($text, $current['end'], $component['start'] - $current['end']);
-            if (HtmlBlockContext::isWhitespace($gap)) {
+            if (HtmlBlockContext::isInsignificant($gap)) {
                 $current['end'] = $component['end'];
                 continue;
             }
@@ -493,7 +541,27 @@ final class BlockDocumentRecovery
         if ($current !== null) {
             $runs[] = $current;
         }
-        return $runs;
+        return ['runs' => $runs, 'skipped' => $skipped];
+    }
+
+    /** A one-line, length-capped excerpt of a span, for a log note. */
+    private static function snippet(string $text, int $start, int $end): string
+    {
+        $excerpt = (string) preg_replace(
+            '/\s+/',
+            ' ',
+            substr($text, $start, min($end - $start, 120)),
+        );
+        return $end - $start > 120 ? $excerpt . '…' : $excerpt;
+    }
+
+    /** Whether a span sits inside a pair of Markdown inline-code backticks. */
+    private static function isBacktickWrapped(string $text, int $start, int $end): bool
+    {
+        return $start > 0
+            && $end < strlen($text)
+            && $text[$start - 1] === '`'
+            && $text[$end] === '`';
     }
 
     /** Whether the offset is preceded only by whitespace on its logical line. */
@@ -506,6 +574,6 @@ final class BlockDocumentRecovery
         $lf = strrpos($before, "\n");
         $cr = strrpos($before, "\r");
         $lineBreak = max($lf === false ? -1 : $lf, $cr === false ? -1 : $cr);
-        return HtmlBlockContext::isWhitespace(substr($before, $lineBreak + 1));
+        return HtmlBlockContext::isInsignificant(substr($before, $lineBreak + 1));
     }
 }
