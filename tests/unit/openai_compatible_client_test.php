@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 
 /**
@@ -74,18 +75,92 @@ test('bodyFor prepends cached prefixes to the OpenAI user content without cache 
     assert_true(!str_contains((string) json_encode($body), 'cache_control'), 'OpenAI body has no explicit cache marker');
 });
 
-test('retrySingleRequest tolerates an empty probe response without retrying', function () {
+test('retrySingleRequest tolerates an empty truncated probe response without retrying', function () {
     $body = ['messages' => []];
     $calls = 0;
     $transport = function (array $requestBody) use (&$calls): array {
         $calls++;
-        return ['text' => " \n\t", 'input' => 100, 'output' => 1, 'time' => 0.25];
+        return [
+            'text' => " \n\t",
+            'input' => 100,
+            'output' => 1,
+            'time' => 0.25,
+            'stop_reason' => 'length',
+        ];
     };
 
     $result = OpenAiCompatibleClient::retrySingleRequest($body, $transport, [0, 0, 0], true);
 
     assert_eq(1, $calls, 'successful empty probe makes exactly one transport attempt');
     assert_eq('', $result['text'], 'tolerated whitespace is normalized to the empty-string contract');
+});
+
+test('retrySingleRequest accepts a non-empty truncated cache-warm probe', function () {
+    foreach (['length', 'max_tokens'] as $stopReason) {
+        $body = ['messages' => []];
+        $calls = 0;
+        $transport = function (array $requestBody) use (&$calls, $stopReason): array {
+            $calls++;
+            return [
+                'text' => 'x',
+                'input' => 100,
+                'output' => 1,
+                'time' => 0.25,
+                'stop_reason' => $stopReason,
+            ];
+        };
+
+        $result = OpenAiCompatibleClient::retrySingleRequest(
+            $body,
+            $transport,
+            [0, 0, 0],
+            true,
+        );
+
+        assert_eq(1, $calls, "{$stopReason} probe makes exactly one transport attempt");
+        assert_eq('x', $result['text'], 'the successful probe token is preserved');
+    }
+});
+
+test('retrySingleRequest rejects truncated ordinary text without retrying', function () {
+    foreach (['length', 'max_tokens'] as $stopReason) {
+        $body = ['messages' => []];
+        $calls = 0;
+        $transport = function (array $requestBody) use (&$calls, $stopReason): array {
+            $calls++;
+            return [
+                'text' => 'partial response',
+                'input' => 100,
+                'output' => 1,
+                'time' => 0.25,
+                'stop_reason' => $stopReason,
+            ];
+        };
+
+        assert_throws(
+            fn () => OpenAiCompatibleClient::retrySingleRequest($body, $transport, [0, 0, 0]),
+            'ordinary truncated text is never accepted as a complete response',
+        );
+        assert_eq(1, $calls, 'retrying unchanged cannot fix an exhausted output budget');
+    }
+});
+
+test('retrySingleRequest does not hide a context-window failure in a cache probe', function () {
+    foreach (['partial response', ''] as $text) {
+        $body = ['messages' => []];
+        $transport = fn (array $requestBody): array => [
+            'text' => $text,
+            'input' => 100,
+            'output' => 1,
+            'time' => 0.25,
+            'stop_reason' => 'model_context_window_exceeded',
+        ];
+
+        assert_throws(
+            fn () => OpenAiCompatibleClient::retrySingleRequest($body, $transport, [], true),
+            'tolerate_empty only relaxes the expected one-token output-limit stop reasons',
+        );
+    }
 });
 
 test('maxTokensParam picks the right token key per provider and model', function () {
@@ -124,11 +199,78 @@ test('bodyFor keeps a custom temperature for xAI Grok (uses max_completion_token
     assert_eq(16000, $body['max_completion_tokens']);
 });
 
-test('restrictsTemperature only flags OpenAI reasoning / gpt-5+ models', function () {
+test('bodyFor gives OpenRouter Kimi K3 its configured budget and omits unsupported temperature', function () {
+    $body = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'temperature' => 0.9],
+        'moonshotai/kimi-k3',
+        16000,
+        'openrouter',
+    );
+    assert_eq(65536, $body['max_tokens']);
+    assert_true(!array_key_exists('max_completion_tokens', $body), 'OpenRouter uses max_tokens');
+    assert_true(!array_key_exists('temperature', $body), 'K3 profile keeps the provider sampling default');
+
+    $explicit = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi', 'max_tokens' => 32000],
+        'moonshotai/kimi-k3',
+        16000,
+        'openrouter',
+    );
+    assert_eq(32000, $explicit['max_tokens'], 'an explicit per-request budget still wins');
+
+    $k2 = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Hi'],
+        'moonshotai/kimi-k2.5:nitro',
+        16000,
+        'openrouter',
+    );
+    assert_eq(16000, $k2['max_tokens'], 'the larger implicit budget is K3-only');
+    assert_eq(['enabled' => false], $k2['reasoning'], 'K2.5 optional reasoning is disabled');
+});
+
+test('Kimi K3 JSON recovery doubles its effective 65k budget', function () {
+    $client = new OpenAiCompatibleClient(
+        'key',
+        'moonshotai/kimi-k3',
+        'https://openrouter.ai/api/v1',
+        16000,
+        'openrouter',
+    );
+    $method = new ReflectionMethod(OpenAiCompatibleClient::class, 'withEffectiveMaxTokens');
+    $method->setAccessible(true);
+    $requests = $method->invoke($client, [
+        'direction' => ['prompt' => 'Choose a complete design direction.'],
+    ]);
+    assert_eq(65536, $requests['direction']['max_tokens'], 'recovery sees K3’s real first-attempt budget');
+
+    $round = 0;
+    $repair = null;
+    $out = JsonBatchRecovery::run(
+        $requests,
+        function (array $subset) use (&$round, &$repair): array {
+            $request = $subset['direction'];
+            if ($round++ === 0) {
+                return ['direction' => [
+                    'text' => '{"direction":"cut off',
+                    'stop_reason' => 'length',
+                ]];
+            }
+            $repair = $request;
+            return ['direction' => ['text' => '{"direction":"complete"}', 'stop_reason' => 'stop']];
+        },
+    );
+
+    assert_eq('complete', $out['direction']['direction']);
+    assert_eq(131072, $repair['max_tokens'], 'the retry grows rather than shrinking to the generic 32k default');
+});
+
+test('restrictsTemperature flags OpenAI reasoning models and OpenRouter K3', function () {
     assert_true(OpenAiCompatibleClient::restrictsTemperature('openai', 'gpt-5.5'), 'gpt-5.5 restricted');
     assert_true(OpenAiCompatibleClient::restrictsTemperature('openai', 'o3'), 'o3 restricted');
     assert_true(!OpenAiCompatibleClient::restrictsTemperature('openai', 'gpt-4o'), 'gpt-4o free');
     assert_true(!OpenAiCompatibleClient::restrictsTemperature('xai', 'grok-4.5'), 'grok free');
+    assert_true(OpenAiCompatibleClient::restrictsTemperature('openrouter', 'moonshotai/kimi-k3'), 'K3 restricted');
+    assert_true(!OpenAiCompatibleClient::restrictsTemperature('openrouter', 'moonshotai/kimi-k2.5'), 'K2.5 free');
 });
 
 test('rejectedParam catches OpenAI temperature errors and falls back to Anthropic wording', function () {
@@ -186,6 +328,32 @@ test('parseSse concatenates delta content and reads final usage chunk', function
     assert_eq(null, $parsed['error']);
 });
 
+test('token-limited output reaches JSON recovery but is rejected as ordinary text', function () {
+    $raw = implode("\n", [
+        'data: {"choices":[{"delta":{"content":"<!-- wp:group"},"index":0}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":10,"completion_tokens":16000}}',
+        'data: [DONE]',
+        '',
+    ]);
+
+    $parsed = OpenAiCompatibleClient::parseSse($raw);
+    assert_eq('<!-- wp:group', $parsed['text'], 'partial text is retained for diagnostics');
+    assert_eq('length', $parsed['stop_reason']);
+    assert_eq(null, $parsed['error'], 'the recovery layer, not the parser, owns truncation policy');
+
+    $method = new ReflectionMethod(OpenAiCompatibleClient::class, 'interpretStream');
+    $method->setAccessible(true);
+
+    $jsonResult = $method->invoke(null, $raw, 0, '', 200, 0.25, true);
+    assert_eq(true, $jsonResult['ok'], 'JSON recovery receives the partial response and stop reason');
+    assert_eq('length', $jsonResult['stop_reason']);
+
+    $textResult = $method->invoke(null, $raw, 0, '', 200, 0.25, false);
+    assert_eq(false, $textResult['ok'], 'ordinary text must not accept truncated markup');
+    assert_eq(false, $textResult['transient'], 'retrying unchanged cannot fix an exhausted budget');
+    assert_contains('truncated', (string) $textResult['error']);
+});
+
 test('parseSse accepts a non-stream JSON chat.completion body', function () {
     $raw = json_encode([
         'id' => 'chatcmpl-x',
@@ -212,6 +380,7 @@ test('parseSse surfaces error objects from JSON or SSE', function () {
     $sseErr = "data: {\"error\":{\"message\":\"rate limit exceeded\"}}\n\n";
     $parsed = OpenAiCompatibleClient::parseSse($sseErr);
     assert_eq('rate limit exceeded', $parsed['error']);
+    assert_eq(true, OpenAiCompatibleClient::isTransientStreamError($parsed));
 });
 
 test('OpenAiCompatibleClient implements Llm', function () {
@@ -248,6 +417,47 @@ test('bodyFor maps json_schema to a strict OpenAI response_format', function () 
             'schema' => $schema,
         ],
     ], $body['response_format']);
+});
+
+test('bodyFor uses JSON-object response_format only for generic JSON calls', function () {
+    $jsonBody = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Return an object.'],
+        'moonshotai/kimi-k2.5',
+        16000,
+        'openrouter',
+        true,
+    );
+    assert_eq(['type' => 'json_object'], $jsonBody['response_format']);
+
+    $textBody = OpenAiCompatibleClient::bodyFor(
+        ['prompt' => 'Return prose.'],
+        'moonshotai/kimi-k2.5',
+        16000,
+        'openrouter',
+    );
+    assert_true(!array_key_exists('response_format', $textBody), 'ordinary text does not request JSON mode');
+});
+
+test('bodyFor keeps json_schema response_format when JSON mode is enabled', function () {
+    $schema = [
+        'type' => 'object',
+        'properties' => ['ok' => ['type' => 'boolean']],
+        'required' => ['ok'],
+        'additionalProperties' => false,
+    ];
+    $body = OpenAiCompatibleClient::bodyFor(
+        [
+            'prompt' => 'Return the result.',
+            'json_schema' => ['name' => 'result', 'schema' => $schema],
+        ],
+        'moonshotai/kimi-k2.5',
+        16000,
+        'openrouter',
+        true,
+    );
+
+    assert_eq('json_schema', $body['response_format']['type']);
+    assert_eq($schema, $body['response_format']['json_schema']['schema']);
 });
 
 test('bodyFor maps json_schema to the same strict xAI response_format', function () {
@@ -332,4 +542,43 @@ test('OpenAI batch transport preserves abnormal empty responses but retries ordi
     $ordinary = $method->invoke(null, (string) $ordinaryRaw, 0, '', 200, 0.25);
     assert_eq(false, $ordinary['ok'], 'ordinary empty successes retain transport retry behavior');
     assert_eq(true, $ordinary['transient']);
+});
+
+test('parseSse preserves OpenRouter mid-stream error code and type for retry classification', function () {
+    $raw = 'data: {"error":{"code":520,"message":"error code: 520",'
+        . '"metadata":{"error_type":"provider_unavailable"}},'
+        . '"choices":[{"delta":{},"finish_reason":"error"}]}' . "\n\n";
+
+    $parsed = OpenAiCompatibleClient::parseSse($raw);
+    assert_eq('error code: 520', $parsed['error']);
+    assert_eq(520, $parsed['error_code']);
+    assert_eq('provider_unavailable', $parsed['error_type']);
+    assert_eq('error', $parsed['stop_reason']);
+    assert_eq(true, OpenAiCompatibleClient::isTransientStreamError($parsed));
+});
+
+test('parseSse preserves an OpenRouter error nested in a non-stream choice', function () {
+    $raw = json_encode([
+        'choices' => [[
+            'message' => ['role' => 'assistant', 'content' => null],
+            'finish_reason' => 'error',
+            'error' => ['code' => 503, 'message' => 'upstream unavailable'],
+        ]],
+    ]);
+
+    $parsed = OpenAiCompatibleClient::parseSse((string) $raw);
+    assert_eq('upstream unavailable', $parsed['error']);
+    assert_eq(503, $parsed['error_code']);
+    assert_eq('error', $parsed['stop_reason']);
+    assert_eq(true, OpenAiCompatibleClient::isTransientStreamError($parsed));
+});
+
+test('OpenAiCompatibleClient concurrencyWindows applies a provider-specific cap', function () {
+    $bodies = [];
+    for ($i = 0; $i < 9; $i++) {
+        $bodies["r{$i}"] = ['model' => 'm'];
+    }
+    $windows = OpenAiCompatibleClient::concurrencyWindows($bodies, 4);
+    assert_eq([4, 4, 1], array_map('count', $windows));
+    assert_eq(array_keys($bodies), array_keys(array_merge(...$windows)), 'keys and order are preserved');
 });

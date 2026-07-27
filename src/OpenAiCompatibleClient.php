@@ -16,6 +16,9 @@ namespace Automattic\SiteBuild;
  */
 final class OpenAiCompatibleClient implements Llm
 {
+    /** K3's default max-effort reasoning shares this budget with its answer. */
+    private const KIMI_K3_MIN_MAX_TOKENS = 65536;
+
     /**
      * Appended to the system prompt of every JSON call (single and batch) to
      * steer the model toward raw, fence-free JSON. Kept in sync with the
@@ -36,7 +39,10 @@ final class OpenAiCompatibleClient implements Llm
      * @param int    $defaultMaxTokens  max_tokens default for completions
      * @param string $provider          Selects provider-specific request quirks
      *                                   (token-limit key, temperature support):
-     *                                   'openai' or 'xai'. See maxTokensParam().
+     *                                   'openai', 'xai', or 'openrouter'.
+     *                                   See maxTokensParam().
+     * @param int    $timeoutSeconds    Hard timeout for one streamed request
+     * @param int    $maxConcurrency    Most simultaneous requests in one batch
      */
     public function __construct(
         private string $apiKey,
@@ -44,6 +50,8 @@ final class OpenAiCompatibleClient implements Llm
         string $baseUrl = 'https://api.openai.com/v1',
         private int $defaultMaxTokens = 16000,
         private string $provider = 'openai',
+        private int $timeoutSeconds = 600,
+        private int $maxConcurrency = 10,
     ) {
         $this->endpoint = rtrim($baseUrl, '/') . '/chat/completions';
     }
@@ -90,8 +98,8 @@ final class OpenAiCompatibleClient implements Llm
 
     /**
      * @param array{system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>,tolerate_empty?:bool,log_label?:string} $opts
-     *        tolerate_empty accepts a successful whitespace-only response as ''
-     *        without retrying; it is intended only for cache-warm probes.
+     *        tolerate_empty accepts a successful cache-warm probe even when
+     *        its one-token budget produces a truncation stop reason.
      */
     public function complete(string $prompt, array $opts = []): string
     {
@@ -129,10 +137,34 @@ final class OpenAiCompatibleClient implements Llm
 
     public function completeJsonBatch(array $requests): array
     {
+        $requests = $this->withEffectiveMaxTokens($requests);
         return JsonBatchRecovery::run(
             $requests,
             fn (array $subset): array => $this->responseBatch($subset, true),
         );
+    }
+
+    /**
+     * Make the transport's effective first-attempt budget explicit so
+     * JsonBatchRecovery can double the real value after truncation. This is
+     * especially important for Kimi K3, whose implicit floor is 65,536 rather
+     * than the generic 16k default.
+     *
+     * @param array<array-key,array<string,mixed>> $requests
+     * @return array<array-key,array<string,mixed>>
+     */
+    private function withEffectiveMaxTokens(array $requests): array
+    {
+        foreach ($requests as $key => $request) {
+            $model = (string) ($request['model'] ?? $this->model);
+            $requests[$key]['max_tokens'] = self::effectiveMaxTokens(
+                $request,
+                $model,
+                $this->defaultMaxTokens,
+                $this->provider,
+            );
+        }
+        return $requests;
     }
 
     public function completeBatch(array $requests): array
@@ -162,7 +194,13 @@ final class OpenAiCompatibleClient implements Llm
             if ($json) {
                 $system .= self::JSON_SYSTEM;
             }
-            $bodies[$key] = self::bodyFor(['system' => $system] + $req, $this->model, $this->defaultMaxTokens, $this->provider);
+            $bodies[$key] = self::bodyFor(
+                ['system' => $system] + $req,
+                $this->model,
+                $this->defaultMaxTokens,
+                $this->provider,
+                $json,
+            );
         }
 
         // Keys may be ints too (PHP coerces numeric keys), so admit both.
@@ -204,9 +242,17 @@ final class OpenAiCompatibleClient implements Llm
      * maxTokensParam() and restrictsTemperature().
      *
      * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>} $req
+     * @param bool $json Whether this is a JSON completion. Generic JSON calls
+     *                   request JSON-object mode when no schema was supplied.
      * @return array<string,mixed>
      */
-    public static function bodyFor(array $req, string $defaultModel, int $defaultMaxTokens, string $provider = 'openai'): array
+    public static function bodyFor(
+        array $req,
+        string $defaultModel,
+        int $defaultMaxTokens,
+        string $provider = 'openai',
+        bool $json = false,
+    ): array
     {
         $model = (string) ($req['model'] ?? $defaultModel);
         $system = AnthropicClient::systemPreamble();
@@ -227,7 +273,7 @@ final class OpenAiCompatibleClient implements Llm
             ['role' => 'user', 'content' => $userPrompt],
         ];
 
-        $maxTokens = (int) ($req['max_tokens'] ?? $defaultMaxTokens);
+        $maxTokens = self::effectiveMaxTokens($req, $model, $defaultMaxTokens, $provider);
         $body = [
             'model'      => $model,
             'stream'     => true,
@@ -236,9 +282,16 @@ final class OpenAiCompatibleClient implements Llm
             'messages'   => $messages,
         ] + self::maxTokensParam($provider, $model, $maxTokens);
 
-        // Reasoning models (OpenAI o-series / gpt-5+) reject any non-default
-        // temperature, so omit it rather than 400. Sending nothing == the API
-        // default (1), which is what those models require anyway.
+        // K2.5 is a hybrid model whose optional reasoning defaults on at
+        // OpenRouter. Builder calls need direct JSON/code/markup, not thousands
+        // of hidden thinking tokens, so use its fast non-thinking mode.
+        if (self::isKimiK25($provider, $model)) {
+            $body['reasoning'] = ['enabled' => false];
+        }
+
+        // OpenAI reasoning models reject a non-default temperature. Keep Kimi
+        // K3 on its provider sampling default too: this profile is tuned
+        // around K3's default max-effort reasoning behavior.
         if (isset($req['temperature']) && !self::restrictsTemperature($provider, $model)) {
             $body['temperature'] = (float) $req['temperature'];
         }
@@ -257,8 +310,24 @@ final class OpenAiCompatibleClient implements Llm
                     'schema' => $spec['schema'],
                 ],
             ];
+        } elseif ($json) {
+            $body['response_format'] = ['type' => 'json_object'];
         }
         return $body;
+    }
+
+    /** @param array<string,mixed> $req */
+    private static function effectiveMaxTokens(
+        array $req,
+        string $model,
+        int $defaultMaxTokens,
+        string $provider,
+    ): int {
+        $maxTokens = (int) ($req['max_tokens'] ?? $defaultMaxTokens);
+        if (!isset($req['max_tokens']) && self::isKimiK3($provider, $model)) {
+            $maxTokens = max($maxTokens, self::KIMI_K3_MIN_MAX_TOKENS);
+        }
+        return $maxTokens;
     }
 
     /**
@@ -284,14 +353,28 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
-     * Whether $provider + $model only accepts the default sampling temperature.
-     * True for OpenAI reasoning models (o-series / gpt-5+), which 400 on any
-     * temperature other than 1. xAI (Grok) accepts arbitrary temperatures, so
-     * this is scoped to the OpenAI provider only.
+     * Whether $provider + $model should stay at its default sampling
+     * temperature. OpenAI reasoning models (o-series / gpt-5+) require that;
+     * the OpenRouter Kimi K3 profile deliberately keeps its provider default
+     * alongside default max-effort reasoning. xAI (Grok) accepts arbitrary
+     * temperatures.
      */
     public static function restrictsTemperature(string $provider, string $model): bool
     {
-        return $provider === 'openai' && preg_match('/^gpt-[34]/', $model) !== 1;
+        return ($provider === 'openai' && preg_match('/^gpt-[34]/', $model) !== 1)
+            || self::isKimiK3($provider, $model);
+    }
+
+    private static function isKimiK3(string $provider, string $model): bool
+    {
+        return $provider === 'openrouter'
+            && preg_match('~^moonshotai/kimi-k3(?::|$)~', $model) === 1;
+    }
+
+    private static function isKimiK25(string $provider, string $model): bool
+    {
+        return $provider === 'openrouter'
+            && preg_match('~^moonshotai/kimi-k2\.5(?::|$)~', $model) === 1;
     }
 
     /**
@@ -301,10 +384,19 @@ final class OpenAiCompatibleClient implements Llm
     private function streamMulti(array $bodies): array
     {
         $out = [];
-        foreach (AnthropicClient::concurrencyWindows($bodies) as $chunk) {
+        foreach (self::concurrencyWindows($bodies, $this->maxConcurrency) as $chunk) {
             $out += $this->streamChunk($chunk);
         }
         return $out;
+    }
+
+    /**
+     * @param array<array-key,array<string,mixed>> $bodies
+     * @return list<array<array-key,array<string,mixed>>>
+     */
+    public static function concurrencyWindows(array $bodies, int $maxConcurrency): array
+    {
+        return array_chunk($bodies, max(1, $maxConcurrency), true);
     }
 
     /**
@@ -323,7 +415,7 @@ final class OpenAiCompatibleClient implements Llm
                 CURLOPT_POST          => true,
                 CURLOPT_HTTPHEADER    => $this->headers(),
                 CURLOPT_POSTFIELDS    => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                CURLOPT_TIMEOUT       => 600,
+                CURLOPT_TIMEOUT       => $this->timeoutSeconds,
                 CURLOPT_LOW_SPEED_LIMIT => 1,
                 CURLOPT_LOW_SPEED_TIME  => 90,
                 CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw, $key) {
@@ -372,6 +464,7 @@ final class OpenAiCompatibleClient implements Llm
         string $error,
         int $status,
         float $time = 0.0,
+        bool $preserveAbnormalTerminal = true,
     ): array
     {
         if ($errno !== 0) {
@@ -387,16 +480,27 @@ final class OpenAiCompatibleClient implements Llm
 
         $parsed = self::parseSse($raw);
         if ($parsed['error'] !== null) {
-            // Treat provider "overloaded" style messages as transient when obvious.
-            $transient = str_contains(strtolower($parsed['error']), 'overloaded')
-                || str_contains(strtolower($parsed['error']), 'rate limit');
+            $transient = self::isTransientStreamError($parsed);
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
+        }
+        $terminationError = JsonBatchRecovery::terminationError($parsed['stop_reason']);
+        // Batch callers preserve abnormal terminal responses so
+        // TextBatchRecovery / JsonBatchRecovery can selectively regenerate
+        // only the affected member. Keep the explicit false mode for callers
+        // that need the legacy immediate rejection policy.
+        if (!$preserveAbnormalTerminal && self::isTruncationStopReason($parsed['stop_reason'])) {
+            return [
+                'ok' => false,
+                'transient' => false,
+                'error' => "stream error: {$terminationError}",
+                'time' => $time,
+            ];
         }
         // Preserve recognized abnormal terminal responses (including empty
         // refusals and zero-token truncations) for the batch recovery layer.
         // An ordinary successful empty response remains transient.
         if (trim($parsed['text']) === ''
-            && JsonBatchRecovery::terminationError($parsed['stop_reason']) === null
+            && $terminationError === null
         ) {
             return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response', 'time' => $time];
         }
@@ -417,7 +521,42 @@ final class OpenAiCompatibleClient implements Llm
 
     private static function isTransientStatus(int $status): bool
     {
-        return $status === 429 || $status >= 500;
+        return in_array($status, [408, 429], true) || $status >= 500;
+    }
+
+    /**
+     * Classify an error delivered inside an otherwise-successful HTTP stream.
+     * OpenRouter can emit provider failures (including a numeric 5xx code) as
+     * an SSE error object after the HTTP 200 headers have already been sent.
+     * Preserve and use that structured data instead of relying only on English
+     * message fragments.
+     *
+     * @param array{error:?string,error_code:int|string|null,error_type:string} $parsed
+     */
+    public static function isTransientStreamError(array $parsed): bool
+    {
+        $code = $parsed['error_code'] ?? null;
+        if (is_numeric($code)) {
+            $status = (int) $code;
+            if (self::isTransientStatus($status)) {
+                return true;
+            }
+        }
+
+        $haystack = strtolower(implode(' ', [
+            (string) ($parsed['error_type'] ?? ''),
+            (string) ($parsed['error'] ?? ''),
+        ]));
+        foreach ([
+            'overload', 'rate limit', 'rate_limit', 'timeout', 'timed out',
+            'api_error', 'server_error', 'provider_unavailable',
+            'provider unavailable', 'service unavailable',
+        ] as $needle) {
+            if (str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -437,11 +576,13 @@ final class OpenAiCompatibleClient implements Llm
     /**
      * Drive one request to completion with a fakeable transport seam. A
      * successful empty response is transient unless tolerate_empty is set.
+     * That option also accepts a truncation stop reason because cache-warm
+     * probes intentionally use a one-token output budget.
      *
      * @param array<string,mixed> $body
-     * @param callable(array<string,mixed>):array{text:string,input:int,output:int,time:float} $transport
+     * @param callable(array<string,mixed>):array{text:string,input:int,output:int,time:float,stop_reason?:?string} $transport
      * @param list<int> $delays
-     * @return array{text:string,input:int,output:int,time:float}
+     * @return array{text:string,input:int,output:int,time:float,stop_reason?:?string}
      */
     public static function retrySingleRequest(
         array &$body,
@@ -454,7 +595,18 @@ final class OpenAiCompatibleClient implements Llm
         while (true) {
             try {
                 $result = $transport($body);
-                if (trim($result['text']) === '') {
+                $empty = trim($result['text']) === '';
+                $stopReason = $result['stop_reason'] ?? null;
+                $probeReachedOutputLimit = is_string($stopReason)
+                    && in_array(trim($stopReason), ['length', 'max_tokens'], true);
+                if (
+                    self::isTruncationStopReason($stopReason)
+                    && !($tolerateEmpty && $probeReachedOutputLimit)
+                ) {
+                    $terminationError = JsonBatchRecovery::terminationError($stopReason);
+                    throw new \RuntimeException("stream error: {$terminationError}");
+                }
+                if ($empty) {
                     if (!$tolerateEmpty) {
                         throw new TransientApiException('no text content in streamed response');
                     }
@@ -494,7 +646,7 @@ final class OpenAiCompatibleClient implements Llm
             CURLOPT_POST          => true,
             CURLOPT_HTTPHEADER    => $this->headers(),
             CURLOPT_POSTFIELDS    => $payload,
-            CURLOPT_TIMEOUT       => 600,
+            CURLOPT_TIMEOUT       => $this->timeoutSeconds,
             CURLOPT_LOW_SPEED_LIMIT => 1,
             CURLOPT_LOW_SPEED_TIME  => 90,
             CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$raw) {
@@ -526,15 +678,14 @@ final class OpenAiCompatibleClient implements Llm
         $parsed = self::parseSse($raw);
         if ($parsed['error'] !== null) {
             $msg = "stream error: {$parsed['error']}";
-            if (str_contains(strtolower($parsed['error']), 'overloaded')
-                || str_contains(strtolower($parsed['error']), 'rate limit')) {
+            if (self::isTransientStreamError($parsed)) {
                 throw new TransientApiException($msg);
             }
             throw new \RuntimeException($msg);
         }
-        // Empty-text handling lives in retrySingleRequest so tolerate_empty
-        // (cache-warm probes) can accept a blank one-token reply without a
-        // transient retry loop.
+        // Terminal and empty-text handling live in retrySingleRequest so
+        // tolerate_empty (cache-warm probes) can accept a blank one-token
+        // reply without a transient retry loop.
         return [
             'text'        => $parsed['text'],
             'input'       => $parsed['input'],
@@ -564,7 +715,11 @@ final class OpenAiCompatibleClient implements Llm
      *   - data: [DONE]
      *   - top-level error objects some hosts send mid-stream
      *
-     * @return array{text:string,input:int,output:int,error:?string,stop_reason:?string}
+     * The provider's finish_reason is exposed as the cross-provider
+     * `stop_reason`. JSON recovery uses it to distinguish malformed output
+     * from truncation and refusal without accepting a partial response.
+     *
+     * @return array{text:string,input:int,output:int,error:?string,error_code:int|string|null,error_type:string,stop_reason:?string}
      */
     public static function parseSse(string $raw): array
     {
@@ -572,6 +727,8 @@ final class OpenAiCompatibleClient implements Llm
         $input = 0;
         $output = 0;
         $error = null;
+        $errorCode = null;
+        $errorType = '';
         $stopReason = null;
 
         // Non-stream JSON response (provider ignored stream:true or returned error JSON).
@@ -580,40 +737,41 @@ final class OpenAiCompatibleClient implements Llm
             $json = json_decode($trimmed, true);
             if (is_array($json)) {
                 if (isset($json['error'])) {
-                    $err = $json['error'];
-                    $error = is_array($err)
-                        ? (string) ($err['message'] ?? json_encode($err))
-                        : (string) $err;
-                    return ['text' => '', 'input' => 0, 'output' => 0, 'error' => $error, 'stop_reason' => null];
+                    [$error, $errorCode, $errorType] = self::parseError($json['error']);
+                    return self::parsedResponse('', 0, 0, $error, $errorCode, $errorType, null);
                 }
-                $message = $json['choices'][0]['message'] ?? null;
+                $choice = $json['choices'][0] ?? null;
+                if (is_array($choice) && isset($choice['error'])) {
+                    [$error, $errorCode, $errorType] = self::parseError($choice['error']);
+                    $stopReason = isset($choice['finish_reason'])
+                        ? (string) $choice['finish_reason']
+                        : null;
+                    return self::parsedResponse('', 0, 0, $error, $errorCode, $errorType, $stopReason);
+                }
+                $message = is_array($choice) ? ($choice['message'] ?? null) : null;
                 if (is_array($message)) {
                     $refusal = is_string($message['refusal'] ?? null)
                         && trim((string) $message['refusal']) !== '';
                     if (!array_key_exists('content', $message) && !$refusal) {
-                        return [
-                            'text' => '',
-                            'input' => 0,
-                            'output' => 0,
-                            'error' => null,
-                            'stop_reason' => null,
-                        ];
+                        return self::parsedResponse('', 0, 0, null, null, '', null);
                     }
 
                     $text = is_string($message['content'] ?? null) ? $message['content'] : '';
-                    $usage = self::extractUsage($json);
                     $stopReason = $refusal
                         ? 'refusal'
-                        : (isset($json['choices'][0]['finish_reason'])
-                        ? (string) $json['choices'][0]['finish_reason']
+                        : (isset($choice['finish_reason'])
+                        ? (string) $choice['finish_reason']
                         : null);
-                    return [
-                        'text'        => $text,
-                        'input'       => $usage['input'],
-                        'output'      => $usage['output'],
-                        'error'       => null,
-                        'stop_reason' => $stopReason,
-                    ];
+                    $usage = self::extractUsage($json);
+                    return self::parsedResponse(
+                        $text,
+                        $usage['input'],
+                        $usage['output'],
+                        null,
+                        null,
+                        '',
+                        $stopReason,
+                    );
                 }
             }
         }
@@ -630,11 +788,17 @@ final class OpenAiCompatibleClient implements Llm
             if (!is_array($evt)) {
                 continue;
             }
-            if (isset($evt['error'])) {
-                $err = $evt['error'];
-                $error = is_array($err)
-                    ? (string) ($err['message'] ?? json_encode($err))
-                    : (string) $err;
+            $streamError = $evt['error'] ?? $evt['choices'][0]['error'] ?? null;
+            if ($streamError !== null) {
+                [$error, $errorCode, $errorType] = self::parseError($streamError);
+                if ($stopReason !== 'refusal' && isset($evt['choices'][0]['finish_reason'])) {
+                    $stopReason = (string) $evt['choices'][0]['finish_reason'];
+                }
+                if (isset($evt['usage']) && is_array($evt['usage'])) {
+                    $usage = self::extractUsage($evt);
+                    $input = $usage['input'];
+                    $output = $usage['output'];
+                }
                 continue;
             }
             $delta = $evt['choices'][0]['delta']['content'] ?? null;
@@ -661,13 +825,60 @@ final class OpenAiCompatibleClient implements Llm
             }
         }
 
+        return self::parsedResponse(
+            $text,
+            $input,
+            $output,
+            $error,
+            $errorCode,
+            $errorType,
+            $stopReason,
+        );
+    }
+
+    /** @return array{0:string,1:int|string|null,2:string} */
+    private static function parseError(mixed $error): array
+    {
+        if (!is_array($error)) {
+            return [(string) $error, null, ''];
+        }
+        $message = (string) ($error['message'] ?? json_encode($error));
+        $code = $error['code'] ?? null;
+        $type = (string) (
+            $error['metadata']['error_type']
+            ?? $error['type']
+            ?? ''
+        );
+        return [$message, is_int($code) || is_string($code) ? $code : null, $type];
+    }
+
+    /**
+     * @return array{text:string,input:int,output:int,error:?string,error_code:int|string|null,error_type:string,stop_reason:?string}
+     */
+    private static function parsedResponse(
+        string $text,
+        int $input,
+        int $output,
+        ?string $error,
+        int|string|null $errorCode,
+        string $errorType,
+        ?string $stopReason,
+    ): array {
         return [
             'text'        => $text,
             'input'       => $input,
             'output'      => $output,
             'error'       => $error,
+            'error_code'  => $errorCode,
+            'error_type'  => $errorType,
             'stop_reason' => $stopReason,
         ];
+    }
+
+    private static function isTruncationStopReason(mixed $reason): bool
+    {
+        return is_string($reason)
+            && in_array(trim($reason), ['max_tokens', 'length', 'model_context_window_exceeded'], true);
     }
 
     private static function truncate(string $s, int $max = 300): string

@@ -6,12 +6,12 @@ namespace Automattic\SiteBuild;
 /**
  * Loads config/models.json — the per-provider default model matrix.
  *
- * Each provider defines a `large` and `small` model id; each pipeline step is
- * tagged with a tier in `step_tiers`. StepDefaults resolves a step's model by
- * looking up the active provider's model for that step's tier, while env
- * overrides (LLM_MODEL, LLM_MODEL_SMALL, LLM_MODEL_<STEP>) still win. Keeping the
- * matrix in data (not code) lets `--provider` swap the whole model set in one
- * flag without touching per-step wiring.
+ * Each provider defines a `large` and `small` model id and may override costly
+ * outlier steps with `step_models`; every pipeline step is tagged with a tier
+ * in `step_tiers`. Environment overrides (LLM_MODEL, LLM_MODEL_SMALL,
+ * LLM_MODEL_<STEP>) still win. Keeping the matrix in data (not code) lets
+ * `--provider` swap the whole model set in one flag without hard-coded step
+ * wiring.
  */
 final class ModelConfig
 {
@@ -98,6 +98,27 @@ final class ModelConfig
             throw new \RuntimeException("No '{$tier}' model configured for provider '{$provider}'.");
         }
         return $model;
+    }
+
+    /**
+     * Optional provider-specific model for one step. This lets a provider keep
+     * an expensive reasoning model as its creative large tier while routing
+     * high-volume code/markup steps to a faster model. Environment overrides
+     * are applied later by StepDefaults and always take precedence.
+     */
+    public static function stepModel(string $provider, string $step): ?string
+    {
+        $providers = self::data()['providers'];
+        $models = $providers[$provider] ?? null;
+        if (!is_array($models)) {
+            return null;
+        }
+        $stepModels = $models['step_models'] ?? null;
+        if (!is_array($stepModels)) {
+            return null;
+        }
+        $model = $stepModels[$step] ?? null;
+        return is_string($model) && trim($model) !== '' ? $model : null;
     }
 
     /**

@@ -1,5 +1,5 @@
 {
-    "$comment": "Default LLM models per provider for each pipeline step. Pick the active provider with `php bin/build.php --provider=<name>` or the LLM_PROVIDER env var (falls back to default_provider below). Every step is tagged with a tier (large | small); the active provider's model for that tier is used. Small = fast/cheap structural steps; large = quality-critical creative/generation steps. OVERRIDES (any model id, always win): LLM_MODEL_<STEP> for one step (e.g. LLM_MODEL_SITE_SPEC=gpt-5.5), LLM_MODEL for the whole run's large tier, LLM_MODEL_SMALL for the small tier.",
+    "$comment": "Default LLM models per provider for each pipeline step. Pick the active provider with `php bin/build.php --provider=<name>` or the LLM_PROVIDER env var (falls back to default_provider below). Every step is tagged with a tier (large | small); the active provider's model for that tier is used unless that provider declares a step_models override. Small = fast/cheap structural steps; large = quality-critical creative/generation steps. ENV OVERRIDES (any model id, always win): LLM_MODEL_<STEP> for one step (e.g. LLM_MODEL_SITE_SPEC=gpt-5.5), LLM_MODEL for the whole run's large tier, LLM_MODEL_SMALL for the small tier.",
     "version": 1,
     "default_provider": "anthropic",
     "providers": {
@@ -14,6 +14,17 @@
         "xai": {
             "large": "grok-4.5",
             "small": "grok-4.5"
+        },
+        "openrouter": {
+            "large": "moonshotai/kimi-k3",
+            "small": "moonshotai/kimi-k2.5:nitro",
+            "step_models": {
+                "theme-json": "moonshotai/kimi-k2.5:nitro",
+                "sections": "moonshotai/kimi-k2.5:nitro",
+                "page-styles": "moonshotai/kimi-k2.5:nitro",
+                "custom-motion": "moonshotai/kimi-k2.5:nitro",
+                "fonts-php": "moonshotai/kimi-k2.5:nitro"
+            }
         }
     },
     "step_tiers": {

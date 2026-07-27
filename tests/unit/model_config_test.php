@@ -12,7 +12,7 @@ use Automattic\SiteBuild\StepDefaults;
 
 test('ModelConfig reads the packaged provider matrix', function () {
     assert_eq('anthropic', ModelConfig::defaultProvider());
-    foreach (['anthropic', 'openai', 'xai'] as $p) {
+    foreach (['anthropic', 'openai', 'xai', 'openrouter'] as $p) {
         assert_true(ModelConfig::hasProvider($p), "has {$p}");
     }
     assert_true(!ModelConfig::hasProvider('nope'), 'unknown provider is absent');
@@ -21,6 +21,10 @@ test('ModelConfig reads the packaged provider matrix', function () {
     assert_eq('gpt-5.4-mini', ModelConfig::tierModel('openai', 'small'));
     assert_eq('claude-opus-4-8', ModelConfig::tierModel('anthropic', 'large'));
     assert_eq('claude-haiku-4-5', ModelConfig::tierModel('anthropic', 'small'));
+    assert_eq('moonshotai/kimi-k3', ModelConfig::tierModel('openrouter', 'large'));
+    assert_eq('moonshotai/kimi-k2.5:nitro', ModelConfig::tierModel('openrouter', 'small'));
+    assert_eq('moonshotai/kimi-k2.5:nitro', ModelConfig::stepModel('openrouter', 'sections'));
+    assert_eq(null, ModelConfig::stepModel('openrouter', 'design-direction'));
 
     $tiers = ModelConfig::stepTiers();
     assert_eq('small', $tiers['site-spec']);
@@ -75,6 +79,36 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
         assert_eq('gpt-5.5', $models['theme-json']);
     } finally {
         putenv('LLM_PROVIDER');
+    }
+});
+
+test('StepDefaults applies OpenRouter step models while keeping K3 for creative direction', function () {
+    putenv('LLM_PROVIDER=openrouter');
+    try {
+        $models = StepDefaults::models();
+        assert_eq('moonshotai/kimi-k3', $models['design-direction']);
+        assert_eq('moonshotai/kimi-k2.5:nitro', $models['theme-json']);
+        assert_eq('moonshotai/kimi-k2.5:nitro', $models['sections']);
+        assert_eq('moonshotai/kimi-k2.5:nitro', $models['page-styles']);
+        assert_eq('moonshotai/kimi-k2.5:nitro', $models['fonts-php']);
+    } finally {
+        putenv('LLM_PROVIDER');
+    }
+});
+
+test('global and per-step env models override provider step models', function () {
+    putenv('LLM_PROVIDER=openrouter');
+    putenv('LLM_MODEL=override-large');
+    putenv('LLM_MODEL_SECTIONS=override-sections');
+    try {
+        $models = StepDefaults::models();
+        assert_eq('override-large', $models['theme-json'], 'large-tier env beats provider step model');
+        assert_eq('override-sections', $models['sections'], 'per-step env wins over everything');
+        assert_eq('moonshotai/kimi-k2.5:nitro', $models['site-spec'], 'unoverridden small tier stays configured');
+    } finally {
+        putenv('LLM_PROVIDER');
+        putenv('LLM_MODEL');
+        putenv('LLM_MODEL_SECTIONS');
     }
 });
 
