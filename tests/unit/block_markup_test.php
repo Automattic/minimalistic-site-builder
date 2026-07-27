@@ -139,3 +139,20 @@ test('serializeComment escapes like WP serialize_block_attributes', function () 
     assert_eq('<!-- wp:spacer {"height":"40px"} /-->', BlockMarkup::serializeComment('spacer', ['height' => '40px'], true));
     assert_eq('<!-- wp:paragraph -->', BlockMarkup::serializeComment('paragraph', [], false));
 });
+
+test('endOffset exposes exact spans: past the closer, past a void delimiter, null when unclosed', function () {
+    $group = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:spacer {"height":"40px"} /-->'
+        . '</div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($group . "\ntrailing prose");
+    // Closed block: end lands just past its closing comment.
+    assert_eq(strlen($group), $doc->endOffset(0));
+    assert_eq($group, substr($group . "\ntrailing prose", $doc->openingOffset(0), $doc->endOffset(0)));
+    // Void block: end lands just past its self-closing delimiter.
+    $void = '<!-- wp:spacer {"height":"40px"} /-->';
+    assert_eq($doc->openingOffset(1) + strlen($void), $doc->endOffset(1));
+
+    // Unclosed block: no exact end.
+    $open = BlockMarkup::parse('<!-- wp:group --><div class="wp-block-group">');
+    assert_eq(null, $open->endOffset(0));
+});

@@ -58,7 +58,7 @@ final class MarkupSalvage
         $dropped = 0;
         $keep = -1;
         for ($i = count($open) - 1; $i >= 0; $i--) {
-            $end = self::lastCompleteChildEnd($doc, $markup, $open[$i], $cut);
+            $end = self::lastCompleteChildEnd($doc, $open[$i], $cut);
             if ($end !== null) {
                 $cut = $end;
                 $keep = $i;
@@ -115,38 +115,19 @@ final class MarkupSalvage
      * End offset (past the closing comment) of the last fully-closed direct
      * child of $idx that ends at or before $cut, or null when it has none.
      */
-    private static function lastCompleteChildEnd(BlockMarkup $doc, string $markup, int $idx, int $cut): ?int
+    private static function lastCompleteChildEnd(BlockMarkup $doc, int $idx, int $cut): ?int
     {
         $open = $doc->unclosedIndices();
         foreach (array_reverse($doc->children($idx)) as $child) {
             if (in_array($child, $open, true)) {
                 continue;
             }
-            $end = self::blockEnd($doc, $markup, $child);
+            $end = $doc->endOffset($child);
             if ($end !== null && $end <= $cut) {
                 return $end;
             }
         }
         return null;
-    }
-
-    /**
-     * End offset of a closed block including its closing comment. Null when
-     * the closer is not literally where the parse says the inner HTML ends
-     * (a stray-closer artifact) — not a safe cut point.
-     */
-    private static function blockEnd(BlockMarkup $doc, string $markup, int $idx): ?int
-    {
-        if ($doc->isVoid($idx)) {
-            // Void block: complete at its own delimiter.
-            return $doc->openingOffset($idx) + $doc->openingLength($idx);
-        }
-        $innerEnd = $doc->openingOffset($idx) + $doc->openingLength($idx) + strlen($doc->innerHtml($idx));
-        $name = preg_quote($doc->name($idx), '/');
-        if (preg_match('/\A<!--\s+\/wp:' . $name . '\s+-->/s', substr($markup, $innerEnd), $m) !== 1) {
-            return null;
-        }
-        return $innerEnd + strlen($m[0]);
     }
 
     /**
@@ -156,10 +137,31 @@ final class MarkupSalvage
      */
     private static function closers(BlockMarkup $doc, int $idx): string
     {
+        $out = '';
+        foreach (array_reverse(self::openElements($doc->ownHtml($idx))) as $name) {
+            $out .= "</{$name}>";
+        }
+        return ($out !== '' ? "\n" . $out : '') . "\n<!-- /wp:" . $doc->name($idx) . ' -->';
+    }
+
+    /**
+     * The HTML element names a fragment leaves open, in opening order. An
+     * empty list means the fragment builds no container — for an unclosed
+     * block opener, the signal that it decorates prose (a delimiter quoted in
+     * a sentence) rather than wrapping real markup: a STATIC-save container
+     * block always leaves its own root tag open until its closer. (Dynamic
+     * wrappers that save no HTML of their own — wp:query and friends — would
+     * defeat that signal, but they are outside the static section vocabulary
+     * this generator emits.)
+     *
+     * @return list<string>
+     */
+    public static function openElements(string $html): array
+    {
         $stack = [];
         preg_match_all(
             '/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"\']|"[^"]*"|\'[^\']*\')*?)(\/?)>/s',
-            $doc->ownHtml($idx),
+            $html,
             $tags,
             PREG_SET_ORDER,
         );
@@ -176,11 +178,6 @@ final class MarkupSalvage
                 $stack[] = $name;
             }
         }
-
-        $out = '';
-        foreach (array_reverse($stack) as $name) {
-            $out .= "</{$name}>";
-        }
-        return ($out !== '' ? "\n" . $out : '') . "\n<!-- /wp:" . $doc->name($idx) . ' -->';
+        return $stack;
     }
 }

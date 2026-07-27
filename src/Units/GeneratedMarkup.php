@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 
@@ -18,7 +19,11 @@ final class GeneratedMarkup
      */
     public static function normalize(string $text, string $key): string
     {
-        $markup = self::stripWrapper(self::stripFences(trim($text)));
+        try {
+            $markup = self::recoverDocument(self::stripFences(trim($text)));
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
+        }
         if ($markup === '' || !str_contains($markup, 'wp:')) {
             throw new \RuntimeException("part '{$key}' is not block markup");
         }
@@ -37,6 +42,13 @@ final class GeneratedMarkup
         foreach ($salvage['notes'] as $note) {
             fwrite(STDERR, "    (part '{$key}': {$note})\n");
         }
+
+        // Validate the final artifact strictly: everything must live inside
+        // its top-level blocks. Recovery and salvage guarantee this for the
+        // shapes they read; anything else (e.g. prose wedged between two
+        // top-level blocks) fails HERE with an explicit message instead of
+        // much later at the section-rhythm gate.
+        self::assertNoContentOutsideBlocks($salvage['markup'], $key);
         return $salvage['markup'];
     }
 
@@ -96,27 +108,162 @@ final class GeneratedMarkup
     }
 
     /**
-     * Drop any wrapper the model put around the block markup: a sentence of
-     * reasoning before the first delimiter ("Looking at the notes… Let me
-     * build the contrast band…"), or a leftover code fence / prose after the
-     * last one. Both survive fence-stripping — which only fires when the text
-     * *starts* with a fence, so a preamble ahead of the opening ``` defeats
-     * it — and leave the part with content outside its root block, which the
-     * section-rhythm gate rejects ("malformed root wp:group opener" /
-     * "content outside its top-level wp:group"), failing the whole build.
+     * Recover the one block document from a model response that wrapped it —
+     * a sentence of reasoning before the markup ("Looking at the notes… Let
+     * me build the contrast band…"), a leftover code fence or prose after it,
+     * a delimiter *quoted inside the prose* ("I'll use `<!-- wp:group -->` as
+     * the root."), or an ordinary trailing HTML comment. Both wrappers
+     * survive fence-stripping — which only fires when the text *starts* with
+     * a fence — and would leave the part with content outside its root block,
+     * failing the whole build much later at the section-rhythm gate.
      *
-     * Text with no block delimiter is left untouched for the caller's "not
-     * block markup" guard to reject.
+     * The recovery is structural, not textual: the candidate is a complete,
+     * balanced block document found by parsing (see balancedCandidate), never
+     * "the first opener-shaped substring to the last `-->`" — so an ordinary
+     * trailing HTML comment falls outside the recovered span. Two plausible
+     * documents are an explicit ambiguity error, and a truncated container
+     * wrapper keeps its whole tail for MarkupSalvage rather than having a
+     * complete nested child promoted to document root.
+     *
+     * Text with no block delimiter at all is returned untouched for the
+     * caller's "not block markup" guard to reject.
      */
-    private static function stripWrapper(string $text): string
+    private static function recoverDocument(string $text): string
     {
-        if (preg_match('/<!--\s*wp:/', $text, $m, PREG_OFFSET_CAPTURE) === 1) {
-            $text = substr($text, $m[0][1]);
+        $full = BlockMarkup::parse($text);
+        if ($full->indices() === []) {
+            return $text;
         }
-        $lastClose = strrpos($text, '-->');
-        if ($lastClose !== false) {
-            $text = substr($text, 0, $lastClose + 3);
+
+        // The end of the last block delimiter in the text: a candidate must
+        // reach it, else it would silently discard trailing block content.
+        $lastDelimiterEnd = 0;
+        foreach ($full->indices() as $i) {
+            $lastDelimiterEnd = max(
+                $lastDelimiterEnd,
+                $full->endOffset($i) ?? $full->openingOffset($i) + $full->openingLength($i),
+            );
         }
-        return trim($text);
+
+        $candidate = self::balancedCandidate($text, $full, $lastDelimiterEnd);
+
+        if ($candidate !== null) {
+            [$start, $end] = $candidate;
+            // Every opener before the candidate, at any depth: the tolerant
+            // parse nests the real payload under a quoted opener, so a
+            // truncated wrapper is not necessarily top-level.
+            foreach ($full->indices() as $i) {
+                if ($full->openingOffset($i) >= $start || self::isDecorativeOpener($full, $i)) {
+                    continue;
+                }
+                if ($full->endOffset($i) !== null) {
+                    // A complete block before the candidate: two plausible
+                    // documents. Refuse to guess which one is meant.
+                    throw new \RuntimeException(
+                        'contains multiple candidate block documents; cannot recover one unambiguously'
+                    );
+                }
+                // A truncated container wrapper: keep the whole tail for
+                // salvage — never promote its complete child to document root.
+                $candidate = null;
+                break;
+            }
+            if ($candidate !== null) {
+                return trim(substr($text, $start, $end - $start));
+            }
+        }
+
+        // No balanced candidate (or a truncated wrapper to preserve): strip
+        // the preamble down to the first anchor-worthy opener and keep the
+        // tail for MarkupSalvage. Decorative openers cannot anchor.
+        foreach ($full->indices() as $i) {
+            if (!self::isDecorativeOpener($full, $i)) {
+                return trim(substr($text, $full->openingOffset($i)));
+            }
+        }
+        return trim(substr($text, $full->openingOffset(0)));
+    }
+
+    /**
+     * Whether an opener is a block delimiter quoted in the wrapper prose
+     * rather than a real block: it never got a closer AND its own HTML builds
+     * no container. A genuine static-save container block cut off by
+     * truncation leaves its root tag open until its closer, so it fails the
+     * second test and keeps anchoring the document.
+     */
+    private static function isDecorativeOpener(BlockMarkup $full, int $i): bool
+    {
+        return $full->endOffset($i) === null
+            && MarkupSalvage::openElements($full->ownHtml($i)) === [];
+    }
+
+    /**
+     * The earliest opener whose suffix parses as one balanced block document
+     * covering the text through its last block delimiter, as an absolute
+     * [start, end) span — or null when no opener does.
+     *
+     * @return array{0:int,1:int}|null
+     */
+    private static function balancedCandidate(string $text, BlockMarkup $full, int $lastDelimiterEnd): ?array
+    {
+        foreach ($full->indices() as $i) {
+            if ($full->endOffset($i) === null) {
+                continue; // unclosed in the full parse ⇒ unclosed in its own suffix too
+            }
+            $start = $full->openingOffset($i);
+            $end = self::documentEnd(substr($text, $start));
+            if ($end === null || $start + $end < $lastDelimiterEnd) {
+                continue;
+            }
+            return [$start, $start + $end];
+        }
+        return null;
+    }
+
+    /**
+     * The end offset of $suffix's block content when it parses as ONE
+     * balanced document — every block closed, delimiters matched, nothing
+     * but whitespace between its top-level blocks — or null when it doesn't.
+     */
+    private static function documentEnd(string $suffix): ?int
+    {
+        $p = BlockMarkup::parse($suffix);
+        if ($p->indices() === [] || $p->unclosedIndices() !== [] || $p->hasMismatchedDelimiters()) {
+            return null;
+        }
+        $prevEnd = null;
+        foreach ($p->indices() as $j) {
+            if ($p->parent($j) !== null) {
+                continue;
+            }
+            if ($prevEnd !== null && trim(substr($suffix, $prevEnd, $p->openingOffset($j) - $prevEnd)) !== '') {
+                return null; // prose between top-level blocks — not one document
+            }
+            $prevEnd = $p->endOffset($j);
+        }
+        return $prevEnd;
+    }
+
+    /**
+     * Fail loudly when the final normalized artifact still has content
+     * outside its top-level blocks — the exact defect the downstream gates
+     * reject late, surfaced here with the part identified.
+     */
+    private static function assertNoContentOutsideBlocks(string $markup, string $key): void
+    {
+        $doc = BlockMarkup::parse($markup);
+        $outside = '';
+        $pos = 0;
+        foreach ($doc->indices() as $i) {
+            if ($doc->parent($i) !== null) {
+                continue;
+            }
+            $outside .= substr($markup, $pos, $doc->openingOffset($i) - $pos);
+            $pos = $doc->endOffset($i) ?? strlen($markup);
+        }
+        $outside .= substr($markup, $pos);
+        if (trim($outside) !== '') {
+            throw new \RuntimeException("part '{$key}' has content outside its top-level blocks after recovery");
+        }
     }
 }

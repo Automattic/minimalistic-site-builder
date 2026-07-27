@@ -37,7 +37,7 @@ final class BlockMarkup
      * @param string $source the original document
      * @param list<array{name:string, attrs:?array<mixed>, void:bool, parent:?int,
      *                    children:list<int>, offset:int, length:int,
-     *                    innerStart:int, innerEnd:int}> $nodes
+     *                    innerStart:int, innerEnd:int, closerLength:?int}> $nodes
      * @param list<int> $unclosed indices of blocks still open at end of document
      * @param bool $mismatchedDelimiters whether a closer crossed an open block
      *                                  or had no matching opener
@@ -82,6 +82,7 @@ final class BlockMarkup
                                 $mismatchedDelimiters = true;
                             }
                             $nodes[$stack[$i]]['innerEnd'] = $offset;
+                            $nodes[$stack[$i]]['closerLength'] = $length;
                             array_splice($stack, $i);
                             $matched = true;
                             break;
@@ -103,15 +104,16 @@ final class BlockMarkup
                 $index = count($nodes);
                 $parent = $stack === [] ? null : $stack[count($stack) - 1];
                 $nodes[] = [
-                    'name'       => $name,
-                    'attrs'      => $attrs,
-                    'void'       => $isVoid,
-                    'parent'     => $parent,
-                    'children'   => [],
-                    'offset'     => $offset,
-                    'length'     => $length,
-                    'innerStart' => $offset + $length,
-                    'innerEnd'   => $offset + $length, // stays for void / unclosed
+                    'name'         => $name,
+                    'attrs'        => $attrs,
+                    'void'         => $isVoid,
+                    'parent'       => $parent,
+                    'children'     => [],
+                    'offset'       => $offset,
+                    'length'       => $length,
+                    'innerStart'   => $offset + $length,
+                    'innerEnd'     => $offset + $length, // stays for void / unclosed
+                    'closerLength' => null,              // set when a closer matches
                 ];
                 if ($parent !== null) {
                     $nodes[$parent]['children'][] = $index;
@@ -205,6 +207,21 @@ final class BlockMarkup
     public function openingLength(int $i): int
     {
         return $this->nodes[$i]['length'];
+    }
+
+    /**
+     * Byte offset just past this block's full span in the source: past the
+     * closing delimiter for a closed block, past the self-closing delimiter
+     * for a void block. Null when the block never got a matching closer (a
+     * truncated document), so callers can tell an exact span from an open one.
+     */
+    public function endOffset(int $i): ?int
+    {
+        $n = $this->nodes[$i];
+        if ($n['void']) {
+            return $n['offset'] + $n['length'];
+        }
+        return $n['closerLength'] === null ? null : $n['innerEnd'] + $n['closerLength'];
     }
 
     /** Raw source between this block's delimiters (includes child blocks). */
