@@ -238,70 +238,119 @@ final class FixBlocksStep implements Step
         return $dropped;
     }
 
+    /** Most warning lines emitted for one distinct attribute before they are summarized. */
+    private const MAX_WARNING_LINES_PER_ATTRIBUTE = 20;
+
     /**
-     * Attributes the normalizer renamed onto the registered name they misspelt,
-     * as one report line per distinct rename with its occurrence count.
+     * Attributes the normalizer renamed onto the registered name whose shape
+     * they varied, one line per distinct rename with its occurrence count.
+     * These stay out of warnings.json: the value survived under its correct
+     * name, so there is no defect for the repair pass to act on.
      *
      * @return string[]
      */
     public static function renamedAttributes(string $report): array
     {
-        return self::summarizeAttributeRepairs(
-            $report,
-            'attribute-renamed',
-            static fn (string $subject, int $count): string => sprintf(
-                "renamed '%s' to '%s' on %d block(s)",
-                (string) strtok($subject, '>'),
-                substr($subject, (int) strpos($subject, '>') + 1),
-                $count,
-            ),
-        );
+        $counts = [];
+        foreach (self::attributeRepairs($report, 'attribute-renamed') as $row) {
+            $key = ($row['from'] ?? '') . "\0" . ($row['to'] ?? '');
+            $counts[$key] = ($counts[$key] ?? 0) + 1;
+        }
+        $lines = [];
+        foreach ($counts as $key => $count) {
+            [$from, $to] = explode("\0", (string) $key, 2);
+            $lines[] = sprintf("renamed '%s' to '%s' on %d block(s)", $from, $to, $count);
+        }
+        return $lines;
     }
 
     /**
      * Attributes dropped because the block does not register them and no
-     * registered name was a close enough match to rename onto. These are the
-     * lines recorded in warnings.json.
+     * registered name matched. Each line names the file and block path so the
+     * repair pass documented on Project::addWarnings can find the block again,
+     * and carries the dropped value so it can restore it. Structural drops —
+     * where the block ended up without what it needs to render at all — lead,
+     * and are labelled so they are not lost among alignment nits.
      *
      * @return string[]
      */
     public static function droppedAttributes(string $report): array
     {
-        return self::summarizeAttributeRepairs(
-            $report,
-            'unknown-attribute-dropped',
-            static fn (string $subject, int $count): string => sprintf(
-                "dropped unregistered attribute '%s' from %s on %d block(s); the block does not implement it",
-                substr($subject, (int) strrpos($subject, '.') + 1),
-                substr($subject, 0, (int) strrpos($subject, '.')),
-                $count,
-            ),
-        );
+        $lines = [];
+        foreach (['structural-attribute-dropped', 'unknown-attribute-dropped'] as $code) {
+            $structural = $code === 'structural-attribute-dropped';
+            $seen = [];
+            foreach (self::attributeRepairs($report, $code) as $row) {
+                $key = (string) ($row['key'] ?? '');
+                $seen[$key] = ($seen[$key] ?? 0) + 1;
+                if ($seen[$key] > self::MAX_WARNING_LINES_PER_ATTRIBUTE) {
+                    continue;
+                }
+                $lines[] = sprintf(
+                    "%s%s block %s: dropped unregistered attribute '%s' (value %s) from %s%s",
+                    $structural ? 'BROKEN: ' : '',
+                    $row['file'],
+                    $row['blockPath'],
+                    $key,
+                    json_encode((string) ($row['value'] ?? ''), JSON_UNESCAPED_SLASHES),
+                    (string) ($row['block'] ?? 'unknown block'),
+                    $structural
+                        ? ' — the block cannot render without it'
+                        : '; the block does not implement it',
+                );
+            }
+            foreach ($seen as $key => $count) {
+                if ($count > self::MAX_WARNING_LINES_PER_ATTRIBUTE) {
+                    $lines[] = sprintf(
+                        "...and %d further block(s) with '%s' dropped (listed in logs/%s)",
+                        $count - self::MAX_WARNING_LINES_PER_ATTRIBUTE,
+                        $key,
+                        self::LOG_FILE,
+                    );
+                }
+            }
+        }
+        return $lines;
     }
 
     /**
-     * Collapse `REPAIR <code>:<subject> at <path>` rows into one line per
-     * distinct subject, counting the blocks each affected. Report order is
-     * preserved so the output is deterministic.
+     * Every `REPAIR <code>:<json> at <path>` row in the report, decoded, with
+     * the file it appeared under attached.
      *
-     * @param callable(string,int):string $format
-     * @return string[]
+     * The payload is JSON rather than delimiter-packed text because the fields
+     * are model-authored and can contain any character a delimiter might use.
+     * Rows whose payload does not decode are skipped rather than guessed at.
+     *
+     * @return list<array<string,mixed>>
      */
-    private static function summarizeAttributeRepairs(string $report, string $code, callable $format): array
+    private static function attributeRepairs(string $report, string $code): array
     {
-        $pattern = '/\bREPAIR\s+' . preg_quote($code, '/') . ':(\S+)\s+at\s+/';
-        if (preg_match_all($pattern, $report, $matches) < 1) {
-            return [];
+        $rows = [];
+        $file = 'unknown file';
+        $marker = '- REPAIR ' . $code . ':';
+        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
+            if (preg_match('/^\s{2}(?:FIXED|ok|skip)\s+(\S+)$/', $line, $m) === 1) {
+                $file = $m[1];
+                continue;
+            }
+            $at = strpos($line, $marker);
+            if ($at === false) {
+                continue;
+            }
+            $rest = substr($line, $at + strlen($marker));
+            $split = strrpos($rest, ' at ');
+            if ($split === false) {
+                continue;
+            }
+            $decoded = json_decode(substr($rest, 0, $split), true);
+            if (!is_array($decoded)) {
+                continue;
+            }
+            $decoded['file'] = $file;
+            $decoded['blockPath'] = trim(substr($rest, $split + 4));
+            $rows[] = $decoded;
         }
-        $counts = [];
-        foreach ($matches[1] as $subject) {
-            $counts[$subject] = ($counts[$subject] ?? 0) + 1;
-        }
-        $lines = [];
-        foreach ($counts as $subject => $count) {
-            $lines[] = $format((string) $subject, $count);
-        }
-        return $lines;
+        return $rows;
     }
 
     /** @return string[] parts/*.html and templates/*.html, theme-relative */

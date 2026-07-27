@@ -57,11 +57,11 @@ test('registered blocks drop comment keys outside the current schema, keeping th
     assert_contains('style="color:#ff0000"', $result->html);
     assert_true(
         in_array(
-            'unknown-attribute-dropped:core/paragraph.customTextColor',
+            'unknown-attribute-dropped:{"block":"core/paragraph","key":"customTextColor","value":"#ff0000"}',
             array_map(static fn ($r): string => $r->code, $result->repairs),
             true,
         ),
-        'the drop is reported',
+        'the drop is reported with the block, key and value the repair pass needs',
     );
 });
 
@@ -77,7 +77,7 @@ test('a misnamed comment key is renamed onto the attribute it meant', function (
     assert_contains('"verticalAlignment":"center"', $result->html);
     assert_contains('are-vertically-aligned-center', $result->html);
     assert_eq(
-        ['attribute-renamed:vertical_alignment>verticalAlignment'],
+        ['attribute-renamed:{"from":"vertical_alignment","to":"verticalAlignment"}'],
         array_map(static fn ($r): string => $r->code, $result->repairs),
     );
 });
@@ -100,7 +100,10 @@ test('resolution does not depend on the order the delimiter was authored in', fu
     $after  = $transform('{"verticalAlignment":"center","vertical_alignment":"top"}');
     assert_eq($before, $after, 'a stray key cannot outrace its correctly spelled twin');
     assert_contains('"verticalAlignment":"center"', $before[0]);
-    assert_eq(['unknown-attribute-dropped:core/columns.vertical_alignment'], $before[1]);
+    assert_eq(
+        ['unknown-attribute-dropped:{"block":"core/columns","key":"vertical_alignment","value":"top"}'],
+        $before[1],
+    );
 
     // Two spellings of the same attribute are ambiguous; neither is applied.
     $ab = $transform('{"vertical_alignment":"top","VerticalAlignment":"bottom"}');
@@ -109,8 +112,8 @@ test('resolution does not depend on the order the delimiter was authored in', fu
     assert_true(!str_contains($ab[0], 'verticalAlignment'), 'neither guess is applied');
     assert_eq(
         [
-            'unknown-attribute-dropped:core/columns.VerticalAlignment',
-            'unknown-attribute-dropped:core/columns.vertical_alignment',
+            'unknown-attribute-dropped:{"block":"core/columns","key":"VerticalAlignment","value":"bottom"}',
+            'unknown-attribute-dropped:{"block":"core/columns","key":"vertical_alignment","value":"top"}',
         ],
         $ab[1],
     );
@@ -135,7 +138,7 @@ test('an unregistered attribute on a block that never had it is dropped, not ren
     assert_contains('<p>Kept</p>', $result->html);
     assert_contains('"layout":{"type":"constrained"}', $result->html);
     assert_eq(
-        ['unknown-attribute-dropped:core/group.verticalAlignment'],
+        ['unknown-attribute-dropped:{"block":"core/group","key":"verticalAlignment","value":"stretch"}'],
         array_map(static fn ($r): string => $r->code, $result->repairs),
     );
 });

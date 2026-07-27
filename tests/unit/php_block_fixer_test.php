@@ -437,7 +437,7 @@ test('PhpBlockFixer drops an unregistered comment attribute and still delivers e
     try {
         $report = (string) (new PhpBlockFixer())->fix($theme);
 
-        assert_contains('REPAIR unknown-attribute-dropped:core/paragraph.customTextColor', $report);
+        assert_contains('REPAIR unknown-attribute-dropped:{"block":"core/paragraph","key":"customTextColor"', $report);
         $b = (string) file_get_contents($theme . '/parts/b.html');
         assert_true(!str_contains($b, 'customTextColor'), 'the unregistered key is gone');
         assert_contains('style="color:#ff0000"', $b);

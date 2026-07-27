@@ -121,10 +121,12 @@ test('FixBlocksStep records dropped attributes in warnings.json and renames only
         public function fix(string $themeDir): string
         {
             return "  FIXED  parts/section.html\n"
-                . "         - REPAIR unknown-attribute-dropped:core/group.verticalAlignment at 0/1\n"
-                . "         - REPAIR unknown-attribute-dropped:core/group.verticalAlignment at 0/2\n"
-                . "         - REPAIR attribute-renamed:vertical_alignment>verticalAlignment at 0/3\n"
-                . '[fix-templates] 1/1 file(s) re-serialized, 0 style/class value(s) dropped';
+                . '         - REPAIR unknown-attribute-dropped:{"block":"core/group","key":"verticalAlignment","value":"stretch"} at 0/1' . "\n"
+                . '         - REPAIR unknown-attribute-dropped:{"block":"core/group","key":"verticalAlignment","value":"top"} at 0/2' . "\n"
+                . '         - REPAIR attribute-renamed:{"from":"vertical_alignment","to":"verticalAlignment"} at 0/3' . "\n"
+                . "  FIXED  parts/header.html\n"
+                . '         - REPAIR structural-attribute-dropped:{"block":"core/template-part","key":"partSlug","value":"header"} at 0' . "\n"
+                . '[fix-templates] 2/2 file(s) re-serialized, 0 style/class value(s) dropped';
         }
     };
 
@@ -138,14 +140,23 @@ test('FixBlocksStep records dropped attributes in warnings.json and renames only
     try {
         (new FixBlocksStep($fake))->run($project);
 
-        // A dropped attribute is authored intent the build delivered without,
-        // so it belongs in the durable record the repair pass reads. The two
-        // occurrences of one key collapse into a single counted line.
-        $warnings = $project->readJson('warnings.json');
-        assert_eq(1, count($warnings['fix-blocks']), 'one line per distinct attribute');
-        assert_contains("dropped unregistered attribute 'verticalAlignment'", $warnings['fix-blocks'][0]);
-        assert_contains('core/group', $warnings['fix-blocks'][0]);
-        assert_contains('2 block(s)', $warnings['fix-blocks'][0]);
+        $warnings = $project->readJson('warnings.json')['fix-blocks'];
+
+        // A structural drop leads and says so: the part renders nothing without
+        // its slug, which is not the same class of problem as a lost alignment.
+        assert_contains('BROKEN: ', $warnings[0]);
+        assert_contains('parts/header.html block 0', $warnings[0]);
+        assert_contains("attribute 'partSlug'", $warnings[0]);
+        assert_contains('cannot render without it', $warnings[0]);
+
+        // Ordinary drops carry the file, block path and value the repair pass
+        // documented on Project::addWarnings needs to locate and restore them.
+        assert_eq(3, count($warnings), 'one line per dropped block, not per attribute');
+        assert_contains('parts/section.html block 0/1', $warnings[1]);
+        assert_contains('(value "stretch")', $warnings[1]);
+        assert_contains('parts/section.html block 0/2', $warnings[2]);
+        assert_contains('(value "top")', $warnings[2]);
+
         assert_true(
             !str_contains(json_encode($warnings), 'renamed'),
             'a rename left nothing to repair, so it is not a warning',
@@ -157,6 +168,63 @@ test('FixBlocksStep records dropped attributes in warnings.json and renames only
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
+});
+
+test('attribute warnings are capped so one block cannot flood the file', function () {
+    $rows = '';
+    for ($i = 0; $i < 25; $i++) {
+        $rows .= '         - REPAIR unknown-attribute-dropped:{"block":"core/group","key":"bogus","value":"v"} at 0/' . $i . "\n";
+    }
+    $fake = new class ($rows) implements BlockFixer {
+        public function __construct(private string $rows) {}
+
+        public function fix(string $themeDir): string
+        {
+            return "  FIXED  parts/section.html\n" . $this->rows
+                . '[fix-templates] 1/1 file(s) re-serialized, 0 style/class value(s) dropped';
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/builder_fix_cap_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group"></div><!-- /wp:group -->'
+    );
+
+    try {
+        (new FixBlocksStep($fake))->run($project);
+        $warnings = $project->readJson('warnings.json')['fix-blocks'];
+        assert_eq(21, count($warnings), '20 detailed lines plus one summarizing the rest');
+        assert_contains("...and 5 further block(s) with 'bogus' dropped", $warnings[20]);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('attribute report parsing survives keys containing anything a delimiter might use', function () {
+    // The key is model-authored, so it can contain the characters a packed
+    // format would split on. Carrying the fields as JSON removes the split
+    // entirely: there is no direction to get wrong and no key that can forge a
+    // row. A payload that does not decode is skipped rather than guessed at.
+    $report = "  FIXED  parts/section.html\n"
+        . '         - REPAIR unknown-attribute-dropped:{"block":"core/group","key":"my key","value":"a"} at 0/1' . "\n"
+        . '         - REPAIR unknown-attribute-dropped:{"block":"core/group","key":"a.b.c","value":"b"} at 0/2' . "\n"
+        . '         - REPAIR unknown-attribute-dropped:{"block":"core/group","key":"x at y > z","value":"c"} at 0/3' . "\n"
+        . '         - REPAIR unknown-attribute-dropped:not json at all at 0/4' . "\n"
+        . '         - REPAIR attribute-renamed:{"from":"x>y","to":"verticalAlignment"} at 0/5' . "\n";
+
+    $drops = FixBlocksStep::droppedAttributes($report);
+    assert_eq(3, count($drops), 'an undecodable row is skipped, the rest survive intact');
+    assert_contains("attribute 'my key'", $drops[0]);
+    assert_contains("attribute 'a.b.c'", $drops[1]);
+    assert_contains("attribute 'x at y > z'", $drops[2], 'a key containing the row delimiter still decodes');
+    foreach ($drops as $line) {
+        assert_contains('parts/section.html', $line, 'every line names its file');
+    }
+
+    $renames = FixBlocksStep::renamedAttributes($report);
+    assert_eq(["renamed 'x>y' to 'verticalAlignment' on 1 block(s)"], $renames);
 });
 
 test('FixBlocksStep writes no warnings when nothing was dropped', function () {

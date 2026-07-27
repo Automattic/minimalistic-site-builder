@@ -68,6 +68,15 @@ One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
      acceptance emits a typed `Repair` row). Unknown legacy paragraph
      signatures throw; the paragraph-only scope of that guard is a recorded
      decision (plan addendum).
+   - A comment key outside the block's registered schema does **not** throw.
+     `Attributes/AttributeNameResolver` first tries to rename it onto the
+     attribute it misspelt (shape-insensitive match, then a guarded edit
+     distance); anything it cannot resolve unambiguously is dropped, which is
+     what the `createBlock` recreation does to an unregistered key regardless.
+     Both outcomes emit a `Repair` row (`attribute-renamed:…`,
+     `unknown-attribute-dropped:…`), and `FixBlocksStep` records the drops in
+     `warnings.json`. `REVIEWED_LEGACY_COMMENT_KEYS` no longer gates anything —
+     it marks drops as expected so they stay out of the report.
    - `Save/SaveStrategyRegistry` dispatches on the block's `SaveStrategy`:
      `DYNAMIC_NULL` → empty save, `INNER_BLOCKS` → inner content only,
      `RAW_CONTENT` (core/html) → attribute bytes, `CONDITIONAL`

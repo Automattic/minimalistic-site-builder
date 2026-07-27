@@ -22,12 +22,20 @@ final class DeprecationAdapters
      * adapter has admitted the signature.
      *
      * Since AttributeNormalizer began dropping unregistered keys instead of
-     * rejecting them, this list no longer gates anything — every key here would
-     * be dropped anyway. What it still does is mark those drops as reviewed and
-     * expected, so they are omitted from the repair report. Everything else
-     * earns an `unknown-attribute-dropped` row and a line in warnings.json.
-     * Adding an entry is therefore a decision about reporting noise, not about
-     * whether a build survives.
+     * rejecting them, this list no longer decides whether a build survives —
+     * an absent key is dropped rather than rejected. It now does two things,
+     * and only the first is cosmetic:
+     *
+     * 1. Marks the drop as reviewed and expected, keeping it out of the repair
+     *    report; everything else earns an `unknown-attribute-dropped` row and a
+     *    line in warnings.json.
+     * 2. Suppresses the rename attempt entirely — an entry here short-circuits
+     *    before AttributeNameResolver runs. This is load-bearing. `core/button`
+     *    lists `href` precisely because the resolver would otherwise rename it
+     *    onto `rel`, turning an authored destination into a link relation.
+     *
+     * So adding an entry is a reporting decision, but REMOVING one is not:
+     * it can turn a silent, correct drop into a silent, wrong rename.
      */
     private const REVIEWED_LEGACY_COMMENT_KEYS = [
         'core/button' => [

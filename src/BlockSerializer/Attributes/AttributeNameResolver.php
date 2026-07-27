@@ -7,35 +7,45 @@ namespace Automattic\SiteBuild\BlockSerializer\Attributes;
  * Maps an unregistered comment-attribute key onto the registered attribute it
  * was probably meant to be.
  *
- * Generated markup misses attribute names in two predictable ways: it varies
- * the shape of a real name (`vertical_alignment`, `VerticalAlignment`) or it
- * misspells one (`verticleAlignment`, `textColour`). Both carry authored
- * intent that the block can still honour, so renaming beats dropping.
+ * Generated markup varies the shape of a real name — `vertical_alignment`,
+ * `VerticalAlignment`, `vertical-alignment` — while meaning the registered
+ * attribute exactly. That intent is recoverable, so renaming beats dropping.
  *
- * Everything here is a guess, so each guess has to be unambiguous before it is
- * applied. A rename must win outright — a tie between two candidates is
- * rejected rather than broken arbitrarily — and the authored value must fit the
- * target's declared type, because renaming a value the block cannot store just
- * moves the failure downstream. A key that clears none of that is left for the
- * caller to drop.
+ * Matching is deliberately limited to shape. An earlier revision also matched
+ * on edit distance to catch genuine misspellings; measured against every real
+ * build in this repo it resolved nothing the shape pass did not already get,
+ * while producing renames that silently changed pages: `author` onto `anchor`
+ * (emitting an `id` with a space in it), `alias` onto `align` (changing a
+ * section's width), `link` onto `lock` (turning an authored link into a
+ * block-locking directive). On core/group alone, 273 dictionary words fall
+ * within edit distance 2 of `lock`. Recall that never fires is not worth a
+ * corruption mode that does, so the fuzzy pass is gone.
+ *
+ * A rename is still a guess, so it must be unambiguous: a key whose shape
+ * matches two registered names is refused rather than resolved arbitrarily,
+ * the authored value must fit the target's declared type, and several classes
+ * of target are excluded outright (see NEVER_RENAME_ONTO and the source-backed
+ * check). A key that clears none of that is left for the caller to drop.
  *
  * Pure and side-effect free.
  */
 final class AttributeNameResolver
 {
-    /**
-     * Maximum edit distance between two normalized names that still reads as a
-     * typo. Two covers the observed cases (a transposition, a dropped letter, a
-     * British spelling) without letting genuinely different short names collide.
-     */
-    private const MAX_DISTANCE = 2;
 
     /**
-     * Shortest normalized key eligible for distance matching. Below this, two
-     * unrelated names are routinely within MAX_DISTANCE of each other (`top`
-     * and `tag`, `id` and `url`), so only exact shape matches are trusted.
+     * Attributes a rename may never target, whatever the key looks like.
+     *
+     * SupportDomainGuard validates `style` and `layout` against the raw comment
+     * — before any rename exists — and fails closed on an unreviewed path under
+     * them. A key renamed onto either would arrive after that check and ship
+     * unvalidated, so `{"Style":{"background":{"bogusKey":"x"}}}` would smuggle
+     * past the one family the design says must never pass silently. Nobody
+     * meaningfully misspells `style`; dropping the stray is the correct outcome.
      */
-    private const MIN_TYPO_LENGTH = 4;
+    private const NEVER_RENAME_ONTO = [
+        'style'  => true,
+        'layout' => true,
+    ];
 
     /**
      * The registered attribute $key was probably meant to name, or null when
@@ -60,47 +70,27 @@ final class AttributeNameResolver
             if (array_key_exists($name, $taken) || !is_array($schema)) {
                 continue;
             }
+            if (isset(self::NEVER_RENAME_ONTO[$name])) {
+                continue;
+            }
+            // A source-backed attribute is read from the saved HTML, not from
+            // the delimiter, so a value moved here is discarded on the next
+            // sourcing pass. Reporting that as a successful rename would be a
+            // lie — and one this pipeline keeps out of warnings.json, since a
+            // rename is supposed to mean the value survived. Drop instead.
+            if (isset($schema['source'])) {
+                continue;
+            }
             $candidates[$name] = self::normalize((string) $name);
         }
 
-        $exact = array_keys($candidates, $normalized, true);
-        if (count($exact) === 1) {
-            return self::typeMatches($value, $schemas[$exact[0]]) ? $exact[0] : null;
-        }
         // Two registered names that differ only in shape cannot be told apart
-        // from the authored key alone.
-        if ($exact !== []) {
+        // from the authored key alone, so only a lone match resolves.
+        $matches = array_keys($candidates, $normalized, true);
+        if (count($matches) !== 1) {
             return null;
         }
-
-        if (strlen($normalized) < self::MIN_TYPO_LENGTH) {
-            return null;
-        }
-
-        $best = null;
-        $bestDistance = self::MAX_DISTANCE + 1;
-        $tied = false;
-        foreach ($candidates as $name => $candidate) {
-            // levenshtein() is byte-oriented and returns -1 past 255 bytes;
-            // attribute names never approach that, and a negative would
-            // otherwise read as a perfect match.
-            $distance = levenshtein($normalized, $candidate);
-            if ($distance < 0 || $distance > self::MAX_DISTANCE) {
-                continue;
-            }
-            if ($distance < $bestDistance) {
-                $best = $name;
-                $bestDistance = $distance;
-                $tied = false;
-            } elseif ($distance === $bestDistance) {
-                $tied = true;
-            }
-        }
-
-        if ($best === null || $tied) {
-            return null;
-        }
-        return self::typeMatches($value, $schemas[$best]) ? $best : null;
+        return self::typeMatches($value, $schemas[$matches[0]]) ? $matches[0] : null;
     }
 
     /**

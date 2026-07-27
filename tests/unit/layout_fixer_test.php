@@ -472,7 +472,7 @@ test('normalize-layout repair preserves padding the raw markup would otherwise l
     $theme = php_block_fixer_test_theme(['parts/page-home--trust-builders.html' => $pre]);
     try {
         $report = (string) (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme);
-        assert_contains('REPAIR unknown-attribute-dropped:core/group.spacing', $report);
+        assert_contains('REPAIR unknown-attribute-dropped:{"block":"core/group","key":"spacing"', $report);
         $written = (string) file_get_contents($theme . '/parts/page-home--trust-builders.html');
         assert_true(
             !str_contains($written, 'padding-left:var(--wp--preset--spacing--md)'),
