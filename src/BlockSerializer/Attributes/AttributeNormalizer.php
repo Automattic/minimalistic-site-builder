@@ -58,6 +58,18 @@ final class AttributeNormalizer
         // mismatches on reviewed paths and unknown keys under the remaining
         // fail-closed family (background) still fail in assertSupported().
         if ($node->attributes !== null) {
+            // A border only renders with a border-style, so generated markup
+            // routinely states it in the HTML while omitting it from the
+            // delimiter. Source it back here, on the raw comment, so the
+            // canonical render reproduces the whole border — and so the raw
+            // overlay near the end of this pass carries the recovery instead of
+            // reverting it.
+            foreach (BorderStyleRecovery::apply($node->attributes, $this->jsTrim($node->innerHTML)) as $path) {
+                $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                    'border-style-recovered:' . self::payload(['block' => $node->name, 'key' => $path]),
+                    $blockPath,
+                );
+            }
             foreach ($this->supportDomain->pruneInventedStylePaths($node->name, $node->attributes) as $prunedPath) {
                 $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
                     'invented-style-pruned:' . $prunedPath,

@@ -181,3 +181,40 @@ test('a style emptied by dropping is removed entirely', function () {
     assert_true(!str_contains($html, '"style"'), 'no bare empty style object is left behind');
     assert_eq(1, count($codes));
 });
+
+test('a border-style the HTML declares but the delimiter omits is recovered, not dropped', function () {
+    // A CSS border only renders with a border-style, so generated markup writes
+    // color and width into the delimiter while emitting all three declarations
+    // into the HTML. Sourcing the style back makes the re-render byte-identical
+    // to what was authored — the border survives exactly as designed.
+    $markup = '<!-- wp:paragraph {"style":{"border":{"left":{"color":"var:preset|color|accent","width":"2px"}}}} -->' . "\n"
+        . '<p style="border-left-color:var(--wp--preset--color--accent);border-left-style:solid;border-left-width:2px">Note</p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+
+    $result = (new Serializer())->transform($markup);
+    $codes = array_map(static fn ($r): string => $r->code, $result->repairs);
+
+    assert_contains('"style":"solid"', $result->html, 'the missing longhand is sourced into the delimiter');
+    assert_contains('border-left-style:solid', $result->html, 'the authored border still renders');
+    assert_true(
+        in_array(
+            'border-style-recovered:{"block":"core/paragraph","key":"style.border.left.style"}',
+            $codes,
+            true,
+        ),
+        'the recovery is reported',
+    );
+});
+
+test('a border side the delimiter never described is not invented from a stray declaration', function () {
+    // Recovery fills a gap in something authored; it does not conjure a border
+    // side out of a declaration with no attribute behind it. The block guard
+    // therefore still objects — and that is the layering working as intended:
+    // this pass refuses to guess, and PhpBlockFixer keeps the one file as
+    // authored so the run continues (see php_block_fixer_test.php).
+    $markup = '<!-- wp:paragraph {"style":{"border":{"left":{"width":"2px"}}}} -->' . "\n"
+        . '<p style="border-top-style:dashed">Note</p>' . "\n"
+        . '<!-- /wp:paragraph -->';
+
+    assert_throws(static fn () => (new Serializer())->transform($markup));
+});
