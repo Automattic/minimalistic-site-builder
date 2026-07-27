@@ -64,7 +64,7 @@ final class ScaffoldPluginStep implements Step
          * Plugin Name: {{THEME_NAME}} Content
          * Description: Seeds the generated content for {{THEME_NAME}}: creates the site pages on activation and removes them on deactivation.
          * Version: 0.1.0
-         * Requires at least: 6.5
+         * Requires at least: 6.7
          * Requires PHP: 7.4
          * License: GNU General Public License v2 or later
          * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -153,7 +153,7 @@ final class ScaffoldPluginStep implements Step
                     trailingslashit(get_stylesheet_directory_uri()) . 'assets/',
                     $content
                 );
-                $content = {{FN_PREFIX}}_content_sanitize($content);
+                $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
 
                 $parent_slug = isset($page['parent']) ? (string) $page['parent'] : '';
                 $id = wp_insert_post(array(
@@ -314,959 +314,215 @@ final class ScaffoldPluginStep implements Step
             return $content;
         }
 
-        /** Return the byte after a tag's attribute-state-aware closing `>`. */
-        function {{FN_PREFIX}}_content_tag_end($html, $start, &$self_closing = null) {
-            $self_closing = false;
-            $length = strlen($html);
-            if (preg_match(
-                // The name follows `<` (or `</`) with no space between, the
-                // same boundary the build-side scanner uses. Browsers emit
-                // `< b` and `</ b>` as text/bogus comments, never as tags.
-                '/\A<\/?[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
-                substr($html, $start),
-                $opening
-            ) !== 1) {
-                // Declarations use a different tokenizer; consuming quoted
-                // `>` conservatively is sufficient for sanitizer scanning.
-                $quote = null;
-                for ($i = $start + 2; $i < $length; $i++) {
-                    $char = $html[$i];
-                    if ($quote !== null) {
-                        if ($char === $quote) {
-                            $quote = null;
-                        }
-                    } elseif ($char === '"' || $char === "'") {
-                        $quote = $char;
-                    } elseif ($char === '>') {
-                        return $i + 1;
-                    }
-                }
-                return $length;
+        /**
+         * Deterministic strip of script-capable markup from generated content.
+         *
+         * The build applies the same rules to every part at intake
+         * (MarkupSanitizer); repeating them here keeps seeding safe if a page
+         * file was edited between build and activation. wp_kses() is not
+         * usable for this — it mangles the block comments the content is made
+         * of — but WordPress's HTML API is, and it is the same tokenizer the
+         * block editor trusts. The build cannot reach for it (that pipeline
+         * runs standalone, with no WordPress loaded); here it is already in
+         * memory, so the two are deliberately different implementations of one
+         * contract: nothing executable survives.
+         *
+         * Nothing below deletes a tag. Deleting one joins whatever sits on
+         * either side of it, and that seam can spell a tag the browser never
+         * parsed from the input; editing attributes in place cannot.
+         */
+        function {{FN_PREFIX}}_content_sanitize($content, $context = 'page') {
+            if (!class_exists('WP_HTML_Tag_Processor')) {
+                {{FN_PREFIX}}_content_log(
+                    "{$context}: WordPress has no HTML API (requires 6.7); stored empty"
+                    . ' rather than markup nothing reviewed'
+                );
+                return '';
             }
 
-            $offset = $start + strlen($opening[0]);
-            $state = 'before_attribute';
-            $quote = '';
-            while ($offset < $length) {
-                $char = $html[$offset];
-                $space = $char === ' ' || $char === "\t" || $char === "\n"
-                    || $char === "\f" || $char === "\r";
-
-                if ($state === 'quoted_value') {
-                    if ($char === $quote) {
-                        $state = 'after_quoted_value';
-                    }
-                    $offset++;
-                    continue;
+            // Each round drops at most one unfinished trailing token, so this
+            // terminates well inside the bound.
+            for ($round = 0; $round < 8; $round++) {
+                $incomplete = false;
+                $sanitized = {{FN_PREFIX}}_content_sanitize_document($content, $incomplete, $context);
+                if ($sanitized !== null) {
+                    return $sanitized;
+                }
+                if (!$incomplete) {
+                    break;
                 }
 
-                if ($state === 'unquoted_value') {
-                    if ($space) {
-                        $state = 'before_attribute';
-                    } elseif ($char === '>') {
-                        $self_closing = ($state === 'self_closing');
-                        return $offset + 1;
-                    }
-                    $offset++;
-                    continue;
+                // The document ends inside an unfinished tag or raw-text body.
+                // Everything from there on was never inspected, and a browser
+                // still runs an unterminated <script>. Cut the fragment and
+                // rescan: truncation rejoins nothing, so unlike deletion it
+                // cannot produce a tag at the seam.
+                $cut = strrpos($content, '<');
+                if ($cut === false) {
+                    break;
                 }
-
-                if ($state === 'before_value') {
-                    if ($space) {
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '"' || $char === "'") {
-                        $quote = $char;
-                        $state = 'quoted_value';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '>') {
-                        $self_closing = ($state === 'self_closing');
-                        return $offset + 1;
-                    }
-                    $state = 'unquoted_value';
-                    continue;
-                }
-
-                if ($state === 'attribute_name') {
-                    if ($space) {
-                        $state = 'after_attribute_name';
-                    } elseif ($char === '=') {
-                        $state = 'before_value';
-                    } elseif ($char === '>') {
-                        $self_closing = ($state === 'self_closing');
-                        return $offset + 1;
-                    } elseif ($char === '/') {
-                        $state = 'self_closing';
-                    }
-                    $offset++;
-                    continue;
-                }
-
-                if ($state === 'after_attribute_name') {
-                    if ($space) {
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '=') {
-                        $state = 'before_value';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '>') {
-                        $self_closing = ($state === 'self_closing');
-                        return $offset + 1;
-                    }
-                    if ($char === '/') {
-                        $state = 'self_closing';
-                        $offset++;
-                        continue;
-                    }
-                    $state = 'attribute_name';
-                    continue;
-                }
-
-                if ($state === 'after_quoted_value') {
-                    if ($space) {
-                        $state = 'before_attribute';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '/') {
-                        $state = 'self_closing';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '>') {
-                        $self_closing = ($state === 'self_closing');
-                        return $offset + 1;
-                    }
-                    $state = 'before_attribute';
-                    continue;
-                }
-
-                if ($state === 'self_closing') {
-                    if ($char === '>') {
-                        $self_closing = ($state === 'self_closing');
-                        return $offset + 1;
-                    }
-                    $state = 'before_attribute';
-                    continue;
-                }
-
-                if ($space) {
-                    $offset++;
-                    continue;
-                }
-                if ($char === '>') {
-                        $self_closing = ($state === 'self_closing');
-                        return $offset + 1;
-                }
-                if ($char === '/') {
-                    $state = 'self_closing';
-                    $offset++;
-                    continue;
-                }
-                $state = 'attribute_name';
-                if ($char === '=') {
-                    $offset++;
-                }
+                $content = substr($content, 0, $cut);
             }
-            return $length;
+
+            // Publishing nothing is the safe answer, but an empty page that
+            // nobody was told about is its own failure — say so loudly enough
+            // that it is findable after the fact.
+            {{FN_PREFIX}}_content_log(
+                "{$context}: no HTML pass could read this markup through to the end;"
+                . ' stored empty rather than unreviewed markup'
+            );
+            return '';
         }
 
-        /** Parse one tag at an exact less-than offset, or return null. */
-        function {{FN_PREFIX}}_content_tag_at($html, $start) {
-            if (preg_match(
-                '/\A<(\/?)([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)(?=[\x09\x0A\x0C\x0D\x20\/>])/',
-                substr($html, $start),
-                $tag
-            ) !== 1) {
+        /** Report a seeding problem where a site owner can still find it. */
+        function {{FN_PREFIX}}_content_log($message) {
+            error_log('{{THEME_NAME}} Content: ' . $message);
+        }
+
+        /** Sanitize with the tree processor, falling back to the tag processor. */
+        function {{FN_PREFIX}}_content_sanitize_document($content, &$incomplete, $context = 'page') {
+            // Preferred: the tree processor tracks SVG/MathML namespaces, so
+            // HTML raw-text rules are not applied inside foreign content and
+            // `<svg><title><img onerror=...>` is still reached. It also knows
+            // each token's ancestors, which is how inert fallback content is
+            // found.
+            if (class_exists('WP_HTML_Processor')) {
+                $sanitized = {{FN_PREFIX}}_content_sanitize_pass(
+                    WP_HTML_Processor::create_fragment($content),
+                    $incomplete
+                );
+                if ($sanitized !== null || $incomplete) {
+                    return $sanitized;
+                }
+            }
+
+            // It gives up on markup it does not model (<plaintext>) and throws
+            // past roughly 98 nested elements. The tag processor has neither
+            // limit, so it is the fallback — but it does NOT track SVG/MathML
+            // namespaces, so it applies HTML raw-text rules inside foreign
+            // content and would miss `<svg><title><img onerror=...>`. That is
+            // a weaker guarantee, and degrading to it quietly is how a gap
+            // goes unnoticed.
+            {{FN_PREFIX}}_content_log(
+                "{$context}: " . (class_exists('WP_HTML_Processor')
+                    ? 'HTML tree processor could not finish'
+                    : 'WordPress has no HTML tree processor')
+                . '; fell back to the tag processor, which does not track'
+                . ' SVG/MathML namespaces'
+            );
+            return {{FN_PREFIX}}_content_sanitize_pass(
+                new WP_HTML_Tag_Processor($content),
+                $incomplete
+            );
+        }
+
+        /** One sanitizing walk; null when the processor could not finish. */
+        function {{FN_PREFIX}}_content_sanitize_pass($processor, &$incomplete) {
+            if (!$processor instanceof WP_HTML_Tag_Processor) {
                 return null;
             }
-            $self_closing = false;
-            $end = {{FN_PREFIX}}_content_tag_end($html, $start, $self_closing);
-            return array(
-                'name' => strtolower($tag[2]),
-                'closer' => $tag[1] === '/',
-                'end' => $end,
-                'self_closing' => $self_closing,
-            );
-        }
 
-        /**
-         * End of the comment at $start, or null when it never closes.
-         *
-         * A comment ends three ways, not one: `-->`, `--!>`, and immediately
-         * for `<!-->` / `<!--->`, which are complete empty comments. Matching
-         * only `-->` runs the comment to EOF, so every byte after the real
-         * terminator is skipped instead of sanitized.
-         */
-        function {{FN_PREFIX}}_content_comment_end($html, $start) {
-            if (substr($html, $start + 4, 1) === '>') {
-                return $start + 5;
-            }
-            if (substr($html, $start + 4, 2) === '->') {
-                return $start + 6;
-            }
-            if (preg_match('/--!?>/', $html, $close, PREG_OFFSET_CAPTURE, $start + 4) !== 1) {
+            // Elements that load or run code.
+            $inert = array(
+                'SCRIPT' => true, 'IFRAME' => true, 'OBJECT' => true,
+                'APPLET' => true, 'EMBED' => true, 'NOEMBED' => true,
+                'NOFRAMES' => true, 'NOSCRIPT' => true,
+            );
+            $loaders = array(
+                'src', 'data', 'srcdoc', 'code', 'codebase', 'archive',
+                'classid', 'href',
+            );
+            // Core's canonical URI-attribute list (18 entries, including
+            // poster/cite/background/longdesc) plus the SVG spelling it omits.
+            $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
+            $allowed = wp_allowed_protocols();
+            $tree = $processor instanceof WP_HTML_Processor;
+
+            try {
+                while ($processor->next_token()) {
+                    $type = $processor->get_token_type();
+
+                    if ($type === '#text') {
+                        // <object>/<applet> fallback content and, to a parser
+                        // with scripting disabled, <noscript> children are real
+                        // nodes rather than raw text — so emptying the
+                        // container's own text leaves this behind as page copy.
+                        if ($tree && {{FN_PREFIX}}_content_inside_inert($processor, $inert)) {
+                            $processor->set_modifiable_text('');
+                        }
+                        continue;
+                    }
+                    if ($type !== '#tag' || $processor->is_tag_closer()) {
+                        continue;
+                    }
+                    $tag = $processor->get_tag();
+
+                    $handlers = $processor->get_attribute_names_with_prefix('on');
+                    if (is_array($handlers)) {
+                        foreach ($handlers as $name) {
+                            $processor->remove_attribute($name);
+                        }
+                    }
+
+                    // No branch below returns early: every tag still falls
+                    // through to the URL sweep, so a stray href on a <meta>
+                    // cannot slip past on its way out.
+                    if (isset($inert[$tag])) {
+                        foreach ($loaders as $name) {
+                            $processor->remove_attribute($name);
+                        }
+                        if ($tag === 'SCRIPT') {
+                            $processor->set_attribute('type', 'text/plain');
+                        }
+                        // Raw-text bodies (script, iframe, noembed, noframes)
+                        // are this tag's own modifiable text and go with it.
+                        $processor->set_modifiable_text('');
+                    }
+                    if ($tag === 'BASE') {
+                        $processor->remove_attribute('href');
+                        $processor->remove_attribute('target');
+                    }
+                    if ($tag === 'META') {
+                        // http-equiv="refresh" redirects every visitor to a
+                        // URL the model chose.
+                        $processor->remove_attribute('http-equiv');
+                        $processor->remove_attribute('content');
+                    }
+
+                    foreach ($urls as $name) {
+                        // get_attribute() returns the value already decoded, so
+                        // `&#106;avascript:` is compared in its resolved form
+                        // and needs no entity handling here.
+                        $value = $processor->get_attribute($name);
+                        if (is_string($value)
+                            && wp_kses_bad_protocol($value, $allowed) !== $value
+                        ) {
+                            $processor->set_attribute($name, '#');
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
                 return null;
             }
-            return $close[0][1] + strlen($close[0][0]);
+
+            if ($processor->paused_at_incomplete_token()) {
+                $incomplete = true;
+                return null;
+            }
+            if ($tree && $processor->get_last_error() !== null) {
+                return null;
+            }
+            return $processor->get_updated_html();
         }
 
-        /**
-         * End of a bogus comment. It stops at the first `>`; quotes do not
-         * protect it, so a quote-aware scan here stretches the inert region
-         * over live markup that then never reaches the sanitizer. The end is
-         * clamped to the next block delimiter so an unterminated `<!` cannot
-         * hide the rest of the document.
-         */
-        function {{FN_PREFIX}}_content_bogus_comment_end($html, $start) {
-            $length = strlen($html);
-            $close = strpos($html, '>', $start + 2);
-            $end = $close === false ? $length : $close + 1;
-            if (preg_match('/<!--\s*\/?wp:/', $html, $marker, PREG_OFFSET_CAPTURE, $start + 2) === 1
-                && $marker[0][1] < $end
-            ) {
-                return $marker[0][1];
-            }
-            return $end;
-        }
-
-        /**
-         * End of a comment/declaration at an exact offset, or null.
-         *
-         * `<![CDATA[` is only CDATA inside SVG/MathML. In HTML content a
-         * browser reads it as a bogus comment, so honoring `]]>` there skips
-         * live markup — everything that follows when no `]]>` exists.
-         */
-        function {{FN_PREFIX}}_content_special_end($html, $start, $in_foreign = false) {
-            $length = strlen($html);
-            if (substr($html, $start, 4) === '<!--') {
-                $end = {{FN_PREFIX}}_content_comment_end($html, $start);
-                return $end === null ? $length : $end;
-            }
-            if ($in_foreign && substr($html, $start, 9) === '<![CDATA[') {
-                $close = strpos($html, ']]>', $start + 9);
-                // With no ]]> anywhere, skipping to EOF would hand the rest of
-                // the markup past the sanitizer. Use the bogus-comment end.
-                return $close === false
-                    ? {{FN_PREFIX}}_content_bogus_comment_end($html, $start)
-                    : $close + 3;
-            }
-            if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
-                return {{FN_PREFIX}}_content_bogus_comment_end($html, $start);
-            }
-            // `</` with no name is a bogus comment too, not an end tag.
-            if (substr($html, $start, 2) === '</'
-                && preg_match('/\A<\/[a-zA-Z]/', substr($html, $start, 3)) !== 1
-            ) {
-                return {{FN_PREFIX}}_content_bogus_comment_end($html, $start);
-            }
-            return null;
-        }
-
-        /**
-         * Track the SVG/MathML subtrees a scan is inside. Inside foreign
-         * content `<title>` and friends hold real elements rather than text,
-         * and a self-closing slash is honored.
-         */
-        function {{FN_PREFIX}}_content_track_foreign(&$foreign, $tag) {
-            // A browser also leaves foreign content on these HTML tags, with
-            // no closer involved. Missing that keeps the scan in foreign mode,
-            // where <![CDATA[ is honored and ]]> skips over live HTML. `font`
-            // is deliberately absent: it breaks out only with color/face/size,
-            // and staying foreign scans more, never less.
-            $breakout = array(
-                'b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd',
-                'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5',
-                'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta',
-                'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong',
-                'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var',
-            );
-            if ($foreign !== array() && in_array($tag['name'], $breakout, true)) {
-                $foreign = array();
-                return;
-            }
-            if ($tag['name'] !== 'svg' && $tag['name'] !== 'math') {
-                return;
-            }
-            if (!$tag['closer']) {
-                if (empty($tag['self_closing'])) {
-                    $foreign[] = $tag['name'];
-                }
-                return;
-            }
-            for ($i = count($foreign) - 1; $i >= 0; $i--) {
-                if ($foreign[$i] === $tag['name']) {
-                    array_splice($foreign, $i);
-                    return;
+        /** Whether the current token sits inside a code-bearing element. */
+        function {{FN_PREFIX}}_content_inside_inert($processor, $inert) {
+            foreach ($processor->get_breadcrumbs() as $crumb) {
+                if (isset($inert[strtoupper($crumb)])) {
+                    return true;
                 }
             }
-        }
-
-        /** Whether an offset begins a state-changing script keyword. */
-        function {{FN_PREFIX}}_content_script_keyword_at($html, $offset, $closer) {
-            $keyword = $closer ? '</script' : '<script';
-            $keyword_length = strlen($keyword);
-            // strncasecmp, not strtolower: before PHP 8.2 strtolower honors
-            // LC_CTYPE, so under a Turkish locale `<SCRIPT` lowercases to
-            // `<scrıpt` and the script element never finds its end.
-            if (strncasecmp(substr($html, $offset, $keyword_length), $keyword, $keyword_length) !== 0) {
-                return false;
-            }
-            $delimiter = isset($html[$offset + $keyword_length])
-                ? $html[$offset + $keyword_length]
-                : '';
-            return {{FN_PREFIX}}_content_is_space_byte($delimiter)
-                || $delimiter === '/'
-                || $delimiter === '>';
-        }
-
-        /** End of the script element under HTML escaped/double-escaped states. */
-        function {{FN_PREFIX}}_content_script_end($html, $content_start) {
-            $length = strlen($html);
-            $offset = $content_start;
-            $state = 'data';
-            while ($offset < $length) {
-                if ($state !== 'data' && substr($html, $offset, 3) === '-->') {
-                    $state = 'data';
-                    $offset += 3;
-                    continue;
-                }
-                if ($html[$offset] !== '<') {
-                    $offset++;
-                    continue;
-                }
-
-                if ($state === 'data') {
-                    if (substr($html, $offset, 4) === '<!--') {
-                        $state = 'escaped';
-                        $offset += 4;
-                        continue;
-                    }
-                    if ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, true)) {
-                        return {{FN_PREFIX}}_content_tag_end($html, $offset);
-                    }
-                } elseif ($state === 'escaped') {
-                    if ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, true)) {
-                        return {{FN_PREFIX}}_content_tag_end($html, $offset);
-                    }
-                    if ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, false)) {
-                        $state = 'double_escaped';
-                        $offset += 8;
-                        continue;
-                    }
-                } elseif ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, true)) {
-                    $state = 'escaped';
-                    $offset += 9;
-                    continue;
-                }
-                $offset++;
-            }
-            return $length;
-        }
-
-        /**
-         * Find an opaque element's true end. Normal/inert elements are
-         * nesting-aware; raw-text elements end at their first real closer.
-         */
-        function {{FN_PREFIX}}_content_opaque_end($html, $name, $content_start) {
-            $length = strlen($html);
-            if ($name === 'plaintext') {
-                return $length;
-            }
-            if ($name === 'script') {
-                return {{FN_PREFIX}}_content_script_end($html, $content_start);
-            }
-            $nestable = array('object', 'applet', 'template', 'code', 'pre');
-            if (!in_array($name, $nestable, true)) {
-                if (preg_match(
-                    '#</' . preg_quote($name, '#') . '(?=[\x09\x0A\x0C\x0D\x20/>])#i',
-                    $html,
-                    $close,
-                    PREG_OFFSET_CAPTURE,
-                    $content_start
-                ) !== 1) {
-                    return $length;
-                }
-                return {{FN_PREFIX}}_content_tag_end($html, $close[0][1]);
-            }
-
-            $opaque = array(
-                'script', 'style', 'textarea', 'title', 'xmp', 'iframe',
-                'object', 'applet', 'noembed', 'noframes', 'noscript',
-                'template', 'code', 'pre', 'plaintext',
-            );
-            $offset = $content_start;
-            $depth = 1;
-            $foreign = array();
-            while ($offset < $length) {
-                $start = strpos($html, '<', $offset);
-                if ($start === false) {
-                    return $length;
-                }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
-                if ($special_end !== null) {
-                    $offset = max($special_end, $start + 1);
-                    continue;
-                }
-                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
-                if ($tag === null) {
-                    $offset = $start + 1;
-                    continue;
-                }
-                if ($tag['name'] === $name) {
-                    if ($tag['closer']) {
-                        $depth--;
-                        if ($depth === 0) {
-                            return $tag['end'];
-                        }
-                    } elseif (empty($tag['self_closing']) || $foreign === array()) {
-                        $depth++;
-                    }
-                    {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
-                    $offset = $tag['end'];
-                    continue;
-                }
-                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
-                if (!$tag['closer']
-                    && $foreign === array()
-                    && in_array($tag['name'], $opaque, true)
-                ) {
-                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
-                    continue;
-                }
-                $offset = $tag['end'];
-            }
-            return $length;
-        }
-
-        /** Remove listed container elements with all of their content. */
-        function {{FN_PREFIX}}_content_remove_elements($html, $names) {
-            $targets = array_fill_keys($names, true);
-            $raw = array(
-                'script', 'style', 'textarea', 'title', 'xmp',
-                'iframe', 'noembed', 'noframes', 'noscript',
-            );
-            $length = strlen($html);
-            $offset = 0;
-            $kept_from = 0;
-            $out = '';
-            $foreign = array();
-            while ($offset < $length) {
-                $start = strpos($html, '<', $offset);
-                if ($start === false) {
-                    break;
-                }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
-                if ($special_end !== null) {
-                    $offset = max($special_end, $start + 1);
-                    continue;
-                }
-                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
-                if ($tag === null) {
-                    $offset = $start + 1;
-                    continue;
-                }
-                if (!$tag['closer'] && isset($targets[$tag['name']])) {
-                    // A slash does not self-close these non-void HTML elements,
-                    // but in foreign content it does and there is no body.
-                    $end = (!empty($tag['self_closing']) && $foreign !== array())
-                        ? $tag['end']
-                        : {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
-                    $out .= substr($html, $kept_from, $start - $kept_from);
-                    $kept_from = $end;
-                    $offset = $end;
-                    continue;
-                }
-                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
-                if (!$tag['closer']
-                    && $foreign === array()
-                    && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
-                ) {
-                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
-                    continue;
-                }
-                $offset = $tag['end'];
-            }
-            return $out . substr($html, $kept_from);
-        }
-
-        /** Remove listed tags without touching surrounding text. */
-        function {{FN_PREFIX}}_content_remove_tags($html, $names) {
-            $targets = array_fill_keys($names, true);
-            $raw = array(
-                'script', 'style', 'textarea', 'title', 'xmp',
-                'iframe', 'noembed', 'noframes', 'noscript',
-            );
-            $length = strlen($html);
-            $offset = 0;
-            $kept_from = 0;
-            $out = '';
-            $foreign = array();
-            while ($offset < $length) {
-                $start = strpos($html, '<', $offset);
-                if ($start === false) {
-                    break;
-                }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
-                if ($special_end !== null) {
-                    $offset = max($special_end, $start + 1);
-                    continue;
-                }
-                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
-                if ($tag === null) {
-                    $offset = $start + 1;
-                    continue;
-                }
-                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
-                if (isset($targets[$tag['name']])) {
-                    $out .= substr($html, $kept_from, $start - $kept_from);
-                    $kept_from = $tag['end'];
-                }
-
-                // A tag-shaped string in a raw-text body is text. Without this
-                // skip a `<!--` in a <style> body reads as a comment start,
-                // runs to EOF, and every later <base>/<embed> survives.
-                if (!$tag['closer']
-                    && $foreign === array()
-                    && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
-                ) {
-                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
-                    continue;
-                }
-                $offset = $tag['end'];
-            }
-            return $out . substr($html, $kept_from);
-        }
-
-        /** Rewrite each real opening tag using stateful HTML boundaries. */
-        function {{FN_PREFIX}}_content_rewrite_opening_tags($html, $rewrite) {
-            $raw = array(
-                'script', 'style', 'textarea', 'title', 'xmp',
-                'iframe', 'noembed', 'noframes', 'noscript',
-            );
-            $length = strlen($html);
-            $offset = 0;
-            $kept_from = 0;
-            $out = '';
-            $foreign = array();
-            while ($offset < $length) {
-                $start = strpos($html, '<', $offset);
-                if ($start === false) {
-                    break;
-                }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
-                if ($special_end !== null) {
-                    $offset = max($special_end, $start + 1);
-                    continue;
-                }
-                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
-                if ($tag === null) {
-                    $offset = $start + 1;
-                    continue;
-                }
-                if (!$tag['closer']) {
-                    $out .= substr($html, $kept_from, $start - $kept_from);
-                    $out .= $rewrite(substr($html, $start, $tag['end'] - $start));
-                    $kept_from = $tag['end'];
-                }
-                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
-                // Inside foreign content there is no raw text, so those
-                // bodies are scanned and their event handlers still stripped.
-                if (!$tag['closer']
-                    && $foreign === array()
-                    && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
-                ) {
-                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
-                } else {
-                    $offset = $tag['end'];
-                }
-            }
-            return $out . substr($html, $kept_from);
-        }
-
-        function {{FN_PREFIX}}_content_is_space_byte($char) {
-            return $char === ' '
-                || $char === "\t"
-                || $char === "\n"
-                || $char === "\f"
-                || $char === "\r";
-        }
-
-        /**
-         * Tokenize attribute byte spans from one already-bounded opening tag.
-         * Quote and slash transitions mirror the browser-facing tag scanner.
-         */
-        function {{FN_PREFIX}}_content_attributes($tag) {
-            if (preg_match(
-                '/\A<[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
-                $tag,
-                $opening
-            ) !== 1) {
-                return array();
-            }
-
-            $length = strlen($tag);
-            $offset = strlen($opening[0]);
-            $state = 'before_attribute';
-            $quote = '';
-            $pending_start = null;
-            $after_name_whitespace = null;
-            $attribute = null;
-            $attributes = array();
-
-            $begin = function ($at) use (&$attribute, &$pending_start) {
-                $attribute = array(
-                    'start' => $pending_start !== null ? $pending_start : $at,
-                    'name_start' => $at,
-                    'name_end' => null,
-                    'value_start' => null,
-                );
-                $pending_start = null;
-            };
-            $commit = function ($end, $value_end = null) use (
-                &$attribute,
-                &$attributes,
-                $tag
-            ) {
-                if ($attribute === null) {
-                    return;
-                }
-                $name_end = $attribute['name_end'] !== null
-                    ? $attribute['name_end']
-                    : $end;
-                $attributes[] = array(
-                    'name' => strtolower(substr(
-                        $tag,
-                        $attribute['name_start'],
-                        $name_end - $attribute['name_start']
-                    )),
-                    'start' => $attribute['start'],
-                    'end' => $end,
-                    'value_start' => $attribute['value_start'],
-                    'value_end' => $value_end,
-                );
-                $attribute = null;
-            };
-
-            while ($offset < $length) {
-                $char = $tag[$offset];
-
-                if ($state === 'quoted_value') {
-                    if ($char === $quote) {
-                        $commit($offset + 1, $offset);
-                        $state = 'after_quoted_value';
-                    }
-                    $offset++;
-                    continue;
-                }
-
-                if ($state === 'unquoted_value') {
-                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
-                        $commit($offset, $offset);
-                        $pending_start = $offset;
-                        $state = 'before_attribute';
-                        $offset++;
-                    } elseif ($char === '>') {
-                        $commit($offset, $offset);
-                        break;
-                    } else {
-                        $offset++;
-                    }
-                    continue;
-                }
-
-                if ($state === 'before_value') {
-                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '"' || $char === "'") {
-                        $quote = $char;
-                        $attribute['value_start'] = $offset + 1;
-                        $state = 'quoted_value';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '>') {
-                        $attribute['value_start'] = $offset;
-                        $commit($offset, $offset);
-                        break;
-                    }
-                    $attribute['value_start'] = $offset;
-                    $state = 'unquoted_value';
-                    continue;
-                }
-
-                if ($state === 'attribute_name') {
-                    if ($char === '=') {
-                        $attribute['name_end'] = $offset;
-                        $state = 'before_value';
-                        $offset++;
-                        continue;
-                    }
-                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
-                        $attribute['name_end'] = $offset;
-                        $after_name_whitespace = $offset;
-                        $state = 'after_attribute_name';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '/' || $char === '>') {
-                        $attribute['name_end'] = $offset;
-                        $state = 'after_attribute_name';
-                        continue;
-                    }
-                    $offset++;
-                    continue;
-                }
-
-                if ($state === 'after_attribute_name') {
-                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
-                        if ($after_name_whitespace === null) {
-                            $after_name_whitespace = $offset;
-                        }
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '=') {
-                        $after_name_whitespace = null;
-                        $state = 'before_value';
-                        $offset++;
-                        continue;
-                    }
-
-                    $commit((int) $attribute['name_end']);
-                    if ($char === '>') {
-                        break;
-                    }
-                    $pending_start = $after_name_whitespace;
-                    $after_name_whitespace = null;
-                    if ($char === '/') {
-                        if ($pending_start === null) {
-                            $pending_start = $offset;
-                        }
-                        $state = 'self_closing';
-                        $offset++;
-                    } else {
-                        $state = 'before_attribute';
-                    }
-                    continue;
-                }
-
-                if ($state === 'after_quoted_value') {
-                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
-                        $pending_start = $offset;
-                        $state = 'before_attribute';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '/') {
-                        $pending_start = $offset;
-                        $state = 'self_closing';
-                        $offset++;
-                        continue;
-                    }
-                    if ($char === '>') {
-                        break;
-                    }
-                    $state = 'before_attribute';
-                    continue;
-                }
-
-                if ($state === 'self_closing') {
-                    if ($char === '>') {
-                        break;
-                    }
-                    $state = 'before_attribute';
-                    continue;
-                }
-
-                // before_attribute
-                if ({{FN_PREFIX}}_content_is_space_byte($char)) {
-                    if ($pending_start === null) {
-                        $pending_start = $offset;
-                    }
-                    $offset++;
-                    continue;
-                }
-                if ($char === '>') {
-                    break;
-                }
-                if ($char === '/') {
-                    if ($pending_start === null) {
-                        $pending_start = $offset;
-                    }
-                    $state = 'self_closing';
-                    $offset++;
-                    continue;
-                }
-                $begin($offset);
-                $after_name_whitespace = null;
-                $state = 'attribute_name';
-                if ($char === '=') {
-                    // A leading equals sign belongs to a malformed name.
-                    $offset++;
-                }
-            }
-
-            if ($attribute !== null) {
-                if ($state === 'attribute_name') {
-                    $attribute['name_end'] = $length;
-                    $commit($length);
-                } elseif ($state === 'after_attribute_name') {
-                    $commit((int) $attribute['name_end']);
-                } elseif ($state === 'before_value') {
-                    $attribute['value_start'] = $length;
-                    $commit($length, $length);
-                } elseif ($state === 'quoted_value' || $state === 'unquoted_value') {
-                    $commit($length, $length);
-                }
-            }
-
-            return $attributes;
-        }
-
-        /** Whether an attribute value resolves to an executable URL scheme. */
-        // Fails closed at every step: casting a PCRE error to '' would report
-        // an empty scheme and keep a javascript: URL.
-        function {{FN_PREFIX}}_content_has_executable_scheme($value) {
-            $decoded = preg_replace_callback(
-                '/&#(?:(?:x|X)([0-9a-fA-F]+)|([0-9]+));?/',
-                function ($match) {
-                    $hex = isset($match[1]) && $match[1] !== '';
-                    $digits = $hex ? $match[1] : $match[2];
-                    $significant = ltrim($digits, '0');
-                    if ($significant === '') {
-                        return "\xEF\xBF\xBD";
-                    }
-                    if (strlen($significant) > ($hex ? 2 : 3)) {
-                        return $match[0];
-                    }
-                    $codepoint = $hex
-                        ? hexdec($significant)
-                        : (int) $significant;
-                    return $codepoint > 0 && $codepoint <= 0x7f
-                        ? chr($codepoint)
-                        : $match[0];
-                },
-                $value
-            );
-            if ($decoded === null) {
-                return true;
-            }
-            $decoded = html_entity_decode(
-                $decoded,
-                ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
-                'UTF-8'
-            );
-            $stripped = preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
-            if ($stripped === null) {
-                return true;
-            }
-            return preg_match('/\A(?:javascript|vbscript|data):/i', $stripped) !== 0;
-        }
-
-        /** Strip active attributes from one opening tag without reserializing it. */
-        function {{FN_PREFIX}}_content_sanitize_opening_tag($tag) {
-            $url_attributes = array(
-                'href', 'src', 'xlink:href', 'formaction', 'action',
-            );
-            $attributes = {{FN_PREFIX}}_content_attributes($tag);
-            $event_starts = array();
-            foreach ($attributes as $attribute) {
-                if (strlen($attribute['name']) > 2
-                    && substr($attribute['name'], 0, 2) === 'on'
-                ) {
-                    $event_starts[$attribute['start']] = true;
-                }
-            }
-
-            $edits = array();
-            foreach ($attributes as $attribute) {
-                if (strlen($attribute['name']) > 2
-                    && substr($attribute['name'], 0, 2) === 'on'
-                ) {
-                    $next = isset($tag[$attribute['end']])
-                        ? $tag[$attribute['end']]
-                        : '>';
-                    $needs_separator = !{{FN_PREFIX}}_content_is_space_byte($next)
-                        && $next !== '/'
-                        && $next !== '>'
-                        && !isset($event_starts[$attribute['end']]);
-                    $edits[] = array(
-                        'start' => $attribute['start'],
-                        'end' => $attribute['end'],
-                        'replacement' => $needs_separator ? ' ' : '',
-                    );
-                    continue;
-                }
-
-                if ($attribute['value_start'] !== null
-                    && in_array($attribute['name'], $url_attributes, true)
-                    && {{FN_PREFIX}}_content_has_executable_scheme(substr(
-                        $tag,
-                        $attribute['value_start'],
-                        $attribute['value_end'] - $attribute['value_start']
-                    ))
-                ) {
-                    $edits[] = array(
-                        'start' => $attribute['value_start'],
-                        'end' => $attribute['value_end'],
-                        'replacement' => '#',
-                    );
-                }
-            }
-
-            usort($edits, function ($a, $b) {
-                return $b['start'] <=> $a['start'];
-            });
-            foreach ($edits as $edit) {
-                $tag = substr_replace(
-                    $tag,
-                    $edit['replacement'],
-                    $edit['start'],
-                    $edit['end'] - $edit['start']
-                );
-            }
-            return $tag;
-        }
-
-        /**
-         * Deterministic strip of script-capable markup: script/embed elements,
-         * inline event handlers, and executable URL schemes. The build applies
-         * the same rules (MarkupSanitizer) to every generated part; repeating
-         * them here keeps seeding safe if a page file was edited between build
-         * and activation. wp_kses() is not usable for this — it mangles the
-         * block comments the content is made of.
-         */
-        function {{FN_PREFIX}}_content_sanitize($content) {
-            $containers = array(
-                'script', 'iframe', 'object', 'applet',
-                'noembed', 'noframes', 'noscript',
-            );
-            // `meta` carries no content but http-equiv="refresh" redirects
-            // every visitor to a model-chosen URL.
-            $tags = array_merge($containers, array('embed', 'base', 'meta'));
-
-            // Removal splices the bytes on either side of a deleted tag
-            // together, and that seam can spell a new tag: `<<base>script>`
-            // becomes a live `<script>` a browser would never have parsed
-            // from the input. Repeat until stable — this terminates because
-            // a pass that changes anything strictly shortens the content.
-            do {
-                $before = $content;
-                $content = {{FN_PREFIX}}_content_remove_elements($content, $containers);
-                $content = {{FN_PREFIX}}_content_remove_tags($content, $tags);
-            } while ($content !== $before);
-            return {{FN_PREFIX}}_content_rewrite_opening_tags($content, function ($tag) {
-                return {{FN_PREFIX}}_content_sanitize_opening_tag($tag);
-            });
+            return false;
         }
 
         /**
