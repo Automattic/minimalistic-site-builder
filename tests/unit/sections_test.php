@@ -49,6 +49,13 @@ function sections_request_text(array $request): string
     return implode('', $request['cached_prefixes'] ?? []) . $request['prompt'];
 }
 
+/** Minimal valid section output: one closed top-level wp:group. */
+function sections_part(string $heading): string
+{
+    return '<!-- wp:group --><!-- wp:heading --><h2>' . $heading
+        . '</h2><!-- /wp:heading --><!-- /wp:group -->';
+}
+
 test('sections requests one part per header/footer/page-section', function () {
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -317,8 +324,8 @@ test('sections writes header, footer and a part per page section', function () {
     $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
-    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText(sections_part('Hero'));
+    $llm->queueText(sections_part('About'));
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);
@@ -328,6 +335,104 @@ test('sections writes header, footer and a part per page section', function () {
     foreach (['parts/header.html', 'parts/footer.html', 'parts/page-home--hero.html', 'parts/page-home--about.html'] as $rel) {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
         assert_contains('wp:', $project->readText('theme/' . $rel));
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections retries only the invalid part once and retains valid siblings', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $invalid = '<!-- wp:group {"layout":{"type":"flex","justifyContent":"diagonal"}} -->'
+        . '<div class="wp-block-group"><p>Hero copy</p></div><!-- /wp:group -->';
+    $llm->queueText($invalid);
+    $llm->queueText(sections_part('About'));
+    $llm->queueText(
+        '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><p>Hero copy</p></div><!-- /wp:group -->'
+    );
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(2, $llm->completeBatchCalls, 'one initial batch plus one invalid-only repair batch');
+    assert_eq(6, count($llm->calls), 'cache warm + four initial parts + one repaired part');
+    $repair = $llm->calls[5];
+    assert_eq('page-home--hero-markup-repair', $repair['opts']['log_label'] ?? null);
+    assert_contains("layout value 'diagonal'", $repair['prompt']);
+    assert_contains($invalid, $repair['prompt'], 'repair receives the rejected output');
+    assert_true(
+        !str_contains($repair['prompt'], 'Build the site FOOTER template part'),
+        'a valid sibling is not regenerated in the repair request'
+    );
+    assert_contains('Hero copy', $project->readText('theme/parts/page-home--hero.html'));
+    foreach (['header.html', 'footer.html', 'page-home--about.html'] as $file) {
+        assert_true($project->exists('theme/parts/' . $file), "valid sibling {$file} retained");
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections repairs only a section whose root group closes too early', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $invalid = '<!-- wp:group --><!-- wp:columns --><!-- wp:column -->'
+        . '<div class="wp-block-column"><p>Hero copy</p></div><!-- /wp:column --><!-- /wp:columns -->'
+        . '<!-- /wp:group --><!-- wp:column -->'
+        . '<div class="wp-block-column"></div><!-- /wp:column -->';
+    $llm->queueText($invalid);
+    $llm->queueText(sections_part('About'));
+    $llm->queueText(
+        '<!-- wp:group --><!-- wp:columns --><!-- wp:column -->'
+        . '<div class="wp-block-column"><p>Hero copy</p></div><!-- /wp:column --><!-- /wp:columns -->'
+        . '<!-- /wp:group -->'
+    );
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(2, $llm->completeBatchCalls, 'malformed section root receives one repair batch');
+    $repair = $llm->calls[5];
+    assert_eq('page-home--hero-markup-repair', $repair['opts']['log_label'] ?? null);
+    assert_contains('must contain exactly one top-level wp:group', $repair['prompt']);
+    assert_contains($invalid, $repair['prompt']);
+    assert_contains('Hero copy', $project->readText('theme/parts/page-home--hero.html'));
+    assert_true($project->exists('theme/parts/page-home--about.html'), 'valid sibling is retained');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections writes nothing when the one semantic repair remains invalid', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText(
+        '<!-- wp:group {"layout":{"type":"flex","justifyContent":"diagonal"}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->'
+    );
+    $llm->queueText(sections_part('About'));
+    $llm->queueText(
+        '<!-- wp:group {"layout":{"type":"flex","justifyContent":"sideways"}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->'
+    );
+    $error = null;
+
+    try {
+        (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    } catch (RuntimeException $caught) {
+        $error = $caught;
+    }
+
+    assert_true($error instanceof RuntimeException);
+    assert_contains('markup repair failed after one attempt', $error->getMessage());
+    assert_contains('page-home--hero', $error->getMessage());
+    assert_contains("layout value 'sideways'", $error->getMessage());
+    assert_eq(2, $llm->completeBatchCalls, 'a failed repair is never retried recursively');
+    foreach (['header.html', 'footer.html', 'page-home--hero.html', 'page-home--about.html'] as $file) {
+        assert_true(!$project->exists('theme/parts/' . $file), "no {$file} written");
     }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -364,8 +469,8 @@ test('sections writes header AND footer with a constrained layout when the model
     // The naturaleza6 failure: footer group with align:full but no layout —
     // flow, not constrained, so its text ran edge-to-edge at the viewport.
     $llm->queueText('<!-- wp:group {"tagName":"footer","align":"full"} --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
-    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText(sections_part('Hero'));
+    $llm->queueText(sections_part('About'));
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);
@@ -433,8 +538,8 @@ test('sections strips a stray markdown code fence from a part response', functio
     $llm->queueText('OK');
     $llm->queueText("```html\n<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->\n```");
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
-    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText(sections_part('Hero'));
+    $llm->queueText(sections_part('About'));
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);
@@ -452,7 +557,7 @@ test('sections throws when a part has no block markup', function () {
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('just text, no blocks'); // hero — invalid
-    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText(sections_part('About'));
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     assert_throws(function () use ($llm, $renderer, $project) {
@@ -468,7 +573,7 @@ test('sections writes nothing when any part is invalid (no partial output)', fun
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header — valid
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
     $llm->queueText('just text, no blocks');                               // page-home--hero — invalid
-    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText(sections_part('About'));
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     assert_throws(function () use ($llm, $renderer, $project) {
@@ -522,7 +627,7 @@ test('sections salvages a truncated section part instead of failing the build', 
     $llm->queueText('OK'); // cache warm-up probe
     $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText(sections_part('Hero'));
     // The BIGR-716 portfolio2 shape: the about section's stream was cut off
     // inside a paragraph's comment JSON, leaving two groups unclosed.
     $llm->queueText(<<<HTML

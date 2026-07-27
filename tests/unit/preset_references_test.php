@@ -67,6 +67,23 @@ test('preset references accepts declared block and CSS forms for every known typ
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('preset references validates one in-memory markup document against decoded theme data', function () {
+    [$project, $tmp] = preset_references_project();
+    $theme = $project->readJson('theme/theme.json');
+    $markup = '<!-- wp:group {"backgroundColor":"primary","style":{"spacing":{"blockGap":"var:preset|spacing|missing"}}} -->'
+        . '<div class="wp-block-group" style="color:var(--wp--preset--color--ghost)"></div>'
+        . '<!-- /wp:group -->';
+
+    $problems = PresetReferences::problemsForMarkup($markup, $theme, 'page-home--hero');
+    $joined = implode("\n", $problems);
+
+    assert_eq(2, count($problems));
+    assert_contains('page-home--hero: preset spacing slug "missing" is not declared', $joined);
+    assert_contains('page-home--hero: preset color slug "ghost" is not declared', $joined);
+    assert_true(!str_contains($joined, 'color slug "primary"'), 'declared direct fields pass');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('preset references reports malformed block and CSS separators', function () {
     [$project, $tmp] = preset_references_project();
     $project->writeText(

@@ -29,6 +29,19 @@ namespace Automattic\SiteBuild;
  */
 final class SectionRhythm
 {
+    /**
+     * Validate the exact root-block contract required by the rhythm pass.
+     *
+     * Generated sections call this before they are persisted so a malformed
+     * root can use the bounded markup-repair round instead of failing later,
+     * after otherwise valid sibling sections have already been accepted.
+     */
+    public static function validateSectionMarkup(string $markup, string $label): string
+    {
+        self::rootGroup($markup, $label);
+        return $markup;
+    }
+
     /** Density names are page-plan vocabulary; values are theme spacing slugs. */
     public const DENSITY_PRESETS = [
         'compact'  => 'lg',

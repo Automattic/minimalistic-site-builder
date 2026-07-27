@@ -120,7 +120,7 @@ test('sections passes the configured model into every part request', function ()
     $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:heading --><h2>Hero</h2><!-- /wp:heading --><!-- /wp:group -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
@@ -146,7 +146,7 @@ test('sections sends no model key when none is configured', function () {
     $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:heading --><h2>Hero</h2><!-- /wp:heading --><!-- /wp:group -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);
@@ -199,7 +199,7 @@ test('sections passes the configured temperature into every part request', funct
     $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
-    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:heading --><h2>Hero</h2><!-- /wp:heading --><!-- /wp:group -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer, null, 0.9))->run($project);

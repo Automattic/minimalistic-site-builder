@@ -53,3 +53,23 @@ test('FooterUnit generates a constrained footer from self-contained input', func
     assert_contains('"tagName":"footer"', $markup, 'existing attributes preserved');
     assert_contains('"layout":{"type":"constrained"}', $markup);
 });
+
+test('FooterUnit surfaces precise preset-reference errors', function () {
+    $llm = new FakeLlm();
+    $llm->queueText(
+        '<!-- wp:group {"style":{"spacing":{"blockGap":"var:preset|spacing|missing"}}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->'
+    );
+    $unit = new FooterUnit($llm, new PromptRenderer(repo_path('prompts')));
+    $error = null;
+
+    try {
+        $unit->generate(template_part_unit_input());
+    } catch (RuntimeException $caught) {
+        $error = $caught;
+    }
+
+    assert_true($error instanceof RuntimeException);
+    assert_contains("part 'footer' failed semantic validation", $error->getMessage());
+    assert_contains('preset spacing slug "missing" is not declared', $error->getMessage());
+});

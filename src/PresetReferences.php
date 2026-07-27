@@ -66,17 +66,7 @@ final class PresetReferences
         foreach (self::markupFiles($project) as $file) {
             $relative = substr($file, strlen($project->themePath()) + 1);
             $markup = (string) file_get_contents($file);
-
-            $attributes = self::blockAttributes($markup);
-            $values = [];
-            foreach ($attributes as $attrs) {
-                self::collectStrings($attrs, $values);
-                self::scanDirectBlockFields($attrs, $relative, $declared, $problems);
-            }
-            array_push($values, ...self::cssSegments($markup));
-            foreach ($values as $value) {
-                self::scan($value, $relative, $declared, $problems);
-            }
+            self::scanMarkup($markup, $relative, $declared, $problems);
         }
 
         // The page-styles step appends generated CSS after block repair, and
@@ -93,6 +83,22 @@ final class PresetReferences
 
         // The same logical reference is commonly present in block attributes
         // and rendered HTML. Message-keyed collection keeps the report useful.
+        return array_values($problems);
+    }
+
+    /**
+     * Validate one in-memory markup document against an already-decoded
+     * theme.json. This is the project-free intake counterpart to problems():
+     * generated units can reject an undeclared preset before any part is
+     * written, while the final project-wide gate keeps using the same scanner.
+     *
+     * @param array<mixed> $theme
+     * @return string[] human-readable problems; empty means every reference is valid
+     */
+    public static function problemsForMarkup(string $markup, array $theme, string $label): array
+    {
+        $problems = [];
+        self::scanMarkup($markup, $label, self::declaredSlugs($theme), $problems);
         return array_values($problems);
     }
 
@@ -155,6 +161,27 @@ final class PresetReferences
             }
         }
         return $attributes;
+    }
+
+    /**
+     * @param array<string,array<string,true>> $declared
+     * @param array<string,string> $problems message => message, for de-duplication
+     */
+    private static function scanMarkup(
+        string $markup,
+        string $label,
+        array $declared,
+        array &$problems,
+    ): void {
+        $values = [];
+        foreach (self::blockAttributes($markup) as $attrs) {
+            self::collectStrings($attrs, $values);
+            self::scanDirectBlockFields($attrs, $label, $declared, $problems);
+        }
+        array_push($values, ...self::cssSegments($markup));
+        foreach ($values as $value) {
+            self::scan($value, $label, $declared, $problems);
+        }
     }
 
     /**

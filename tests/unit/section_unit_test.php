@@ -11,7 +11,7 @@ function section_unit_input(): array
     return [
         'site_spec'        => '{"name":"UNIT-SPEC-SENTINEL"}',
         'language'         => 'unit-language-sentinel',
-        'theme_json'       => '{"unit-theme-sentinel":true}',
+        'theme_json'       => '{"unit-theme-sentinel":true,"settings":{"spacing":{"spacingSizes":[{"slug":"xl"}]}}}',
         'design_direction' => 'UNIT-DIRECTION-SENTINEL',
         'outline'          => '1. UNIT-OUTLINE-SENTINEL (hero)',
         'site_pages'       => '- "Home" — / (front page): UNIT-PAGES-SENTINEL',
@@ -98,6 +98,50 @@ test('SectionUnit rejects a response without block markup', function () {
     $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
 
     assert_throws(fn () => $unit->generate(section_unit_input()));
+});
+
+test('SectionUnit surfaces precise block compatibility errors', function () {
+    $llm = new FakeLlm();
+    $llm->queueText(
+        '<!-- wp:group {"layout":{"type":"flex","justifyContent":"diagonal"}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->'
+    );
+    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+    $error = null;
+
+    try {
+        $unit->generate(section_unit_input());
+    } catch (RuntimeException $caught) {
+        $error = $caught;
+    }
+
+    assert_true($error instanceof RuntimeException);
+    assert_contains("part 'page-unit-page--unit-section' failed semantic validation", $error->getMessage());
+    assert_contains("layout value 'diagonal'", $error->getMessage());
+});
+
+test('SectionUnit rejects a section with content outside its root group', function () {
+    $llm = new FakeLlm();
+    $llm->queueText(
+        '<!-- wp:group --><!-- wp:columns --><!-- wp:column -->'
+        . '<div class="wp-block-column"></div><!-- /wp:column --><!-- /wp:columns -->'
+        . '<!-- /wp:group --><!-- wp:column -->'
+        . '<div class="wp-block-column"></div><!-- /wp:column -->'
+    );
+    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+    $error = null;
+
+    try {
+        $unit->generate(section_unit_input());
+    } catch (RuntimeException $caught) {
+        $error = $caught;
+    }
+
+    assert_true($error instanceof RuntimeException);
+    assert_contains(
+        "part 'page-unit-page--unit-section' must contain exactly one top-level wp:group",
+        $error->getMessage(),
+    );
 });
 
 test('SectionUnit request preparation does not call the LLM', function () {

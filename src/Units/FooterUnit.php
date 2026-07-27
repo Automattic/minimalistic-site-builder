@@ -29,6 +29,8 @@ final class FooterUnit extends AbstractMarkupUnit
 
     public function finish(string $raw, array $input): string
     {
-        return GeneratedMarkup::constrainedPart(GeneratedMarkup::normalize($raw, $this->key($input)));
+        $key = $this->key($input);
+        $markup = GeneratedMarkup::constrainedPart(GeneratedMarkup::normalize($raw, $key));
+        return GeneratedMarkup::validate($markup, $key, $input['theme_json']);
     }
 }

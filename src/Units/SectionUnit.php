@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\SectionRole;
 
 /**
@@ -109,7 +110,10 @@ final class SectionUnit extends AbstractMarkupUnit
 
     public function finish(string $raw, array $input): string
     {
-        return GeneratedMarkup::normalize($raw, $this->key($input));
+        $key = $this->key($input);
+        $markup = GeneratedMarkup::normalize($raw, $key);
+        $markup = SectionRhythm::validateSectionMarkup($markup, "part '{$key}'");
+        return GeneratedMarkup::validate($markup, $key, $input['theme_json']);
     }
 
     /** @return array<string,mixed> */
