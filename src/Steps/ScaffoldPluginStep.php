@@ -314,6 +314,776 @@ final class ScaffoldPluginStep implements Step
             return $content;
         }
 
+        /** Return the byte after a tag's attribute-state-aware closing `>`. */
+        function {{FN_PREFIX}}_content_tag_end($html, $start) {
+            $length = strlen($html);
+            if (preg_match(
+                '/\A<[\x09\x0A\x0C\x0D\x20]*\/?[\x09\x0A\x0C\x0D\x20]*[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
+                substr($html, $start),
+                $opening
+            ) !== 1) {
+                // Declarations use a different tokenizer; consuming quoted
+                // `>` conservatively is sufficient for sanitizer scanning.
+                $quote = null;
+                for ($i = $start + 2; $i < $length; $i++) {
+                    $char = $html[$i];
+                    if ($quote !== null) {
+                        if ($char === $quote) {
+                            $quote = null;
+                        }
+                    } elseif ($char === '"' || $char === "'") {
+                        $quote = $char;
+                    } elseif ($char === '>') {
+                        return $i + 1;
+                    }
+                }
+                return $length;
+            }
+
+            $offset = $start + strlen($opening[0]);
+            $state = 'before_attribute';
+            $quote = '';
+            while ($offset < $length) {
+                $char = $html[$offset];
+                $space = $char === ' ' || $char === "\t" || $char === "\n"
+                    || $char === "\f" || $char === "\r";
+
+                if ($state === 'quoted_value') {
+                    if ($char === $quote) {
+                        $state = 'after_quoted_value';
+                    }
+                    $offset++;
+                    continue;
+                }
+
+                if ($state === 'unquoted_value') {
+                    if ($space) {
+                        $state = 'before_attribute';
+                    } elseif ($char === '>') {
+                        return $offset + 1;
+                    }
+                    $offset++;
+                    continue;
+                }
+
+                if ($state === 'before_value') {
+                    if ($space) {
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '"' || $char === "'") {
+                        $quote = $char;
+                        $state = 'quoted_value';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '>') {
+                        return $offset + 1;
+                    }
+                    $state = 'unquoted_value';
+                    continue;
+                }
+
+                if ($state === 'attribute_name') {
+                    if ($space) {
+                        $state = 'after_attribute_name';
+                    } elseif ($char === '=') {
+                        $state = 'before_value';
+                    } elseif ($char === '>') {
+                        return $offset + 1;
+                    } elseif ($char === '/') {
+                        $state = 'self_closing';
+                    }
+                    $offset++;
+                    continue;
+                }
+
+                if ($state === 'after_attribute_name') {
+                    if ($space) {
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '=') {
+                        $state = 'before_value';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '>') {
+                        return $offset + 1;
+                    }
+                    if ($char === '/') {
+                        $state = 'self_closing';
+                        $offset++;
+                        continue;
+                    }
+                    $state = 'attribute_name';
+                    continue;
+                }
+
+                if ($state === 'after_quoted_value') {
+                    if ($space) {
+                        $state = 'before_attribute';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '/') {
+                        $state = 'self_closing';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '>') {
+                        return $offset + 1;
+                    }
+                    $state = 'before_attribute';
+                    continue;
+                }
+
+                if ($state === 'self_closing') {
+                    if ($char === '>') {
+                        return $offset + 1;
+                    }
+                    $state = 'before_attribute';
+                    continue;
+                }
+
+                if ($space) {
+                    $offset++;
+                    continue;
+                }
+                if ($char === '>') {
+                    return $offset + 1;
+                }
+                if ($char === '/') {
+                    $state = 'self_closing';
+                    $offset++;
+                    continue;
+                }
+                $state = 'attribute_name';
+                if ($char === '=') {
+                    $offset++;
+                }
+            }
+            return $length;
+        }
+
+        /** Parse one tag at an exact less-than offset, or return null. */
+        function {{FN_PREFIX}}_content_tag_at($html, $start) {
+            if (preg_match(
+                '/\A<[\x09\x0A\x0C\x0D\x20]*(\/?)[\x09\x0A\x0C\x0D\x20]*([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)(?=[\x09\x0A\x0C\x0D\x20\/>])/',
+                substr($html, $start),
+                $tag
+            ) !== 1) {
+                return null;
+            }
+            $end = {{FN_PREFIX}}_content_tag_end($html, $start);
+            return array(
+                'name' => strtolower($tag[2]),
+                'closer' => $tag[1] === '/',
+                'end' => $end,
+            );
+        }
+
+        /** End of a comment/declaration at an exact offset, or null. */
+        function {{FN_PREFIX}}_content_special_end($html, $start) {
+            $length = strlen($html);
+            if (substr($html, $start, 4) === '<!--') {
+                $close = strpos($html, '-->', $start + 4);
+                return $close === false ? $length : $close + 3;
+            }
+            if (substr($html, $start, 9) === '<![CDATA[') {
+                $close = strpos($html, ']]>', $start + 9);
+                return $close === false ? $length : $close + 3;
+            }
+            if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
+                return {{FN_PREFIX}}_content_tag_end($html, $start);
+            }
+            return null;
+        }
+
+        /** Whether an offset begins a state-changing script keyword. */
+        function {{FN_PREFIX}}_content_script_keyword_at($html, $offset, $closer) {
+            $keyword = $closer ? '</script' : '<script';
+            $keyword_length = strlen($keyword);
+            if (strtolower(substr($html, $offset, $keyword_length)) !== $keyword) {
+                return false;
+            }
+            $delimiter = isset($html[$offset + $keyword_length])
+                ? $html[$offset + $keyword_length]
+                : '';
+            return {{FN_PREFIX}}_content_is_space_byte($delimiter)
+                || $delimiter === '/'
+                || $delimiter === '>';
+        }
+
+        /** End of the script element under HTML escaped/double-escaped states. */
+        function {{FN_PREFIX}}_content_script_end($html, $content_start) {
+            $length = strlen($html);
+            $offset = $content_start;
+            $state = 'data';
+            while ($offset < $length) {
+                if ($state !== 'data' && substr($html, $offset, 3) === '-->') {
+                    $state = 'data';
+                    $offset += 3;
+                    continue;
+                }
+                if ($html[$offset] !== '<') {
+                    $offset++;
+                    continue;
+                }
+
+                if ($state === 'data') {
+                    if (substr($html, $offset, 4) === '<!--') {
+                        $state = 'escaped';
+                        $offset += 4;
+                        continue;
+                    }
+                    if ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, true)) {
+                        return {{FN_PREFIX}}_content_tag_end($html, $offset);
+                    }
+                } elseif ($state === 'escaped') {
+                    if ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, true)) {
+                        return {{FN_PREFIX}}_content_tag_end($html, $offset);
+                    }
+                    if ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, false)) {
+                        $state = 'double_escaped';
+                        $offset += 8;
+                        continue;
+                    }
+                } elseif ({{FN_PREFIX}}_content_script_keyword_at($html, $offset, true)) {
+                    $state = 'escaped';
+                    $offset += 9;
+                    continue;
+                }
+                $offset++;
+            }
+            return $length;
+        }
+
+        /**
+         * Find an opaque element's true end. Normal/inert elements are
+         * nesting-aware; raw-text elements end at their first real closer.
+         */
+        function {{FN_PREFIX}}_content_opaque_end($html, $name, $content_start) {
+            $length = strlen($html);
+            if ($name === 'plaintext') {
+                return $length;
+            }
+            if ($name === 'script') {
+                return {{FN_PREFIX}}_content_script_end($html, $content_start);
+            }
+            $nestable = array('object', 'applet', 'template', 'code', 'pre');
+            if (!in_array($name, $nestable, true)) {
+                if (preg_match(
+                    '#</[\x09\x0A\x0C\x0D\x20]*' . preg_quote($name, '#') . '(?=[\x09\x0A\x0C\x0D\x20/>])#i',
+                    $html,
+                    $close,
+                    PREG_OFFSET_CAPTURE,
+                    $content_start
+                ) !== 1) {
+                    return $length;
+                }
+                return {{FN_PREFIX}}_content_tag_end($html, $close[0][1]);
+            }
+
+            $opaque = array(
+                'script', 'style', 'textarea', 'title', 'xmp', 'iframe',
+                'object', 'applet', 'noembed', 'noframes', 'noscript',
+                'template', 'code', 'pre', 'plaintext',
+            );
+            $offset = $content_start;
+            $depth = 1;
+            while ($offset < $length) {
+                $start = strpos($html, '<', $offset);
+                if ($start === false) {
+                    return $length;
+                }
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                if ($special_end !== null) {
+                    $offset = $special_end;
+                    continue;
+                }
+                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
+                if ($tag === null) {
+                    $offset = $start + 1;
+                    continue;
+                }
+                if ($tag['name'] === $name) {
+                    if ($tag['closer']) {
+                        $depth--;
+                        if ($depth === 0) {
+                            return $tag['end'];
+                        }
+                    } else {
+                        $depth++;
+                    }
+                    $offset = $tag['end'];
+                    continue;
+                }
+                if (!$tag['closer'] && in_array($tag['name'], $opaque, true)) {
+                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
+                    continue;
+                }
+                $offset = $tag['end'];
+            }
+            return $length;
+        }
+
+        /** Remove listed container elements with all of their content. */
+        function {{FN_PREFIX}}_content_remove_elements($html, $names) {
+            $targets = array_fill_keys($names, true);
+            $raw = array(
+                'script', 'style', 'textarea', 'title', 'xmp',
+                'iframe', 'noembed', 'noframes', 'noscript',
+            );
+            $length = strlen($html);
+            $offset = 0;
+            $kept_from = 0;
+            $out = '';
+            while ($offset < $length) {
+                $start = strpos($html, '<', $offset);
+                if ($start === false) {
+                    break;
+                }
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                if ($special_end !== null) {
+                    $offset = $special_end;
+                    continue;
+                }
+                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
+                if ($tag === null) {
+                    $offset = $start + 1;
+                    continue;
+                }
+                if (!$tag['closer'] && isset($targets[$tag['name']])) {
+                    // A slash does not self-close these non-void HTML elements.
+                    $end = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
+                    $out .= substr($html, $kept_from, $start - $kept_from);
+                    $kept_from = $end;
+                    $offset = $end;
+                    continue;
+                }
+                if (!$tag['closer']
+                    && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
+                ) {
+                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
+                    continue;
+                }
+                $offset = $tag['end'];
+            }
+            return $out . substr($html, $kept_from);
+        }
+
+        /** Remove listed tags without touching surrounding text. */
+        function {{FN_PREFIX}}_content_remove_tags($html, $names) {
+            $targets = array_fill_keys($names, true);
+            $length = strlen($html);
+            $offset = 0;
+            $kept_from = 0;
+            $out = '';
+            while ($offset < $length) {
+                $start = strpos($html, '<', $offset);
+                if ($start === false) {
+                    break;
+                }
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                if ($special_end !== null) {
+                    $offset = $special_end;
+                    continue;
+                }
+                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
+                if ($tag === null) {
+                    $offset = $start + 1;
+                    continue;
+                }
+                if (isset($targets[$tag['name']])) {
+                    $out .= substr($html, $kept_from, $start - $kept_from);
+                    $kept_from = $tag['end'];
+                }
+                $offset = $tag['end'];
+            }
+            return $out . substr($html, $kept_from);
+        }
+
+        /** Rewrite each real opening tag using stateful HTML boundaries. */
+        function {{FN_PREFIX}}_content_rewrite_opening_tags($html, $rewrite) {
+            $raw = array(
+                'script', 'style', 'textarea', 'title', 'xmp',
+                'iframe', 'noembed', 'noframes', 'noscript',
+            );
+            $length = strlen($html);
+            $offset = 0;
+            $kept_from = 0;
+            $out = '';
+            while ($offset < $length) {
+                $start = strpos($html, '<', $offset);
+                if ($start === false) {
+                    break;
+                }
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                if ($special_end !== null) {
+                    $offset = $special_end;
+                    continue;
+                }
+                $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
+                if ($tag === null) {
+                    $offset = $start + 1;
+                    continue;
+                }
+                if (!$tag['closer']) {
+                    $out .= substr($html, $kept_from, $start - $kept_from);
+                    $out .= $rewrite(substr($html, $start, $tag['end'] - $start));
+                    $kept_from = $tag['end'];
+                }
+                if (!$tag['closer']
+                    && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
+                ) {
+                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
+                } else {
+                    $offset = $tag['end'];
+                }
+            }
+            return $out . substr($html, $kept_from);
+        }
+
+        function {{FN_PREFIX}}_content_is_space_byte($char) {
+            return $char === ' '
+                || $char === "\t"
+                || $char === "\n"
+                || $char === "\f"
+                || $char === "\r";
+        }
+
+        /**
+         * Tokenize attribute byte spans from one already-bounded opening tag.
+         * Quote and slash transitions mirror the browser-facing tag scanner.
+         */
+        function {{FN_PREFIX}}_content_attributes($tag) {
+            if (preg_match(
+                '/\A<[\x09\x0A\x0C\x0D\x20]*[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
+                $tag,
+                $opening
+            ) !== 1) {
+                return array();
+            }
+
+            $length = strlen($tag);
+            $offset = strlen($opening[0]);
+            $state = 'before_attribute';
+            $quote = '';
+            $pending_start = null;
+            $after_name_whitespace = null;
+            $attribute = null;
+            $attributes = array();
+
+            $begin = function ($at) use (&$attribute, &$pending_start) {
+                $attribute = array(
+                    'start' => $pending_start !== null ? $pending_start : $at,
+                    'name_start' => $at,
+                    'name_end' => null,
+                    'value_start' => null,
+                );
+                $pending_start = null;
+            };
+            $commit = function ($end, $value_end = null) use (
+                &$attribute,
+                &$attributes,
+                $tag
+            ) {
+                if ($attribute === null) {
+                    return;
+                }
+                $name_end = $attribute['name_end'] !== null
+                    ? $attribute['name_end']
+                    : $end;
+                $attributes[] = array(
+                    'name' => strtolower(substr(
+                        $tag,
+                        $attribute['name_start'],
+                        $name_end - $attribute['name_start']
+                    )),
+                    'start' => $attribute['start'],
+                    'end' => $end,
+                    'value_start' => $attribute['value_start'],
+                    'value_end' => $value_end,
+                );
+                $attribute = null;
+            };
+
+            while ($offset < $length) {
+                $char = $tag[$offset];
+
+                if ($state === 'quoted_value') {
+                    if ($char === $quote) {
+                        $commit($offset + 1, $offset);
+                        $state = 'after_quoted_value';
+                    }
+                    $offset++;
+                    continue;
+                }
+
+                if ($state === 'unquoted_value') {
+                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
+                        $commit($offset, $offset);
+                        $pending_start = $offset;
+                        $state = 'before_attribute';
+                        $offset++;
+                    } elseif ($char === '>') {
+                        $commit($offset, $offset);
+                        break;
+                    } else {
+                        $offset++;
+                    }
+                    continue;
+                }
+
+                if ($state === 'before_value') {
+                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '"' || $char === "'") {
+                        $quote = $char;
+                        $attribute['value_start'] = $offset + 1;
+                        $state = 'quoted_value';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '>') {
+                        $attribute['value_start'] = $offset;
+                        $commit($offset, $offset);
+                        break;
+                    }
+                    $attribute['value_start'] = $offset;
+                    $state = 'unquoted_value';
+                    continue;
+                }
+
+                if ($state === 'attribute_name') {
+                    if ($char === '=') {
+                        $attribute['name_end'] = $offset;
+                        $state = 'before_value';
+                        $offset++;
+                        continue;
+                    }
+                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
+                        $attribute['name_end'] = $offset;
+                        $after_name_whitespace = $offset;
+                        $state = 'after_attribute_name';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '/' || $char === '>') {
+                        $attribute['name_end'] = $offset;
+                        $state = 'after_attribute_name';
+                        continue;
+                    }
+                    $offset++;
+                    continue;
+                }
+
+                if ($state === 'after_attribute_name') {
+                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
+                        if ($after_name_whitespace === null) {
+                            $after_name_whitespace = $offset;
+                        }
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '=') {
+                        $after_name_whitespace = null;
+                        $state = 'before_value';
+                        $offset++;
+                        continue;
+                    }
+
+                    $commit((int) $attribute['name_end']);
+                    if ($char === '>') {
+                        break;
+                    }
+                    $pending_start = $after_name_whitespace;
+                    $after_name_whitespace = null;
+                    if ($char === '/') {
+                        if ($pending_start === null) {
+                            $pending_start = $offset;
+                        }
+                        $state = 'self_closing';
+                        $offset++;
+                    } else {
+                        $state = 'before_attribute';
+                    }
+                    continue;
+                }
+
+                if ($state === 'after_quoted_value') {
+                    if ({{FN_PREFIX}}_content_is_space_byte($char)) {
+                        $pending_start = $offset;
+                        $state = 'before_attribute';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '/') {
+                        $pending_start = $offset;
+                        $state = 'self_closing';
+                        $offset++;
+                        continue;
+                    }
+                    if ($char === '>') {
+                        break;
+                    }
+                    $state = 'before_attribute';
+                    continue;
+                }
+
+                if ($state === 'self_closing') {
+                    if ($char === '>') {
+                        break;
+                    }
+                    $state = 'before_attribute';
+                    continue;
+                }
+
+                // before_attribute
+                if ({{FN_PREFIX}}_content_is_space_byte($char)) {
+                    if ($pending_start === null) {
+                        $pending_start = $offset;
+                    }
+                    $offset++;
+                    continue;
+                }
+                if ($char === '>') {
+                    break;
+                }
+                if ($char === '/') {
+                    if ($pending_start === null) {
+                        $pending_start = $offset;
+                    }
+                    $state = 'self_closing';
+                    $offset++;
+                    continue;
+                }
+                $begin($offset);
+                $after_name_whitespace = null;
+                $state = 'attribute_name';
+                if ($char === '=') {
+                    // A leading equals sign belongs to a malformed name.
+                    $offset++;
+                }
+            }
+
+            if ($attribute !== null) {
+                if ($state === 'attribute_name') {
+                    $attribute['name_end'] = $length;
+                    $commit($length);
+                } elseif ($state === 'after_attribute_name') {
+                    $commit((int) $attribute['name_end']);
+                } elseif ($state === 'before_value') {
+                    $attribute['value_start'] = $length;
+                    $commit($length, $length);
+                } elseif ($state === 'quoted_value' || $state === 'unquoted_value') {
+                    $commit($length, $length);
+                }
+            }
+
+            return $attributes;
+        }
+
+        /** Whether an attribute value resolves to an executable URL scheme. */
+        function {{FN_PREFIX}}_content_has_executable_scheme($value) {
+            $decoded = (string) preg_replace_callback(
+                '/&#(?:(?:x|X)([0-9a-fA-F]+)|([0-9]+));?/',
+                function ($match) {
+                    $hex = isset($match[1]) && $match[1] !== '';
+                    $digits = $hex ? $match[1] : $match[2];
+                    $significant = ltrim($digits, '0');
+                    if ($significant === '') {
+                        return "\xEF\xBF\xBD";
+                    }
+                    if (strlen($significant) > ($hex ? 2 : 3)) {
+                        return $match[0];
+                    }
+                    $codepoint = $hex
+                        ? hexdec($significant)
+                        : (int) $significant;
+                    return $codepoint > 0 && $codepoint <= 0x7f
+                        ? chr($codepoint)
+                        : $match[0];
+                },
+                $value
+            );
+            $decoded = html_entity_decode(
+                $decoded,
+                ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
+                'UTF-8'
+            );
+            $decoded = (string) preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
+            return preg_match('/\A(?:javascript|vbscript|data):/i', $decoded) === 1;
+        }
+
+        /** Strip active attributes from one opening tag without reserializing it. */
+        function {{FN_PREFIX}}_content_sanitize_opening_tag($tag) {
+            $url_attributes = array(
+                'href', 'src', 'xlink:href', 'formaction', 'action',
+            );
+            $attributes = {{FN_PREFIX}}_content_attributes($tag);
+            $event_starts = array();
+            foreach ($attributes as $attribute) {
+                if (strlen($attribute['name']) > 2
+                    && substr($attribute['name'], 0, 2) === 'on'
+                ) {
+                    $event_starts[$attribute['start']] = true;
+                }
+            }
+
+            $edits = array();
+            foreach ($attributes as $attribute) {
+                if (strlen($attribute['name']) > 2
+                    && substr($attribute['name'], 0, 2) === 'on'
+                ) {
+                    $next = isset($tag[$attribute['end']])
+                        ? $tag[$attribute['end']]
+                        : '>';
+                    $needs_separator = !{{FN_PREFIX}}_content_is_space_byte($next)
+                        && $next !== '/'
+                        && $next !== '>'
+                        && !isset($event_starts[$attribute['end']]);
+                    $edits[] = array(
+                        'start' => $attribute['start'],
+                        'end' => $attribute['end'],
+                        'replacement' => $needs_separator ? ' ' : '',
+                    );
+                    continue;
+                }
+
+                if ($attribute['value_start'] !== null
+                    && in_array($attribute['name'], $url_attributes, true)
+                    && {{FN_PREFIX}}_content_has_executable_scheme(substr(
+                        $tag,
+                        $attribute['value_start'],
+                        $attribute['value_end'] - $attribute['value_start']
+                    ))
+                ) {
+                    $edits[] = array(
+                        'start' => $attribute['value_start'],
+                        'end' => $attribute['value_end'],
+                        'replacement' => '#',
+                    );
+                }
+            }
+
+            usort($edits, function ($a, $b) {
+                return $b['start'] <=> $a['start'];
+            });
+            foreach ($edits as $edit) {
+                $tag = substr_replace(
+                    $tag,
+                    $edit['replacement'],
+                    $edit['start'],
+                    $edit['end'] - $edit['start']
+                );
+            }
+            return $tag;
+        }
+
         /**
          * Deterministic strip of script-capable markup: script/embed elements,
          * inline event handlers, and executable URL schemes. The build applies
@@ -323,17 +1093,18 @@ final class ScaffoldPluginStep implements Step
          * block comments the content is made of.
          */
         function {{FN_PREFIX}}_content_sanitize($content) {
-            $content = (string) preg_replace('#<script\b[^>]*>.*?</script\s*>#is', '', $content);
-            $content = (string) preg_replace('#</?(script|iframe|object|embed|applet|base)\b[^>]*>#i', '', $content);
-            // Event handlers are matched only inside tags so prose is never touched.
-            $content = (string) preg_replace_callback('#<[a-z][^>]*>#i', function ($m) {
-                return (string) preg_replace('#\s+on[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', $m[0]);
-            }, $content);
-            return (string) preg_replace(
-                '#\b(href|src|xlink:href|formaction|action)\s*=\s*(["\'])\s*(?:javascript|vbscript|data)\s*:[^"\']*\2#i',
-                '$1=$2#$2',
-                $content
+            $containers = array(
+                'script', 'iframe', 'object', 'applet',
+                'noembed', 'noframes', 'noscript',
             );
+            $content = {{FN_PREFIX}}_content_remove_elements($content, $containers);
+            $content = {{FN_PREFIX}}_content_remove_tags(
+                $content,
+                array_merge($containers, array('embed', 'base'))
+            );
+            return {{FN_PREFIX}}_content_rewrite_opening_tags($content, function ($tag) {
+                return {{FN_PREFIX}}_content_sanitize_opening_tag($tag);
+            });
         }
 
         /**

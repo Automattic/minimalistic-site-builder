@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
+use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
+
 /**
  * Minimal Gutenberg block-comment parser and attribute rewriter.
  *
@@ -31,22 +35,28 @@ final class BlockMarkup
      */
     private const DELIMITER =
         '/<!--\s+(?<closer>\/)?wp:(?<name>[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)\s+' .
-        '(?:(?<attrs>\{(?:(?!-->).)*?\})\s*)?(?<void>\/)?-->/s';
+        '(?:(?<attrs>\{(?:(?!-->).)*?\})\s+)?(?<void>\/)?-->/s';
 
     /**
      * @param string $source the original document
-     * @param list<array{name:string, attrs:?array<mixed>, void:bool, parent:?int,
+     * @param list<array{name:string, attrs:?array<mixed>, void:bool, unsafe:bool, parent:?int,
      *                    children:list<int>, offset:int, length:int,
-     *                    innerStart:int, innerEnd:int, closerLength:?int}> $nodes
+     *                    innerStart:int, innerEnd:int, end:?int}> $nodes
      * @param list<int> $unclosed indices of blocks still open at end of document
      * @param bool $mismatchedDelimiters whether a closer crossed an open block
      *                                  or had no matching opener
+     * @param list<int> $mismatchedDelimiterOffsets offsets of crossed, stray,
+     *                                                or malformed closers
+     * @param list<int> $malformedDelimiterOffsets offsets of Gutenberg-looking
+     *                                               comments the grammar rejected
      */
     private function __construct(
         private string $source,
         private array $nodes,
         private array $unclosed = [],
         private bool $mismatchedDelimiters = false,
+        private array $mismatchedDelimiterOffsets = [],
+        private array $malformedDelimiterOffsets = [],
     ) {}
 
     /** @var array<int,array<mixed>> node index => replacement attrs */
@@ -55,19 +65,71 @@ final class BlockMarkup
     /** @var list<array{start:int, end:int, search:string, replace:string}> */
     private array $innerEdits = [];
 
-    public static function parse(string $source): self
+    /**
+     * @param string|null $delimiterView same-length lexical view used only to
+     *                                  locate block comments; offsets and HTML
+     *                                  are always read from $source
+     */
+    public static function parse(string $source, ?string $delimiterView = null): self
     {
+        $delimiterView ??= $source;
+        if (strlen($delimiterView) !== strlen($source)) {
+            throw new \InvalidArgumentException('delimiter view must preserve source byte length');
+        }
+
         $nodes = [];
         $stack = []; // node indices of currently open blocks
         $mismatchedDelimiters = false;
+        $mismatchedDelimiterOffsets = [];
+        $malformedDelimiterOffsets = [];
+        $validDelimiterRanges = [];
 
-        if (preg_match_all(self::DELIMITER, $source, $matches, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
+        if (preg_match_all(self::DELIMITER, $delimiterView, $matches, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
             foreach ($matches as $m) {
                 $offset = $m[0][1];
                 $length = strlen($m[0][0]);
                 $name = $m['name'][0];
                 $isCloser = ($m['closer'][0] ?? '') === '/';
                 $isVoid = ($m['void'][0] ?? '') === '/';
+                $validDelimiterRanges[] = [$offset, $offset + $length];
+                $attrs = null;
+                $rawAttrs = trim($m['attrs'][0] ?? '');
+                $attrsMalformed = false;
+                if ($rawAttrs !== '') {
+                    // Structural validity must match JSON.parse(), which the
+                    // pinned Gutenberg parser uses. Native json_decode()
+                    // rejects valid JS strings containing lone surrogates;
+                    // retain it only as the legacy PHP-array projection.
+                    $typedAttrs = JsonValue::tryParse($rawAttrs);
+                    $attrsMalformed = !($typedAttrs instanceof JsonObject);
+                    $decoded = json_decode($rawAttrs, true);
+                    $attrs = is_array($decoded)
+                        ? $decoded
+                        : ($typedAttrs instanceof JsonObject
+                            ? self::typedObjectToArray($typedAttrs)
+                            : null);
+                    if ($attrsMalformed) {
+                        $malformedDelimiterOffsets[] = $offset;
+                        foreach ($stack as $openIdx) {
+                            $nodes[$openIdx]['unsafe'] = true;
+                            $nodes[$openIdx]['end'] = null;
+                        }
+                    }
+                }
+
+                // The pinned Gutenberg parser gives `/-->` void precedence.
+                // `/wp:name /-->` is therefore not a closer and must never
+                // complete an existing frame in this stricter parser.
+                if ($isCloser && $isVoid) {
+                    $mismatchedDelimiters = true;
+                    $mismatchedDelimiterOffsets[] = $offset;
+                    $malformedDelimiterOffsets[] = $offset;
+                    foreach ($stack as $openIdx) {
+                        $nodes[$openIdx]['unsafe'] = true;
+                        $nodes[$openIdx]['end'] = null;
+                    }
+                    continue;
+                }
 
                 if ($isCloser) {
                     // Close the nearest open block with this name; tolerate
@@ -78,11 +140,19 @@ final class BlockMarkup
                     $matched = false;
                     for ($i = count($stack) - 1; $i >= 0; $i--) {
                         if ($nodes[$stack[$i]]['name'] === $name) {
-                            if ($i !== count($stack) - 1) {
+                            $crossed = $i !== count($stack) - 1;
+                            if ($crossed) {
                                 $mismatchedDelimiters = true;
+                                $mismatchedDelimiterOffsets[] = $offset;
+                                foreach ($stack as $openIdx) {
+                                    $nodes[$openIdx]['unsafe'] = true;
+                                    $nodes[$openIdx]['end'] = null;
+                                }
                             }
                             $nodes[$stack[$i]]['innerEnd'] = $offset;
-                            $nodes[$stack[$i]]['closerLength'] = $length;
+                            if (!$crossed && !$nodes[$stack[$i]]['unsafe']) {
+                                $nodes[$stack[$i]]['end'] = $offset + $length;
+                            }
                             array_splice($stack, $i);
                             $matched = true;
                             break;
@@ -90,30 +160,29 @@ final class BlockMarkup
                     }
                     if (!$matched) {
                         $mismatchedDelimiters = true;
+                        $mismatchedDelimiterOffsets[] = $offset;
+                        foreach ($stack as $openIdx) {
+                            $nodes[$openIdx]['unsafe'] = true;
+                            $nodes[$openIdx]['end'] = null;
+                        }
                     }
                     continue;
-                }
-
-                $attrs = null;
-                $rawAttrs = trim($m['attrs'][0] ?? '');
-                if ($rawAttrs !== '') {
-                    $decoded = json_decode($rawAttrs, true);
-                    $attrs = is_array($decoded) ? $decoded : null;
                 }
 
                 $index = count($nodes);
                 $parent = $stack === [] ? null : $stack[count($stack) - 1];
                 $nodes[] = [
-                    'name'         => $name,
-                    'attrs'        => $attrs,
-                    'void'         => $isVoid,
-                    'parent'       => $parent,
-                    'children'     => [],
-                    'offset'       => $offset,
-                    'length'       => $length,
-                    'innerStart'   => $offset + $length,
-                    'innerEnd'     => $offset + $length, // stays for void / unclosed
-                    'closerLength' => null,              // set when a closer matches
+                    'name'       => $name,
+                    'attrs'      => $attrs,
+                    'void'       => $isVoid,
+                    'unsafe'     => $attrsMalformed,
+                    'parent'     => $parent,
+                    'children'   => [],
+                    'offset'     => $offset,
+                    'length'     => $length,
+                    'innerStart' => $offset + $length,
+                    'innerEnd'   => $offset + $length, // stays for void / unclosed
+                    'end'        => $isVoid && !$attrsMalformed ? $offset + $length : null,
                 ];
                 if ($parent !== null) {
                     $nodes[$parent]['children'][] = $index;
@@ -124,13 +193,92 @@ final class BlockMarkup
             }
         }
 
+        // Report wp:-looking comments that the delimiter grammar could not
+        // consume (for example, truncated JSON or missing required whitespace
+        // after attributes). A malformed marker inside an otherwise closed
+        // block makes that whole subtree unsafe.
+        if (preg_match_all('/<!--\s*\/?wp:/', $delimiterView, $markers, PREG_OFFSET_CAPTURE)) {
+            foreach ($markers[0] as $marker) {
+                $offset = $marker[1];
+                if (!self::offsetIsInsideRanges($offset, $validDelimiterRanges)) {
+                    $malformedDelimiterOffsets[] = $offset;
+                }
+            }
+        }
+        $mismatchedDelimiterOffsets = self::sortedUnique($mismatchedDelimiterOffsets);
+        $malformedDelimiterOffsets = self::sortedUnique($malformedDelimiterOffsets);
+        foreach ($nodes as &$node) {
+            if ($node['end'] === null) {
+                continue;
+            }
+            foreach ($malformedDelimiterOffsets as $offset) {
+                if ($offset >= $node['offset'] && $offset < $node['end']) {
+                    $node['unsafe'] = true;
+                    $node['end'] = null;
+                    break;
+                }
+            }
+        }
+        unset($node);
+
         // Unclosed blocks read to end of document.
         $end = strlen($source);
         foreach ($stack as $i) {
             $nodes[$i]['innerEnd'] = $end;
         }
 
-        return new self($source, $nodes, array_values($stack), $mismatchedDelimiters);
+        return new self(
+            $source,
+            $nodes,
+            array_values($stack),
+            $mismatchedDelimiters,
+            $mismatchedDelimiterOffsets,
+            $malformedDelimiterOffsets,
+        );
+    }
+
+    /** @param list<int> $offsets @return list<int> */
+    private static function sortedUnique(array $offsets): array
+    {
+        $offsets = array_values(array_unique($offsets));
+        sort($offsets);
+        return $offsets;
+    }
+
+    /** @param list<array{0:int,1:int}> $ranges */
+    private static function offsetIsInsideRanges(int $offset, array $ranges): bool
+    {
+        foreach ($ranges as [$start, $end]) {
+            if ($offset < $start) {
+                return false;
+            }
+            if ($offset < $end) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return array<mixed> */
+    private static function typedObjectToArray(JsonObject $object): array
+    {
+        $value = self::objectsToArrays($object->toNative());
+        return is_array($value) ? $value : [];
+    }
+
+    private static function objectsToArrays(mixed $value): mixed
+    {
+        if ($value instanceof \stdClass) {
+            $out = [];
+            foreach (get_object_vars($value) as $key => $entry) {
+                $out[$key] = self::objectsToArrays($entry);
+            }
+            return $out;
+        }
+        if (is_array($value)) {
+            return array_map(self::objectsToArrays(...), $value);
+        }
+        return $value;
     }
 
     /**
@@ -155,6 +303,24 @@ final class BlockMarkup
     public function hasMismatchedDelimiters(): bool
     {
         return $this->mismatchedDelimiters;
+    }
+
+    /** @return list<int> byte offsets of crossed, stray, or malformed closers */
+    public function mismatchedDelimiterOffsets(): array
+    {
+        return $this->mismatchedDelimiterOffsets;
+    }
+
+    /** Whether a Gutenberg-looking comment was not a valid block delimiter. */
+    public function hasMalformedDelimiters(): bool
+    {
+        return $this->malformedDelimiterOffsets !== [];
+    }
+
+    /** @return list<int> byte offsets of malformed Gutenberg-looking comments */
+    public function malformedDelimiterOffsets(): array
+    {
+        return $this->malformedDelimiterOffsets;
     }
 
     /** @return list<int> all node indices, in document order */
@@ -210,18 +376,19 @@ final class BlockMarkup
     }
 
     /**
-     * Byte offset just past this block's full span in the source: past the
-     * closing delimiter for a closed block, past the self-closing delimiter
-     * for a void block. Null when the block never got a matching closer (a
-     * truncated document), so callers can tell an exact span from an open one.
+     * Exclusive end offset of a structurally safe closed block, including its
+     * closing delimiter. Self-closing blocks end after their opener; unclosed,
+     * crossed, or malformed subtrees have no safe endpoint.
      */
     public function endOffset(int $i): ?int
     {
-        $n = $this->nodes[$i];
-        if ($n['void']) {
-            return $n['offset'] + $n['length'];
-        }
-        return $n['closerLength'] === null ? null : $n['innerEnd'] + $n['closerLength'];
+        return $this->nodes[$i]['end'];
+    }
+
+    /** Closing-delimiter start for a closed block; EOF for an open block. */
+    public function innerEndOffset(int $i): int
+    {
+        return $this->nodes[$i]['innerEnd'];
     }
 
     /** Raw source between this block's delimiters (includes child blocks). */
@@ -373,6 +540,16 @@ final class BlockMarkup
                 JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
                 | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
             );
+            if ($encoded === false) {
+                // Native json_encode() rejects the WTF-8 spelling used to
+                // retain JavaScript lone surrogates. Fall back to the pinned
+                // JSON.stringify-compatible encoder for that valid case.
+                $object = new JsonObject();
+                foreach ($attrs as $key => $value) {
+                    $object->set((string) $key, JsonValue::fromNative($value));
+                }
+                $encoded = JsJsonEncoder::serializeAttributes($object);
+            }
             $json = ' ' . str_replace('--', '\\u002d\\u002d', (string) $encoded);
         }
         return '<!-- wp:' . $name . $json . ' ' . ($void ? '/' : '') . '-->';

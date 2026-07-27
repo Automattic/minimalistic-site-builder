@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
@@ -254,6 +255,48 @@ test('two generated sites define disjoint symbols and can coexist on one host', 
     exec('rm -rf ' . escapeshellarg($b[1]));
 });
 
+test('generated seeder sanitizer matches intake sanitizer on adversarial attributes', function () {
+    $slug = 'sanitizer-parity';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $corpus = [
+        '<img src=x onerror="E()">',
+        '<svg/onload=E()>',
+        '<svg id="x"/onload=\'E()\'>',
+        '<div class="x"onclick=E()>',
+        '<div id=a onload="x"class=y>t</div>',
+        '<div id=a onload="x"onclick="y"class=z>t</div>',
+        '<svg =" /onload=E()>',
+        '<a href=javascript:alert(1)>x</a>',
+        '<a/href=javascript:alert(1)>x</a>',
+        '<a href="java&#x73;cript:alert(1)">x</a>',
+        '<a href=jav&#97;script:alert(1)>x</a>',
+        '<a href=javascript&colon;alert(1)>x</a>',
+        "<a href=\"java\tscript:alert(1)\">x</a>",
+        '<a href="java&#9;script:alert(1)">x</a>',
+        '<img src=data:text/html,x>',
+        '<form action=vbscript:x></form>',
+        '<svg><a xlink:href=data:text/html,x>x</a></svg>',
+        '<a =" /href=javascript:E()>x</a>',
+        '<img src=x/onerror=not-an-attr>',
+        '<a href="https://example.com">safe</a>',
+        '<a href="&amp;#106;avascript:x">one decode only</a>',
+        '<!-- href="javascript:x" --> prose href="javascript:x"',
+        '<script><!--<script></script><!-- wp:paragraph --><p>Fake</p><!-- /wp:paragraph --></script><p>After</p>',
+    ];
+    foreach ($corpus as $html) {
+        assert_eq(
+            MarkupSanitizer::sanitize($html),
+            $sanitize($html),
+            "runtime/generated parity: {$html}",
+        );
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('the seeder plugin creates, fronts, and removes the site pages', function () {
     $slug = 'seeder-pages';
     [$project, $tmp] = scaffold_plugin_fixture($slug);
@@ -274,7 +317,13 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // build-check gap) could carry; seeding must strip them, not store them.
     $project->writeText('plugin/pages/menu.html', '<!-- wp:heading --><h2 onclick="alert(1)">Menu</h2><!-- /wp:heading -->' . "\n"
         . '<!-- wp:html --><script>alert(2)</script><!-- /wp:html -->' . "\n"
-        . '<!-- wp:paragraph --><p><a href="javascript:alert(3)">Specials</a> and <a href="/breads/">breads</a>, come on in=side</p><!-- /wp:paragraph -->');
+        . '<!-- wp:paragraph --><p><a href="javascript:alert(3)">Specials</a> and <a href="/breads/">breads</a>, come on in=side</p><!-- /wp:paragraph -->'
+        . "\n<object><object>inner</object>nested_object_body()</object>"
+        . "\n<script data-x=\"</script>\">quoted_script_body()</script>"
+        . "\n<noscript>noscript_body()</noscript>"
+        . "\n<img src=x\" onerror=malformed_handler()>"
+        . "\n<script data-x=foo\"><span x=\">malformed_attribute_body()</script>"
+        . "\n<script>unterminated_script_body()");
     $project->writeText('plugin/pages/breads.html', '<!-- wp:heading --><h2>Breads</h2><!-- /wp:heading -->');
     // The content-image bundle: hero.jpg shipped; never-generated.jpg listed
     // but absent (a build without --with-images), so it must fall back to the
@@ -339,6 +388,12 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     assert_true(!str_contains($menuContent, '<script'), 'script element removed');
     assert_true(!str_contains($menuContent, 'onclick'), 'event handler removed');
     assert_true(!str_contains($menuContent, 'javascript:'), 'executable URL neutralized');
+    assert_true(!str_contains($menuContent, 'unterminated_script_body'), 'unclosed script body removed');
+    assert_true(!str_contains($menuContent, 'nested_object_body'), 'nested object body removed');
+    assert_true(!str_contains($menuContent, 'quoted_script_body'), 'a quoted fake closer cannot expose a script body');
+    assert_true(!str_contains($menuContent, 'noscript_body'), 'noscript fallback body removed');
+    assert_true(!str_contains($menuContent, 'malformed_handler'), 'malformed unquoted attribute cannot hide an event handler');
+    assert_true(!str_contains($menuContent, 'malformed_attribute_body'), 'malformed attribute quote state cannot expose a script body');
     assert_contains('come on in=side', $menuContent, 'prose is untouched');
     assert_contains('href="/breads/"', $menuContent, 'legitimate links survive');
     assert_contains('<!-- wp:html -->', $menuContent, 'block comments survive');
@@ -379,4 +434,3 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
-
