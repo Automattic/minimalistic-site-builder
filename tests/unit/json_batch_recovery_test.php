@@ -38,6 +38,28 @@ test('JsonBatchRecovery returns an all-valid batch without a retry', function ()
     assert_eq('page', $out['page']['kind']);
 });
 
+test('JsonBatchRecovery keeps safely repaired quotes out of the model retry path', function () {
+    $requests = ['page' => ['prompt' => 'Plan the page']];
+    $rounds = [];
+
+    $send = function (array $subset) use (&$rounds): array {
+        $rounds[] = array_keys($subset);
+        return [
+            'page' => [
+                'text' => '{"content_notes":"Headline "Reserve Now" in gold","purpose":"Convert"}',
+            ],
+        ];
+    };
+
+    $out = JsonBatchRecovery::run($requests, $send);
+
+    assert_eq([['page']], $rounds, 'local quote repair avoids a second model request');
+    assert_eq([
+        'content_notes' => 'Headline "Reserve Now" in gold',
+        'purpose'       => 'Convert',
+    ], $out['page']);
+});
+
 test('JsonBatchRecovery retries only one malformed sibling', function () {
     $requests = [
         'theme' => ['prompt' => 'Generate the theme'],
@@ -84,15 +106,18 @@ test('JsonBatchRecovery retries multiple malformed siblings together', function 
         $rounds[] = array_keys($subset);
         if (count($rounds) === 1) {
             return [
+                // Both malformed shapes must be ones JsonDecoder cannot repair
+                // locally, or they never reach a repair round: unescaped inner
+                // quotes now decode on their own.
                 'home'    => ['text' => '{"sections":[}'],
                 'theme'   => ['text' => '{"ok":"theme"}'],
-                'contact' => ['text' => '{"heading":"Say "hello""}'],
+                'contact' => ['text' => '{"sections":["Hero" "Menu","About"]}'],
             ];
         }
 
         return [
             'home'    => ['text' => '{"ok":"home"}'],
-            'contact' => ['text' => '{"ok":"contact"}'],
+            'contact' => ['text' => '{"sections":["Hero","Menu","About"]}'],
         ];
     };
 
@@ -105,7 +130,7 @@ test('JsonBatchRecovery retries multiple malformed siblings together', function 
     );
     assert_eq('home', $out['home']['ok']);
     assert_eq('theme', $out['theme']['ok']);
-    assert_eq('contact', $out['contact']['ok']);
+    assert_eq(['Hero', 'Menu', 'About'], $out['contact']['sections']);
 });
 
 test('JsonBatchRecovery reports a concise diagnostic when the retry is still malformed', function () {
