@@ -14,6 +14,11 @@ final class FixerReport
         }
     }
 
+    public function failedCount(): int
+    {
+        return count(array_filter($this->files, static fn (FileReport $file): bool => $file->status === 'failed'));
+    }
+
     public function changedCount(): int
     {
         return count(array_filter($this->files, static fn (FileReport $file): bool => $file->status === 'fixed'));
@@ -43,7 +48,9 @@ final class FixerReport
             $this->repairCount(),
             $this->droppedCount(),
             $this->themes,
-        );
+        ) . ($this->failedCount() > 0
+            ? sprintf(' %d file(s) kept as authored — see UNPROCESSED below.', $this->failedCount())
+            : '');
     }
 
     public function format(): string
@@ -54,8 +61,12 @@ final class FixerReport
                 'fixed' => 'FIXED ',
                 'ok' => 'ok    ',
                 'skip' => 'skip  ',
+                'failed' => 'FAILED',
             };
             $lines[] = '  ' . $tag . ' ' . $file->path;
+            if ($file->status === 'failed') {
+                $lines[] = '         ! UNPROCESSED — kept as authored: ' . (string) $file->error;
+            }
             foreach ($file->dropped as $drop) {
                 $lines[] = '         ! ' . $drop->line();
             }

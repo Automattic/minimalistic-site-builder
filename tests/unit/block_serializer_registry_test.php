@@ -152,7 +152,10 @@ test('registered blocks reject recognizable unreviewed current-key deprecations'
     $paragraph = '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.12em"}}} -->'
         . '<div style="letter-spacing:0.12em;color:var(--wp--preset--color--accent)">'
         . 'Legacy</div><!-- /wp:paragraph -->';
-    assert_throws(static fn () => (new Serializer())->transform($paragraph));
+    // The signature is still refused — the block is not canonicalized and no
+    // guessed bytes are emitted. It keeps exactly what was authored, and says
+    // why, instead of taking the file down with it.
+    assert_block_kept_as_authored($paragraph, 'core/paragraph style signature');
 });
 
 test('reviewed navigation font-family deprecation supplies pinned defaults', function () {
@@ -276,11 +279,11 @@ test('reviewed legacy button textAlign follows the pinned drop', function () {
     assert_true(!str_contains($result, '"textAlign"'));
     assert_true(!str_contains($result, 'has-text-align-center'));
     assert_contains('href="#contact"', $result);
-    assert_throws(static fn () => (new Serializer())->transform(str_replace(
+    assert_block_kept_as_authored(str_replace(
         '"textAlign":"center"',
         '"textAlign":"justify"',
         $button,
-    )));
+    ));
 });
 
 test('reviewed legacy image shadow follows the pinned lossy migration', function () {

@@ -169,9 +169,14 @@ test('style.background stays fail-closed', function () {
     // The reviewed exception: StyleEngine consumes background, so a value this
     // pass cannot judge would render a visibly broken band rather than a
     // missing refinement. It must still fail rather than degrade.
-    assert_throws(static fn () => nested_style_transform(
-        '{"style":{"background":{"backgroundSize":{"nested":"object"}}}}'
-    ));
+    // Fail-closed now means "emit nothing we guessed at" rather than "kill the
+    // run": the block keeps its authored bytes verbatim and reports why, so no
+    // wrong background is ever written.
+    assert_block_kept_as_authored(
+        '<!-- wp:group {"style":{"background":{"backgroundSize":{"nested":"object"}}}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->',
+        'style.background',
+    );
 });
 
 test('a style emptied by dropping is removed entirely', function () {
@@ -216,7 +221,7 @@ test('a border side the delimiter never described is not invented from a stray d
         . '<p style="border-top-style:dashed">Note</p>' . "\n"
         . '<!-- /wp:paragraph -->';
 
-    assert_throws(static fn () => (new Serializer())->transform($markup));
+    assert_block_kept_as_authored($markup, 'border-top-style');
 });
 
 test('a border is only read from the block own wrapper', function () {

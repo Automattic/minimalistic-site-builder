@@ -59,18 +59,25 @@ final class PhpBlockFixer implements BlockFixer
                 continue;
             }
 
+            // One file the serializer cannot process must not cost the run
+            // every other file. On failure the authored bytes stay on disk —
+            // they are what the generator wrote and they still render, they
+            // just are not canonicalized — and the reason is reported so it can
+            // be fixed at the source instead of discovered by a dead build.
             $current = $original;
             $repairs = [];
             $converged = false;
+            $failure = null;
             for ($pass = 1; $pass <= self::MAX_PASSES; $pass++) {
                 try {
                     $result = $this->transformer->transform($current);
-                } catch (\Throwable $error) {
-                    throw new \RuntimeException(
-                        "Block transformation failed for {$relative} on pass {$pass}: {$error->getMessage()}",
-                        0,
-                        $error,
-                    );
+                } catch (\RuntimeException $error) {
+                    // Same narrowing as the per-block fallback: only an
+                    // "unsupported markup" failure degrades. A TypeError or
+                    // LogicException is our bug and must still crash loudly
+                    // rather than ship a theme of unprocessed files.
+                    $failure = "pass {$pass}: {$error->getMessage()}";
+                    break;
                 }
                 foreach ($result->repairs as $repair) {
                     $repairs[$repair->blockPath . "\0" . $repair->code] = $repair;
@@ -81,14 +88,25 @@ final class PhpBlockFixer implements BlockFixer
                 }
                 $current = $result->html;
             }
-            if (!$converged) {
-                throw new \RuntimeException(
-                    "Block transformation did not converge within " . self::MAX_PASSES . " passes for {$relative}"
-                );
+            if ($failure === null && !$converged) {
+                $failure = 'did not converge within ' . self::MAX_PASSES . ' passes';
+            }
+            if ($failure !== null) {
+                $reports[] = new FileReport($relative, 'failed', [], [], $failure);
+                continue;
             }
 
             $changed = $current !== $original;
-            $fileRepairs = $changed ? array_values($repairs) : [];
+            // Repairs are normally only reported for a file whose bytes moved.
+            // A block kept as authored is the exception: the file may be
+            // byte-identical *because* the serializer gave up on part of it, and
+            // reporting that as a clean `ok` is the one outcome this whole
+            // fallback must never produce.
+            $kept = array_values(array_filter(
+                $repairs,
+                static fn (Repair $repair): bool => str_starts_with($repair->code, 'block-kept-as-authored:'),
+            ));
+            $fileRepairs = $changed ? array_values($repairs) : $kept;
             $dropped = $changed ? $this->drops->detect($original, $current) : [];
             $reports[] = new FileReport(
                 $relative,

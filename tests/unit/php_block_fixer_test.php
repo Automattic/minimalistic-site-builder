@@ -329,7 +329,7 @@ test('PhpBlockFixer permits convergence on pass five', function () {
     }
 });
 
-test('PhpBlockFixer fails closed when pass five still changes bytes', function () {
+test('PhpBlockFixer keeps a non-converging file as authored and carries on', function () {
     $initial = '<!-- wp:paragraph --><p>state-0</p><!-- /wp:paragraph -->';
     $theme = php_block_fixer_test_theme(['parts/state.html' => $initial]);
     $writer = new PhpBlockFixerTestWriter();
@@ -343,21 +343,23 @@ test('PhpBlockFixer fails closed when pass five still changes bytes', function (
     );
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer($transformer, writer: $writer))->fix($theme)
-        );
+        $report = (string) (new PhpBlockFixer($transformer, writer: $writer))->fix($theme);
 
-        assert_true($error instanceof RuntimeException);
-        assert_contains('did not converge within 5 passes for parts/state.html', $error->getMessage());
+        assert_contains('FAILED parts/state.html', $report);
+        assert_contains('did not converge within 5 passes', $report);
         assert_eq(5, count($transformer->calls));
-        assert_eq(0, $writer->stageCalls, 'non-convergence is detected before staging');
-        assert_eq($initial, file_get_contents($theme . '/parts/state.html'));
+        assert_eq(0, $writer->stageCalls, 'a file that never settled is not written');
+        assert_eq($initial, file_get_contents($theme . '/parts/state.html'), 'authored bytes are kept');
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer leaves every file unchanged when a later transformation throws', function () {
+test('PhpBlockFixer delivers every other file when one transformation throws', function () {
+    // The property that matters in production: one unprocessable section costs
+    // the site that section, not every section. The failing file keeps the
+    // bytes the generator wrote — they still render — and the reason is
+    // reported so it can be fixed at the source.
     $aOriginal = '<!-- wp:paragraph --><p>dirty-a</p><!-- /wp:paragraph -->';
     $aCanonical = '<!-- wp:paragraph --><p>clean-a</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:paragraph --><p>dirty-b</p><!-- /wp:paragraph -->';
@@ -378,23 +380,20 @@ test('PhpBlockFixer leaves every file unchanged when a later transformation thro
     );
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer($transformer, writer: $writer))->fix($theme)
-        );
+        $report = (string) (new PhpBlockFixer($transformer, writer: $writer))->fix($theme);
 
-        assert_true($error instanceof RuntimeException);
-        assert_contains('Block transformation failed for parts/b.html on pass 1', $error->getMessage());
-        assert_contains('injected renderer failure', $error->getMessage());
-        assert_eq(0, $writer->stageCalls, 'all transformations must finish before the first stage');
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
-        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
+        assert_contains('FAILED parts/b.html', $report);
+        assert_contains('injected renderer failure', $report);
+        assert_contains('1 file(s) kept as authored', $report);
+        assert_eq($aCanonical, file_get_contents($theme . '/parts/a.html'), 'the healthy file is delivered');
+        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'), 'the failing file keeps its bytes');
+        assert_eq(1, $writer->replaceCalls, 'only the healthy file is written');
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer preflights the real registry guard before staging any file', function () {
+test('PhpBlockFixer keeps an unsupported-domain file as authored and delivers the rest', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->';
     $theme = php_block_fixer_test_theme([
@@ -404,18 +403,13 @@ test('PhpBlockFixer preflights the real registry guard before staging any file',
     $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (string) (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains(
-            "Registered block 'core/query' is outside the supported PHP domain",
-            $error->getMessage(),
-        );
-        assert_eq(0, $writer->stageCalls, 'registry preflight must finish before the first stage');
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
-        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
+        assert_contains('FAILED parts/b.html', $report);
+        assert_contains("Registered block 'core/query' is outside the supported PHP domain", $report);
+        assert_contains('1 file(s) kept as authored', $report);
+        assert_contains('<p>Supported</p>', file_get_contents($theme . '/parts/a.html'), 'the healthy file is delivered');
+        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'), 'the failing file keeps its bytes');
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
@@ -447,7 +441,7 @@ test('PhpBlockFixer drops an unregistered comment attribute and still delivers e
     }
 });
 
-test('PhpBlockFixer rejects a current-key historical style signature before staging', function () {
+test('PhpBlockFixer keeps an unfixable block as authored and delivers the rest', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     // An invalid paragraph whose root is not a <p> is outside the reviewed
     // selector-less carryover (paragraph-inline-color-carryover golden), so
@@ -462,24 +456,18 @@ test('PhpBlockFixer rejects a current-key historical style signature before stag
     $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (string) (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains(
-            'Unsupported deprecated core/paragraph style signature at 0: color',
-            $error->getMessage(),
-        );
-        assert_eq(0, $writer->stageCalls);
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
-        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
+        assert_contains('REPAIR block-kept-as-authored:', $report);
+        assert_contains('core/paragraph style signature', $report);
+        assert_contains('<p>Supported</p>', file_get_contents($theme . '/parts/a.html'), 'the healthy file is delivered');
+        assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'), 'the unfixable block keeps its bytes');
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer rejects an unsupported block-support family before staging', function () {
+test('PhpBlockFixer keeps a block with an unsupported block-support family as authored', function () {
     // background is the one pinned-unimplemented family that stays
     // fail-closed: StyleEngine consumes style.background wholesale, so an
     // unreviewed shape could change the emitted bytes.
@@ -489,17 +477,11 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
     $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (string) (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains(
-            "Unsupported block-support path 'style.background.backgroundImage.id' for core/group at 0",
-            $error->getMessage(),
-        );
-        assert_eq(0, $writer->stageCalls);
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
+        assert_contains('REPAIR block-kept-as-authored:', $report);
+        assert_contains('style.background.backgroundImage.id', $report);
+        assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'), 'authored bytes kept verbatim');
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
@@ -585,11 +567,12 @@ test('PhpBlockFixer deep-merges duplicate comment JSON keys instead of failing t
     $collapsedTheme = php_block_fixer_test_theme(['parts/page-home--contact-and-location.html' => $collapsed]);
     $theme = php_block_fixer_test_theme(['parts/page-home--contact-and-location.html' => $original]);
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($collapsedTheme)
-        );
-        assert_contains('Unsupported deprecated core/paragraph style signature', $error->getMessage());
-        assert_contains('margin-top', $error->getMessage());
+        // The pre-fix collapse still cannot be serialized — it now costs that
+        // one file, which keeps its authored bytes, rather than the theme.
+        $collapsedReport = (string) (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($collapsedTheme);
+        assert_contains('REPAIR block-kept-as-authored:', $collapsedReport);
+        assert_contains('Unsupported deprecated core/paragraph style signature', $collapsedReport);
+        assert_contains('margin-top', $collapsedReport);
 
         $report = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
         $fixed = file_get_contents($theme . '/parts/page-home--contact-and-location.html');
@@ -785,6 +768,50 @@ test('PhpBlockFixer leaves only complete original or canonical bytes after mid-c
             writer: new PhpBlockFixerTestWriter(),
         ))->fix($theme);
         assert_contains('[fix-templates] 0/3 file(s) re-serialized', $stableReport);
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
+});
+
+test('a bug in the serializer still crashes loudly instead of shipping unprocessed files', function () {
+    // The degradation path is deliberately scoped to \RuntimeException, the
+    // type every "this markup is unsupported" guard throws. A TypeError means
+    // this code is broken, and swallowing it would turn our own defects into
+    // silently unprocessed pages — which is exactly what a catch-all did during
+    // development: one deleted variable and 39 files passed through untouched
+    // while the run reported clean.
+    $buggy = new PhpBlockFixerTestTransformer(
+        static fn (): TransformResult => throw new TypeError('simulated internal bug')
+    );
+    $theme = php_block_fixer_test_theme([
+        'parts/a.html' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+    ]);
+
+    try {
+        $error = php_block_fixer_test_exception(
+            static fn () => (new PhpBlockFixer($buggy, writer: new PhpBlockFixerTestWriter()))->fix($theme)
+        );
+        assert_true($error instanceof TypeError, 'the bug propagates unchanged');
+        assert_contains('simulated internal bug', $error->getMessage());
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
+});
+
+test('an unsupported-markup failure still degrades rather than crashing', function () {
+    // The other half of the same contract, so the narrowing cannot be widened
+    // or tightened by accident without a test noticing.
+    $unsupported = new PhpBlockFixerTestTransformer(
+        static fn (): TransformResult => throw new RuntimeException('unsupported markup here')
+    );
+    $theme = php_block_fixer_test_theme([
+        'parts/a.html' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+    ]);
+
+    try {
+        $report = (string) (new PhpBlockFixer($unsupported, writer: new PhpBlockFixerTestWriter()))->fix($theme);
+        assert_contains('FAILED parts/a.html', $report);
+        assert_contains('unsupported markup here', $report);
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }

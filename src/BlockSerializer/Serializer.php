@@ -106,13 +106,61 @@ final class Serializer implements TemplateTransformer
             $repairs = array_merge($repairs, $result['repairs']);
         }
         $innerHtml = implode("\n\n", $inner);
-        $block = $this->normalizer->normalize($node, $innerHtml, $path);
-        $content = $this->saves->save($node->name, $block->attributes, $innerHtml, $node->innerHTML);
-        $html = $this->comments->delimit($node->name, $this->comments->attributes($block), $content);
+        try {
+            $block = $this->normalizer->normalize($node, $innerHtml, $path);
+            $content = $this->saves->save($node->name, $block->attributes, $innerHtml, $node->innerHTML);
+            $html = $this->comments->delimit($node->name, $this->comments->attributes($block), $content);
+        } catch (\RuntimeException $error) {
+            // Deliberately \RuntimeException and nothing wider. Every guard
+            // that means "this markup is unsupported" throws that type; a
+            // TypeError, LogicException or InvalidArgumentException means a bug
+            // in this code, and swallowing those would turn our own defects
+            // into silently unprocessed pages. During development a deleted
+            // variable did exactly that under a catch-all: 39 files passed
+            // through untouched and the run reported clean.
+            //
+            // This one block cannot be canonicalized. Keeping its authored
+            // bytes costs the page that block; abandoning the file costs every
+            // other block in it the fix it would have had. The fixer's job is
+            // to fix what it can, so the loss is scoped to the block that
+            // caused it and reported with the reason.
+            //
+            // rawSource is the block's verbatim original, inner blocks
+            // included, so the subtree stays internally consistent — a
+            // half-fixed block whose attributes and HTML disagree would be
+            // worse than an untouched one.
+            if (trim($node->rawSource) === '') {
+                throw $error;
+            }
+            return [
+                'html' => $node->rawSource,
+                'repairs' => array_merge($repairs, [new Repair(
+                    'block-kept-as-authored:' . self::failureNote($node->name, $error),
+                    $path,
+                )]),
+            ];
+        }
         return [
             'html' => $html,
             'repairs' => array_merge($repairs, $block->repairs),
         ];
+    }
+
+    /**
+     * A one-line, JSON-encoded note naming the block and why it could not be
+     * canonicalized, safe to embed in a repair code the report reads back.
+     */
+    private static function failureNote(string $name, \Throwable $error): string
+    {
+        $reason = (string) preg_replace('/\s+/', ' ', $error->getMessage());
+        $reason = trim((string) preg_replace('/[\p{C}`]+/u', '', $reason));
+        return (string) json_encode(
+            [
+                'block'  => $name,
+                'reason' => strlen($reason) > 160 ? substr($reason, 0, 157) . '...' : $reason,
+            ],
+            JSON_UNESCAPED_SLASHES,
+        );
     }
 
     /** Pinned serializeRawBlock() behavior used by core/missing. */

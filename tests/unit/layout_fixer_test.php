@@ -446,10 +446,12 @@ test('layout fixer leaves explicit non-object style shapes for the gate', functi
         // so what reaches the gate is the explicit non-object `style` this test
         // is about — still fail-closed, because a scalar where the block-support
         // tree expects an object is a shape the save path cannot reason about.
-        $error = php_block_fixer_test_exception(
-            static fn () => (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme)
-        );
-        assert_contains('Unsupported block-support scalar at core/group', $error->getMessage());
+        // The explicit non-object `style` is still something the serializer
+        // cannot process — it just costs this one file rather than the run.
+        $report = (string) (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme);
+        assert_contains('REPAIR block-kept-as-authored:', $report);
+        assert_contains('Unsupported block-support scalar at core/group', $report);
+        assert_eq($markup, file_get_contents($theme . '/parts/invalid-style-shape.html'), 'authored bytes kept verbatim');
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }

@@ -87,3 +87,24 @@ function run_tests(): int
     echo "\n{$pass} passed, {$fail} failed, {$skip} skipped\n";
     return $fail === 0 ? 0 : 1;
 }
+
+/**
+ * Assert that a block the serializer cannot canonicalize is kept verbatim and
+ * reported, rather than taking the file (or the run) down with it.
+ *
+ * @return string the reported reason
+ */
+function assert_block_kept_as_authored(string $markup, ?string $reasonFragment = null): string
+{
+    $result = (new Automattic\SiteBuild\BlockSerializer\Serializer())->transform($markup);
+    assert_eq(trim($markup), trim($result->html), 'the block keeps its authored bytes verbatim');
+    $kept = array_values(array_filter(
+        $result->repairs,
+        static fn ($r): bool => str_starts_with($r->code, 'block-kept-as-authored:'),
+    ));
+    assert_eq(1, count($kept), 'exactly one block was kept as authored');
+    if ($reasonFragment !== null) {
+        assert_contains($reasonFragment, $kept[0]->code);
+    }
+    return $kept[0]->code;
+}

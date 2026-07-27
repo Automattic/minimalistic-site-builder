@@ -109,9 +109,14 @@ final class FixBlocksStep implements Step
         // deliberately not recorded there: the attribute survived under its
         // correct name, so there is no defect left to repair.
         $renames = self::renamedAttributes($summary);
-        $drops = self::droppedAttributes($summary);
+        $unprocessed = self::unprocessedFiles($summary);
+        $drops = array_merge($unprocessed, self::droppedAttributes($summary));
         if ($drops !== []) {
             $project->addWarnings($this->id(), $drops);
+        }
+        if ($unprocessed !== []) {
+            echo '  [attributes] warning: ' . count($unprocessed)
+                . " file(s) kept as generated; see warnings.json\n";
         }
         if ($renames !== []) {
             $summary .= "\n[attributes] " . count($renames) . " misnamed attribute(s) renamed:\n  "
@@ -236,6 +241,49 @@ final class FixBlocksStep implements Step
             }
         }
         return $dropped;
+    }
+
+    /**
+     * Files the fixer could not process, which kept the bytes the generator
+     * wrote. These lead warnings.json: the markup still renders, but it was
+     * never canonicalized, so it is the most likely thing on the site to look
+     * wrong and the first thing worth fixing at the source.
+     *
+     * @return string[]
+     */
+    public static function unprocessedFiles(string $report): array
+    {
+        $lines = [];
+        // A block the serializer could not canonicalize kept its authored
+        // bytes. The block fixer exists to make generated markup match what
+        // WordPress save() produces, so a block it could not process is the
+        // most likely thing on the delivered site to look wrong — it leads
+        // warnings.json for the same reason an unprocessed file does.
+        foreach (self::attributeRepairs($report, 'block-kept-as-authored') as $row) {
+            $lines[] = sprintf(
+                'UNFIXED BLOCK: %s block %s (%s) kept the markup as generated — %s',
+                $row['file'],
+                $row['blockPath'],
+                (string) ($row['block'] ?? 'unknown block'),
+                (string) ($row['reason'] ?? 'no reason reported'),
+            );
+        }
+        $file = null;
+        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
+            if (preg_match('/^\s{2}FAILED\s+(\S+)$/', $line, $m) === 1) {
+                $file = $m[1];
+                continue;
+            }
+            if ($file !== null && preg_match('/UNPROCESSED — kept as authored: (.+)$/', $line, $m) === 1) {
+                $lines[] = sprintf(
+                    'UNPROCESSED: %s kept the markup as generated — the block fixer could not serialize it (%s)',
+                    $file,
+                    trim($m[1]),
+                );
+                $file = null;
+            }
+        }
+        return $lines;
     }
 
     /** Most warning lines emitted for one distinct attribute before they are summarized. */
