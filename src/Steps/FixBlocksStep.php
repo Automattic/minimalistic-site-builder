@@ -67,6 +67,7 @@ final class FixBlocksStep implements Step
         // contract one more chance, then re-serialize only when that pass
         // actually changed comment attributes so the authored HTML stays in
         // sync with them.
+        $followUp = '';
         $postRepairLayoutNotes = self::normalizeLayouts($project);
         $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
         if ($postRepairLayoutNotes !== []) {
@@ -82,6 +83,12 @@ final class FixBlocksStep implements Step
                 $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
                 throw $e;
             }
+            // Keep the follow-up report parseable. Indenting it for display
+            // pushes every `FIXED`/`FAILED`/`ok` line out of the two-space
+            // column the readers below anchor on, which silently drops that
+            // pass's unprocessed files and bills its kept blocks to whichever
+            // file the first pass happened to end on.
+            $followUp = $followUpSummary;
             $summary .= "\n[layout] post-repair normalization required a second block-fixer pass:\n  "
                 . str_replace("\n", "\n  ", $followUpSummary);
         }
@@ -108,9 +115,12 @@ final class FixBlocksStep implements Step
         // authored intent went missing — the repair pass reads it. Renames are
         // deliberately not recorded there: the attribute survived under its
         // correct name, so there is no defect left to repair.
-        $renames = self::renamedAttributes($summary);
-        $unprocessed = self::unprocessedFiles($summary);
-        $drops = array_merge($unprocessed, self::droppedAttributes($summary));
+        // Both passes are read in their unindented form; $summary alone would
+        // miss everything the follow-up pass found.
+        $reports = $followUp === '' ? [$summary] : [$summary, $followUp];
+        $renames = array_merge(...array_map(self::renamedAttributes(...), $reports));
+        $unprocessed = array_merge(...array_map(self::unprocessedFiles(...), $reports));
+        $drops = array_merge($unprocessed, ...array_map(self::droppedAttributes(...), $reports));
         if ($drops !== []) {
             $project->addWarnings($this->id(), $drops);
         }
@@ -408,7 +418,7 @@ final class FixBlocksStep implements Step
         $file = 'unknown file';
         $marker = '- REPAIR ' . $code . ':';
         foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
-            if (preg_match('/^\s{2}(?:FIXED|ok|skip)\s+(\S+)$/', $line, $m) === 1) {
+            if (preg_match('/^\s{2}(?:FIXED|FAILED|ok|skip)\s+(\S+)$/', $line, $m) === 1) {
                 $file = $m[1];
                 continue;
             }

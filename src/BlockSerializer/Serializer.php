@@ -132,12 +132,19 @@ final class Serializer implements TemplateTransformer
             if (trim($node->rawSource) === '') {
                 throw $error;
             }
+            //
+            // The children's repairs are discarded along with their bytes.
+            // rawSource reverts this whole subtree, so reporting a descendant's
+            // rename or drop would claim a change the file does not contain,
+            // and a repair pass reading warnings.json would believe it had
+            // already been handled. The report describes what is on disk, not
+            // what was attempted.
             return [
                 'html' => $node->rawSource,
-                'repairs' => array_merge($repairs, [new Repair(
+                'repairs' => [new Repair(
                     'block-kept-as-authored:' . self::failureNote($node->name, $error),
                     $path,
-                )]),
+                )],
             ];
         }
         return [

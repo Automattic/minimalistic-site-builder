@@ -539,3 +539,51 @@ HTML;
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
 });
+
+test('the report never claims a repair the file does not contain', function () {
+    // A block kept as authored reverts its whole subtree, children included.
+    // Reporting a descendant's rename or drop would describe a change that is
+    // not on disk — and a repair pass reading warnings.json would believe it
+    // had already been handled.
+    $tmp = sys_get_temp_dir() . '/builder_truth_' . uniqid();
+    @mkdir($tmp . '/theme/parts', 0775, true);
+    file_put_contents(
+        $tmp . '/theme/parts/section.html',
+        '<!-- wp:group {"style":{"background":{"bogusKey":"x"}}} --><div class="wp-block-group">'
+        . '<!-- wp:paragraph {"totallyMadeUp":"zzz","drop_cap":true} --><p>x</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+    );
+
+    try {
+        $report = (string) (new PhpBlockFixer())->fix($tmp . '/theme');
+        $written = (string) file_get_contents($tmp . '/theme/parts/section.html');
+
+        assert_contains('totallyMadeUp', $written, 'the child keeps its bytes with the reverted parent');
+        assert_eq([], FixBlocksStep::droppedAttributes($report), 'no drop is claimed for reverted bytes');
+        assert_eq([], FixBlocksStep::renamedAttributes($report), 'no rename is claimed for reverted bytes');
+        assert_eq(1, count(FixBlocksStep::unprocessedFiles($report)), 'the kept block is still reported');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('a second block-fixer pass is read before it is indented for display', function () {
+    // FixBlocksStep splices the follow-up report into the log with two extra
+    // spaces. Parsing that indented copy pushes every FIXED/FAILED/ok line out
+    // of the column the readers anchor on, which silently drops that pass's
+    // unprocessed files and bills its kept blocks to whichever file the first
+    // pass happened to end on.
+    $followUp = "  FAILED parts/second.html\n"
+        . "         ! UNPROCESSED — kept as authored: pass 1: boom\n";
+
+    assert_eq(1, count(FixBlocksStep::unprocessedFiles($followUp)), 'readable unindented');
+
+    // Exactly how run() splices it into the log: a literal two-space prefix on
+    // the first line, and two more on every line after it.
+    $indented = '  ' . str_replace("\n", "\n  ", $followUp);
+    assert_eq(
+        0,
+        count(FixBlocksStep::unprocessedFiles($indented)),
+        'the display copy is unreadable — which is why the step parses the raw report',
+    );
+});
