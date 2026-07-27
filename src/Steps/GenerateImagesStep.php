@@ -14,6 +14,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\ThemeValidator;
 
 /**
  * Step (opt-in, networked): generate the images collected by CollectImagesStep
@@ -226,9 +227,21 @@ final class GenerateImagesStep implements Step
         }
     }
 
-    /** Publish the dependency stamp only after every required operation succeeds. */
+    /**
+     * Publish the dependency stamp only after every required operation succeeds.
+     * A raw AI_IMAGE spec in a final URL/source is a hard postcondition failure:
+     * without this gate an unrecognized placeholder shape can silently ship as
+     * a blank image even when the manifest was absent or empty.
+     */
     private function markComplete(Project $project): void
     {
+        $problems = ThemeValidator::unresolvedImageSourceProblems($project);
+        if ($problems !== []) {
+            throw new \RuntimeException(
+                "generate-images: unresolved AI_IMAGE source(s) remain after generation:\n- "
+                . implode("\n- ", $problems)
+            );
+        }
         $project->writeJson(self::COMPLETION_ARTIFACT, ['status' => 'completed']);
     }
 
