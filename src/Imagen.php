@@ -15,6 +15,15 @@ namespace Automattic\SiteBuild;
  */
 final class Imagen
 {
+    /** Aspect-ratio values accepted by Imagen's generation endpoint. */
+    private const SUPPORTED_ASPECT_RATIOS = [
+        '1:1'  => 1.0,
+        '3:4'  => 3 / 4,
+        '4:3'  => 4 / 3,
+        '9:16' => 9 / 16,
+        '16:9' => 16 / 9,
+    ];
+
     /**
      * Hard cap Imagen enforces on the text prompt (input tokens). We compose the
      * site context + per-image prompt to stay safely under this.
@@ -22,17 +31,45 @@ final class Imagen
     public const MAX_PROMPT_TOKENS = 480;
 
     /**
-     * Map the prompt's aspect-ratio keyword to the Imagen ratio string.
-     * Accepts either a keyword (square/landscape/portrait) or a ratio as-is.
+     * Map the prompt's aspect-ratio keyword to an Imagen-supported ratio.
+     * Unsupported positive numeric ratios are mapped to the nearest supported
+     * shape; malformed values fall back to landscape.
      */
     public static function aspectRatio(string $keyword): string
     {
-        return match (strtolower(trim($keyword))) {
+        $normalized = strtolower(trim($keyword));
+        $named = match ($normalized) {
             'square'   => '1:1',
             'portrait' => '9:16',
             'landscape' => '16:9',
-            default    => preg_match('/^\d+:\d+$/', trim($keyword)) ? trim($keyword) : '16:9',
+            default    => null,
         };
+        if ($named !== null) {
+            return $named;
+        }
+        if (isset(self::SUPPORTED_ASPECT_RATIOS[$normalized])) {
+            return $normalized;
+        }
+        if (!preg_match('/^(\d+):(\d+)$/', $normalized, $match)) {
+            return '16:9';
+        }
+
+        $width = (int) $match[1];
+        $height = (int) $match[2];
+        if ($width < 1 || $height < 1) {
+            return '16:9';
+        }
+        $requested = $width / $height;
+        $closest = '16:9';
+        $distance = INF;
+        foreach (self::SUPPORTED_ASPECT_RATIOS as $ratio => $value) {
+            $candidate = abs(log($requested / $value));
+            if ($candidate < $distance) {
+                $closest = $ratio;
+                $distance = $candidate;
+            }
+        }
+        return $closest;
     }
 
     /**
@@ -126,7 +163,7 @@ final class Imagen
             'instances'  => [['prompt' => $prompt]],
             'parameters' => [
                 'sampleCount'     => 1,
-                'aspectRatio'     => $opts['aspect_ratio'] ?? '16:9',
+                'aspectRatio'     => self::aspectRatio((string) ($opts['aspect_ratio'] ?? '16:9')),
                 'sampleImageSize' => $opts['sample_image_size'] ?? '1K',
                 'outputOptions'   => $outputOptions,
             ],

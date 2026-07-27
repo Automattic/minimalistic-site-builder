@@ -2,8 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\StepGraph;
+use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
@@ -17,11 +19,13 @@ function generate_fixture(): array
 {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeText('theme/templates/page.html',
-        '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div class="wp-block-cover">'
+    $markup = '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div class="wp-block-cover">'
         . '<img class="wp-block-cover__image-background" src="theme:./assets/hero.jpg" '
-        . 'alt="AI_IMAGE: A bakery at dawn | full-bleed hero with text overlay | photorealistic | landscape"/></div><!-- /wp:cover -->'
-    );
+        . 'alt="AI_IMAGE: A bakery at dawn | full-bleed hero with text overlay | photorealistic | landscape"/></div><!-- /wp:cover -->';
+    // Collection runs over the pre-assembly parts. Keep the same placeholder
+    // in a template to verify GenerateImagesStep rewrites every shipped scope.
+    $project->writeText('theme/parts/hero.html', $markup);
+    $project->writeText('theme/templates/page.html', $markup);
     (new CollectImagesStep())->run($project);
     return [$project, $tmp];
 }
@@ -107,7 +111,7 @@ test('generate-images rewrites theme: placeholders in assembled plugin/pages', f
         . 'alt="AI_IMAGE: A bakery at dawn | full-bleed hero with text overlay | photorealistic | landscape"/>'
         . '</div><!-- /wp:cover -->'
     );
-    // Collect from theme template (fixture); the plugin page reuses the same
+    // Collect from the theme part (fixture); the plugin page reuses the same
     // theme:./assets/hero.jpg placeholder and must rewrite with the same map.
     $images = new FakeImageClient('JPEGDATA');
 
@@ -116,6 +120,58 @@ test('generate-images rewrites theme: placeholders in assembled plugin/pages', f
     $page = $project->readText('plugin/pages/home.html');
     assert_contains('/wp-content/themes/demo/assets/hero.jpg', $page);
     assert_true(!str_contains($page, 'theme:./assets/hero.jpg'), 'plugin page theme: placeholders rewritten');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('recovered cover survives serialization, ships with the plugin, and generates once', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_recovered_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home', 'title' => 'Home', 'front' => true, 'menu_order' => 0,
+        'sections' => [['slug' => 'hero']],
+    ]]]);
+    $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph -->'
+    );
+    $project->writeText(
+        'theme/parts/page-home--hero.html',
+        '<!-- wp:cover {"url":"AI_IMAGE:coffee \u0026 croissant at dawn|ratio:21:9|role:hero","dimRatio":40} -->'
+        . '<!-- wp:paragraph {"content":"Welcome"} /-->'
+        . '<!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+    $specs = $project->readJson('images.json');
+    assert_eq(1, count($specs));
+    assert_eq('16:9', $specs[0]['aspectRatio']);
+    assert_eq('theme:./assets/' . $specs[0]['filename'], $specs[0]['src']);
+
+    (new PhpBlockFixer())->fix($project->themePath());
+    $fixed = $project->readText('theme/parts/page-home--hero.html');
+    assert_eq(2, substr_count($fixed, $specs[0]['src']), 'url and rendered src use the canonical path');
+    assert_true(!str_contains($fixed, 'AI_IMAGE:'), 'serializer never sees the raw prompt');
+
+    (new AssemblePagesStep())->run($project);
+    assert_eq([[
+        'filename' => $specs[0]['filename'],
+        'title' => 'coffee & croissant at dawn',
+    ]], $project->readJson('plugin/images.json')['images']);
+
+    $images = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls));
+    assert_eq('16:9', $images->calls[0]['opts']['aspect_ratio']);
+    assert_true($project->exists('theme/assets/' . $specs[0]['filename']));
+    assert_true($project->exists('plugin/images/' . $specs[0]['filename']));
+    $page = $project->readText('plugin/pages/home.html');
+    $served = '/wp-content/themes/demo/assets/' . $specs[0]['filename'];
+    assert_eq(2, substr_count($page, $served), 'assembled cover url and img src both resolved');
+    assert_true(!str_contains($page, 'AI_IMAGE:'), 'no raw prompt shipped in page sources');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -502,6 +558,25 @@ test('generate-images publishes completion when the image manifest is absent', f
         ['status' => 'completed'],
         $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
     );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images refuses completion when an uncollected AI_IMAGE source remains', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<img src="AI_IMAGE:an unrecognized raw source|ratio:16:9|role:hero" alt="">'
+    );
+    $images = new FakeImageClient();
+
+    assert_throws(
+        fn () => (new GenerateImagesStep($images))->run($project),
+        'empty/absent manifests must not bypass the final source gate',
+    );
+    assert_eq([], $images->calls);
+    assert_true(!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

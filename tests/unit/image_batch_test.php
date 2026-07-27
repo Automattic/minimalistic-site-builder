@@ -154,6 +154,27 @@ test('sampleImageSize renders wide (full-bleed) images at 2K, the rest at 1K', f
     assert_eq('1K', Imagen::sampleImageSize('9:16'));
 });
 
+test('aspectRatio emits only Imagen-supported ratios and clamps arbitrary shapes', function () {
+    foreach (['1:1', '3:4', '4:3', '9:16', '16:9'] as $supported) {
+        assert_eq($supported, Imagen::aspectRatio($supported));
+    }
+    assert_eq('1:1', Imagen::aspectRatio('square'));
+    assert_eq('9:16', Imagen::aspectRatio('portrait'));
+    assert_eq('16:9', Imagen::aspectRatio('landscape'));
+
+    assert_eq('16:9', Imagen::aspectRatio('21:9'));
+    assert_eq('4:3', Imagen::aspectRatio('8:6'));
+    assert_eq('3:4', Imagen::aspectRatio('6:8'));
+    assert_eq('1:1', Imagen::aspectRatio('2:2'));
+    assert_eq('16:9', Imagen::aspectRatio('0:0'));
+    assert_eq('16:9', Imagen::aspectRatio('not-a-ratio'));
+});
+
+test('buildBody normalizes an invalid ratio at the transport boundary', function () {
+    $body = Imagen::buildBody('A wide landscape', ['aspect_ratio' => '21:9']);
+    assert_eq('16:9', $body['parameters']['aspectRatio']);
+});
+
 test('sampleImageSize keeps transparent decoratives at 1K even when wide', function () {
     assert_eq('1K', Imagen::sampleImageSize('16:9', true));
     assert_eq('1K', Imagen::sampleImageSize('1:1', true));
