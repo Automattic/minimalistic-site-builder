@@ -306,6 +306,25 @@ test('generated seeder sanitizer matches intake sanitizer on adversarial attribu
         '<p>a</ b <script>E()</script></p>',
         '<div><svg><script>E()</script></svg></div>',
         '<xmp><img src=x onerror=E()></xmp>',
+        // A comment ends at -->, at --!>, and immediately for <!--> / <!--->.
+        '<div><!--><script>E()</script></div>',
+        '<div><!---><script>E()</script></div>',
+        '<div><!----><script>E()</script></div>',
+        '<div><!-- c --!><script>E()</script></div>',
+        '<div><!-- c --><script>E()</script></div>',
+        '<div><!-- never closed <script>E()</script>',
+        '<p>a<!-->b</p><a href=javascript:E()>x</a>',
+        '<!-- wp:paragraph --><p>a</p><!-- /wp:paragraph --><!--><img src=x onerror=E()>',
+        // Foreign-content breakout, and raw-text bodies vs tag removal.
+        '<div><svg><p><![CDATA[x><img src=q onerror=E()>]]></svg></div>',
+        '<div><svg><![CDATA[x><img src=q onerror=E()>]]></svg></div>',
+        '<div><svg><![CDATA[x> <img src=q onerror=E()></div>',
+        '<div><svg><div><![CDATA[x><base href="//evil/">]]></svg></div>',
+        '<svg><img src=x onerror=E()><title><b>t</b></title></svg>',
+        '<div><style>a{c:"<!--"}</style><base href="//evil/"></div>',
+        '<div><title><!--</title><embed src=x></div>',
+        '<div><textarea><!--</textarea><base href="//evil/"></div>',
+        '<style>a{c:"<base>"}</style>',
     ];
     foreach ($corpus as $html) {
         assert_eq(

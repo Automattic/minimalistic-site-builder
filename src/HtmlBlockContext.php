@@ -26,12 +26,25 @@ final class HtmlBlockContext
         'template', 'code', 'pre', 'plaintext',
     ];
 
+    /**
+     * HTML tags that end an SVG/MathML subtree wherever they appear inside it,
+     * per the "in foreign content" tree-construction rules.
+     */
+    private const FOREIGN_BREAKOUT = [
+        'b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div',
+        'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head',
+        'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta', 'nobr', 'ol', 'p',
+        'pre', 'ruby', 's', 'small', 'span', 'strong', 'strike', 'sub', 'sup',
+        'table', 'tt', 'u', 'ul', 'var',
+    ];
+
     public static function delimiterView(string $html): string
     {
         $view = $html;
         $length = strlen($html);
         $offset = 0;
         $foreign = [];
+        $memo = [];
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -40,8 +53,7 @@ final class HtmlBlockContext
             }
 
             if (substr($html, $start, 4) === '<!--') {
-                $close = strpos($html, '-->', $start + 4);
-                $end = $close === false ? $length : $close + 3;
+                $end = self::commentEnd($html, $start) ?? $length;
                 $comment = substr($html, $start, $end - $start);
                 if (preg_match('/\A<!--\s*\/?wp:/', $comment) !== 1) {
                     self::mask($view, $start, $end);
@@ -73,7 +85,7 @@ final class HtmlBlockContext
                 // An unclosed inert element must not mask the rest of the
                 // response: hiding every later delimiter turns an ordinary
                 // stray <code> into an unrecoverable document.
-                $end = self::opaqueElementEnd($html, $tag['name'], $end, false);
+                $end = self::opaqueElementEnd($html, $tag['name'], $end, false, $memo);
             }
             self::trackForeign($foreign, $tag);
             self::mask($view, $start, $end);
@@ -204,6 +216,14 @@ final class HtmlBlockContext
                 $out .= substr($html, $keptFrom, $start - $keptFrom);
                 $keptFrom = $tag['end'];
             }
+
+            // A tag-shaped string in a raw-text body is text, not a tag.
+            // Without this skip a `<!--` in a <style> body reads as a comment
+            // start, runs to EOF, and every later <base>/<embed> survives.
+            if (!$tag['closer'] && self::isRawText($tag['name'], $foreign !== [])) {
+                $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                continue;
+            }
             $offset = $tag['end'];
         }
 
@@ -289,11 +309,11 @@ final class HtmlBlockContext
             }
 
             if (substr($html, $start, 4) === '<!--') {
-                $close = strpos($html, '-->', $start + 4);
-                if ($close === false) {
+                $end = self::commentEnd($html, $start);
+                if ($end === null) {
                     return null;
                 }
-                $offset = $close + 3;
+                $offset = $end;
                 continue;
             }
             if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
@@ -579,6 +599,35 @@ final class HtmlBlockContext
     }
 
     /**
+     * End of the comment beginning at $start, or null when it never closes.
+     *
+     * A comment ends three ways, not one: `-->`, `--!>` (the comment-end-bang
+     * state), and immediately for `<!-->` and `<!--->`, which are complete
+     * empty comments. Recognizing only `-->` runs the comment to EOF and every
+     * byte after the real terminator is skipped — past the sanitizer, since
+     * these scans treat a comment as one inert region.
+     */
+    private static function commentEnd(string $html, int $start): ?int
+    {
+        if (substr($html, $start + 4, 1) === '>') {
+            return $start + 5;
+        }
+        if (substr($html, $start + 4, 2) === '->') {
+            return $start + 6;
+        }
+        if (preg_match(
+            '/--!?>/',
+            $html,
+            $close,
+            PREG_OFFSET_CAPTURE,
+            $start + 4,
+        ) !== 1) {
+            return null;
+        }
+        return $close[0][1] + strlen($close[0][0]);
+    }
+
+    /**
      * End of a bogus comment — `<!` that is not a comment or (in foreign
      * content) CDATA, `<?`, and `</` not followed by a name.
      *
@@ -627,12 +676,15 @@ final class HtmlBlockContext
     ): ?int {
         $length = strlen($html);
         if (substr($html, $start, 4) === '<!--') {
-            $close = strpos($html, '-->', $start + 4);
-            return $close === false ? $length : $close + 3;
+            return self::commentEnd($html, $start) ?? $length;
         }
         if ($inForeign && substr($html, $start, 9) === '<![CDATA[') {
             $close = strpos($html, ']]>', $start + 9);
-            return $close === false ? $length : $close + 3;
+            // With no ]]> anywhere, skipping to EOF would hand the rest of the
+            // response past the sanitizer. Fall back to the bogus-comment end.
+            return $close === false
+                ? self::bogusCommentEnd($html, $start)
+                : $close + 3;
         }
         if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
             return self::bogusCommentEnd($html, $start);
@@ -656,6 +708,15 @@ final class HtmlBlockContext
      */
     private static function trackForeign(array &$foreign, array $tag): void
     {
+        // A browser also leaves foreign content on these HTML tags, with no
+        // closer involved. Missing that keeps the scan in foreign mode, where
+        // <![CDATA[ is honored and ]]> skips over live HTML. `font` is
+        // deliberately absent — it breaks out only when it carries
+        // color/face/size, and staying foreign scans more, never less.
+        if ($foreign !== [] && in_array($tag['name'], self::FOREIGN_BREAKOUT, true)) {
+            $foreign = [];
+            return;
+        }
         if ($tag['name'] !== 'svg' && $tag['name'] !== 'math') {
             return;
         }
@@ -694,7 +755,8 @@ final class HtmlBlockContext
         string $html,
         string $name,
         int $contentStart,
-        bool $toEofWhenUnclosed = true
+        bool $toEofWhenUnclosed = true,
+        array &$memo = []
     ): int {
         if ($name === 'plaintext') {
             return strlen($html);
@@ -706,6 +768,7 @@ final class HtmlBlockContext
                 $name,
                 $contentStart,
                 $toEofWhenUnclosed,
+                $memo,
             );
         }
 
@@ -830,8 +893,19 @@ final class HtmlBlockContext
         string $html,
         string $name,
         int $contentStart,
-        bool $toEofWhenUnclosed = true
+        bool $toEofWhenUnclosed = true,
+        array &$memo = []
     ): int {
+        // Without $toEofWhenUnclosed an unclosed child returns its own content
+        // start, so the outer scan resumes just behind it and re-descends into
+        // every deeper opaque element — exponential in the nesting depth.
+        // Memoizing (name, offset) makes each span cost at most one scan.
+        $key = $name . ':' . $contentStart . ':' . ($toEofWhenUnclosed ? '1' : '0');
+        if (isset($memo[$key])) {
+            return $memo[$key];
+        }
+        $memo[$key] = strlen($html);
+
         $length = strlen($html);
         $offset = $contentStart;
         $depth = 1;
@@ -841,7 +915,7 @@ final class HtmlBlockContext
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
             if ($start === false) {
-                return $unclosed;
+                return $memo[$key] = $unclosed;
             }
 
             $specialEnd = self::specialMarkupEnd($html, $start, $foreign !== []);
@@ -860,7 +934,7 @@ final class HtmlBlockContext
                 if ($tag['closer']) {
                     $depth--;
                     if ($depth === 0) {
-                        return $tag['end'];
+                        return $memo[$key] = $tag['end'];
                     }
                 } elseif (!$tag['selfClosing'] || $foreign === []) {
                     $depth++;
@@ -880,6 +954,7 @@ final class HtmlBlockContext
                     $tag['name'],
                     $tag['end'],
                     $toEofWhenUnclosed,
+                    $memo,
                 );
                 continue;
             }
@@ -887,7 +962,7 @@ final class HtmlBlockContext
             $offset = $tag['end'];
         }
 
-        return $unclosed;
+        return $memo[$key] = $unclosed;
     }
 
     /**

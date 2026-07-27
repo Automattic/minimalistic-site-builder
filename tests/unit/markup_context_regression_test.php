@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\HtmlBlockContext;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
@@ -61,6 +62,94 @@ test('html title outside foreign content stays raw text', function () {
         '<!-- wp:html --><title>a <b> b</title><p>After.</p><!-- /wp:html -->'
     );
     assert_contains('<title>a <b> b</title>', $out);
+});
+
+test('an abrupt-closed empty comment does not hide the markup after it', function () {
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><!--><script>alert(1)</script></div><!-- /wp:html -->'
+    );
+    assert_true(!str_contains($out, '<script'), 'script after <!--> removed');
+    assert_true(!str_contains($out, 'alert(1)'), 'script body removed');
+});
+
+test('an abrupt-closed comment spelled with one dash also ends there', function () {
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><!---><img src=x onerror=alert(1)></div><!-- /wp:html -->'
+    );
+    assert_true(!str_contains($out, 'onerror'), 'handler after <!---> removed');
+});
+
+test('a comment closed with --!> does not hide the markup after it', function () {
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><!-- c --!><script>alert(1)</script></div><!-- /wp:html -->'
+    );
+    assert_true(!str_contains($out, 'alert(1)'), 'script after --!> removed');
+});
+
+test('an ordinary comment still ends at its own -->', function () {
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><!-- <script>alert(1)</script> --><p>After.</p></div>'
+        . '<!-- /wp:html -->'
+    );
+    assert_contains('<!-- <script>alert(1)</script> -->', $out);
+    assert_contains('<p>After.</p>', $out);
+});
+
+test('an abrupt-closed comment does not hide a later block delimiter', function () {
+    $out = GeneratedMarkup::normalize(
+        '<!-- wp:paragraph --><p>One.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:html --><div><!--></div><!-- /wp:html -->'
+        . '<!-- wp:paragraph --><p>Two.</p><!-- /wp:paragraph -->',
+        'section-5'
+    );
+    assert_contains('<p>Two.</p>', $out);
+});
+
+test('an html breakout tag leaves foreign content, so CDATA stops being CDATA', function () {
+    // A browser exits SVG/MathML on ~40 HTML start tags. After <svg><p> it is
+    // back in HTML, where <![CDATA[ is a bogus comment ending at the first >.
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><svg><p><![CDATA[x><img src=q onerror=alert(1)>]]>'
+        . '</svg></div><!-- /wp:html -->'
+    );
+    assert_true(!str_contains($out, 'onerror'), 'handler after the breakout tag removed');
+});
+
+test('CDATA with no breakout tag stays CDATA inside foreign content', function () {
+    // The control for the case above: still in SVG, so this really is CDATA
+    // and the img is inert text a browser never runs.
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><svg><![CDATA[x><img src=q onerror=alert(1)>]]>'
+        . '</svg></div><!-- /wp:html -->'
+    );
+    assert_contains('<![CDATA[x><img src=q onerror=alert(1)>]]>', $out);
+});
+
+test('an unterminated CDATA in foreign content does not skip to EOF', function () {
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><svg><![CDATA[x> <img src=q onerror=alert(1)></div>'
+        . '<!-- /wp:html -->'
+    );
+    assert_true(!str_contains($out, 'onerror'), 'handler after an unclosed CDATA removed');
+});
+
+test('a comment in a raw-text body does not stop tag removal', function () {
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><style>a{c:"<!--"}</style>'
+        . '<base href="https://evil.example/"></div><!-- /wp:html -->'
+    );
+    assert_true(!str_contains($out, '<base'), 'base removed despite the comment in the style body');
+    assert_contains('a{c:"<!--"}', $out);
+});
+
+test('nested unclosed opaque elements scan in linear time', function () {
+    // The unclosed-inert mode must not re-scan the tail once per nesting
+    // level: 24 alternating opaque openers took hours before memoization.
+    $html = str_repeat('<pre><code>', 24) . '<!-- wp:paragraph --><p>x</p>';
+    $start = microtime(true);
+    HtmlBlockContext::delimiterView($html);
+    $elapsed = microtime(true) - $start;
+    assert_true($elapsed < 2.0, "delimiterView took {$elapsed}s for " . strlen($html) . ' bytes');
 });
 
 // --- The same boundaries must not hide real block delimiters ----------------

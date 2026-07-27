@@ -494,6 +494,27 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
+         * End of the comment at $start, or null when it never closes.
+         *
+         * A comment ends three ways, not one: `-->`, `--!>`, and immediately
+         * for `<!-->` / `<!--->`, which are complete empty comments. Matching
+         * only `-->` runs the comment to EOF, so every byte after the real
+         * terminator is skipped instead of sanitized.
+         */
+        function {{FN_PREFIX}}_content_comment_end($html, $start) {
+            if (substr($html, $start + 4, 1) === '>') {
+                return $start + 5;
+            }
+            if (substr($html, $start + 4, 2) === '->') {
+                return $start + 6;
+            }
+            if (preg_match('/--!?>/', $html, $close, PREG_OFFSET_CAPTURE, $start + 4) !== 1) {
+                return null;
+            }
+            return $close[0][1] + strlen($close[0][0]);
+        }
+
+        /**
          * End of a bogus comment. It stops at the first `>`; quotes do not
          * protect it, so a quote-aware scan here stretches the inert region
          * over live markup that then never reaches the sanitizer. The end is
@@ -522,12 +543,16 @@ final class ScaffoldPluginStep implements Step
         function {{FN_PREFIX}}_content_special_end($html, $start, $in_foreign = false) {
             $length = strlen($html);
             if (substr($html, $start, 4) === '<!--') {
-                $close = strpos($html, '-->', $start + 4);
-                return $close === false ? $length : $close + 3;
+                $end = {{FN_PREFIX}}_content_comment_end($html, $start);
+                return $end === null ? $length : $end;
             }
             if ($in_foreign && substr($html, $start, 9) === '<![CDATA[') {
                 $close = strpos($html, ']]>', $start + 9);
-                return $close === false ? $length : $close + 3;
+                // With no ]]> anywhere, skipping to EOF would hand the rest of
+                // the markup past the sanitizer. Use the bogus-comment end.
+                return $close === false
+                    ? {{FN_PREFIX}}_content_bogus_comment_end($html, $start)
+                    : $close + 3;
             }
             if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
                 return {{FN_PREFIX}}_content_bogus_comment_end($html, $start);
@@ -547,6 +572,22 @@ final class ScaffoldPluginStep implements Step
          * and a self-closing slash is honored.
          */
         function {{FN_PREFIX}}_content_track_foreign(&$foreign, $tag) {
+            // A browser also leaves foreign content on these HTML tags, with
+            // no closer involved. Missing that keeps the scan in foreign mode,
+            // where <![CDATA[ is honored and ]]> skips over live HTML. `font`
+            // is deliberately absent: it breaks out only with color/face/size,
+            // and staying foreign scans more, never less.
+            $breakout = array(
+                'b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd',
+                'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5',
+                'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta',
+                'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong',
+                'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var',
+            );
+            if ($foreign !== array() && in_array($tag['name'], $breakout, true)) {
+                $foreign = array();
+                return;
+            }
             if ($tag['name'] !== 'svg' && $tag['name'] !== 'math') {
                 return;
             }
@@ -752,6 +793,10 @@ final class ScaffoldPluginStep implements Step
         /** Remove listed tags without touching surrounding text. */
         function {{FN_PREFIX}}_content_remove_tags($html, $names) {
             $targets = array_fill_keys($names, true);
+            $raw = array(
+                'script', 'style', 'textarea', 'title', 'xmp',
+                'iframe', 'noembed', 'noframes', 'noscript',
+            );
             $length = strlen($html);
             $offset = 0;
             $kept_from = 0;
@@ -776,6 +821,17 @@ final class ScaffoldPluginStep implements Step
                 if (isset($targets[$tag['name']])) {
                     $out .= substr($html, $kept_from, $start - $kept_from);
                     $kept_from = $tag['end'];
+                }
+
+                // A tag-shaped string in a raw-text body is text. Without this
+                // skip a `<!--` in a <style> body reads as a comment start,
+                // runs to EOF, and every later <base>/<embed> survives.
+                if (!$tag['closer']
+                    && $foreign === array()
+                    && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
+                ) {
+                    $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
+                    continue;
                 }
                 $offset = $tag['end'];
             }
