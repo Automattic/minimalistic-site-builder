@@ -31,6 +31,7 @@ final class HtmlBlockContext
         $view = $html;
         $length = strlen($html);
         $offset = 0;
+        $foreign = [];
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -49,18 +50,10 @@ final class HtmlBlockContext
                 continue;
             }
 
-            if (substr($html, $start, 9) === '<![CDATA[') {
-                $close = strpos($html, ']]>', $start + 9);
-                $end = $close === false ? $length : $close + 3;
-                self::mask($view, $start, $end);
-                $offset = $end;
-                continue;
-            }
-
-            if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
-                $end = self::declarationEnd($html, $start);
-                self::mask($view, $start, $end);
-                $offset = $end;
+            $specialEnd = self::specialMarkupEnd($html, $start, $foreign !== []);
+            if ($specialEnd !== null) {
+                self::mask($view, $start, $specialEnd);
+                $offset = max($specialEnd, $start + 1);
                 continue;
             }
 
@@ -71,11 +64,18 @@ final class HtmlBlockContext
             }
 
             $end = $tag['end'];
+            // Foreign content holds real child elements, so nothing in an
+            // SVG/MathML subtree is an opaque text region.
             if (!$tag['closer']
+                && $foreign === []
                 && in_array($tag['name'], self::OPAQUE_ELEMENTS, true)
             ) {
-                $end = self::opaqueElementEnd($html, $tag['name'], $end);
+                // An unclosed inert element must not mask the rest of the
+                // response: hiding every later delimiter turns an ordinary
+                // stray <code> into an unrecoverable document.
+                $end = self::opaqueElementEnd($html, $tag['name'], $end, false);
             }
+            self::trackForeign($foreign, $tag);
             self::mask($view, $start, $end);
             $offset = $end;
         }
@@ -117,6 +117,7 @@ final class HtmlBlockContext
         $offset = 0;
         $keptFrom = 0;
         $out = '';
+        $foreign = [];
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -124,9 +125,9 @@ final class HtmlBlockContext
                 break;
             }
 
-            $specialEnd = self::specialMarkupEnd($html, $start);
+            $specialEnd = self::specialMarkupEnd($html, $start, $foreign !== []);
             if ($specialEnd !== null) {
-                $offset = $specialEnd;
+                $offset = max($specialEnd, $start + 1);
                 continue;
             }
 
@@ -138,21 +139,24 @@ final class HtmlBlockContext
 
             if (!$tag['closer'] && array_key_exists($tag['name'], $targets)) {
                 // In HTML, a slash does not self-close these non-void
-                // elements (`<script/>` is still an opening script tag).
-                $end = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                // elements (`<script/>` is still an opening script tag) —
+                // but in foreign content it does, and the element has no
+                // body to remove.
+                $end = $tag['selfClosing'] && $foreign !== []
+                    ? $tag['end']
+                    : self::opaqueElementEnd($html, $tag['name'], $tag['end']);
                 $out .= substr($html, $keptFrom, $start - $keptFrom);
                 $keptFrom = $end;
                 $offset = $end;
                 continue;
             }
 
+            self::trackForeign($foreign, $tag);
+
             // Text inside a non-target raw-text element cannot contain real
             // child elements. Skipping it prevents tag-shaped strings there
             // from being mistaken for sanitizer targets.
-            if (!$tag['closer']
-                && (in_array($tag['name'], self::RAW_TEXT_ELEMENTS, true)
-                    || $tag['name'] === 'plaintext')
-            ) {
+            if (!$tag['closer'] && self::isRawText($tag['name'], $foreign !== [])) {
                 $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
                 continue;
             }
@@ -176,6 +180,7 @@ final class HtmlBlockContext
         $offset = 0;
         $keptFrom = 0;
         $out = '';
+        $foreign = [];
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -183,9 +188,9 @@ final class HtmlBlockContext
                 break;
             }
 
-            $specialEnd = self::specialMarkupEnd($html, $start);
+            $specialEnd = self::specialMarkupEnd($html, $start, $foreign !== []);
             if ($specialEnd !== null) {
-                $offset = $specialEnd;
+                $offset = max($specialEnd, $start + 1);
                 continue;
             }
 
@@ -194,6 +199,7 @@ final class HtmlBlockContext
                 $offset = $start + 1;
                 continue;
             }
+            self::trackForeign($foreign, $tag);
             if (array_key_exists($tag['name'], $targets)) {
                 $out .= substr($html, $keptFrom, $start - $keptFrom);
                 $keptFrom = $tag['end'];
@@ -215,6 +221,7 @@ final class HtmlBlockContext
         $offset = 0;
         $keptFrom = 0;
         $out = '';
+        $foreign = [];
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -222,9 +229,9 @@ final class HtmlBlockContext
                 break;
             }
 
-            $specialEnd = self::specialMarkupEnd($html, $start);
+            $specialEnd = self::specialMarkupEnd($html, $start, $foreign !== []);
             if ($specialEnd !== null) {
-                $offset = $specialEnd;
+                $offset = max($specialEnd, $start + 1);
                 continue;
             }
 
@@ -239,11 +246,12 @@ final class HtmlBlockContext
                 $keptFrom = $tag['end'];
             }
 
-            // Tag-shaped text in raw-text bodies is not a child tag.
-            if (!$tag['closer']
-                && (in_array($tag['name'], self::RAW_TEXT_ELEMENTS, true)
-                    || $tag['name'] === 'plaintext')
-            ) {
+            self::trackForeign($foreign, $tag);
+
+            // Tag-shaped text in raw-text bodies is not a child tag. Inside
+            // foreign content there is no raw text, so those bodies are
+            // scanned and their event handlers still stripped.
+            if (!$tag['closer'] && self::isRawText($tag['name'], $foreign !== [])) {
                 $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
             } else {
                 $offset = $tag['end'];
@@ -269,6 +277,7 @@ final class HtmlBlockContext
         $length = strlen($html);
         $offset = 0;
         $tags = [];
+        $foreign = [];
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -295,13 +304,27 @@ final class HtmlBlockContext
             if ($tag === null || !$tag['valid']) {
                 return null;
             }
-            $tags[] = ['name' => $tag['name'], 'closer' => $tag['closer']];
+            // A slash self-closes a foreign element, so `<path/>` inside an
+            // <svg> leaves nothing open and never needs a closer. In HTML the
+            // same slash is only a parse-error separator (`<span/>` stays
+            // open), so this cannot be applied to the document at large.
+            $selfCloses = $tag['selfClosing']
+                && !$tag['closer']
+                && ($foreign !== []
+                    || $tag['name'] === 'svg'
+                    || $tag['name'] === 'math');
+
+            if (!$selfCloses) {
+                $tags[] = ['name' => $tag['name'], 'closer' => $tag['closer']];
+            }
+            self::trackForeign($foreign, $tag);
             $offset = $tag['end'];
 
             // Raw-text bodies may contain arbitrary text and tag-looking
             // bytes. Skip them as one lexical region, but retain the real
             // opening/closing pair in the wrapper token stream.
             if (!$tag['closer']
+                && $foreign === []
                 && in_array($tag['name'], self::RAW_TEXT_ELEMENTS, true)
             ) {
                 $close = self::rawTextClosingTagAt(
@@ -329,16 +352,23 @@ final class HtmlBlockContext
     }
 
     /**
-     * @return array{name:string,closer:bool,end:int,valid:bool}|null
+     * @return array{name:string,closer:bool,end:int,valid:bool,selfClosing:bool}|null
      */
     private static function tagAt(string $html, int $start): ?array
     {
+        // The name must follow `<` (or `</`) with no space between. Browsers
+        // emit `< b` as text; accepting it here invents a tag whose boundary
+        // runs to the next `>`, swallowing the real markup in between.
+        //
+        // \G anchors the match at $start so the scan does not copy the rest of
+        // the document at every `<`.
         if (preg_match(
-            '/\A<[\x09\x0A\x0C\x0D\x20]*(\/?)[\x09\x0A\x0C\x0D\x20]*'
-                . '([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)'
+            '/\G<(\/?)([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)'
                 . '(?=[\x09\x0A\x0C\x0D\x20\/>])/',
-            substr($html, $start),
+            $html,
             $tag,
+            0,
+            $start,
         ) !== 1) {
             return null;
         }
@@ -349,10 +379,11 @@ final class HtmlBlockContext
             $tag[1] === '/',
         );
         return [
-            'name'   => strtolower($tag[2]),
-            'closer' => $tag[1] === '/',
-            'end'    => $boundary['end'],
-            'valid'  => $boundary['valid']
+            'name'        => strtolower($tag[2]),
+            'closer'      => $tag[1] === '/',
+            'end'         => $boundary['end'],
+            'selfClosing' => $boundary['selfClosing'],
+            'valid'       => $boundary['valid']
                 && preg_match('/\A[a-zA-Z][a-zA-Z0-9:-]*\z/D', $tag[2]) === 1,
         ];
     }
@@ -360,7 +391,7 @@ final class HtmlBlockContext
     /**
      * Locate a tag's browser-visible end with attribute-state-aware quoting.
      *
-     * @return array{end:int,valid:bool}
+     * @return array{end:int,valid:bool,selfClosing:bool}
      */
     private static function tagBoundary(string $html, int $offset, bool $closer): array
     {
@@ -384,7 +415,11 @@ final class HtmlBlockContext
                 if (self::isSpaceByte($char)) {
                     $state = 'before_attribute';
                 } elseif ($char === '>') {
-                    return ['end' => $offset + 1, 'valid' => $valid];
+                    return [
+                        'end' => $offset + 1,
+                        'valid' => $valid,
+                        'selfClosing' => $state === 'self_closing',
+                    ];
                 } elseif (str_contains("\"'<=`", $char)) {
                     // HTML keeps these bytes in the unquoted value (with a
                     // parse error); critically, a quote does not open one.
@@ -406,7 +441,11 @@ final class HtmlBlockContext
                     continue;
                 }
                 if ($char === '>') {
-                    return ['end' => $offset + 1, 'valid' => false];
+                    return [
+                        'end' => $offset + 1,
+                        'valid' => false,
+                        'selfClosing' => false,
+                    ];
                 }
                 $state = 'unquoted_value';
                 continue;
@@ -418,7 +457,11 @@ final class HtmlBlockContext
                 } elseif ($char === '=') {
                     $state = 'before_value';
                 } elseif ($char === '>') {
-                    return ['end' => $offset + 1, 'valid' => $valid];
+                    return [
+                        'end' => $offset + 1,
+                        'valid' => $valid,
+                        'selfClosing' => $state === 'self_closing',
+                    ];
                 } elseif ($char === '/') {
                     $state = 'self_closing';
                 } elseif (str_contains("\"'<", $char)) {
@@ -439,7 +482,11 @@ final class HtmlBlockContext
                     continue;
                 }
                 if ($char === '>') {
-                    return ['end' => $offset + 1, 'valid' => $valid];
+                    return [
+                        'end' => $offset + 1,
+                        'valid' => $valid,
+                        'selfClosing' => $state === 'self_closing',
+                    ];
                 }
                 if ($char === '/') {
                     $state = 'self_closing';
@@ -462,7 +509,11 @@ final class HtmlBlockContext
                     continue;
                 }
                 if ($char === '>') {
-                    return ['end' => $offset + 1, 'valid' => $valid];
+                    return [
+                        'end' => $offset + 1,
+                        'valid' => $valid,
+                        'selfClosing' => $state === 'self_closing',
+                    ];
                 }
                 $valid = false;
                 $state = 'before_attribute';
@@ -471,7 +522,11 @@ final class HtmlBlockContext
 
             if ($state === 'self_closing') {
                 if ($char === '>') {
-                    return ['end' => $offset + 1, 'valid' => $valid];
+                    return [
+                        'end' => $offset + 1,
+                        'valid' => $valid,
+                        'selfClosing' => $state === 'self_closing',
+                    ];
                 }
                 $valid = false;
                 $state = 'before_attribute';
@@ -484,7 +539,11 @@ final class HtmlBlockContext
                 continue;
             }
             if ($char === '>') {
-                return ['end' => $offset + 1, 'valid' => $valid];
+                return [
+                    'end' => $offset + 1,
+                    'valid' => $valid,
+                    'selfClosing' => $state === 'self_closing',
+                ];
             }
             if ($char === '/') {
                 $state = 'self_closing';
@@ -507,7 +566,7 @@ final class HtmlBlockContext
             }
         }
 
-        return ['end' => $length, 'valid' => false];
+        return ['end' => $length, 'valid' => false, 'selfClosing' => false];
     }
 
     private static function isSpaceByte(string $char): bool
@@ -519,55 +578,135 @@ final class HtmlBlockContext
             || $char === "\r";
     }
 
-    /** Quote-aware conservative end for declarations/processing instructions. */
-    private static function declarationEnd(string $html, int $start): int
+    /**
+     * End of a bogus comment — `<!` that is not a comment or (in foreign
+     * content) CDATA, `<?`, and `</` not followed by a name.
+     *
+     * A bogus comment ends at the first `>`; quotes do not protect it, and
+     * neither does a quoted `>` in a DOCTYPE identifier. Being quote-aware
+     * here stretches the inert region over live markup that then never
+     * reaches the sanitizer.
+     *
+     * The end is clamped to the next block delimiter. An unterminated `<!` in
+     * model preamble prose would otherwise hide the whole document, and this
+     * scanner exists to find that document; a bogus comment that reaches a
+     * delimiter has already left anything a browser would treat as comment
+     * text far behind.
+     */
+    private static function bogusCommentEnd(string $html, int $start): int
     {
         $length = strlen($html);
-        $quote = null;
-        for ($i = $start + 2; $i < $length; $i++) {
-            $char = $html[$i];
-            if ($quote !== null) {
-                if ($char === $quote) {
-                    $quote = null;
-                }
-            } elseif ($char === '"' || $char === "'") {
-                $quote = $char;
-            } elseif ($char === '>') {
-                return $i + 1;
-            }
+        $close = strpos($html, '>', $start + 2);
+        $end = $close === false ? $length : $close + 1;
+
+        if (preg_match(
+            '/<!--\s*\/?wp:/',
+            $html,
+            $delimiter,
+            PREG_OFFSET_CAPTURE,
+            $start + 2,
+        ) === 1 && $delimiter[0][1] < $end) {
+            return $delimiter[0][1];
         }
-        return $length;
+        return $end;
     }
 
     /**
      * End of a comment/declaration beginning at $start, or null for a tag or
      * ordinary less-than character.
+     *
+     * `<![CDATA[` is only CDATA inside an SVG/MathML subtree. In HTML content
+     * a browser reads it as a bogus comment ending at the first `>`, so
+     * honoring `]]>` there skips over live markup — and when no `]]>` exists
+     * at all, over the entire rest of the response.
      */
-    private static function specialMarkupEnd(string $html, int $start): ?int
-    {
+    private static function specialMarkupEnd(
+        string $html,
+        int $start,
+        bool $inForeign = false
+    ): ?int {
         $length = strlen($html);
         if (substr($html, $start, 4) === '<!--') {
             $close = strpos($html, '-->', $start + 4);
             return $close === false ? $length : $close + 3;
         }
-        if (substr($html, $start, 9) === '<![CDATA[') {
+        if ($inForeign && substr($html, $start, 9) === '<![CDATA[') {
             $close = strpos($html, ']]>', $start + 9);
             return $close === false ? $length : $close + 3;
         }
         if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
-            return self::declarationEnd($html, $start);
+            return self::bogusCommentEnd($html, $start);
+        }
+        // `</` with no name is a bogus comment too, not an end tag.
+        if (substr($html, $start, 2) === '</'
+            && preg_match('/\A<\/[a-zA-Z]/', substr($html, $start, 3)) !== 1
+        ) {
+            return self::bogusCommentEnd($html, $start);
         }
         return null;
     }
 
-    private static function opaqueElementEnd(string $html, string $name, int $contentStart): int
+    /**
+     * Track the SVG/MathML subtrees a scan is inside. HTML raw-text rules and
+     * CDATA both hinge on this: inside foreign content `<title>` holds real
+     * elements rather than text, and a self-closing slash is honored.
+     *
+     * @param list<string> $foreign
+     * @param array{name:string,closer:bool,selfClosing:bool} $tag
+     */
+    private static function trackForeign(array &$foreign, array $tag): void
     {
+        if ($tag['name'] !== 'svg' && $tag['name'] !== 'math') {
+            return;
+        }
+        if (!$tag['closer']) {
+            if (!$tag['selfClosing']) {
+                $foreign[] = $tag['name'];
+            }
+            return;
+        }
+        for ($i = count($foreign) - 1; $i >= 0; $i--) {
+            if ($foreign[$i] === $tag['name']) {
+                array_splice($foreign, $i);
+                return;
+            }
+        }
+    }
+
+    /** Whether an element's body is text rather than markup at this position. */
+    private static function isRawText(string $name, bool $inForeign): bool
+    {
+        if ($inForeign) {
+            return false;
+        }
+        return in_array($name, self::RAW_TEXT_ELEMENTS, true)
+            || $name === 'plaintext';
+    }
+
+    /**
+     * @param bool $toEofWhenUnclosed End an unclosed inert element at EOF
+     *        (safe when removing it) rather than at its start tag (safe when
+     *        masking, where over-reach hides the rest of the document).
+     *        Genuine raw text always runs to EOF — that is what a browser
+     *        does with an unclosed <script> or <title>.
+     */
+    private static function opaqueElementEnd(
+        string $html,
+        string $name,
+        int $contentStart,
+        bool $toEofWhenUnclosed = true
+    ): int {
         if ($name === 'plaintext') {
             return strlen($html);
         }
 
         if (!in_array($name, self::RAW_TEXT_ELEMENTS, true)) {
-            return self::nestedOpaqueElementEnd($html, $name, $contentStart);
+            return self::nestedOpaqueElementEnd(
+                $html,
+                $name,
+                $contentStart,
+                $toEofWhenUnclosed,
+            );
         }
 
         $tag = self::rawTextClosingTagAt($html, $name, $contentStart);
@@ -690,21 +829,24 @@ final class HtmlBlockContext
     private static function nestedOpaqueElementEnd(
         string $html,
         string $name,
-        int $contentStart
+        int $contentStart,
+        bool $toEofWhenUnclosed = true
     ): int {
         $length = strlen($html);
         $offset = $contentStart;
         $depth = 1;
+        $foreign = [];
+        $unclosed = $toEofWhenUnclosed ? $length : $contentStart;
 
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
             if ($start === false) {
-                return $length;
+                return $unclosed;
             }
 
-            $specialEnd = self::specialMarkupEnd($html, $start);
+            $specialEnd = self::specialMarkupEnd($html, $start, $foreign !== []);
             if ($specialEnd !== null) {
-                $offset = $specialEnd;
+                $offset = max($specialEnd, $start + 1);
                 continue;
             }
 
@@ -720,31 +862,52 @@ final class HtmlBlockContext
                     if ($depth === 0) {
                         return $tag['end'];
                     }
-                } else {
+                } elseif (!$tag['selfClosing'] || $foreign === []) {
                     $depth++;
                 }
+                self::trackForeign($foreign, $tag);
                 $offset = $tag['end'];
                 continue;
             }
 
+            self::trackForeign($foreign, $tag);
             if (!$tag['closer']
+                && $foreign === []
                 && in_array($tag['name'], self::OPAQUE_ELEMENTS, true)
             ) {
-                $offset = self::opaqueElementEnd($html, $tag['name'], $tag['end']);
+                $offset = self::opaqueElementEnd(
+                    $html,
+                    $tag['name'],
+                    $tag['end'],
+                    $toEofWhenUnclosed,
+                );
                 continue;
             }
 
             $offset = $tag['end'];
         }
 
-        return $length;
+        return $unclosed;
     }
 
-    /** Replace a range with spaces while retaining CR/LF and byte offsets. */
+    /**
+     * Replace a range with spaces while retaining CR/LF and byte offsets.
+     *
+     * Callers address the original source by offset, so the substitution has
+     * to be length-preserving even when PCRE errors: casting a null result to
+     * '' would shorten the view and desynchronize every later offset.
+     */
     private static function mask(string &$view, int $start, int $end): void
     {
         $source = substr($view, $start, $end - $start);
-        $masked = (string) preg_replace('/[^\r\n]/', ' ', $source);
+        $masked = preg_replace('/[^\r\n]/', ' ', $source);
+        if ($masked === null || strlen($masked) !== strlen($source)) {
+            $masked = '';
+            foreach (str_split($source === '' ? ' ' : $source) as $byte) {
+                $masked .= ($byte === "\r" || $byte === "\n") ? $byte : ' ';
+            }
+            $masked = substr($masked, 0, strlen($source));
+        }
         $view = substr_replace($view, $masked, $start, $end - $start);
     }
 }

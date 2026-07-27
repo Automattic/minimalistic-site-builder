@@ -285,6 +285,27 @@ test('generated seeder sanitizer matches intake sanitizer on adversarial attribu
         '<a href="&amp;#106;avascript:x">one decode only</a>',
         '<!-- href="javascript:x" --> prose href="javascript:x"',
         '<script><!--<script></script><!-- wp:paragraph --><p>Fake</p><!-- /wp:paragraph --></script><p>After</p>',
+        // Tokenizer boundaries. Each of these is inert in a browser only if
+        // both copies agree on where the tag, the bogus comment, the CDATA,
+        // and the raw-text body start and end.
+        '<p>a < b <script>E()</script></p>',
+        '<p>x < y <base href="https://evil.example/">z</p>',
+        '<div><![CDATA[><script>E()</script>]]></div>',
+        '<div><![CDATA[x> <img src=x onerror=E()></div>',
+        '<div><![CDATA[ never closed <img src=x onerror=E()>',
+        '<div><! " ><img src=x onerror=E()> " ></div>',
+        '<div><!bogus <img src=x onerror=E()>',
+        '<svg><title><img src=x onerror=E()></title></svg>',
+        '<svg><style><img src=x onerror=E()></style></svg>',
+        '<svg><foreignObject><iframe srcdoc="&lt;script&gt;E()&lt;/script&gt;"></iframe></foreignObject></svg>',
+        '<svg/><title>a <b> b</title><img src=x onerror=E()>',
+        '<svg><![CDATA[<img src=x onerror=E()>]]></svg>',
+        '<math><mtext><img src=x onerror=E()></mtext></math>',
+        '<title>a <b> b</title><img src=x onerror=E()>',
+        '</ b ><script>E()</script>',
+        '<p>a</ b <script>E()</script></p>',
+        '<div><svg><script>E()</script></svg></div>',
+        '<xmp><img src=x onerror=E()></xmp>',
     ];
     foreach ($corpus as $html) {
         assert_eq(

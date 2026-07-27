@@ -18,12 +18,35 @@ test('HTML block context masks inert examples while preserving offsets', functio
 test('HTML block context masks comments declarations and tag attributes', function () {
     $fake = '<!-- wp:paragraph --><p>Fake</p><!-- /wp:paragraph -->';
     $html = "<!-- example {$fake} -->"
-        . "<![CDATA[{$fake}]]>"
         . "<div data-example=\"{$fake}\"></div>";
     $view = HtmlBlockContext::delimiterView($html);
 
     assert_eq(strlen($html), strlen($view));
-    assert_eq(5, count(HtmlBlockContext::hiddenDelimiterOffsets($html, $view)));
+    assert_eq(3, count(HtmlBlockContext::hiddenDelimiterOffsets($html, $view)));
+    assert_true(!str_contains($view, '<!-- wp:paragraph -->'));
+});
+
+test('HTML block context reads CDATA as a bogus comment outside foreign content', function () {
+    // A browser only treats <![CDATA[ as CDATA inside SVG/MathML. In HTML it
+    // is a bogus comment, and honoring ]]> there skips live markup — the whole
+    // rest of the response when no ]]> exists. Masking stops at the delimiter
+    // rather than running to the bogus comment's `>` so an unterminated `<!`
+    // in model preamble cannot hide the document this scanner has to find.
+    $fake = '<!-- wp:paragraph --><p>Fake</p><!-- /wp:paragraph -->';
+    $html = "<![CDATA[{$fake}]]>";
+    $view = HtmlBlockContext::delimiterView($html);
+
+    assert_eq(strlen($html), strlen($view));
+    assert_eq([], HtmlBlockContext::hiddenDelimiterOffsets($html, $view));
+});
+
+test('HTML block context masks CDATA inside foreign content', function () {
+    $fake = '<!-- wp:paragraph --><p>Fake</p><!-- /wp:paragraph -->';
+    $html = "<svg><![CDATA[{$fake}]]></svg>";
+    $view = HtmlBlockContext::delimiterView($html);
+
+    assert_eq(strlen($html), strlen($view));
+    assert_eq(2, count(HtmlBlockContext::hiddenDelimiterOffsets($html, $view)));
     assert_true(!str_contains($view, '<!-- wp:paragraph -->'));
 });
 

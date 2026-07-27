@@ -131,9 +131,11 @@ final class MarkupSanitizer
      */
     private static function attributes(string $tag): array
     {
+        // The name follows `<` with no space, matching HtmlBlockContext's tag
+        // boundary. The two must agree on where attributes begin.
         if (preg_match(
-            '/\A<[\x09\x0A\x0C\x0D\x20]*[a-zA-Z]'
-                . '[^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
+            '/\A<[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*'
+                . '(?=[\x09\x0A\x0C\x0D\x20\/>])/',
             $tag,
             $opening,
         ) !== 1) {
@@ -355,7 +357,10 @@ final class MarkupSanitizer
     {
         // PHP requires semicolons on numeric references; HTML does not. Decode
         // the ASCII subset explicitly first, then named/terminated references.
-        $decoded = (string) preg_replace_callback(
+        // Every step fails closed: casting a PCRE error to '' would report an
+        // empty scheme and keep the URL, so the one check standing between a
+        // javascript: href and the visitor would silently pass it through.
+        $decoded = preg_replace_callback(
             '/&#(?:(?:x|X)([0-9a-fA-F]+)|([0-9]+));?/',
             static function (array $match): string {
                 $hex = ($match[1] ?? '') !== '';
@@ -374,13 +379,19 @@ final class MarkupSanitizer
             },
             $value,
         );
+        if ($decoded === null) {
+            return true;
+        }
         $decoded = html_entity_decode(
             $decoded,
             ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
             'UTF-8',
         );
-        $decoded = (string) preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
-        return preg_match('/\A(?:javascript|vbscript|data):/i', $decoded) === 1;
+        $stripped = preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
+        if ($stripped === null) {
+            return true;
+        }
+        return preg_match('/\A(?:javascript|vbscript|data):/i', $stripped) !== 0;
     }
 
     private static function isSpaceByte(string $char): bool

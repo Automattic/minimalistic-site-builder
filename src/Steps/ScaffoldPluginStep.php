@@ -315,7 +315,8 @@ final class ScaffoldPluginStep implements Step
         }
 
         /** Return the byte after a tag's attribute-state-aware closing `>`. */
-        function {{FN_PREFIX}}_content_tag_end($html, $start) {
+        function {{FN_PREFIX}}_content_tag_end($html, $start, &$self_closing = null) {
+            $self_closing = false;
             $length = strlen($html);
             if (preg_match(
                 '/\A<[\x09\x0A\x0C\x0D\x20]*\/?[\x09\x0A\x0C\x0D\x20]*[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
@@ -360,6 +361,7 @@ final class ScaffoldPluginStep implements Step
                     if ($space) {
                         $state = 'before_attribute';
                     } elseif ($char === '>') {
+                        $self_closing = ($state === 'self_closing');
                         return $offset + 1;
                     }
                     $offset++;
@@ -378,6 +380,7 @@ final class ScaffoldPluginStep implements Step
                         continue;
                     }
                     if ($char === '>') {
+                        $self_closing = ($state === 'self_closing');
                         return $offset + 1;
                     }
                     $state = 'unquoted_value';
@@ -390,6 +393,7 @@ final class ScaffoldPluginStep implements Step
                     } elseif ($char === '=') {
                         $state = 'before_value';
                     } elseif ($char === '>') {
+                        $self_closing = ($state === 'self_closing');
                         return $offset + 1;
                     } elseif ($char === '/') {
                         $state = 'self_closing';
@@ -409,6 +413,7 @@ final class ScaffoldPluginStep implements Step
                         continue;
                     }
                     if ($char === '>') {
+                        $self_closing = ($state === 'self_closing');
                         return $offset + 1;
                     }
                     if ($char === '/') {
@@ -432,6 +437,7 @@ final class ScaffoldPluginStep implements Step
                         continue;
                     }
                     if ($char === '>') {
+                        $self_closing = ($state === 'self_closing');
                         return $offset + 1;
                     }
                     $state = 'before_attribute';
@@ -440,6 +446,7 @@ final class ScaffoldPluginStep implements Step
 
                 if ($state === 'self_closing') {
                     if ($char === '>') {
+                        $self_closing = ($state === 'self_closing');
                         return $offset + 1;
                     }
                     $state = 'before_attribute';
@@ -451,7 +458,8 @@ final class ScaffoldPluginStep implements Step
                     continue;
                 }
                 if ($char === '>') {
-                    return $offset + 1;
+                        $self_closing = ($state === 'self_closing');
+                        return $offset + 1;
                 }
                 if ($char === '/') {
                     $state = 'self_closing';
@@ -469,35 +477,91 @@ final class ScaffoldPluginStep implements Step
         /** Parse one tag at an exact less-than offset, or return null. */
         function {{FN_PREFIX}}_content_tag_at($html, $start) {
             if (preg_match(
-                '/\A<[\x09\x0A\x0C\x0D\x20]*(\/?)[\x09\x0A\x0C\x0D\x20]*([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)(?=[\x09\x0A\x0C\x0D\x20\/>])/',
+                '/\A<(\/?)([a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*)(?=[\x09\x0A\x0C\x0D\x20\/>])/',
                 substr($html, $start),
                 $tag
             ) !== 1) {
                 return null;
             }
-            $end = {{FN_PREFIX}}_content_tag_end($html, $start);
+            $self_closing = false;
+            $end = {{FN_PREFIX}}_content_tag_end($html, $start, $self_closing);
             return array(
                 'name' => strtolower($tag[2]),
                 'closer' => $tag[1] === '/',
                 'end' => $end,
+                'self_closing' => $self_closing,
             );
         }
 
-        /** End of a comment/declaration at an exact offset, or null. */
-        function {{FN_PREFIX}}_content_special_end($html, $start) {
+        /**
+         * End of a bogus comment. It stops at the first `>`; quotes do not
+         * protect it, so a quote-aware scan here stretches the inert region
+         * over live markup that then never reaches the sanitizer. The end is
+         * clamped to the next block delimiter so an unterminated `<!` cannot
+         * hide the rest of the document.
+         */
+        function {{FN_PREFIX}}_content_bogus_comment_end($html, $start) {
+            $length = strlen($html);
+            $close = strpos($html, '>', $start + 2);
+            $end = $close === false ? $length : $close + 1;
+            if (preg_match('/<!--\s*\/?wp:/', $html, $marker, PREG_OFFSET_CAPTURE, $start + 2) === 1
+                && $marker[0][1] < $end
+            ) {
+                return $marker[0][1];
+            }
+            return $end;
+        }
+
+        /**
+         * End of a comment/declaration at an exact offset, or null.
+         *
+         * `<![CDATA[` is only CDATA inside SVG/MathML. In HTML content a
+         * browser reads it as a bogus comment, so honoring `]]>` there skips
+         * live markup — everything that follows when no `]]>` exists.
+         */
+        function {{FN_PREFIX}}_content_special_end($html, $start, $in_foreign = false) {
             $length = strlen($html);
             if (substr($html, $start, 4) === '<!--') {
                 $close = strpos($html, '-->', $start + 4);
                 return $close === false ? $length : $close + 3;
             }
-            if (substr($html, $start, 9) === '<![CDATA[') {
+            if ($in_foreign && substr($html, $start, 9) === '<![CDATA[') {
                 $close = strpos($html, ']]>', $start + 9);
                 return $close === false ? $length : $close + 3;
             }
             if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
-                return {{FN_PREFIX}}_content_tag_end($html, $start);
+                return {{FN_PREFIX}}_content_bogus_comment_end($html, $start);
+            }
+            // `</` with no name is a bogus comment too, not an end tag.
+            if (substr($html, $start, 2) === '</'
+                && preg_match('/\A<\/[a-zA-Z]/', substr($html, $start, 3)) !== 1
+            ) {
+                return {{FN_PREFIX}}_content_bogus_comment_end($html, $start);
             }
             return null;
+        }
+
+        /**
+         * Track the SVG/MathML subtrees a scan is inside. Inside foreign
+         * content `<title>` and friends hold real elements rather than text,
+         * and a self-closing slash is honored.
+         */
+        function {{FN_PREFIX}}_content_track_foreign(&$foreign, $tag) {
+            if ($tag['name'] !== 'svg' && $tag['name'] !== 'math') {
+                return;
+            }
+            if (!$tag['closer']) {
+                if (empty($tag['self_closing'])) {
+                    $foreign[] = $tag['name'];
+                }
+                return;
+            }
+            for ($i = count($foreign) - 1; $i >= 0; $i--) {
+                if ($foreign[$i] === $tag['name']) {
+                    array_splice($foreign, $i);
+                    return;
+                }
+            }
         }
 
         /** Whether an offset begins a state-changing script keyword. */
@@ -592,14 +656,15 @@ final class ScaffoldPluginStep implements Step
             );
             $offset = $content_start;
             $depth = 1;
+            $foreign = array();
             while ($offset < $length) {
                 $start = strpos($html, '<', $offset);
                 if ($start === false) {
                     return $length;
                 }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
                 if ($special_end !== null) {
-                    $offset = $special_end;
+                    $offset = max($special_end, $start + 1);
                     continue;
                 }
                 $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
@@ -613,13 +678,18 @@ final class ScaffoldPluginStep implements Step
                         if ($depth === 0) {
                             return $tag['end'];
                         }
-                    } else {
+                    } elseif (empty($tag['self_closing']) || $foreign === array()) {
                         $depth++;
                     }
+                    {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
                     $offset = $tag['end'];
                     continue;
                 }
-                if (!$tag['closer'] && in_array($tag['name'], $opaque, true)) {
+                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
+                if (!$tag['closer']
+                    && $foreign === array()
+                    && in_array($tag['name'], $opaque, true)
+                ) {
                     $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
                     continue;
                 }
@@ -639,14 +709,15 @@ final class ScaffoldPluginStep implements Step
             $offset = 0;
             $kept_from = 0;
             $out = '';
+            $foreign = array();
             while ($offset < $length) {
                 $start = strpos($html, '<', $offset);
                 if ($start === false) {
                     break;
                 }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
                 if ($special_end !== null) {
-                    $offset = $special_end;
+                    $offset = max($special_end, $start + 1);
                     continue;
                 }
                 $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
@@ -655,14 +726,19 @@ final class ScaffoldPluginStep implements Step
                     continue;
                 }
                 if (!$tag['closer'] && isset($targets[$tag['name']])) {
-                    // A slash does not self-close these non-void HTML elements.
-                    $end = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
+                    // A slash does not self-close these non-void HTML elements,
+                    // but in foreign content it does and there is no body.
+                    $end = (!empty($tag['self_closing']) && $foreign !== array())
+                        ? $tag['end']
+                        : {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
                     $out .= substr($html, $kept_from, $start - $kept_from);
                     $kept_from = $end;
                     $offset = $end;
                     continue;
                 }
+                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
                 if (!$tag['closer']
+                    && $foreign === array()
                     && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
                 ) {
                     $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
@@ -680,14 +756,15 @@ final class ScaffoldPluginStep implements Step
             $offset = 0;
             $kept_from = 0;
             $out = '';
+            $foreign = array();
             while ($offset < $length) {
                 $start = strpos($html, '<', $offset);
                 if ($start === false) {
                     break;
                 }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
                 if ($special_end !== null) {
-                    $offset = $special_end;
+                    $offset = max($special_end, $start + 1);
                     continue;
                 }
                 $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
@@ -695,6 +772,7 @@ final class ScaffoldPluginStep implements Step
                     $offset = $start + 1;
                     continue;
                 }
+                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
                 if (isset($targets[$tag['name']])) {
                     $out .= substr($html, $kept_from, $start - $kept_from);
                     $kept_from = $tag['end'];
@@ -714,14 +792,15 @@ final class ScaffoldPluginStep implements Step
             $offset = 0;
             $kept_from = 0;
             $out = '';
+            $foreign = array();
             while ($offset < $length) {
                 $start = strpos($html, '<', $offset);
                 if ($start === false) {
                     break;
                 }
-                $special_end = {{FN_PREFIX}}_content_special_end($html, $start);
+                $special_end = {{FN_PREFIX}}_content_special_end($html, $start, $foreign !== array());
                 if ($special_end !== null) {
-                    $offset = $special_end;
+                    $offset = max($special_end, $start + 1);
                     continue;
                 }
                 $tag = {{FN_PREFIX}}_content_tag_at($html, $start);
@@ -734,7 +813,11 @@ final class ScaffoldPluginStep implements Step
                     $out .= $rewrite(substr($html, $start, $tag['end'] - $start));
                     $kept_from = $tag['end'];
                 }
+                {{FN_PREFIX}}_content_track_foreign($foreign, $tag);
+                // Inside foreign content there is no raw text, so those
+                // bodies are scanned and their event handlers still stripped.
                 if (!$tag['closer']
+                    && $foreign === array()
                     && (in_array($tag['name'], $raw, true) || $tag['name'] === 'plaintext')
                 ) {
                     $offset = {{FN_PREFIX}}_content_opaque_end($html, $tag['name'], $tag['end']);
@@ -759,7 +842,7 @@ final class ScaffoldPluginStep implements Step
          */
         function {{FN_PREFIX}}_content_attributes($tag) {
             if (preg_match(
-                '/\A<[\x09\x0A\x0C\x0D\x20]*[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
+                '/\A<[a-zA-Z][^\x09\x0A\x0C\x0D\x20\/>]*(?=[\x09\x0A\x0C\x0D\x20\/>])/',
                 $tag,
                 $opening
             ) !== 1) {
@@ -988,8 +1071,10 @@ final class ScaffoldPluginStep implements Step
         }
 
         /** Whether an attribute value resolves to an executable URL scheme. */
+        // Fails closed at every step: casting a PCRE error to '' would report
+        // an empty scheme and keep a javascript: URL.
         function {{FN_PREFIX}}_content_has_executable_scheme($value) {
-            $decoded = (string) preg_replace_callback(
+            $decoded = preg_replace_callback(
                 '/&#(?:(?:x|X)([0-9a-fA-F]+)|([0-9]+));?/',
                 function ($match) {
                     $hex = isset($match[1]) && $match[1] !== '';
@@ -1010,13 +1095,19 @@ final class ScaffoldPluginStep implements Step
                 },
                 $value
             );
+            if ($decoded === null) {
+                return true;
+            }
             $decoded = html_entity_decode(
                 $decoded,
                 ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
                 'UTF-8'
             );
-            $decoded = (string) preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
-            return preg_match('/\A(?:javascript|vbscript|data):/i', $decoded) === 1;
+            $stripped = preg_replace('/[\x00-\x20\x7F]+/', '', $decoded);
+            if ($stripped === null) {
+                return true;
+            }
+            return preg_match('/\A(?:javascript|vbscript|data):/i', $stripped) !== 0;
         }
 
         /** Strip active attributes from one opening tag without reserializing it. */
