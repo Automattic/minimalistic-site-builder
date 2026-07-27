@@ -89,13 +89,13 @@ test('JsonBatchRecovery retries multiple malformed siblings together', function 
                 // quotes now decode on their own.
                 'home'    => ['text' => '{"sections":[}'],
                 'theme'   => ['text' => '{"ok":"theme"}'],
-                'contact' => ['text' => '{"title":"Reservations" "sections":[]}'],
+                'contact' => ['text' => '{"sections":["Hero" "Menu","About"]}'],
             ];
         }
 
         return [
             'home'    => ['text' => '{"ok":"home"}'],
-            'contact' => ['text' => '{"ok":"contact"}'],
+            'contact' => ['text' => '{"sections":["Hero","Menu","About"]}'],
         ];
     };
 
@@ -108,7 +108,7 @@ test('JsonBatchRecovery retries multiple malformed siblings together', function 
     );
     assert_eq('home', $out['home']['ok']);
     assert_eq('theme', $out['theme']['ok']);
-    assert_eq('contact', $out['contact']['ok']);
+    assert_eq(['Hero', 'Menu', 'About'], $out['contact']['sections']);
 });
 
 test('JsonBatchRecovery reports a concise diagnostic when the retry is still malformed', function () {

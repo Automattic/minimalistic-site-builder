@@ -49,21 +49,27 @@ test('decodeJson returns null for unrecoverable text', function () {
     assert_true(AnthropicClient::decodeJson('not json at all') === null, 'null on garbage');
 });
 
-test('decodeJsonResult reports the observed missing-separator failure', function () {
-    $result = AnthropicClient::decodeJsonResult('{"title":"Reservations" "sections":[]}');
-
-    assert_true($result['data'] === null, 'missing comma is not guessed at locally');
-    assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained for repair');
+test('decodeJsonResult leaves missing separators for model-driven repair', function () {
+    $cases = [
+        '{"title":"Reservations" "sections":[]}',
+        '{"sections":["Hero" "Menu","About"]}',
+        '{"sections":["Hero" true,"About"]}',
+    ];
+    foreach ($cases as $raw) {
+        $result = AnthropicClient::decodeJsonResult($raw);
+        assert_true($result['data'] === null, 'missing separator is not guessed at locally');
+        assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained for repair');
+    }
 });
 
 test('decodeJson escapes unescaped quotes inside string values', function () {
     // The model writes quoted phrases in prose without escaping them. Escaping
     // recovers the value verbatim rather than spending an LLM repair round-trip.
     $data = AnthropicClient::decodeJson('{"content_notes":"Headline "Reserve Now" in gold"}');
-    assert_eq('Headline "Reserve Now" in gold', $data['content_notes']);
+    assert_eq(['content_notes' => 'Headline "Reserve Now" in gold'], $data);
 
     $valid = AnthropicClient::decodeJson('{"content_notes":"Headline \\"Reserve Now\\" in gold"}');
-    assert_eq('Headline "Reserve Now" in gold', $valid['content_notes']);
+    assert_eq(['content_notes' => 'Headline "Reserve Now" in gold'], $valid);
 });
 
 test('decodeJson recovers the observed page-plan payload with unescaped quotes', function () {
@@ -90,29 +96,64 @@ test('quote escaping leaves valid JSON byte-identical', function () {
     assert_eq('trailing:', $data['e']);
 });
 
-test('quote escaping does not rescue a missing separator', function () {
-    // A quote followed by another quote is not a literal, so escaping cannot
-    // turn this into valid JSON — it stays a repair-worthy failure.
-    $result = AnthropicClient::decodeJsonResult('{"title":"Reservations" "sections":[]}');
-    assert_true($result['data'] === null, 'missing comma is still not guessed at locally');
-    assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained for repair');
+test('quote escaping preserves quoted prose inside an array string', function () {
+    $data = AnthropicClient::decodeJson('{"labels":["Say "hello" warmly","Plain"]}');
+    assert_eq(['labels' => ['Say "hello" warmly', 'Plain']], $data);
 });
 
-test('quote escaping rejects literal-before-comma when no valid member follows', function () {
-    // Unlike the lossy sibling below, `then left.` after the comma cannot be
-    // read as a valid member, so this payload stays invalid.
+test('quote escaping rejects an inner quote at an ambiguous comma boundary', function () {
     $result = AnthropicClient::decodeJsonResult('{"a":"He said "hi", then left."}');
-    assert_true($result['data'] === null, 'ambiguous literal quotes are left to the repair pass');
+    assert_true($result['data'] === null, 'ambiguous comma boundary is left to model-driven repair');
+    assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained');
 });
 
-test('quote escaping documents known lossy literal-before-comma boundary', function () {
-    // Any future follow-set change must surface here instead of silently changing
-    // this known lossy result.
-    $data = AnthropicClient::decodeJson('{"a":"quote: "end", "b":"c"}');
+test('quote escaping never consumes the outer boundary after a literal comma', function () {
+    // This differs from valid JSON only by the two missing inner-quote escapes.
+    // Local repair must fail closed rather than turn the outer quote into the
+    // opening byte of a renamed next key.
+    $result = AnthropicClient::decodeJsonResult(
+        '{"content_notes":"Use "Reserve Now",","purpose":"Convert"}'
+    );
+    assert_true($result['data'] === null, 'literal-before-comma is left to model-driven repair');
+    assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained');
+});
 
-    assert_true(is_array($data), 'known lossy boundary decodes');
-    assert_eq('quote: "end', $data['a']);
-    assert_eq('c', $data['b']);
+test('quote escaping rejects an ambiguous quote with no distinct outer boundary', function () {
+    $result = AnthropicClient::decodeJsonResult('{"a":"quote: "end", "b":"c"}');
+    assert_true($result['data'] === null, 'ambiguous quote is left to model-driven repair');
+    assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained');
+});
+
+test('quote escaping never swallows plausible members into a repaired value', function () {
+    $cases = [
+        '{"a":"x "y","b":true","safe":1}',
+        '{"a":"x "y","b":"z"","safe":true}',
+        '{"a":"x "y","b":{"n":1,"m":2}","safe":1}',
+        '["x "y",123",false]',
+        '["a" 1{} "b"]',
+        '{"x":["a" true{} "b"],"safe":1}',
+    ];
+    foreach ($cases as $raw) {
+        $result = AnthropicClient::decodeJsonResult($raw);
+        assert_true($result['data'] === null, 'plausible sibling remains structural');
+        assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained');
+    }
+});
+
+test('quote escaping never rewrites object keys', function () {
+    $result = AnthropicClient::decodeJsonResult('{"na"me":"Acme","language":"en"}');
+    assert_true($result['data'] === null, 'malformed key is left to model-driven repair');
+    assert_true(is_string($result['error']) && $result['error'] !== '', 'parser error is retained');
+});
+
+test('quote repair establishes string boundaries before stripping trailing commas', function () {
+    $data = AnthropicClient::decodeJson(
+        '{"note":"Render "items: [one, ]" verbatim","list":[1,2,],}'
+    );
+    assert_eq([
+        'note' => 'Render "items: [one, ]" verbatim',
+        'list' => [1, 2],
+    ], $data);
 });
 
 test('decodeJson rejects a top-level scalar with an actionable error', function () {
