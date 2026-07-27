@@ -172,9 +172,9 @@ test('FixBlocksStep degrades reviewed paragraph styles and records actionable wa
         assert_contains('center and justify alignment has no unambiguous winner', $joined);
         assert_contains('authored "0"', $joined, 'the hidden-content value is retained for repair');
         assert_contains(
-            'title="1 > 0"',
+            'title="1 &gt; 0"',
             $project->readText('theme/parts/hidden-opacity.html'),
-            'unrelated root attributes survive the reviewed opacity fallback',
+            'unrelated root attributes survive in WordPress-safe serialized form',
         );
 
         $log = $project->readText('logs/fix-blocks.log');

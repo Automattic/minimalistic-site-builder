@@ -94,9 +94,11 @@ test('RichText keeps inline semantics while canonicalizing entities NBSP attribu
 test('RichText plain-string recreation emits literal NBSP like Gutenberg', function () {
     $nbsp = "\u{00A0}";
     assert_eq(
-        "<strong data-x=\"A&amp;B\">A{$nbsp}B{$nbsp}C &amp; D</strong><br>next",
+        "<strong data-x=\"A&amp;B\" title=\"1 &gt; 0 &lt; 2\">"
+        . "A{$nbsp}B{$nbsp}C &amp; D</strong><br>next",
         RichText::fromHtmlString(
-            "<STRONG data-X='A&amp;B'>A&#160;B{$nbsp}C &amp; D</STRONG><BR>next"
+            "<STRONG data-X='A&amp;B' title='1 &gt; 0 &lt; 2'>"
+            . "A&#160;B{$nbsp}C &amp; D</STRONG><BR>next"
         ),
     );
 });
