@@ -87,10 +87,13 @@ test('StepDefaults applies OpenRouter step models while keeping K3 for creative 
     try {
         $models = StepDefaults::models();
         assert_eq('moonshotai/kimi-k3', $models['design-direction']);
-        assert_eq('moonshotai/kimi-k2.5:nitro', $models['theme-json']);
-        assert_eq('moonshotai/kimi-k2.5:nitro', $models['sections']);
-        assert_eq('moonshotai/kimi-k2.5:nitro', $models['page-styles']);
-        assert_eq('moonshotai/kimi-k2.5:nitro', $models['fonts-php']);
+        foreach (array_diff(array_keys($models), ['design-direction']) as $step) {
+            assert_eq(
+                'moonshotai/kimi-k2.5:nitro',
+                $models[$step],
+                "{$step} uses the non-reasoning throughput model",
+            );
+        }
     } finally {
         putenv('LLM_PROVIDER');
     }

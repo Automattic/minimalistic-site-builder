@@ -145,10 +145,9 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
-     * Make the transport's effective first-attempt budget explicit so
-     * JsonBatchRecovery can double the real value after truncation. This is
-     * especially important for Kimi K3, whose implicit floor is 65,536 rather
-     * than the generic 16k default.
+     * Make Kimi K3's implicit first-attempt budget explicit so either recovery
+     * layer can double the real value after truncation. Other providers retain
+     * their existing implicit-budget behavior.
      *
      * @param array<array-key,array<string,mixed>> $requests
      * @return array<array-key,array<string,mixed>>
@@ -157,6 +156,9 @@ final class OpenAiCompatibleClient implements Llm
     {
         foreach ($requests as $key => $request) {
             $model = (string) ($request['model'] ?? $this->model);
+            if (isset($request['max_tokens']) || !self::isKimiK3($this->provider, $model)) {
+                continue;
+            }
             $requests[$key]['max_tokens'] = self::effectiveMaxTokens(
                 $request,
                 $model,
@@ -169,6 +171,7 @@ final class OpenAiCompatibleClient implements Llm
 
     public function completeBatch(array $requests): array
     {
+        $requests = $this->withEffectiveMaxTokens($requests);
         return TextBatchRecovery::run(
             $requests,
             fn (array $subset): array => $this->responseBatch($subset, false),
@@ -206,14 +209,14 @@ final class OpenAiCompatibleClient implements Llm
         // Keys may be ints too (PHP coerces numeric keys), so admit both.
         $labelFor = fn (string|int $key): string => (string) ($requests[$key]['log_label'] ?? $key);
 
-        $results = AnthropicClient::retryTextBatch(
-            $bodies,
-            fn (array $subset): array => $this->streamMulti($subset),
-            [2, 5, 12],
-            function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
-                LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
-            },
-        );
+        $transport = fn (array $subset): array => $this->streamMulti($subset);
+        $onFailure = function (string|int $key, string $error, float $time) use ($labelFor, &$bodies): void {
+            LlmLogger::log($labelFor($key), $bodies[$key], ['text' => '', 'input' => 0, 'output' => 0], $time, $error);
+        };
+        $delays = [2, 5, 12];
+        $results = $this->provider === 'openrouter'
+            ? self::retryOpenRouterBatch($bodies, $transport, $delays, $onFailure)
+            : AnthropicClient::retryTextBatch($bodies, $transport, $delays, $onFailure);
 
         $out = [];
         foreach ($results as $key => $res) {
@@ -242,8 +245,9 @@ final class OpenAiCompatibleClient implements Llm
      * maxTokensParam() and restrictsTemperature().
      *
      * @param array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>} $req
-     * @param bool $json Whether this is a JSON completion. Generic JSON calls
-     *                   request JSON-object mode when no schema was supplied.
+     * @param bool $json Whether this is a JSON completion. OpenRouter generic
+     *                   JSON calls request JSON-object mode when no schema was
+     *                   supplied; existing providers keep their prior shape.
      * @return array<string,mixed>
      */
     public static function bodyFor(
@@ -310,7 +314,7 @@ final class OpenAiCompatibleClient implements Llm
                     'schema' => $spec['schema'],
                 ],
             ];
-        } elseif ($json) {
+        } elseif ($json && $provider === 'openrouter') {
             $body['response_format'] = ['type' => 'json_object'];
         }
         return $body;
@@ -367,14 +371,127 @@ final class OpenAiCompatibleClient implements Llm
 
     private static function isKimiK3(string $provider, string $model): bool
     {
+        $model = self::withoutRoutingVariant($model);
         return $provider === 'openrouter'
-            && preg_match('~^moonshotai/kimi-k3(?::|$)~', $model) === 1;
+            && preg_match('~^moonshotai/kimi-k3(?:-\d{4,})?$~', $model) === 1;
     }
 
     private static function isKimiK25(string $provider, string $model): bool
     {
+        $model = self::withoutRoutingVariant($model);
         return $provider === 'openrouter'
-            && preg_match('~^moonshotai/kimi-k2\.5(?::|$)~', $model) === 1;
+            && preg_match('~^moonshotai/kimi-k2\.5(?:-\d{4,})?$~', $model) === 1;
+    }
+
+    private static function withoutRoutingVariant(string $model): string
+    {
+        return preg_replace('/:[^:]+$/', '', $model) ?? $model;
+    }
+
+    /**
+     * Reuse the shared batch retry policy while extending only OpenRouter's
+     * waits when a response supplied Retry-After. Deadlines are captured when
+     * the header arrives, so time spent completing concurrent siblings and the
+     * shared helper's normal backoff already counts toward the server's wait.
+     *
+     * @param array<array-key,array<string,mixed>> $bodies
+     * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>> $transport
+     * @param list<int> $delays
+     * @param null|callable(string|int,string,float):void $onFailure
+     * @param null|callable(int):void $sleeper Test seam for the remaining wait
+     * @param null|callable():int $clock Test seam returning the current epoch
+     * @return array<array-key,array<string,mixed>>
+     */
+    public static function retryOpenRouterBatch(
+        array &$bodies,
+        callable $transport,
+        array $delays,
+        ?callable $onFailure = null,
+        ?callable $sleeper = null,
+        ?callable $clock = null,
+    ): array {
+        /** @var array<array-key,int> $retryAfterDeadlineByKey */
+        $retryAfterDeadlineByKey = [];
+        $clock ??= static fn (): int => time();
+
+        $wrappedTransport = function (array $subset) use (
+            $transport,
+            $sleeper,
+            $clock,
+            &$retryAfterDeadlineByKey,
+        ): array {
+            $retryingDeadlines = array_intersect_key($retryAfterDeadlineByKey, $subset);
+            if ($retryingDeadlines !== []) {
+                $deadline = max($retryingDeadlines);
+                $remainingWait = max(0, $deadline - $clock());
+                if ($remainingWait > 0) {
+                    fwrite(
+                        STDERR,
+                        "    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n",
+                    );
+                    if ($sleeper !== null) {
+                        $sleeper($remainingWait);
+                    } else {
+                        sleep($remainingWait);
+                    }
+                }
+                foreach (array_keys($retryingDeadlines) as $key) {
+                    unset($retryAfterDeadlineByKey[$key]);
+                }
+            }
+
+            $outcomes = $transport($subset);
+            foreach ($outcomes as $key => $outcome) {
+                if (
+                    ($outcome['transient'] ?? false)
+                    && !isset($outcome['retry_without'])
+                    && isset($outcome['retry_after_at'])
+                ) {
+                    $retryAfterDeadlineByKey[$key] = max(0, (int) $outcome['retry_after_at']);
+                }
+            }
+            return $outcomes;
+        };
+
+        return AnthropicClient::retryTextBatch(
+            $bodies,
+            $wrappedTransport,
+            $delays,
+            $onFailure,
+        );
+    }
+
+    private static function captureRetryAfterHeader(
+        string $line,
+        ?int &$deadline,
+        ?int $now = null,
+    ): int
+    {
+        $header = trim($line);
+        if (preg_match('/^Retry-After\s*:\s*(.+)$/i', $header, $matches) === 1) {
+            $deadline = self::retryAfterDeadline(trim($matches[1]), $now ?? time());
+        }
+        return strlen($line);
+    }
+
+    /**
+     * Parse HTTP Retry-After as either delay-seconds or an absolute HTTP date.
+     */
+    private static function retryAfterDeadline(?string $value, int $now): ?int
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/^\d+$/', $value) === 1) {
+            return $now + max(0, (int) $value);
+        }
+
+        $at = strtotime($value);
+        if ($at === false) {
+            return null;
+        }
+        return max($now, $at);
     }
 
     /**
@@ -394,24 +511,25 @@ final class OpenAiCompatibleClient implements Llm
      * @param array<array-key,array<string,mixed>> $bodies
      * @return list<array<array-key,array<string,mixed>>>
      */
-    public static function concurrencyWindows(array $bodies, int $maxConcurrency): array
+    public static function concurrencyWindows(array $bodies, int $maxConcurrency = 10): array
     {
         return array_chunk($bodies, max(1, $maxConcurrency), true);
     }
 
     /**
      * @param array<array-key,array<string,mixed>> $bodies
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,retry_after_at?:int,time?:float,stop_reason?:?string}>
      */
     private function streamChunk(array $bodies): array
     {
         $multi = curl_multi_init();
         $handles = [];
         $raw = [];
+        $retryAfterDeadlines = [];
         foreach ($bodies as $key => $body) {
             $raw[$key] = '';
             $ch = curl_init($this->endpoint);
-            curl_setopt_array($ch, [
+            $options = [
                 CURLOPT_POST          => true,
                 CURLOPT_HTTPHEADER    => $this->headers(),
                 CURLOPT_POSTFIELDS    => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
@@ -422,7 +540,17 @@ final class OpenAiCompatibleClient implements Llm
                     $raw[$key] .= $chunk;
                     return strlen($chunk);
                 },
-            ]);
+            ];
+            if ($this->provider === 'openrouter') {
+                $retryAfterDeadlines[$key] = null;
+                $options[CURLOPT_HEADERFUNCTION] = static function ($ch, string $line) use (
+                    &$retryAfterDeadlines,
+                    $key,
+                ): int {
+                    return self::captureRetryAfterHeader($line, $retryAfterDeadlines[$key]);
+                };
+            }
+            curl_setopt_array($ch, $options);
             $handles[$key] = $ch;
             curl_multi_add_handle($multi, $ch);
         }
@@ -442,13 +570,26 @@ final class OpenAiCompatibleClient implements Llm
             $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
             curl_multi_remove_handle($multi, $ch);
             curl_close($ch);
-            $out[$key] = self::interpretStream(
+            $outcome = self::interpretStream(
                 $raw[$key],
                 $errno,
                 $error,
                 $httpStatus,
                 $time,
+                true,
+                $this->provider,
             );
+            if (
+                $this->provider === 'openrouter'
+                && !($outcome['ok'] ?? false)
+                && ($outcome['transient'] ?? false)
+            ) {
+                $retryAfterDeadline = $retryAfterDeadlines[$key] ?? null;
+                if ($retryAfterDeadline !== null) {
+                    $outcome['retry_after_at'] = $retryAfterDeadline;
+                }
+            }
+            $out[$key] = $outcome;
         }
 
         curl_multi_close($multi);
@@ -465,22 +606,43 @@ final class OpenAiCompatibleClient implements Llm
         int $status,
         float $time = 0.0,
         bool $preserveAbnormalTerminal = true,
+        string $provider = 'openai',
     ): array
     {
         if ($errno !== 0) {
             return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}", 'time' => $time];
         }
-        if ($status < 200 || $status >= 300) {
-            $out = ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw), 'time' => $time];
+        $parsed = null;
+        $typedTerminalReason = null;
+        if ($provider === 'openrouter') {
+            $parsed = self::parseSse($raw, $provider);
+            $typedTerminalReason = self::typedTerminalStopReason($parsed);
+        }
+        if (($status < 200 || $status >= 300) && $typedTerminalReason === null) {
+            $out = [
+                'ok' => false,
+                'transient' => self::isTransientStatus($status, $provider),
+                'error' => "HTTP {$status}: " . self::truncate($raw),
+                'time' => $time,
+            ];
             if (($param = self::rejectedParam($raw)) !== null) {
                 $out['retry_without'] = $param;
             }
             return $out;
         }
 
-        $parsed = self::parseSse($raw);
-        if ($parsed['error'] !== null) {
-            $transient = self::isTransientStreamError($parsed);
+        $parsed ??= self::parseSse($raw, $provider);
+        if ($typedTerminalReason !== null) {
+            // OpenRouter reports some semantic completion states inside an SSE
+            // error envelope after the HTTP 200 stream has started. They are
+            // not transport failures: preserve any partial text and translate
+            // them to the provider-generic stop reasons consumed by the batch
+            // recovery layers below.
+            $parsed['stop_reason'] = $typedTerminalReason;
+        } elseif ($parsed['error'] !== null) {
+            $transient = $provider === 'openrouter'
+                ? self::isTransientStreamError($parsed)
+                : self::isLegacyTransientStreamError($parsed);
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
         }
         $terminationError = JsonBatchRecovery::terminationError($parsed['stop_reason']);
@@ -519,9 +681,11 @@ final class OpenAiCompatibleClient implements Llm
         return in_array($errno, [6, 7, 28, 35, 52, 55, 56], true);
     }
 
-    private static function isTransientStatus(int $status): bool
+    private static function isTransientStatus(int $status, string $provider = 'openai'): bool
     {
-        return in_array($status, [408, 429], true) || $status >= 500;
+        return $status === 429
+            || $status >= 500
+            || ($provider === 'openrouter' && $status === 408);
     }
 
     /**
@@ -538,7 +702,7 @@ final class OpenAiCompatibleClient implements Llm
         $code = $parsed['error_code'] ?? null;
         if (is_numeric($code)) {
             $status = (int) $code;
-            if (self::isTransientStatus($status)) {
+            if (self::isTransientStatus($status, 'openrouter')) {
                 return true;
             }
         }
@@ -560,16 +724,69 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
+     * Preserve the pre-OpenRouter stream retry policy for existing providers.
+     *
+     * @param array{error:?string} $parsed
+     */
+    private static function isLegacyTransientStreamError(array $parsed): bool
+    {
+        $message = strtolower((string) ($parsed['error'] ?? ''));
+        return str_contains($message, 'overloaded')
+            || str_contains($message, 'rate limit');
+    }
+
+    /**
+     * Translate OpenRouter's typed terminal SSE errors into the stop-reason
+     * vocabulary shared by JsonBatchRecovery and TextBatchRecovery.
+     *
+     * These error types describe how generation ended after streaming began,
+     * so callers must retain the text received before the terminal event.
+     * Context-window and account/token-credit errors deliberately remain real
+     * failures: increasing an output budget cannot repair either condition.
+     *
+     * @param array{error:?string,error_type:string} $parsed
+     */
+    private static function typedTerminalStopReason(array $parsed): ?string
+    {
+        if ($parsed['error'] === null) {
+            return null;
+        }
+
+        return match (strtolower(trim((string) ($parsed['error_type'] ?? '')))) {
+            'max_tokens_exceeded' => 'max_tokens',
+            'refusal' => 'refusal',
+            'content_policy_violation' => 'content_filter',
+            default => null,
+        };
+    }
+
+    /**
      * @param array<string,mixed> $body
      * @return array{text:string,input:int,output:int,time:float,stop_reason:?string}
      */
     private function requestWithRetry(array &$body, bool $tolerateEmpty = false): array
     {
+        $retryAfterDeadline = null;
+        $transport = function (array $requestBody) use (&$retryAfterDeadline): array {
+            return $this->streamRequest($requestBody, $retryAfterDeadline);
+        };
+        $retryDelay = null;
+        if ($this->provider === 'openrouter') {
+            $retryDelay = static function (int $fallback) use (&$retryAfterDeadline): int {
+                $remaining = $retryAfterDeadline === null
+                    ? 0
+                    : max(0, $retryAfterDeadline - time());
+                return max($fallback, $remaining);
+            };
+        }
+
         return self::retrySingleRequest(
             $body,
-            fn (array $requestBody): array => $this->streamRequest($requestBody),
+            $transport,
             [2, 5, 12],
             $tolerateEmpty,
+            $this->provider === 'openrouter',
+            $retryDelay,
         );
     }
 
@@ -582,6 +799,12 @@ final class OpenAiCompatibleClient implements Llm
      * @param array<string,mixed> $body
      * @param callable(array<string,mixed>):array{text:string,input:int,output:int,time:float,stop_reason?:?string} $transport
      * @param list<int> $delays
+     * @param bool $recoverTerminalReasons Reject refused/filtered responses and
+     *        regenerate one output-limit truncation with a doubled budget;
+     *        enabled only for the new OpenRouter transport.
+     * @param null|callable(int):int $retryDelay Resolve a provider-specific
+     *        wait from the configured fallback after a transient failure.
+     * @param null|callable(int):void $sleeper Test seam; defaults to sleep().
      * @return array{text:string,input:int,output:int,time:float,stop_reason?:?string}
      */
     public static function retrySingleRequest(
@@ -589,21 +812,37 @@ final class OpenAiCompatibleClient implements Llm
         callable $transport,
         array $delays,
         bool $tolerateEmpty = false,
+        bool $recoverTerminalReasons = false,
+        ?callable $retryDelay = null,
+        ?callable $sleeper = null,
     ): array
     {
         $attempt = 0;
+        $retriedTruncation = false;
         while (true) {
             try {
                 $result = $transport($body);
                 $empty = trim($result['text']) === '';
                 $stopReason = $result['stop_reason'] ?? null;
-                $probeReachedOutputLimit = is_string($stopReason)
-                    && in_array(trim($stopReason), ['length', 'max_tokens'], true);
-                if (
-                    self::isTruncationStopReason($stopReason)
-                    && !($tolerateEmpty && $probeReachedOutputLimit)
-                ) {
-                    $terminationError = JsonBatchRecovery::terminationError($stopReason);
+                $normalizedStopReason = is_string($stopReason) ? trim($stopReason) : '';
+                $probeReachedOutputLimit = in_array(
+                    $normalizedStopReason,
+                    ['length', 'max_tokens'],
+                    true,
+                );
+                $terminationError = $recoverTerminalReasons
+                    ? JsonBatchRecovery::terminationError($stopReason)
+                    : null;
+                if ($terminationError !== null && !($tolerateEmpty && $probeReachedOutputLimit)) {
+                    if ($probeReachedOutputLimit && !$retriedTruncation) {
+                        $newBudget = self::prepareSingleTruncationRetry($body);
+                        $retriedTruncation = true;
+                        fwrite(
+                            STDERR,
+                            "    (OpenRouter response was truncated; regenerating once with {$newBudget} max tokens)\n",
+                        );
+                        continue;
+                    }
                     throw new \RuntimeException("stream error: {$terminationError}");
                 }
                 if ($empty) {
@@ -617,10 +856,17 @@ final class OpenAiCompatibleClient implements Llm
                 if ($attempt >= count($delays)) {
                     throw new \RuntimeException('OpenAI-compatible API failed after retries: ' . $e->getMessage(), 0, $e);
                 }
-                $wait = $delays[$attempt];
+                $fallback = $delays[$attempt];
+                $wait = $retryDelay === null
+                    ? $fallback
+                    : max($fallback, (int) $retryDelay($fallback));
                 $attempt++;
                 fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
-                sleep($wait);
+                if ($sleeper !== null) {
+                    $sleeper($wait);
+                } else {
+                    sleep($wait);
+                }
             } catch (\RuntimeException $e) {
                 $param = self::rejectedParam($e->getMessage());
                 if ($param === null || !array_key_exists($param, $body)) {
@@ -633,16 +879,55 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
+     * Increase one OpenRouter single-completion budget and ask for a clean
+     * regeneration. This path is never used for existing providers.
+     *
+     * @param array<string,mixed> $body
+     */
+    private static function prepareSingleTruncationRetry(array &$body): int
+    {
+        $tokenKey = array_key_exists('max_tokens', $body)
+            ? 'max_tokens'
+            : (array_key_exists('max_completion_tokens', $body) ? 'max_completion_tokens' : null);
+        if ($tokenKey === null || (int) $body[$tokenKey] <= 0) {
+            throw new \RuntimeException(
+                'stream error: generation was truncated, but the output token budget is unavailable',
+            );
+        }
+
+        $body[$tokenKey] = (int) $body[$tokenKey] * 2;
+        $messages = $body['messages'] ?? null;
+        if (is_array($messages)) {
+            foreach (array_reverse(array_keys($messages)) as $key) {
+                $message = $body['messages'][$key] ?? null;
+                if (!is_array($message)
+                    || ($message['role'] ?? null) !== 'user'
+                    || !is_string($message['content'] ?? null)
+                ) {
+                    continue;
+                }
+                $body['messages'][$key]['content'] = rtrim($message['content'])
+                    . "\n\nYOUR PREVIOUS RESPONSE WAS CUT OFF BY THE OUTPUT LENGTH LIMIT. "
+                    . 'Regenerate the COMPLETE response from scratch, as compactly as the instructions above allow, '
+                    . 'and return nothing else.';
+                break;
+            }
+        }
+        return (int) $body[$tokenKey];
+    }
+
+    /**
      * @param array<string,mixed> $body
      * @return array{text:string,input:int,output:int,time:float,stop_reason:?string}
      */
-    private function streamRequest(array $body): array
+    private function streamRequest(array $body, ?int &$retryAfterDeadline = null): array
     {
         $payload = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         $raw = '';
+        $retryAfterDeadline = null;
 
         $ch = curl_init($this->endpoint);
-        curl_setopt_array($ch, [
+        $options = [
             CURLOPT_POST          => true,
             CURLOPT_HTTPHEADER    => $this->headers(),
             CURLOPT_POSTFIELDS    => $payload,
@@ -653,7 +938,15 @@ final class OpenAiCompatibleClient implements Llm
                 $raw .= $chunk;
                 return strlen($chunk);
             },
-        ]);
+        ];
+        if ($this->provider === 'openrouter') {
+            $options[CURLOPT_HEADERFUNCTION] = static function ($ch, string $line) use (
+                &$retryAfterDeadline,
+            ): int {
+                return self::captureRetryAfterHeader($line, $retryAfterDeadline);
+            };
+        }
+        curl_setopt_array($ch, $options);
 
         curl_exec($ch);
         $errno  = curl_errno($ch);
@@ -668,24 +961,53 @@ final class OpenAiCompatibleClient implements Llm
             }
             throw new \RuntimeException("cURL error ({$errno}): {$error}");
         }
-        if ($status < 200 || $status >= 300) {
-            if (self::isTransientStatus($status)) {
+        return self::interpretSingleStream($raw, $time, $this->provider, $status);
+    }
+
+    /**
+     * Interpret a successful HTTP response for complete(). OpenRouter can
+     * report output exhaustion as a typed SSE error; expose that as a normal
+     * stop reason so the cache-warm exception and ordinary truncation policy
+     * remain centralized in retrySingleRequest().
+     *
+     * @return array{text:string,input:int,output:int,time:float,stop_reason:?string}
+     */
+    private static function interpretSingleStream(
+        string $raw,
+        float $time,
+        string $provider,
+        int $status = 200,
+    ): array
+    {
+        $parsed = $provider === 'openrouter'
+            ? self::parseSse($raw, $provider)
+            : null;
+        $typedTerminalReason = $parsed === null
+            ? null
+            : self::typedTerminalStopReason($parsed);
+
+        if (($status < 200 || $status >= 300) && $typedTerminalReason === null) {
+            if (self::isTransientStatus($status, $provider)) {
                 throw new TransientApiException("HTTP {$status}: " . self::truncate($raw));
             }
             throw new \RuntimeException("OpenAI-compatible API HTTP {$status}: " . self::truncate($raw));
         }
 
-        $parsed = self::parseSse($raw);
+        $parsed ??= self::parseSse($raw, $provider);
+        if ($typedTerminalReason !== null) {
+            $parsed['error'] = null;
+            $parsed['stop_reason'] = $typedTerminalReason;
+        }
         if ($parsed['error'] !== null) {
             $msg = "stream error: {$parsed['error']}";
-            if (self::isTransientStreamError($parsed)) {
+            $transient = $provider === 'openrouter'
+                ? self::isTransientStreamError($parsed)
+                : self::isLegacyTransientStreamError($parsed);
+            if ($transient) {
                 throw new TransientApiException($msg);
             }
             throw new \RuntimeException($msg);
         }
-        // Terminal and empty-text handling live in retrySingleRequest so
-        // tolerate_empty (cache-warm probes) can accept a blank one-token
-        // reply without a transient retry loop.
         return [
             'text'        => $parsed['text'],
             'input'       => $parsed['input'],
@@ -714,14 +1036,17 @@ final class OpenAiCompatibleClient implements Llm
      *   - usage on any chunk (final chunk when stream_options.include_usage)
      *   - data: [DONE]
      *   - top-level error objects some hosts send mid-stream
+     *   - OpenRouter's choices[0].error extension when provider=openrouter
      *
      * The provider's finish_reason is exposed as the cross-provider
      * `stop_reason`. JSON recovery uses it to distinguish malformed output
      * from truncation and refusal without accepting a partial response.
      *
+     * @param string $provider Nested choice errors are an OpenRouter extension;
+     *                         existing providers retain their earlier parsing.
      * @return array{text:string,input:int,output:int,error:?string,error_code:int|string|null,error_type:string,stop_reason:?string}
      */
-    public static function parseSse(string $raw): array
+    public static function parseSse(string $raw, string $provider = 'openai'): array
     {
         $text = '';
         $input = 0;
@@ -741,12 +1066,25 @@ final class OpenAiCompatibleClient implements Llm
                     return self::parsedResponse('', 0, 0, $error, $errorCode, $errorType, null);
                 }
                 $choice = $json['choices'][0] ?? null;
-                if (is_array($choice) && isset($choice['error'])) {
+                if ($provider === 'openrouter' && is_array($choice) && isset($choice['error'])) {
                     [$error, $errorCode, $errorType] = self::parseError($choice['error']);
                     $stopReason = isset($choice['finish_reason'])
                         ? (string) $choice['finish_reason']
                         : null;
-                    return self::parsedResponse('', 0, 0, $error, $errorCode, $errorType, $stopReason);
+                    $message = $choice['message'] ?? null;
+                    $text = is_array($message) && is_string($message['content'] ?? null)
+                        ? $message['content']
+                        : '';
+                    $usage = self::extractUsage($json);
+                    return self::parsedResponse(
+                        $text,
+                        $usage['input'],
+                        $usage['output'],
+                        $error,
+                        $errorCode,
+                        $errorType,
+                        $stopReason,
+                    );
                 }
                 $message = is_array($choice) ? ($choice['message'] ?? null) : null;
                 if (is_array($message)) {
@@ -788,7 +1126,8 @@ final class OpenAiCompatibleClient implements Llm
             if (!is_array($evt)) {
                 continue;
             }
-            $streamError = $evt['error'] ?? $evt['choices'][0]['error'] ?? null;
+            $streamError = $evt['error']
+                ?? ($provider === 'openrouter' ? ($evt['choices'][0]['error'] ?? null) : null);
             if ($streamError !== null) {
                 [$error, $errorCode, $errorType] = self::parseError($streamError);
                 if ($stopReason !== 'refusal' && isset($evt['choices'][0]['finish_reason'])) {
