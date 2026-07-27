@@ -2,12 +2,12 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixers;
-use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\ThemeValidator;
 
 /**
@@ -180,7 +180,12 @@ function write_report(array $results): void
     $stepIds = ['scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction', 'theme-json+page-plan', 'sections', 'collect-images', 'fix-blocks', 'assemble-pages', 'finalize-theme'];
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
-    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . Env::get('LLM_MODEL', 'claude-opus-4-8') . "\n\n";
+    // Report the tiers this run actually resolved, so an eval never claims a
+    // model the pipeline did not use.
+    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . ' UTC · ' . StepDefaults::provider()
+        . ' · design: ' . StepDefaults::designModel()
+        . ' · code: ' . StepDefaults::codeModel()
+        . ' · small: ' . StepDefaults::smallModel() . "\n\n";
 
     // Speed table.
     $md .= "## Speed (seconds per step)\n\n";

@@ -66,10 +66,21 @@ final class AnthropicClient implements Llm
     private int $cacheReadInputTokens = 0;
     private int $cacheCreationInputTokens = 0;
 
+    /**
+     * Output ceiling for a request that carries no max_tokens of its own. Every
+     * request here streams, so the ~16k rule-of-thumb that keeps non-streaming
+     * calls under the HTTP timeout does not apply. The headroom matters on the
+     * Claude 5 family, where thinking is on by default and shares this budget
+     * with the answer: a section that fits in 16k of markup can still truncate
+     * once thinking is billed against the same ceiling. Recovery doubles it on
+     * a truncation, so this stays well under the 128k output cap.
+     */
+    public const DEFAULT_MAX_TOKENS = 32000;
+
     public function __construct(
         private string $apiKey,
         private string $model,
-        private int $defaultMaxTokens = 16000,
+        private int $defaultMaxTokens = self::DEFAULT_MAX_TOKENS,
     ) {}
 
     /**
@@ -322,7 +333,7 @@ final class AnthropicClient implements Llm
     /**
      * Whether a model still accepts the sampling parameters (temperature,
      * top_p, top_k). The API REMOVED them on Claude Opus 4.7/4.8 and the
-     * whole Claude 5 family (Fable, Mythos, Sonnet 5) — sending one returns
+     * whole Claude 5 family (Fable, Mythos, Opus 5, Sonnet 5) — sending one returns
      * HTTP 400 "`temperature` is deprecated for this model". A model this
      * misclassifies as supporting (e.g. a future family that also drops
      * sampling) is still handled: the 400 is detected via rejectedParam()
@@ -330,7 +341,7 @@ final class AnthropicClient implements Llm
      */
     public static function supportsSampling(string $model): bool
     {
-        return preg_match('/claude-(fable|mythos|opus-4-[78]|sonnet-5)/', $model) !== 1;
+        return preg_match('/claude-(fable|mythos|opus-4-[78]|opus-5|sonnet-5)/', $model) !== 1;
     }
 
     /**

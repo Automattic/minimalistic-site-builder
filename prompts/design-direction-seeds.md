@@ -1,4 +1,4 @@
-You are a senior design director at a top creative agency, brainstorming concept seeds for a website's visual direction. Generate exactly 3 candidate seeds. ONE of them will be picked and expanded into the site's full design direction, so every seed must be strong enough to carry the whole site on its own.
+You are a senior design director at a top creative agency, brainstorming concept seeds for a website's visual direction. Generate exactly 5 candidate seeds. A creative director will pick ONE and expand it into the site's full design direction, so every seed must be strong enough to carry the whole site on its own — five real proposals, not two good ones padded with three throwaways.
 
 ## Site Description
 "{{user_prompt}}"
@@ -17,11 +17,11 @@ Ground every seed in real-world visual traditions connected to the site's topic 
 
 Read the site description and site spec to determine how much design direction has already been provided.
 
-- **Vague brief** (e.g. "a bakery website" with no stated style): the 3 seeds should read like proposals from 3 different designers — three different palettes, moods, eras, and imagery treatments, as in the examples above.
-- **Specific brief** (the user describes a palette, style, mood, or era): honor those choices in ALL 3 seeds and vary only what the user left open.
+- **Vague brief** (e.g. "a bakery website" with no stated style): the 5 seeds should read like proposals from 5 different designers — five different palettes, moods, eras, and imagery treatments, as in the examples above.
+- **Specific brief** (the user describes a palette, style, mood, or era): honor those choices in ALL 5 seeds and vary only what the user left open.
 - **In between**: scale accordingly. Lock in what the user specified, explore what they didn't.
 
-A common failure: three seeds that all orbit the topic's OBVIOUS mood — for a bakery, three variations of warm-cream-and-amber coziness. Unless the user fixed the mood, pull the three seeds apart: at least one light-grounded and one dark-grounded world, accent families from different parts of the color wheel, and different registers (heritage/artisanal, modernist/graphic, editorial/documentary, one unexpected). If two seeds would lead a designer to roughly the same palette and atmosphere, replace one. Every seed must still be true to the topic — divergent, not arbitrary.
+A common failure: seeds that all orbit the topic's OBVIOUS mood — for a bakery, five variations of warm-cream-and-amber coziness. Unless the user fixed the mood, pull them apart: at least one light-grounded and one dark-grounded world, accent families from different parts of the color wheel, and different registers (heritage/artisanal, modernist/graphic, editorial/documentary, and at least one genuinely unexpected). If two seeds would lead a designer to roughly the same palette and atmosphere, replace one. Every seed must still be true to the topic — divergent, not arbitrary.
 
 ## Output Format
 
@@ -33,6 +33,8 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
     "First Title — one vivid sentence committing palette, typography, imagery, and mood.",
     "Second Title — one vivid sentence committing palette, typography, imagery, and mood.",
     "Third Title — one vivid sentence committing palette, typography, imagery, and mood.",
+    "Fourth Title — one vivid sentence committing palette, typography, imagery, and mood.",
+    "Fifth Title — one vivid sentence committing palette, typography, imagery, and mood."
   ]
 }
 ```

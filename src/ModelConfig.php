@@ -6,15 +6,28 @@ namespace Automattic\SiteBuild;
 /**
  * Loads config/models.json — the per-provider default model matrix.
  *
- * Each provider defines a `large` and `small` model id; each pipeline step is
- * tagged with a tier in `step_tiers`. StepDefaults resolves a step's model by
- * looking up the active provider's model for that step's tier, while env
- * overrides (LLM_MODEL, LLM_MODEL_SMALL, LLM_MODEL_<STEP>) still win. Keeping the
- * matrix in data (not code) lets `--provider` swap the whole model set in one
- * flag without touching per-step wiring.
+ * Each provider defines a model id per tier — `design` (the creative steps that
+ * decide what the site looks like), `code` (the steps that emit block markup,
+ * CSS and PHP from a direction already decided) and `small` (fast/cheap
+ * structural steps) — and each pipeline step is tagged with a tier in
+ * `step_tiers`. StepDefaults resolves a step's model by looking up the active
+ * provider's model for that step's tier, while env overrides (LLM_MODEL_<STEP>,
+ * LLM_MODEL_DESIGN / LLM_MODEL_CODE / LLM_MODEL_SMALL, LLM_MODEL) still win.
+ * Keeping the matrix in data (not code) lets `--provider` swap the whole model
+ * set in one flag without touching per-step wiring.
  */
 final class ModelConfig
 {
+    /**
+     * Tier lookup order. A provider may configure a single model and still serve
+     * every tier: each tier falls through to the next configured one, nearest
+     * neighbour first (a missing `code` model borrows `design`, not `small`).
+     */
+    private const TIER_FALLBACKS = [
+        'design' => ['design', 'code', 'small'],
+        'code'   => ['code', 'design', 'small'],
+        'small'  => ['small', 'code', 'design'],
+    ];
     /** @var array<string,mixed>|null Decoded config, cached for the process. */
     private static ?array $cache = null;
 
@@ -79,9 +92,18 @@ final class ModelConfig
         return isset(self::data()['providers'][$provider]);
     }
 
+    /** The tier names a step may be tagged with. @return list<string> */
+    public static function tierNames(): array
+    {
+        return array_keys(self::TIER_FALLBACKS);
+    }
+
     /**
-     * Model id for a provider's tier ('large' | 'small'). Falls back to the other
-     * tier if one is omitted, so a provider may configure a single model.
+     * Model id for a provider's tier ('design' | 'code' | 'small'). Falls back
+     * through TIER_FALLBACKS if that tier is omitted, so a provider may
+     * configure a single model. An unknown tier name fails loud — it can only
+     * come from a typo in step_tiers, and guessing a model there would silently
+     * bill the wrong tier.
      */
     public static function tierModel(string $provider, string $tier): string
     {
@@ -91,17 +113,23 @@ final class ModelConfig
                 "Unknown provider '{$provider}' in model config. Known: " . implode(', ', self::providerNames())
             );
         }
-        $models = $providers[$provider];
-        $other = $tier === 'small' ? 'large' : 'small';
-        $model = $models[$tier] ?? $models[$other] ?? null;
-        if (!is_string($model) || $model === '') {
-            throw new \RuntimeException("No '{$tier}' model configured for provider '{$provider}'.");
+        if (!isset(self::TIER_FALLBACKS[$tier])) {
+            throw new \RuntimeException(
+                "Unknown model tier '{$tier}'. Known: " . implode(', ', self::tierNames())
+            );
         }
-        return $model;
+        $models = $providers[$provider];
+        foreach (self::TIER_FALLBACKS[$tier] as $candidate) {
+            $model = $models[$candidate] ?? null;
+            if (is_string($model) && $model !== '') {
+                return $model;
+            }
+        }
+        throw new \RuntimeException("No '{$tier}' model configured for provider '{$provider}'.");
     }
 
     /**
-     * Step id => tier ('large' | 'small').
+     * Step id => tier ('design' | 'code' | 'small').
      *
      * @return array<string,string>
      */

@@ -386,6 +386,8 @@ test('supportsSampling is false for the Claude 5 family and Opus 4.7/4.8, true o
     assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5[1m]'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-sonnet-5'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-opus-5'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-opus-5[1m]'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-mythos-5'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-haiku-4-5'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-sonnet-4-6'));

@@ -54,21 +54,25 @@ php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu,
 ### Choosing the model / provider
 
 `--provider=<anthropic|openai|xai>` (or the `LLM_PROVIDER` env var) picks a whole
-model set at once. Each provider defines a **large** (quality-critical steps) and
-**small** (fast/cheap structural steps) model in
-[`config/models.json`](config/models.json), and each pipeline step is mapped to a
-tier there — so switching providers needs no per-step configuration. Defaults:
+model set at once. Each provider defines three tiers in
+[`config/models.json`](config/models.json) — **design** (the creative steps that
+decide what the site looks like: the direction, its judge, `theme.json`),
+**code** (the steps that emit block markup, CSS and PHP from a direction already
+decided: sections, page styles, motion, `fonts.php`) and **small** (fast/cheap
+structural steps) — and each pipeline step is mapped to a tier there, so
+switching providers needs no per-step configuration. Defaults:
 
-| Provider | large | small |
-|----------|-------|-------|
-| `anthropic` (default) | `claude-opus-4-8` | `claude-haiku-4-5` |
-| `openai` | `gpt-5.5` | `gpt-5.4-mini` |
-| `xai` | `grok-4.5` | `grok-4.5` |
+| Provider | design | code | small |
+|----------|--------|------|-------|
+| `anthropic` (default) | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5` |
+| `openai` | `gpt-5.5` | `gpt-5.5` | `gpt-5.4-mini` |
+| `xai` | `grok-4.5` | `grok-4.5` | `grok-4.5` |
 
 Edit `config/models.json` to change those model ids. To override just one run or
 one step (any model id, wins over the config):
 
-- `LLM_MODEL` / `LLM_MODEL_SMALL` — the run-wide large / small tier
+- `LLM_MODEL_DESIGN` / `LLM_MODEL_CODE` / `LLM_MODEL_SMALL` — one tier
+- `LLM_MODEL` — design and code together, when you want one big model
 - `LLM_MODEL_<STEP>` — a single step, e.g. `LLM_MODEL_SITE_SPEC=gpt-5.5`
 
 Output lands in `projects/<slug>/`. Each build also writes a run overview —

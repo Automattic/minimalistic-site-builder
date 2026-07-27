@@ -22,18 +22,26 @@ use Automattic\SiteBuild\StepDeclaration;
  *         execute instead of re-interpreting (palette hexes, type pairing,
  *         image grade, signature device, hero composition).
  *
- * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
- * FOUR concept seeds — each one string: an evocative title plus one vivid
+ * Three calls. First, a cheap seed call (small model, hot sampling) brainstorms
+ * several concept seeds — each one string: an evocative title plus one vivid
  * sentence committing the seed's visual world (palette family, typography
  * character, imagery treatment, mood) — with divergence across the set
- * enforced in the prompt. One seed is picked uniformly at random, then the
- * main call expands ONLY that seed into the full direction. The random pick
- * over a divergent seed spread is the pipeline's variety injection — repeated
- * builds of one brief land on different concepts — while the expensive
- * model's tokens are spent on a single direction. The DESIGN_DIRECTION_CHOICE
- * env var forces seed N (1-based) for reproducible evals, and a failed seed
- * call degrades to a built-in "invent one bold concept" seed instead of
- * aborting the build.
+ * enforced in the prompt. Then a judge call scores that spread against the
+ * brief on an explicit rubric and picks a winner with a written reason. The
+ * main call expands ONLY the winner into the full direction, so the expensive
+ * model's tokens are spent on a single concept.
+ *
+ * The seed spread is where variety comes from; the judge is what makes the
+ * pick defensible — a bakery brief that says "moody, industrial" no longer has
+ * a one-in-five chance of landing on warm cream. The judge's reason is
+ * persisted on the direction as `seed_rationale`, and its full scoring lands in
+ * the LLM log under `design-direction-judge`.
+ *
+ * The DESIGN_DIRECTION_CHOICE env var forces seed N (1-based) for reproducible
+ * evals and skips the judge entirely. Every failure degrades instead of
+ * aborting a build: a judge that errors or returns nothing usable falls back to
+ * a random pick over the same seeds, and a failed seed call falls back to a
+ * built-in "invent one bold concept" seed.
  *
  * This is the single source of design intent. The theme-json, page-plan and
  * section steps all read it (via DesignDirectionStep::readFor, which renders
@@ -76,6 +84,7 @@ final class DesignDirectionStep implements Step
         private ?string $model = null,
         private ?float $temperature = null,
         private ?string $seedModel = null,
+        private ?string $judgeModel = null,
     ) {}
 
     public function id(): string
@@ -108,7 +117,7 @@ final class DesignDirectionStep implements Step
         }
         $spec = $project->readText('siteSpec.json');
 
-        $seed = $this->chooseSeed($prompt, $spec);
+        [$seed, $rationale] = $this->chooseSeed($prompt, $spec);
 
         $rendered = $this->renderer->render('design-direction.md', [
             'user_prompt' => $prompt,
@@ -122,23 +131,34 @@ final class DesignDirectionStep implements Step
             throw new \RuntimeException('design-direction: model returned no usable direction');
         }
 
+        // Record what was chosen and why, so a finished build can be traced back
+        // to the concept it came from without re-reading the LLM log. Absent
+        // when no real seed was picked (the fallback path).
+        if ($seed !== self::SEED_FALLBACK) {
+            $direction['seed'] = $seed;
+        }
+        if ($rationale !== '') {
+            $direction['seed_rationale'] = $rationale;
+        }
+
         $project->writeJson(self::FILE, $direction);
     }
 
     /**
-     * Brainstorm four concept titles on the cheap model and pick ONE, rendered
-     * as the text block the expansion prompt consumes.
+     * Brainstorm concept seeds on the cheap model and pick ONE, rendered as the
+     * text block the expansion prompt consumes.
      *
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
      * out of range — including a failed seed call — fails loud, because a
-     * forced eval must not silently drift); otherwise a uniform random pick.
-     * Without a forced choice, any seed failure (transport error, no usable
-     * seeds) degrades to SEED_FALLBACK — seeding must never abort a build.
-     * The step's hot temperature is applied here too: the seed spread is now
-     * the pipeline's variety source, and the small models still support
-     * sampling.
+     * forced eval must not silently drift); otherwise the judge picks. Without
+     * a forced choice, any seed failure (transport error, no usable seeds)
+     * degrades to SEED_FALLBACK — seeding must never abort a build. The step's
+     * hot temperature is applied to the seed call: the seed spread is the
+     * pipeline's variety source, and the small models still support sampling.
+     *
+     * @return array{0:string,1:string} the seed, and the judge's reason ('' when unjudged)
      */
-    private function chooseSeed(string $brief, string $spec): string
+    private function chooseSeed(string $brief, string $spec): array
     {
         $forced = Env::get(self::CHOICE_ENV);
         $isForced = $forced !== null && $forced !== '';
@@ -180,13 +200,88 @@ final class DesignDirectionStep implements Step
                     count($seeds),
                 ));
             }
-            return $seeds[$n - 1];
+            return [$seeds[$n - 1], ''];
         }
 
         if ($seeds === []) {
-            return self::SEED_FALLBACK;
+            return [self::SEED_FALLBACK, ''];
         }
-        return $seeds[random_int(0, count($seeds) - 1)];
+        if (count($seeds) === 1) {
+            return [$seeds[0], ''];
+        }
+
+        [$index, $rationale] = $this->judge($brief, $spec, $seeds);
+        return [$seeds[$index], $rationale];
+    }
+
+    /**
+     * Score the seed spread against the brief and pick a winner, with the
+     * reason the expansion is built on. Degrades to a uniform random pick on
+     * any failure — a judge that errors or answers unusably must cost a build
+     * its best-pick, not its build.
+     *
+     * @param list<string> $seeds
+     * @return array{0:int,1:string} 0-based winning index, and the reason ('' when the judge did not decide)
+     */
+    private function judge(string $brief, string $spec, array $seeds): array
+    {
+        try {
+            $rendered = $this->renderer->render('design-direction-judge.md', [
+                'user_prompt' => $brief,
+                'site_spec'   => $spec,
+                'seeds'       => self::formatSeeds($seeds),
+            ]);
+            $opts = ['log_label' => 'design-direction-judge'];
+            if ($this->judgeModel !== null) {
+                $opts['model'] = $this->judgeModel;
+            }
+            $verdict = self::normalizeVerdict($this->llm->completeJson($rendered, $opts), count($seeds));
+            if ($verdict !== null) {
+                return $verdict;
+            }
+        } catch (\Throwable $e) {
+            // Fall through to the random pick below.
+        }
+
+        return [random_int(0, count($seeds) - 1), ''];
+    }
+
+    /**
+     * The candidate list as the judge prompt reads it — 1-based, one per line,
+     * matching the `choice` number it answers with. Pure — unit-testable.
+     *
+     * @param list<string> $seeds
+     */
+    public static function formatSeeds(array $seeds): string
+    {
+        $lines = [];
+        foreach (array_values($seeds) as $i => $seed) {
+            $lines[] = ($i + 1) . '. ' . $seed;
+        }
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Validate the judge's answer against the candidates it was shown. Returns
+     * null when there is no usable choice — a missing, non-numeric, or
+     * out-of-range `choice` means the judge did not actually decide, and
+     * inventing a winner from a malformed verdict would be worse than the
+     * random fallback. Pure — unit-testable.
+     *
+     * @param array<mixed> $payload
+     * @return ?array{0:int,1:string} 0-based winning index and the reason
+     */
+    public static function normalizeVerdict(array $payload, int $count): ?array
+    {
+        $choice = $payload['choice'] ?? null;
+        if (!is_int($choice) && !(is_string($choice) && ctype_digit(trim($choice)))) {
+            return null;
+        }
+        $n = (int) $choice;
+        if ($n < 1 || $n > $count) {
+            return null;
+        }
+        return [$n - 1, trim((string) ($payload['rationale'] ?? ''))];
     }
 
     /**

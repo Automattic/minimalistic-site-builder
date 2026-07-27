@@ -42,9 +42,10 @@ function designdir_direction(): array
     ];
 }
 
-test('design-direction expands a picked seed into structured designDirection.json', function () {
+test('design-direction expands the judged seed into structured designDirection.json', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['choice' => 3, 'rationale' => 'Only seed that escapes the obvious warm-cream register.']);
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -59,38 +60,152 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('hairline rules with small caps folios', $written['signature_device']);
     assert_eq('full-bleed bakery photo, headline pinned lower-left', $written['hero_composition']);
 
+    // The chosen concept and the reason travel with the direction, so a finished
+    // build says which candidate it came from and why.
+    assert_eq('Seed 3', $written['seed']);
+    assert_contains('warm-cream register', $written['seed_rationale']);
+
+    assert_eq(3, count($llm->calls), 'exactly three calls: seeds + judge + expansion');
+
     // The seed prompt carries the user's words and the factual spec.
-    assert_eq(2, count($llm->calls), 'exactly two calls: seeds + expansion');
     assert_contains('cozy neighborhood bakery', $llm->calls[0]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[0]['prompt']);
     assert_contains('title', $llm->calls[0]['prompt']);
 
-    // The expansion prompt carries the brief, the spec, ONE of the seeds
-    // (random pick), and asks for every structured field.
+    // The judge prompt carries the brief, the spec, and every numbered candidate.
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
-    assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
+    foreach (designdir_seeds() as $i => $seed) {
+        assert_contains(($i + 1) . '. ' . $seed, $llm->calls[1]['prompt']);
+    }
+
+    // The expansion prompt carries the brief, the spec, ONLY the winning seed,
+    // and asks for every structured field.
+    assert_contains('cozy neighborhood bakery', $llm->calls[2]['prompt']);
+    assert_contains('Hearth & Crumb', $llm->calls[2]['prompt']);
+    assert_contains('Seed 3', $llm->calls[2]['prompt'], 'the judged seed reached the expansion prompt');
+    assert_true(!str_contains($llm->calls[2]['prompt'], 'Seed 1'), 'losing seeds do not leak into the prompt');
     foreach (['palette', 'type', 'image_grade', 'signature_device', 'hero_composition'] as $field) {
-        assert_contains($field, $llm->calls[1]['prompt']);
+        assert_contains($field, $llm->calls[2]['prompt']);
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('design-direction sends the seed call to the seed model and keeps the hot temperature on both calls', function () {
+test('design-direction routes each call to its own model and keeps the hot temperature off the judge', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['choice' => 1, 'rationale' => 'strongest topic grounding']);
     $llm->queueJson(['direction' => designdir_direction()]);
 
     $renderer = new PromptRenderer(repo_path('prompts'));
-    (new DesignDirectionStep($llm, $renderer, 'claude-opus-4-8', 1.0, 'claude-haiku-4-5'))->run($project);
+    (new DesignDirectionStep($llm, $renderer, 'claude-opus-5', 1.0, 'claude-haiku-4-5', 'claude-opus-5'))
+        ->run($project);
 
     assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null, 'seeds use the seed model');
     assert_eq(1.0, $llm->calls[0]['opts']['temperature'] ?? null, 'seed spread runs hot');
-    assert_eq('claude-opus-4-8', $llm->calls[1]['opts']['model'] ?? null, 'expansion uses the step model');
-    assert_eq(1.0, $llm->calls[1]['opts']['temperature'] ?? null, 'expansion keeps the step temperature');
+    assert_eq('claude-opus-5', $llm->calls[1]['opts']['model'] ?? null, 'the judge uses the judge model');
+    assert_eq(null, $llm->calls[1]['opts']['temperature'] ?? null, 'scoring is not a sampling task');
+    assert_eq('claude-opus-5', $llm->calls[2]['opts']['model'] ?? null, 'expansion uses the step model');
+    assert_eq(1.0, $llm->calls[2]['opts']['temperature'] ?? null, 'expansion keeps the step temperature');
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction falls back to a random pick when the judge does not decide', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    // The judge answered, but with no usable choice.
+    $llm->queueJson(['rationale' => 'they are all quite nice']);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    $written = $project->readJson('designDirection.json');
+    assert_contains('Seed ', $llm->calls[2]['prompt'], 'a seed still reached the expansion prompt');
+    assert_contains('Seed ', (string) ($written['seed'] ?? ''), 'the random pick is still recorded');
+    assert_true(!isset($written['seed_rationale']), 'no rationale is claimed for an unjudged pick');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction survives a judge that errors', function () {
+    [$project, , $tmp] = make_designdir_fixture();
+
+    // Seeds succeed, the judge call throws, the expansion succeeds.
+    $llm = new class implements Llm {
+        /** @var array<int,array{prompt:string,opts:array<mixed>}> */
+        public array $calls = [];
+
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
+            return match (count($this->calls)) {
+                1       => ['seeds' => designdir_seeds()],
+                2       => throw new RuntimeException('judge transport error'),
+                default => ['direction' => designdir_direction()],
+            };
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeBatch(array $requests): array
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_true($project->exists('designDirection.json'), 'a direction is still committed');
+    assert_contains('Seed ', $llm->calls[2]['prompt'], 'a seed still reached the expansion prompt');
+    assert_true(
+        !isset($project->readJson('designDirection.json')['seed_rationale']),
+        'no rationale is claimed when the judge never answered'
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction skips the judge when only one seed is usable', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => ['Lone Seed — the only candidate.', '   ', 42]]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    assert_eq(2, count($llm->calls), 'nothing to choose between, so no judge call');
+    assert_contains('Lone Seed', $llm->calls[1]['prompt']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('normalizeVerdict accepts an in-range choice and rejects everything else', function () {
+    assert_eq([1, 'because'], DesignDirectionStep::normalizeVerdict(['choice' => 2, 'rationale' => ' because '], 4));
+    assert_eq([0, ''], DesignDirectionStep::normalizeVerdict(['choice' => '1'], 4), 'a numeric string still decides');
+    assert_eq(null, DesignDirectionStep::normalizeVerdict(['choice' => 0], 4), 'the numbering is 1-based');
+    assert_eq(null, DesignDirectionStep::normalizeVerdict(['choice' => 5], 4), 'out of range');
+    assert_eq(null, DesignDirectionStep::normalizeVerdict(['choice' => 'the third one'], 4));
+    assert_eq(null, DesignDirectionStep::normalizeVerdict(['rationale' => 'no choice made'], 4));
+    assert_eq(null, DesignDirectionStep::normalizeVerdict([], 4));
+});
+
+test('formatSeeds numbers the candidates the way the judge answers', function () {
+    assert_eq(
+        "1. Salt & Iron — a.\n2. Midnight Provisions — b.",
+        DesignDirectionStep::formatSeeds(['Salt & Iron — a.', 'Midnight Provisions — b.'])
+    );
 });
 
 test('design-direction falls back to a built-in seed when the seed call fails', function () {
@@ -213,6 +328,7 @@ test('design-direction does not read or write cross-build history', function () 
         ['title' => 'Forbidden Previous Direction'],
     ]));
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['choice' => 1]);
     $llm->queueJson(['direction' => designdir_direction()]);
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new DesignDirectionStep($llm, $renderer))->run($project);
@@ -222,31 +338,32 @@ test('design-direction does not read or write cross-build history', function () 
         (string) file_get_contents($tmp . '/.direction-history.json'),
         'legacy history files are ignored and left untouched'
     );
-    assert_true(
-        !str_contains($llm->calls[0]['prompt'], 'Forbidden Previous Direction'),
-        'seed prompt ignores previous directions'
-    );
-    assert_true(
-        !str_contains($llm->calls[1]['prompt'], 'Forbidden Previous Direction'),
-        'expansion prompt ignores previous directions'
-    );
+    foreach ($llm->calls as $i => $call) {
+        assert_true(
+            !str_contains($call['prompt'], 'Forbidden Previous Direction'),
+            "call {$i} ignores previous directions"
+        );
+    }
 
     $second = (new ProjectStore($tmp))->create('demo-two');
     $second->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $second->writeJson('siteSpec.json', ['name' => 'Hearth & Crumb']);
     $llm2 = new FakeLlm();
     $llm2->queueJson(['seeds' => designdir_seeds()]);
+    $llm2->queueJson(['choice' => 1]);
     $llm2->queueJson(['direction' => designdir_direction()]);
     (new DesignDirectionStep($llm2, $renderer))->run($second);
 
-    assert_true(
-        !str_contains($llm2->calls[0]['prompt'], 'Hearth & Grain'),
-        'seed prompt does not list the previous build choice'
-    );
-    assert_true(
-        !str_contains($llm2->calls[1]['prompt'], 'Forbidden Previous Direction'),
-        'expansion prompt does not list the previous build choice'
-    );
+    foreach ($llm2->calls as $i => $call) {
+        assert_true(
+            !str_contains($call['prompt'], 'Hearth & Grain'),
+            "call {$i} does not list the previous build choice"
+        );
+        assert_true(
+            !str_contains($call['prompt'], 'Forbidden Previous Direction'),
+            "call {$i} does not list the legacy history"
+        );
+    }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -326,6 +443,7 @@ test('format renders the canvas commitment with its executable meaning', functio
 test('design-direction throws when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['choice' => 2]);
     $llm->queueJson(['direction' => ['title' => 'Empty', 'description' => '   ']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
     assert_throws(function () use ($llm, $renderer, $project) {

@@ -47,10 +47,15 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
             ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'Everything we bake, by category', 'children' => []],
         ],
     ]);
-    // design-direction-seeds (json) — 4 cheap concept titles; ONE is picked at
-    // random and expanded by the design-direction call below. Runs after
-    // site-spec, before the concurrent group.
+    // design-direction-seeds (json) — cheap concept titles for the judge to
+    // choose between. Runs after site-spec, before the concurrent group.
     $llm->queueJson(['seeds' => ['Hearth & Grain', 'Flour & Steel', 'Sugar Bloom', 'Midnight Levain']]);
+    // design-direction-judge (json) — scores the spread and picks the one the
+    // expansion call below builds on.
+    $llm->queueJson([
+        'choice' => 1,
+        'rationale' => 'The only seed that reads as a neighborhood bakery rather than a patisserie brand.',
+    ]);
     // design-direction (json) — the expanded direction, read by
     // theme-json/page-plan/sections.
     $llm->queueJson(['direction' => [
