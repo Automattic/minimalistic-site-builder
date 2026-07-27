@@ -81,7 +81,52 @@ final class ThemeValidator
         // Generated links must resolve. The section prompt promises real
         // destinations, but only a scan of what the model actually emitted
         // enforces it.
-        return array_merge($problems, self::linkProblems($project));
+        return array_merge(
+            $problems,
+            self::unresolvedImageSourceProblems($project),
+            self::linkProblems($project),
+        );
+    }
+
+    /**
+     * Raw AI_IMAGE specs still occupying URL/source fields in generated markup.
+     *
+     * The documented AI_IMAGE value belongs in an img alt until collect-images
+     * records it, so a blanket marker scan would reject valid canonical markup
+     * even after its src was resolved. This check is deliberately contextual:
+     * only block-JSON url/src values and rendered HTML src attributes can ship
+     * the prompt as an image URL.
+     *
+     * The ordinary final validator reports these as warnings for builds that
+     * skip optional image generation. GenerateImagesStep also calls this helper
+     * directly as a hard completion gate when image generation is requested.
+     *
+     * @return string[]
+     */
+    public static function unresolvedImageSourceProblems(Project $project): array
+    {
+        $problems = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            $contexts = [];
+            if (preg_match('/"(?:url|src)"\s*:\s*"\s*AI_IMAGE:/i', $markup)) {
+                $contexts[] = 'block JSON url/src';
+            }
+            if (preg_match('/\bsrc\s*=\s*(?:(?:["\'])\s*AI_IMAGE:|AI_IMAGE:)/i', $markup)) {
+                $contexts[] = 'HTML src';
+            }
+            if ($contexts === []) {
+                continue;
+            }
+
+            $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
+            $problems[] = str_replace(DIRECTORY_SEPARATOR, '/', $rel)
+                . ': contains unresolved AI_IMAGE: in ' . implode(' and ', $contexts);
+        }
+
+        return $problems;
     }
 
     /**
