@@ -78,34 +78,51 @@ final class AttributeNormalizer
         // anyway — the difference is that it is now recorded rather than
         // rejected. Reviewed legacy keys drop silently; they are already known
         // to be inert, so a row for each would be noise.
+        // Registered keys bind first, in one pass, so nothing below depends on
+        // the order the author happened to write the delimiter in: a stray key
+        // sitting before its correctly-spelled twin must not win a race against
+        // it. Unknown keys are then resolved against that complete picture.
         $comment = [];
         $rawComment = [];
+        $unknown = [];
         foreach ($node->attributes?->entries() ?? [] as $entry) {
             $rawComment[$entry['key']] = $entry['value']->toNative();
-            if (!array_key_exists($entry['key'], $schemas)) {
-                if ($this->deprecations->isReviewedLegacyCommentAttribute(
-                    $node->name,
-                    $entry['key'],
-                )) {
-                    continue;
-                }
-                $native = $entry['value']->toNative();
-                $corrected = AttributeNameResolver::resolve($entry['key'], $native, $schemas, $comment);
-                if ($corrected !== null) {
-                    $comment[$corrected] = $native;
-                    $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
-                        'attribute-renamed:' . $entry['key'] . '>' . $corrected,
-                        $blockPath,
-                    );
-                    continue;
-                }
+            if (array_key_exists($entry['key'], $schemas)) {
+                $comment[$entry['key']] = $entry['value']->toNative();
+                continue;
+            }
+            if ($this->deprecations->isReviewedLegacyCommentAttribute($node->name, $entry['key'])) {
+                continue;
+            }
+            $unknown[$entry['key']] = $entry['value']->toNative();
+        }
+
+        // Two stray keys pointing at the same attribute are as ambiguous as two
+        // registered names a single key could mean: there is no principled way
+        // to pick a winner, so neither is applied and both are reported.
+        $renameTo = [];
+        $claims = [];
+        foreach ($unknown as $key => $native) {
+            $target = AttributeNameResolver::resolve((string) $key, $native, $schemas, $comment);
+            if ($target !== null) {
+                $renameTo[$key] = $target;
+                $claims[$target] = ($claims[$target] ?? 0) + 1;
+            }
+        }
+        foreach ($unknown as $key => $native) {
+            $target = $renameTo[$key] ?? null;
+            if ($target !== null && $claims[$target] === 1) {
+                $comment[$target] = $native;
                 $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
-                    'unknown-attribute-dropped:' . $node->name . '.' . $entry['key'],
+                    'attribute-renamed:' . $key . '>' . $target,
                     $blockPath,
                 );
                 continue;
             }
-            $comment[$entry['key']] = $entry['value']->toNative();
+            $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                'unknown-attribute-dropped:' . $node->name . '.' . $key,
+                $blockPath,
+            );
         }
         $commentValues = $this->renderValues($comment);
         $rawCommentValues = $this->renderValues($rawComment);

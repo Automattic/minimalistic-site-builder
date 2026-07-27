@@ -82,6 +82,43 @@ test('a misnamed comment key is renamed onto the attribute it meant', function (
     );
 });
 
+test('resolution does not depend on the order the delimiter was authored in', function () {
+    // Registered keys bind before any rename is considered, and two strays
+    // competing for one attribute cancel each other, so neither outcome can be
+    // decided by where the generator happened to put a key.
+    $transform = static function (string $attrs): array {
+        $result = (new Serializer())->transform(
+            "<!-- wp:columns {$attrs} --><div class=\"wp-block-columns\"></div><!-- /wp:columns -->"
+        );
+        $codes = array_map(static fn ($r): string => $r->code, $result->repairs);
+        sort($codes);
+        return [$result->html, $codes];
+    };
+
+    // The explicit registered value wins wherever the stray sits.
+    $before = $transform('{"vertical_alignment":"top","verticalAlignment":"center"}');
+    $after  = $transform('{"verticalAlignment":"center","vertical_alignment":"top"}');
+    assert_eq($before, $after, 'a stray key cannot outrace its correctly spelled twin');
+    assert_contains('"verticalAlignment":"center"', $before[0]);
+    assert_eq(['unknown-attribute-dropped:core/columns.vertical_alignment'], $before[1]);
+
+    // Two spellings of the same attribute are ambiguous; neither is applied.
+    $ab = $transform('{"vertical_alignment":"top","VerticalAlignment":"bottom"}');
+    $ba = $transform('{"VerticalAlignment":"bottom","vertical_alignment":"top"}');
+    assert_eq($ab, $ba, 'competing strays resolve identically either way round');
+    assert_true(!str_contains($ab[0], 'verticalAlignment'), 'neither guess is applied');
+    assert_eq(
+        [
+            'unknown-attribute-dropped:core/columns.VerticalAlignment',
+            'unknown-attribute-dropped:core/columns.vertical_alignment',
+        ],
+        $ab[1],
+    );
+
+    // A stray with no competition is still recovered.
+    assert_contains('"verticalAlignment":"top"', $transform('{"vertical_alignment":"top"}')[0]);
+});
+
 test('an unregistered attribute on a block that never had it is dropped, not renamed', function () {
     // The failure this policy was written for: the generator carries
     // verticalAlignment from core/columns (where it is real) onto core/group
