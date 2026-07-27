@@ -137,6 +137,69 @@ test('collect-images recovers a bare img src placeholder with no ratio', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images recovers every source shape the validator flags', function () {
+    [$project, $tmp] = collect_fixture();
+    // Leading whitespace inside the quoted values, plus an unquoted src —
+    // shapes ThemeValidator::unresolvedImageSourceProblems() detects, so
+    // recovery must repair them too or an images build dies at the
+    // generate-images gate after paying for every other image.
+    $project->writeText('theme/parts/hero.html',
+        '<!-- wp:cover {"url":" AI_IMAGE:dense fog over the dunes|ratio:21:9"} -->'
+        . '<div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" alt="" src=" AI_IMAGE:dense fog over the dunes|ratio:21:9"/>'
+        . '</div><!-- /wp:cover -->'
+    );
+    $project->writeText('theme/parts/band.html', '<img src=AI_IMAGE:beans alt=""/>');
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(2, count($images));
+    $bySubject = array_column($images, null, 'subject');
+    $hero = $project->readText('theme/parts/hero.html');
+    // The whitespace-padded url and src decode to one prompt and one path.
+    assert_eq(2, substr_count($hero, $bySubject['dense fog over the dunes']['src']));
+    $band = $project->readText('theme/parts/band.html');
+    // The unquoted src gains the quotes the model omitted.
+    assert_contains('src="' . $bySubject['beans']['src'] . '"', $band);
+    foreach (['hero', 'band'] as $part) {
+        assert_true(
+            !str_contains($project->readText("theme/parts/{$part}.html"), 'AI_IMAGE:'),
+            "{$part} fully normalized"
+        );
+    }
+    assert_eq([], \Automattic\SiteBuild\ThemeValidator::unresolvedImageSourceProblems($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images points a recovered cover url at its canonical inner img asset', function () {
+    [$project, $tmp] = collect_fixture();
+    // Half-canonical cover: the url carries the raw prompt while the inner img
+    // already follows the documented form. The url must adopt the img's asset
+    // instead of synthesizing a second image for the same background.
+    $project->writeText('theme/parts/hero.html',
+        '<!-- wp:cover {"url":"AI_IMAGE:fog over dunes at dawn|ratio:16:9"} -->'
+        . '<div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src="theme:./assets/hero.jpg" '
+        . 'alt="AI_IMAGE: fog over dunes at dawn | full-bleed hero | photorealistic | landscape"/>'
+        . '</div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('hero.jpg', $images[0]['filename']);
+    // The canonical spec's rich fields win over the recovery fallback.
+    assert_eq('full-bleed hero', $images[0]['pageContext']);
+    $markup = $project->readText('theme/parts/hero.html');
+    assert_contains('"url":"theme:./assets/hero.jpg"', $markup);
+    assert_eq(2, substr_count($markup, 'theme:./assets/hero.jpg'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images ignores plain images with no AI_IMAGE marker', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/parts/plain-image.html',

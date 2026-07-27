@@ -17,7 +17,7 @@ use Automattic\SiteBuild\StepDeclaration;
  * Output: images.json — an array of image specs, one per unique asset filename:
  *           { filename, src, subject, pageContext, style, aspectRatio, status, sources[] }
  *         plus in-place normalization of malformed AI_IMAGE url/src values to
- *         their synthetic theme asset paths.
+ *         canonical theme asset paths.
  *
  * Placeholders follow the telex convention: an <img> whose src is a theme-relative
  * "theme:./assets/<name>.jpg" path (".png" for transparent-background assets)
@@ -127,7 +127,16 @@ final class CollectImagesStep implements Step
             return ['content' => $content, 'images' => []];
         }
 
-        $recovered = self::recoverPlaceholders($content);
+        // Canonical placeholders in the original markup double as recovery
+        // targets: a malformed cover "url" whose subject matches its inner
+        // img's documented AI_IMAGE alt must adopt that img's asset path, not
+        // synthesize a second image for the same background.
+        $canonicalSrcBySubject = [];
+        foreach (self::parseCanonicalPlaceholders($content) as $image) {
+            $canonicalSrcBySubject[self::normalizeSubject($image['subject'])] = $image['src'];
+        }
+
+        $recovered = self::recoverPlaceholders($content, $canonicalSrcBySubject);
         $images = self::parseCanonicalPlaceholders($recovered['content']);
 
         // A malformed src can coexist with a valid AI_IMAGE alt. Once recovery
@@ -204,16 +213,20 @@ final class CollectImagesStep implements Step
      * JSON escapes and HTML entities are decoded before hashing/deduplication,
      * so a cover "url" containing "\u0026" and its <img> src containing
      * "&amp;" resolve to one semantic prompt and one filename. Both contexts
-     * are rewritten in place to that synthetic theme asset path.
+     * are rewritten in place to one theme asset path — the same-file canonical
+     * placeholder's path when one names the same subject (so a half-canonical
+     * cover keeps its url and rendered src on one asset), otherwise a
+     * synthetic one.
      *
+     * @param array<string,string> $canonicalSrcBySubject normalized subject => theme: src
      * @return array{content:string,images:array<int,array<string,mixed>>}
      */
-    private static function recoverPlaceholders(string $content): array
+    private static function recoverPlaceholders(string $content, array $canonicalSrcBySubject): array
     {
         /** @var array<string,array<string,mixed>> $byPrompt semantic prompt => spec */
         $byPrompt = [];
 
-        $imageFor = static function (string $literal, bool $json) use (&$byPrompt): ?array {
+        $imageFor = static function (string $literal, bool $json) use (&$byPrompt, $canonicalSrcBySubject): ?array {
             $semantic = self::decodeRecoveredLiteral($literal, $json);
             $body = trim(substr($semantic, strlen('AI_IMAGE:')));
             $subject = trim(explode('|', $body, 2)[0]);
@@ -223,10 +236,11 @@ final class CollectImagesStep implements Step
 
             $promptKey = 'AI_IMAGE:' . $body;
             if (!isset($byPrompt[$promptKey])) {
-                $filename = self::synthesizeFilename($subject, $promptKey);
+                $src = $canonicalSrcBySubject[self::normalizeSubject($subject)]
+                    ?? 'theme:./assets/' . self::synthesizeFilename($subject, $promptKey);
                 $byPrompt[$promptKey] = [
-                    'filename'    => $filename,
-                    'src'         => 'theme:./assets/' . $filename,
+                    'filename'    => substr($src, strlen('theme:./assets/')),
+                    'src'         => $src,
                     'subject'     => $subject,
                     'pageContext' => '',
                     'style'       => '',
@@ -237,8 +251,10 @@ final class CollectImagesStep implements Step
         };
 
         // Block-comment JSON. Match "src" as well as "url" so any block that
-        // puts the prompt in a JSON source field gets the same repair.
-        $jsonPattern = '/(?P<prefix>"(?:url|src)"\s*:\s*")'
+        // puts the prompt in a JSON source field gets the same repair. Leading
+        // whitespace inside the value is tolerated (and dropped on rewrite) so
+        // every shape ThemeValidator flags as a JSON source is also repaired.
+        $jsonPattern = '/(?P<prefix>"(?:url|src)"\s*:\s*")\s*'
             . '(?P<lit>AI_IMAGE:(?:[^"\\\\]|\\\\.)*)(?P<suffix>")/is';
         $content = (string) preg_replace_callback(
             $jsonPattern,
@@ -253,7 +269,9 @@ final class CollectImagesStep implements Step
 
         // Rendered HTML. Keep the replacement scoped to src= so an identical
         // AI_IMAGE alt remains available to the canonical parser above.
-        $srcPattern = '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))'
+        // Leading whitespace inside the quotes is tolerated, mirroring the
+        // validator's detection.
+        $srcPattern = '/(?P<prefix>\bsrc\s*=\s*(?P<quote>["\']))\s*'
             . '(?P<lit>AI_IMAGE:.*?)(?P<suffix>\k<quote>)/is';
         $content = (string) preg_replace_callback(
             $srcPattern,
@@ -262,6 +280,23 @@ final class CollectImagesStep implements Step
                 return $image === null
                     ? $match[0]
                     : $match['prefix'] . $image['src'] . $match['suffix'];
+            },
+            $content
+        );
+
+        // Unquoted src=AI_IMAGE:… — the value necessarily ends at the first
+        // whitespace or ">", so a piped spec loses everything past the subject's
+        // first word; a truncated recovery still beats shipping the raw prompt
+        // (or, with images requested, failing the whole build at the gate).
+        // The rewrite adds the quotes the model omitted.
+        $bareSrcPattern = '/\bsrc\s*=\s*(?P<lit>AI_IMAGE:[^\s>"\'`=]*)/i';
+        $content = (string) preg_replace_callback(
+            $bareSrcPattern,
+            static function (array $match) use ($imageFor): string {
+                $image = $imageFor($match['lit'], false);
+                return $image === null
+                    ? $match[0]
+                    : 'src="' . $image['src'] . '"';
             },
             $content
         );
@@ -279,6 +314,15 @@ final class CollectImagesStep implements Step
             }
         }
         return trim(html_entity_decode($literal, ENT_QUOTES | ENT_HTML5));
+    }
+
+    /**
+     * The comparison key under which a recovered subject matches a canonical
+     * placeholder's subject: case- and whitespace-insensitive.
+     */
+    private static function normalizeSubject(string $subject): string
+    {
+        return strtolower((string) preg_replace('/\s+/', ' ', trim($subject)));
     }
 
     /**
