@@ -11,6 +11,7 @@ use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
 use Automattic\SiteBuild\BlockSerializer\StagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\TemplateTransformer;
+use Automattic\SiteBuild\BlockSerializer\UnsupportedMarkupException;
 
 /** Pure-PHP, fixed-point Gutenberg compatibility fixer. */
 final class PhpBlockFixer implements BlockFixer
@@ -71,11 +72,12 @@ final class PhpBlockFixer implements BlockFixer
             for ($pass = 1; $pass <= self::MAX_PASSES; $pass++) {
                 try {
                     $result = $this->transformer->transform($current);
-                } catch (\RuntimeException $error) {
+                } catch (UnsupportedMarkupException $error) {
                     // Same narrowing as the per-block fallback: only an
-                    // "unsupported markup" failure degrades. A TypeError or
-                    // LogicException is our bug and must still crash loudly
-                    // rather than ship a theme of unprocessed files.
+                    // authored-markup failure degrades. Anything else — a
+                    // registry defect, a missing renderer, a hardened PHP host —
+                    // is our problem and must still crash loudly rather than
+                    // ship a theme of unprocessed files.
                     $failure = "pass {$pass}: {$error->getMessage()}";
                     break;
                 }

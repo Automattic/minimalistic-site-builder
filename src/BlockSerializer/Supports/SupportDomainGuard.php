@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Supports;
 
+use Automattic\SiteBuild\BlockSerializer\UnsupportedMarkupException;
 use Automattic\SiteBuild\BlockSerializer\Attributes\AttributeNameResolver;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonNative;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
@@ -263,13 +264,13 @@ final class SupportDomainGuard
         if (array_key_exists('layout', $attributes)) {
             $layout = $attributes['layout'];
             if (!is_array($layout)) {
-                throw new \RuntimeException("Unsupported non-object layout for {$name} at {$blockPath}");
+                throw new UnsupportedMarkupException("Unsupported non-object layout for {$name} at {$blockPath}");
             }
             foreach ($layout as $key => $value) {
                 if (is_string($key) && isset(self::LAYOUT_NUMERIC_KEYS[$key])) {
                     if (!is_int($value) && !is_float($value)) {
                         $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
-                        throw new \RuntimeException(
+                        throw new UnsupportedMarkupException(
                             "Unsupported block-support layout value '{$encoded}' for {$name} at {$blockPath} layout.{$key}"
                         );
                     }
@@ -278,7 +279,7 @@ final class SupportDomainGuard
                 if (is_string($key) && isset(self::LAYOUT_STRING_KEYS[$key])) {
                     if (!is_string($value) || $value === '') {
                         $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
-                        throw new \RuntimeException(
+                        throw new UnsupportedMarkupException(
                             "Unsupported block-support layout value '{$encoded}' for {$name} at {$blockPath} layout.{$key}"
                         );
                     }
@@ -286,13 +287,13 @@ final class SupportDomainGuard
                 }
                 if (!is_string($key) || !isset(self::LAYOUT_VALUES[$key])) {
                     $label = is_string($key) ? $key : (string) $key;
-                    throw new \RuntimeException(
+                    throw new UnsupportedMarkupException(
                         "Unsupported block-support layout variant 'layout.{$label}' for {$name} at {$blockPath}"
                     );
                 }
                 if (!is_string($value) || !in_array($value, self::LAYOUT_VALUES[$key], true)) {
                     $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
-                    throw new \RuntimeException(
+                    throw new UnsupportedMarkupException(
                         "Unsupported block-support layout value '{$encoded}' for {$name} at {$blockPath} layout.{$key}"
                     );
                 }
@@ -657,7 +658,7 @@ final class SupportDomainGuard
     ): void {
         if ($rule === true) {
             if (is_array($value)) {
-                throw new \RuntimeException(
+                throw new UnsupportedMarkupException(
                     "Unsupported block-support object at {$name} {$blockPath} {$valuePath}"
                 );
             }
@@ -676,7 +677,7 @@ final class SupportDomainGuard
                     && preg_match($rule['@pattern'], $value) === 1;
                 if (!$matchesValue && !$matchesPattern) {
                     $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
-                    throw new \RuntimeException(
+                    throw new UnsupportedMarkupException(
                         "Unsupported block-support value '{$encoded}' at {$name} {$blockPath} {$valuePath}"
                     );
                 }
@@ -685,14 +686,14 @@ final class SupportDomainGuard
             if (($rule['@leaf'] ?? false) === true) {
                 return;
             }
-            throw new \RuntimeException(
+            throw new UnsupportedMarkupException(
                 "Unsupported block-support scalar at {$name} {$blockPath} {$valuePath}"
             );
         }
         foreach ($value as $key => $child) {
             if (!is_string($key) || $key === '@leaf' || !array_key_exists($key, $rule)) {
                 $label = is_string($key) ? $key : (string) $key;
-                throw new \RuntimeException(
+                throw new UnsupportedMarkupException(
                     "Unsupported block-support path '{$valuePath}.{$label}' for {$name} at {$blockPath}"
                 );
             }

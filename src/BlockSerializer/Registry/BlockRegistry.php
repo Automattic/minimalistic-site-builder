@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Registry;
 
+use Automattic\SiteBuild\BlockSerializer\UnsupportedMarkupException;
 use Automattic\SiteBuild\BlockSerializer\Save\SaveStrategy;
 
 /** Loads and validates the frozen post-registration Gutenberg snapshot. */
@@ -80,7 +81,7 @@ final class BlockRegistry
             return SaveStrategy::MISSING_BLOCK;
         }
         if (!$this->isSupported($name)) {
-            throw new \RuntimeException("Registered block '{$name}' is outside the supported PHP domain");
+            throw new UnsupportedMarkupException("Registered block '{$name}' is outside the supported PHP domain");
         }
         return $this->supported[$name];
     }

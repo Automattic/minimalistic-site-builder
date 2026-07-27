@@ -5,6 +5,7 @@ use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\StagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\TemplateTransformer;
 use Automattic\SiteBuild\BlockSerializer\TransformResult;
+use Automattic\SiteBuild\BlockSerializer\UnsupportedMarkupException;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhpBlockFixer;
 
@@ -373,7 +374,7 @@ test('PhpBlockFixer delivers every other file when one transformation throws', f
             return match ($html) {
                 $aOriginal => new TransformResult($aCanonical),
                 $aCanonical => new TransformResult($aCanonical),
-                $bOriginal => throw new RuntimeException('injected renderer failure'),
+                $bOriginal => throw new UnsupportedMarkupException('injected renderer failure'),
                 default => throw new RuntimeException('unexpected transform input'),
             };
         }
@@ -773,6 +774,32 @@ test('PhpBlockFixer leaves only complete original or canonical bytes after mid-c
     }
 });
 
+test('a plain RuntimeException is treated as our bug, not as bad markup', function () {
+    // The narrowing that matters most: \RuntimeException is this codebase's
+    // general error type — a defect in the frozen registry, a missing renderer,
+    // an environment where ini_set is disabled all throw it. Degrading on those
+    // would ship a whole theme unprocessed and exit zero.
+    $internal = new PhpBlockFixerTestTransformer(
+        static fn (): TransformResult => throw new RuntimeException('serialize_precision must be changeable')
+    );
+    $theme = php_block_fixer_test_theme([
+        'parts/a.html' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',
+    ]);
+
+    try {
+        $error = php_block_fixer_test_exception(
+            static fn () => (new PhpBlockFixer($internal, writer: new PhpBlockFixerTestWriter()))->fix($theme)
+        );
+        assert_true(
+            !$error instanceof UnsupportedMarkupException,
+            'a general RuntimeException is not an authored-markup problem',
+        );
+        assert_contains('serialize_precision', $error->getMessage());
+    } finally {
+        php_block_fixer_test_remove(dirname($theme));
+    }
+});
+
 test('a bug in the serializer still crashes loudly instead of shipping unprocessed files', function () {
     // The degradation path is deliberately scoped to \RuntimeException, the
     // type every "this markup is unsupported" guard throws. A TypeError means
@@ -802,7 +829,7 @@ test('an unsupported-markup failure still degrades rather than crashing', functi
     // The other half of the same contract, so the narrowing cannot be widened
     // or tightened by accident without a test noticing.
     $unsupported = new PhpBlockFixerTestTransformer(
-        static fn (): TransformResult => throw new RuntimeException('unsupported markup here')
+        static fn (): TransformResult => throw new UnsupportedMarkupException('unsupported markup here')
     );
     $theme = php_block_fixer_test_theme([
         'parts/a.html' => '<!-- wp:paragraph --><p>hi</p><!-- /wp:paragraph -->',

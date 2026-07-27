@@ -110,14 +110,15 @@ final class Serializer implements TemplateTransformer
             $block = $this->normalizer->normalize($node, $innerHtml, $path);
             $content = $this->saves->save($node->name, $block->attributes, $innerHtml, $node->innerHTML);
             $html = $this->comments->delimit($node->name, $this->comments->attributes($block), $content);
-        } catch (\RuntimeException $error) {
-            // Deliberately \RuntimeException and nothing wider. Every guard
-            // that means "this markup is unsupported" throws that type; a
-            // TypeError, LogicException or InvalidArgumentException means a bug
-            // in this code, and swallowing those would turn our own defects
-            // into silently unprocessed pages. During development a deleted
-            // variable did exactly that under a catch-all: 39 files passed
-            // through untouched and the run reported clean.
+        } catch (UnsupportedMarkupException $error) {
+            // Only UnsupportedMarkupException degrades — the type the guards
+            // that judge authored markup throw, and nothing else. A plain
+            // \RuntimeException here means a defect in the frozen registry, a
+            // missing renderer for a block we declared supported, or an
+            // environment where ini_set is disabled; degrading on those would
+            // ship a whole theme unprocessed and exit zero. During development a
+            // deleted variable did exactly that under a catch-all: 39 files
+            // passed through untouched and the run reported clean.
             //
             // This one block cannot be canonicalized. Keeping its authored
             // bytes costs the page that block; abandoning the file costs every

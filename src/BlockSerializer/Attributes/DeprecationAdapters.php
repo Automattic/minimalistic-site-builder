@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Attributes;
 
+use Automattic\SiteBuild\BlockSerializer\UnsupportedMarkupException;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Html\RichText;
 use Automattic\SiteBuild\BlockSerializer\Repair;
@@ -128,7 +129,7 @@ final class DeprecationAdapters
         $current = $this->effectiveRootStyles($currentContent);
         foreach ($actual as $property => $value) {
             if (!array_key_exists($property, $current) || $current[$property] !== $value) {
-                throw new \RuntimeException(
+                throw new UnsupportedMarkupException(
                     "Unsupported deprecated core/paragraph style signature at {$blockPath}: {$property}; "
                     . 'a reviewed deprecation adapter is required'
                 );
@@ -226,7 +227,7 @@ final class DeprecationAdapters
     ): array {
         if (array_key_exists('textAlign', $rawCommentAttributes)
             && $rawCommentAttributes['textAlign'] !== 'center') {
-            throw new \RuntimeException(
+            throw new UnsupportedMarkupException(
                 'Unsupported legacy core/button textAlign value; '
                 . 'a reviewed deprecation adapter is required'
             );
@@ -519,7 +520,7 @@ final class DeprecationAdapters
     ): array {
         $legacyAlign = $rawCommentAttributes['textAlign'] ?? null;
         if ($legacyAlign !== null && !is_string($legacyAlign)) {
-            throw new \RuntimeException(
+            throw new UnsupportedMarkupException(
                 "Unsupported deprecated {$name} text-align value; "
                 . 'a reviewed deprecation adapter is required'
             );
@@ -545,7 +546,7 @@ final class DeprecationAdapters
             return $attributes;
         }
         if (!is_string($legacyFamily)) {
-            throw new \RuntimeException(
+            throw new UnsupportedMarkupException(
                 "Unsupported deprecated {$name} font-family value; "
                 . 'a reviewed deprecation adapter is required'
             );
@@ -573,7 +574,7 @@ final class DeprecationAdapters
             return $attributes;
         }
         if (!is_string($typography['fontFamily'])) {
-            throw new \RuntimeException(
+            throw new UnsupportedMarkupException(
                 'Unsupported deprecated core/navigation font-family value; '
                 . 'a reviewed deprecation adapter is required'
             );
@@ -896,7 +897,7 @@ final class DeprecationAdapters
         foreach (explode(';', $style) as $declaration) {
             $parts = explode(':', $declaration, 2);
             if (count($parts) !== 2 || trim($parts[0]) === '') {
-                throw new \RuntimeException('Unsupported malformed paragraph style declaration');
+                throw new UnsupportedMarkupException('Unsupported malformed paragraph style declaration');
             }
             $property = strtolower(trim($parts[0]));
             $value = preg_replace('/\s+/', ' ', trim($parts[1])) ?? trim($parts[1]);
