@@ -76,8 +76,8 @@ final class DeprecationAdapters
             'textAlign' => true,
         ],
         'core/site-tagline' => [
-            // Mirrors core/site-title: same deprecated version-0 legacy, the
-            // top-level textAlign comment key the pinned createBlock path drops.
+            // Mirrors core/site-title: deprecated version 0 migrates the
+            // top-level key to style.typography.textAlign.
             'textAlign' => true,
         ],
     ];
@@ -183,8 +183,13 @@ final class DeprecationAdapters
             $attributes = $this->heading($attributes, $rawCommentAttributes, $matched);
         } elseif ($name === 'core/navigation') {
             $attributes = $this->navigation($attributes, $matched);
-        } elseif ($name === 'core/site-title') {
-            $attributes = $this->siteTitle($attributes, $rawCommentAttributes, $matched);
+        } elseif (in_array($name, ['core/site-title', 'core/site-tagline'], true)) {
+            $attributes = $this->siteIdentityText(
+                $name,
+                $attributes,
+                $rawCommentAttributes,
+                $matched,
+            );
         }
         return ['attributes' => $attributes, 'repairs' => [], 'matched' => $matched];
     }
@@ -480,8 +485,9 @@ final class DeprecationAdapters
     }
 
     /**
-     * Reviewed site-title deprecations, in the pinned candidate order:
-     * textAlign/className migration first, then style-level font family.
+     * Reviewed site-title and site-tagline deprecations, in their shared
+     * pinned candidate order: textAlign/className migration first, then
+     * style-level font family.
      * The caller's later shallow raw-comment overlay intentionally decides
      * whether a raw style object supersedes the migrated text alignment.
      *
@@ -489,7 +495,8 @@ final class DeprecationAdapters
      * @param array<string,mixed> $rawCommentAttributes
      * @return array<string,mixed>
      */
-    private function siteTitle(
+    private function siteIdentityText(
+        string $name,
         array $attributes,
         array $rawCommentAttributes,
         bool &$matched,
@@ -497,7 +504,7 @@ final class DeprecationAdapters
         $legacyAlign = $rawCommentAttributes['textAlign'] ?? null;
         if ($legacyAlign !== null && !is_string($legacyAlign)) {
             throw new \RuntimeException(
-                'Unsupported deprecated core/site-title text-align value; '
+                "Unsupported deprecated {$name} text-align value; "
                 . 'a reviewed deprecation adapter is required'
             );
         }
@@ -514,7 +521,6 @@ final class DeprecationAdapters
                 $style['typography'] = $typography;
                 $attributes['style'] = $style;
             }
-            return $attributes;
         }
 
         $typography = $attributes['style']['typography'] ?? null;
@@ -524,7 +530,7 @@ final class DeprecationAdapters
         }
         if (!is_string($legacyFamily)) {
             throw new \RuntimeException(
-                'Unsupported deprecated core/site-title font-family value; '
+                "Unsupported deprecated {$name} font-family value; "
                 . 'a reviewed deprecation adapter is required'
             );
         }
