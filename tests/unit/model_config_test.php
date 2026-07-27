@@ -19,7 +19,7 @@ test('ModelConfig reads the packaged provider matrix', function () {
 
     assert_eq('gpt-5.5', ModelConfig::tierModel('openai', 'large'));
     assert_eq('gpt-5.4-mini', ModelConfig::tierModel('openai', 'small'));
-    assert_eq('claude-opus-4-8', ModelConfig::tierModel('anthropic', 'large'));
+    assert_eq('claude-opus-5', ModelConfig::tierModel('anthropic', 'large'));
     assert_eq('claude-haiku-4-5', ModelConfig::tierModel('anthropic', 'small'));
 
     $tiers = ModelConfig::stepTiers();
@@ -53,11 +53,11 @@ test('StepDefaults default (anthropic) reproduces the historical model mapping',
     assert_eq('claude-haiku-4-5', $models['site-spec']);
     assert_eq('claude-haiku-4-5', $models['design-direction-seeds']);
     assert_eq('claude-haiku-4-5', $models['page-plan']);
-    assert_eq('claude-opus-4-8', $models['design-direction']);
-    assert_eq('claude-opus-4-8', $models['theme-json']);
-    assert_eq('claude-opus-4-8', $models['sections']);
-    assert_eq('claude-opus-4-8', $models['page-styles']);
-    assert_eq('claude-opus-4-8', $models['fonts-php']);
+    assert_eq('claude-opus-5', $models['design-direction']);
+    assert_eq('claude-opus-5', $models['theme-json']);
+    assert_eq('claude-opus-5', $models['sections']);
+    assert_eq('claude-opus-5', $models['page-styles']);
+    assert_eq('claude-opus-5', $models['fonts-php']);
 });
 
 test('StepDefaults follows the active provider tiers (openai)', function () {
