@@ -299,6 +299,9 @@ final class AnthropicClient implements Llm
         if (isset($req['temperature']) && self::supportsSampling($model)) {
             $body['temperature'] = (float) $req['temperature'];
         }
+        if (self::thinksByDefault($model)) {
+            $body['thinking'] = ['type' => 'disabled'];
+        }
         if (isset($req['json_schema'])) {
             $spec = $req['json_schema'];
             if (!is_array($spec) || !is_array($spec['schema'] ?? null)) {
@@ -331,6 +334,21 @@ final class AnthropicClient implements Llm
     public static function supportsSampling(string $model): bool
     {
         return preg_match('/claude-(fable|mythos|opus-4-[78]|opus-5|sonnet-5)/', $model) !== 1;
+    }
+
+    /**
+     * Models that run adaptive thinking when the request omits the `thinking`
+     * parameter (Opus 5 does; Opus 4.8 and earlier do not). For these we send
+     * an explicit `thinking: {type: "disabled"}` — the pipeline's latency and
+     * token budgets were tuned on non-thinking models, and thinking tokens
+     * also count against max_tokens. Valid only at effort <= high (we never
+     * send effort, and the API default is high). Deliberately narrow: Fable 5
+     * rejects an explicit "disabled" with a 400, so it must never match here.
+     * Pure.
+     */
+    public static function thinksByDefault(string $model): bool
+    {
+        return preg_match('/claude-opus-5/', $model) === 1;
     }
 
     /**
