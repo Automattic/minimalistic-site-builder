@@ -38,6 +38,28 @@ test('JsonBatchRecovery returns an all-valid batch without a retry', function ()
     assert_eq('page', $out['page']['kind']);
 });
 
+test('JsonBatchRecovery keeps safely repaired quotes out of the model retry path', function () {
+    $requests = ['page' => ['prompt' => 'Plan the page']];
+    $rounds = [];
+
+    $send = function (array $subset) use (&$rounds): array {
+        $rounds[] = array_keys($subset);
+        return [
+            'page' => [
+                'text' => '{"content_notes":"Headline "Reserve Now" in gold","purpose":"Convert"}',
+            ],
+        ];
+    };
+
+    $out = JsonBatchRecovery::run($requests, $send);
+
+    assert_eq([['page']], $rounds, 'local quote repair avoids a second model request');
+    assert_eq([
+        'content_notes' => 'Headline "Reserve Now" in gold',
+        'purpose'       => 'Convert',
+    ], $out['page']);
+});
+
 test('JsonBatchRecovery retries only one malformed sibling', function () {
     $requests = [
         'theme' => ['prompt' => 'Generate the theme'],
