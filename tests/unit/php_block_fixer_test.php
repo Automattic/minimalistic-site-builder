@@ -505,18 +505,23 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
     }
 });
 
-test('PhpBlockFixer rejects unreviewed layout variants before staging', function () {
+test('PhpBlockFixer drops an unreviewed layout variant and still delivers the file', function () {
+    // `grid` is not a layout type the pinned runtime consumes. Losing it costs
+    // this section its layout mode; failing the run costs the user every
+    // section. The drop is reported, and a layout emptied by it is removed
+    // rather than left as a bare object in the delimiter.
     $original = '<!-- wp:group {"layout":{"type":"grid"}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
-    $writer = new PhpBlockFixerTestWriter();
+
     try {
-        php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
-        assert_eq(0, $writer->stageCalls);
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
+        $report = (string) (new PhpBlockFixer())->fix($theme);
+
+        assert_contains('REPAIR invalid-layout-dropped:{"block":"core/group","key":"type"', $report);
+        $written = (string) file_get_contents($theme . '/parts/unsupported.html');
+        assert_true(!str_contains($written, 'grid'), 'the unusable value is gone');
+        assert_true(!str_contains($written, '"layout"'), 'an emptied layout is removed, not left bare');
+        assert_contains('<div class="wp-block-group">', $written, 'the block still renders');
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }

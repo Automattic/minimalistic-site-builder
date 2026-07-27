@@ -170,6 +170,28 @@ test('FixBlocksStep records dropped attributes in warnings.json and renames only
     }
 });
 
+test('nested layout and style repairs reach the right sink', function () {
+    // Drops lose authored intent, so they go to warnings.json with the file and
+    // block path a repair pass needs. Corrections kept the intent, so they only
+    // land in the log — the same split the attribute rename/drop pair uses.
+    $report = "  FIXED  parts/hero.html\n"
+        . '         - REPAIR invalid-layout-dropped:{"block":"core/group","key":"justifyContent","value":"stretch"} at 0/1' . "\n"
+        . '         - REPAIR layout-value-corrected:{"block":"core/group","key":"justifyContent","from":"space between","to":"space-between"} at 0/2' . "\n"
+        . '         - REPAIR unusable-style-dropped:{"block":"core/button","key":"elements.link.color.text","value":"object"} at 0/3' . "\n"
+        . '         - REPAIR style-value-corrected:{"block":"core/group","key":"elements.link.typography.textDecoration","from":"UNDERLINE","to":"underline"} at 0/4' . "\n";
+
+    $drops = FixBlocksStep::droppedAttributes($report);
+    assert_eq(2, count($drops), 'only the drops are warnings');
+    assert_contains('dropped layout.justifyContent (value "stretch") from core/group', $drops[0]);
+    assert_contains('parts/hero.html block 0/1', $drops[0]);
+    assert_contains('dropped style.elements.link.color.text (value "object") from core/button', $drops[1]);
+
+    $corrections = FixBlocksStep::renamedAttributes($report);
+    assert_eq(2, count($corrections));
+    assert_contains("corrected layout.justifyContent 'space between' to 'space-between'", $corrections[0]);
+    assert_contains("corrected style.elements.link.typography.textDecoration 'UNDERLINE' to 'underline'", $corrections[1]);
+});
+
 test('attribute warnings are capped so one block cannot flood the file', function () {
     $rows = '';
     for ($i = 0; $i < 25; $i++) {

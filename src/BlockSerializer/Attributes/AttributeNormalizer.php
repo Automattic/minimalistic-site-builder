@@ -64,6 +64,48 @@ final class AttributeNormalizer
                     $blockPath,
                 );
             }
+            // The other half of the same problem: a style key that exists but
+            // carries something it cannot hold (an object where a scalar
+            // belongs, a value outside an enumerated set).
+            foreach ($this->supportDomain->pruneUnusableStyleValues($node->name, $node->attributes) as $row) {
+                $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                    $row['action'] === 'corrected'
+                        ? 'style-value-corrected:' . self::payload([
+                            'block' => $node->name,
+                            'key'   => $row['path'],
+                            'from'  => $row['from'],
+                            'to'    => $row['to'],
+                        ])
+                        : 'unusable-style-dropped:' . self::payload([
+                            'block' => $node->name,
+                            'key'   => $row['path'],
+                            'value' => $row['from'],
+                        ]),
+                    $blockPath,
+                );
+            }
+            // Layout is corrected in the same place and for the same reason as
+            // the invented style paths above: unusable state leaves the raw
+            // comment before the fail-closed guard reads it, so one bad enum
+            // value costs a block its refinement rather than costing the build
+            // its output.
+            foreach ($this->supportDomain->pruneInvalidLayout($node->name, $node->attributes) as $row) {
+                $repairRows[] = new \Automattic\SiteBuild\BlockSerializer\Repair(
+                    $row['action'] === 'corrected'
+                        ? 'layout-value-corrected:' . self::payload([
+                            'block' => $node->name,
+                            'key'   => $row['key'],
+                            'from'  => $row['from'],
+                            'to'    => $row['to'],
+                        ])
+                        : 'invalid-layout-dropped:' . self::payload([
+                            'block' => $node->name,
+                            'key'   => $row['key'],
+                            'value' => $row['from'],
+                        ]),
+                    $blockPath,
+                );
+            }
         }
 
         // Keep stdClass identity at the sourcing boundary. Rendering receives

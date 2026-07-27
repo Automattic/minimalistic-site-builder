@@ -81,16 +81,43 @@ final class AttributeNameResolver
             if (isset($schema['source'])) {
                 continue;
             }
-            $candidates[$name] = self::normalize((string) $name);
+            $candidates[] = (string) $name;
         }
 
-        // Two registered names that differ only in shape cannot be told apart
-        // from the authored key alone, so only a lone match resolves.
-        $matches = array_keys($candidates, $normalized, true);
-        if (count($matches) !== 1) {
+        $match = self::canonicalize($key, $candidates);
+        if ($match === null) {
             return null;
         }
-        return self::typeMatches($value, $schemas[$matches[0]]) ? $matches[0] : null;
+        return self::typeMatches($value, $schemas[$match]) ? $match : null;
+    }
+
+    /**
+     * The one candidate whose shape matches $token, or null when none or
+     * several do.
+     *
+     * This is the primitive behind every correction in the block fixer, applied
+     * to attribute names above and to enumerated layout values in
+     * SupportDomainGuard. Shape means case- and separator-insensitive:
+     * `space between`, `spaceBetween` and `Space-Between` all match
+     * `space-between`, while `stretch` matches nothing in that set and is left
+     * for the caller to drop. Two candidates that differ only in shape cannot
+     * be told apart from the authored token, so an ambiguous match resolves to
+     * null rather than picking one.
+     *
+     * @param list<string> $candidates
+     */
+    public static function canonicalize(string $token, array $candidates): ?string
+    {
+        $normalized = self::normalize($token);
+        if ($normalized === '') {
+            return null;
+        }
+        $shapes = [];
+        foreach ($candidates as $candidate) {
+            $shapes[$candidate] = self::normalize($candidate);
+        }
+        $matches = array_keys($shapes, $normalized, true);
+        return count($matches) === 1 ? (string) $matches[0] : null;
     }
 
     /**

@@ -253,13 +253,27 @@ final class FixBlocksStep implements Step
     {
         $counts = [];
         foreach (self::attributeRepairs($report, 'attribute-renamed') as $row) {
-            $key = ($row['from'] ?? '') . "\0" . ($row['to'] ?? '');
+            $key = sprintf("renamed '%s' to '%s'", $row['from'] ?? '', $row['to'] ?? '');
             $counts[$key] = ($counts[$key] ?? 0) + 1;
         }
+        // A corrected layout value is the same kind of recovery one level down:
+        // the authored intent survived, so it belongs in the log beside the
+        // renames rather than in warnings.json.
+        foreach (['layout' => 'layout-value-corrected', 'style' => 'style-value-corrected'] as $family => $code) {
+            foreach (self::attributeRepairs($report, $code) as $row) {
+                $key = sprintf(
+                    "corrected %s.%s '%s' to '%s'",
+                    $family,
+                    $row['key'] ?? '',
+                    $row['from'] ?? '',
+                    $row['to'] ?? '',
+                );
+                $counts[$key] = ($counts[$key] ?? 0) + 1;
+            }
+        }
         $lines = [];
-        foreach ($counts as $key => $count) {
-            [$from, $to] = explode("\0", (string) $key, 2);
-            $lines[] = sprintf("renamed '%s' to '%s' on %d block(s)", $from, $to, $count);
+        foreach ($counts as $label => $count) {
+            $lines[] = sprintf('%s on %d block(s)', $label, $count);
         }
         return $lines;
     }
@@ -277,8 +291,15 @@ final class FixBlocksStep implements Step
     public static function droppedAttributes(string $report): array
     {
         $lines = [];
-        foreach (['structural-attribute-dropped', 'unknown-attribute-dropped'] as $code) {
+        foreach ([
+            'structural-attribute-dropped',
+            'unknown-attribute-dropped',
+            'invalid-layout-dropped',
+            'unusable-style-dropped',
+        ] as $code) {
             $structural = $code === 'structural-attribute-dropped';
+            $layout = $code === 'invalid-layout-dropped' || $code === 'unusable-style-dropped';
+            $family = $code === 'invalid-layout-dropped' ? 'layout' : 'style';
             $seen = [];
             foreach (self::attributeRepairs($report, $code) as $row) {
                 $key = (string) ($row['key'] ?? '');
@@ -286,18 +307,28 @@ final class FixBlocksStep implements Step
                 if ($seen[$key] > self::MAX_WARNING_LINES_PER_ATTRIBUTE) {
                     continue;
                 }
-                $lines[] = sprintf(
-                    "%s%s block %s: dropped unregistered attribute '%s' (value %s) from %s%s",
-                    $structural ? 'BROKEN: ' : '',
-                    $row['file'],
-                    $row['blockPath'],
-                    $key,
-                    json_encode((string) ($row['value'] ?? ''), JSON_UNESCAPED_SLASHES),
-                    (string) ($row['block'] ?? 'unknown block'),
-                    $structural
-                        ? ' — the block cannot render without it'
-                        : '; the block does not implement it',
-                );
+                $lines[] = $layout
+                    ? sprintf(
+                        '%s block %s: dropped %s.%s (value %s) from %s; not a value the block accepts there',
+                        $row['file'],
+                        $row['blockPath'],
+                        $family,
+                        $key,
+                        json_encode((string) ($row['value'] ?? ''), JSON_UNESCAPED_SLASHES),
+                        (string) ($row['block'] ?? 'unknown block'),
+                    )
+                    : sprintf(
+                        "%s%s block %s: dropped unregistered attribute '%s' (value %s) from %s%s",
+                        $structural ? 'BROKEN: ' : '',
+                        $row['file'],
+                        $row['blockPath'],
+                        $key,
+                        json_encode((string) ($row['value'] ?? ''), JSON_UNESCAPED_SLASHES),
+                        (string) ($row['block'] ?? 'unknown block'),
+                        $structural
+                            ? ' — the block cannot render without it'
+                            : '; the block does not implement it',
+                    );
             }
             foreach ($seen as $key => $count) {
                 if ($count > self::MAX_WARNING_LINES_PER_ATTRIBUTE) {

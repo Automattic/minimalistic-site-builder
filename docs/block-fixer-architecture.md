@@ -77,6 +77,15 @@ One `Serializer::transform()` pass (`src/BlockSerializer/Serializer.php`):
      `unknown-attribute-dropped:…`), and `FixBlocksStep` records the drops in
      `warnings.json`. `REVIEWED_LEGACY_COMMENT_KEYS` no longer gates anything —
      it marks drops as expected so they stay out of the report.
+   - Nested support state degrades the same way. `SupportDomainGuard`
+     `pruneInvalidLayout()` and `pruneUnusableStyleValues()` run before
+     `assertSupported()` and either correct a value whose shape matches a
+     permitted one (`space between` → `space-between`) or drop the key that
+     carries it. This catches the generator borrowing a real value from a
+     neighbouring property — `"justifyContent":"stretch"` is valid on
+     `verticalAlignment`, not there. `style.background` is the reviewed
+     exception and still fails closed: `StyleEngine` consumes it, so a value
+     these passes cannot judge would render a visibly broken band.
    - `Save/SaveStrategyRegistry` dispatches on the block's `SaveStrategy`:
      `DYNAMIC_NULL` → empty save, `INNER_BLOCKS` → inner content only,
      `RAW_CONTENT` (core/html) → attribute bytes, `CONDITIONAL`

@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\BlockSerializer\Supports;
 
+use Automattic\SiteBuild\BlockSerializer\Attributes\AttributeNameResolver;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonNative;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonString;
 
 /** Fail-closed boundary for the reviewed block-support compatibility domain. */
 final class SupportDomainGuard
@@ -268,6 +270,245 @@ final class SupportDomainGuard
                 }
             }
         }
+    }
+
+    /**
+     * Correct or delete unusable `layout` state before assertSupported() sees
+     * it, returning one row per action for repair reporting. Mutates
+     * $attributes so the serialized output drops the same bytes.
+     *
+     * The generator gets layout wrong the same way it gets attribute names
+     * wrong: by borrowing something real from next door. `justifyContent`
+     * accepts left/center/right/space-between, `verticalAlignment` accepts
+     * stretch — so a section reading `"justifyContent":"stretch"` is a valid
+     * value on the wrong property, exactly as `verticalAlignment` on core/group
+     * was a valid name on the wrong block. One such word used to discard an
+     * entire build at the last step.
+     *
+     * A value whose shape matches a permitted one is corrected (`space between`
+     * → `space-between`); anything else has its key removed, which leaves a
+     * layout that renders without that one refinement rather than no site at
+     * all. Only unusable state is touched — everything valid passes through and
+     * assertSupported() still fails closed on whatever this did not handle.
+     *
+     * @return list<array{action:string,key:string,from:string,to:string}>
+     */
+    public function pruneInvalidLayout(string $name, JsonObject $attributes): array
+    {
+        if (!$attributes->has('layout')) {
+            return [];
+        }
+        $layout = $attributes->get('layout');
+        if (!$layout instanceof JsonObject) {
+            // A scalar or list where the layout object belongs carries no
+            // recoverable intent; the block renders with its default layout.
+            $attributes->remove('layout');
+            return [['action' => 'dropped', 'key' => 'layout', 'from' => 'non-object', 'to' => '']];
+        }
+
+        $rows = [];
+        foreach ($layout->entries() as $entry) {
+            $key = (string) $entry['key'];
+            $value = JsonNative::value($entry['value']);
+
+            if (isset(self::LAYOUT_STRING_KEYS[$key])) {
+                if (!is_string($value) || $value === '') {
+                    $layout->remove($key);
+                    $rows[] = ['action' => 'dropped', 'key' => $key, 'from' => self::describe($value), 'to' => ''];
+                }
+                continue;
+            }
+
+            if (!isset(self::LAYOUT_VALUES[$key])) {
+                $layout->remove($key);
+                $rows[] = ['action' => 'dropped', 'key' => $key, 'from' => self::describe($value), 'to' => ''];
+                continue;
+            }
+
+            if (is_string($value) && in_array($value, self::LAYOUT_VALUES[$key], true)) {
+                continue;
+            }
+
+            $corrected = is_string($value)
+                ? AttributeNameResolver::canonicalize($value, self::LAYOUT_VALUES[$key])
+                : null;
+            if ($corrected !== null) {
+                $layout->set($key, new JsonString($corrected));
+                $rows[] = ['action' => 'corrected', 'key' => $key, 'from' => $value, 'to' => $corrected];
+                continue;
+            }
+
+            $layout->remove($key);
+            $rows[] = ['action' => 'dropped', 'key' => $key, 'from' => self::describe($value), 'to' => ''];
+        }
+
+        // A layout stripped to nothing is noise in the delimiter; removing it
+        // matches what pruneInventedStylePaths does to an emptied style.
+        if ($rows !== [] && count($layout) === 0) {
+            $attributes->remove('layout');
+        }
+        return $rows;
+    }
+
+    /**
+     * Correct or delete style values whose *shape* the reviewed tree cannot
+     * accept, returning one row per action. Mutates $attributes.
+     *
+     * pruneInventedStylePaths() above removes keys that do not exist in the
+     * tree. This handles the other half: a key that does exist, carrying
+     * something it cannot hold — an object where a scalar belongs
+     * (`style.elements.link.color.text` written as a nested object), a scalar
+     * where a subtree belongs, or a scalar outside an enumerated set. A value
+     * whose shape matches a permitted one is corrected; the rest have their
+     * path removed, so the block keeps every style it expressed legally.
+     *
+     * @return list<array{action:string,path:string,from:string,to:string}>
+     */
+    public function pruneUnusableStyleValues(string $name, JsonObject $attributes): array
+    {
+        $style = $attributes->get('style');
+        if (!$style instanceof JsonObject) {
+            return [];
+        }
+        $view = $this->withoutReviewedInertStyleState($name, JsonNative::value($style));
+        if (!is_array($view)) {
+            return [];
+        }
+        $rows = [];
+        $this->collectUnusableValuePaths($view, self::STYLE_PATHS, '', $rows);
+        foreach ($rows as $row) {
+            $segments = explode('.', $row['path']);
+            if ($row['action'] === 'corrected') {
+                $this->setStylePath($style, $segments, new JsonString($row['to']));
+                continue;
+            }
+            $this->removeStylePath($style, $segments);
+        }
+        if ($rows !== [] && count($style) === 0) {
+            $attributes->remove('style');
+        }
+        return $rows;
+    }
+
+    /**
+     * Walk the reviewed view alongside its rule, recording every path whose
+     * value shape the rule cannot accept. Mirrors collectInventedPaths, which
+     * owns the unknown-key half of the same problem; anything under a
+     * pinned-but-unimplemented family is left alone there and here.
+     *
+     * @param list<array{action:string,path:string,from:string,to:string}> $rows
+     */
+    private function collectUnusableValuePaths(array $view, array|bool $rule, string $prefix, array &$rows): void
+    {
+        foreach ($view as $key => $child) {
+            if (!is_string($key) || in_array($key, ['@leaf', '@values', '@pattern'], true)) {
+                continue;
+            }
+            $path = $prefix === '' ? $key : $prefix . '.' . $key;
+            // `background` stays fail-closed by reviewed decision: StyleEngine
+            // consumes it, so a wrong value renders a visibly broken band
+            // rather than a missing refinement. Every other family is walked —
+            // including the pinned-unimplemented ones, which assertPathValue
+            // validates regardless of collectInventedPaths leaving their
+            // unknown keys alone.
+            if (self::isFailClosedStylePath($path)) {
+                continue;
+            }
+            if (!is_array($rule) || !array_key_exists($key, $rule)) {
+                // An unknown key is collectInventedPaths' business, not ours.
+                // That also covers unknown keys inside a carried family, which
+                // are kept verbatim on purpose — this walk only ever touches
+                // paths the reviewed tree names, whose value shape it can judge.
+                continue;
+            }
+            $childRule = $rule[$key];
+
+            if ($childRule === true) {
+                if (is_array($child)) {
+                    $rows[] = ['action' => 'dropped', 'path' => $path, 'from' => 'object', 'to' => ''];
+                }
+                continue;
+            }
+            if (is_array($child)) {
+                $this->collectUnusableValuePaths($child, $childRule, $path, $rows);
+                continue;
+            }
+
+            $values = is_array($childRule) && isset($childRule['@values']) && is_array($childRule['@values'])
+                ? $childRule['@values']
+                : null;
+            $pattern = is_array($childRule) && isset($childRule['@pattern']) && is_string($childRule['@pattern'])
+                ? $childRule['@pattern']
+                : null;
+
+            if ($values !== null || $pattern !== null) {
+                if (is_string($child) && $values !== null && in_array($child, $values, true)) {
+                    continue;
+                }
+                if (is_string($child) && $pattern !== null && preg_match($pattern, $child) === 1) {
+                    continue;
+                }
+                $corrected = is_string($child) && $values !== null
+                    ? AttributeNameResolver::canonicalize($child, array_values($values))
+                    : null;
+                $rows[] = $corrected !== null
+                    ? ['action' => 'corrected', 'path' => $path, 'from' => (string) $child, 'to' => $corrected]
+                    : ['action' => 'dropped', 'path' => $path, 'from' => self::describe($child), 'to' => ''];
+                continue;
+            }
+
+            if (is_array($childRule) && ($childRule['@leaf'] ?? false) !== true) {
+                // A scalar where the rule expects a subtree.
+                $rows[] = ['action' => 'dropped', 'path' => $path, 'from' => self::describe($child), 'to' => ''];
+            }
+        }
+    }
+
+    /** Set a nested style path, creating nothing — an absent parent is a no-op. */
+    private function setStylePath(JsonObject $style, array $segments, JsonString $value): void
+    {
+        $key = array_shift($segments);
+        if ($key === null) {
+            return;
+        }
+        if ($segments === []) {
+            $style->set($key, $value);
+            return;
+        }
+        $child = $style->get($key);
+        if ($child instanceof JsonObject) {
+            $this->setStylePath($child, $segments, $value);
+        }
+    }
+
+    /**
+     * Style families that keep failing closed rather than degrading.
+     *
+     * `background` is the reviewed exception: StyleEngine consumes it, so a
+     * value this pass could not judge would render a visibly broken band
+     * instead of one missing refinement. Everything else is safe to degrade.
+     */
+    private const FAIL_CLOSED_STYLE_PATHS = ['background'];
+
+    private static function isFailClosedStylePath(string $path): bool
+    {
+        foreach (self::FAIL_CLOSED_STYLE_PATHS as $entry) {
+            if ($path === $entry || str_starts_with($path, $entry . '.')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A short, loggable rendering of an authored layout value of any type. */
+    private static function describe(mixed $value): string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+        return is_scalar($value) || $value === null
+            ? var_export($value, true)
+            : get_debug_type($value);
     }
 
     /**

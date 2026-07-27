@@ -153,3 +153,22 @@ test('a key that normalizes to nothing is refused', function () {
     assert_eq(null, AttributeNameResolver::resolve('---', 'x', anr_schemas()));
     assert_eq(null, AttributeNameResolver::resolve('', 'x', anr_schemas()));
 });
+
+test('canonicalize matches a value by shape, refusing anything ambiguous or absent', function () {
+    $justify = ['left', 'center', 'right', 'space-between'];
+
+    // Shape variants of a permitted value resolve.
+    assert_eq('space-between', AttributeNameResolver::canonicalize('space between', $justify));
+    assert_eq('space-between', AttributeNameResolver::canonicalize('spaceBetween', $justify));
+    assert_eq('space-between', AttributeNameResolver::canonicalize('Space-Between', $justify));
+    assert_eq('center', AttributeNameResolver::canonicalize('CENTER', $justify));
+
+    // `stretch` is a real layout value — on verticalAlignment, not here. It
+    // matches nothing in this set and is left for the caller to drop.
+    assert_eq(null, AttributeNameResolver::canonicalize('stretch', $justify));
+    assert_eq(null, AttributeNameResolver::canonicalize('middle', $justify));
+    assert_eq(null, AttributeNameResolver::canonicalize('', $justify));
+
+    // Two candidates differing only in shape cannot be told apart.
+    assert_eq(null, AttributeNameResolver::canonicalize('spacebetween', ['space-between', 'space_between']));
+});
