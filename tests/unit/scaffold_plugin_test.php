@@ -590,3 +590,42 @@ test('the seeder reports when it degrades or refuses to store markup', function 
     ini_set('error_log', (string) $previous);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('the seeder keeps pipeline URLs and kills only executable schemes', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'seeder-schemes';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    // An allow-list (wp_kses_bad_protocol) would strip this pipeline's own
+    // pseudo-schemes: activation resolves `theme:` before sanitizing today, so
+    // the loss would show up only if those two lines were ever reordered.
+    foreach ([
+        '<img src="theme:./assets/hero.jpg">',
+        '<img src="AI_IMAGE: hero | a walrus | photo | landscape">',
+        '<img src="/wp-content/uploads/hero.jpg">',
+        '<a href="mailto:hi@example.test">mail</a>',
+        '<a href="tel:+15551234">call</a>',
+        '<a href="#book">book</a>',
+    ] as $kept) {
+        assert_eq($kept, $sanitize($kept, 'page'), 'legitimate URL survives');
+    }
+
+    foreach ([
+        '<a href="javascript:alert(1)">x</a>',
+        "<a href=\"java\tscript:alert(1)\">x</a>",
+        '<a href="&#106;avascript:alert(1)">x</a>',
+        '<a href="javascript&colon;alert(1)">x</a>',
+        '<img src="data:text/html,<script>alert(1)</script>">',
+        '<form action="vbscript:x"></form>',
+    ] as $killed) {
+        $out = $sanitize($killed, 'page');
+        assert_true($out !== $killed, "executable scheme neutralized: {$killed}");
+        assert_inert($out, "scheme case: {$killed}");
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

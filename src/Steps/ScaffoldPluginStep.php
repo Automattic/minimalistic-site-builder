@@ -442,7 +442,12 @@ final class ScaffoldPluginStep implements Step
             // Core's canonical URI-attribute list (18 entries, including
             // poster/cite/background/longdesc) plus the SVG spelling it omits.
             $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
-            $allowed = wp_allowed_protocols();
+            // Executable schemes are named rather than allow-listed, matching
+            // MarkupSanitizer. wp_kses_bad_protocol()'s allow-list would also
+            // strip this pipeline's own pseudo-schemes — `theme:./assets/x.jpg`
+            // and an unresolved `AI_IMAGE:` placeholder both become `#`, so a
+            // page that reached activation with either would lose its images.
+            $executable = '/\A(?:javascript|vbscript|data):/i';
             $tree = $processor instanceof WP_HTML_Processor;
 
             try {
@@ -512,9 +517,15 @@ final class ScaffoldPluginStep implements Step
                         // `&#106;avascript:` is compared in its resolved form
                         // and needs no entity handling here.
                         $value = $processor->get_attribute($name);
-                        if (is_string($value)
-                            && wp_kses_bad_protocol($value, $allowed) !== $value
-                        ) {
+                        if (!is_string($value)) {
+                            continue;
+                        }
+                        // Whitespace and control bytes inside the scheme are
+                        // ignored by browsers, so `java\tscript:` resolves.
+                        $probe = preg_replace('/[\x00-\x20\x7F]+/', '', $value);
+                        if ($probe === null || preg_match($executable, $probe) === 1) {
+                            // A PCRE failure means the scheme is unknown, so
+                            // fail closed rather than keeping the URL.
                             $processor->set_attribute($name, '#');
                         }
                     }
