@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "site-tagline-legacy-text-align",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/site-tagline",
+    "deprecation:site-tagline-align",
+    "deprecation:site-tagline-font-family",
+    "support:typography",
+    "report:fixed"
+  ],
+  "provenance": {
+    "kind": "post-oracle-authored",
+    "notes": [
+      "Input reproduces the generated site-tagline signature that previously failed fix-blocks on its unregistered top-level textAlign comment key.",
+      "The migrations are certified by @wordpress/block-library@9.42.0 site-tagline/deprecated.js: version 2 uses utils/migrate-text-align.js to move textAlign into style.typography.textAlign, and version 1 uses utils/migrate-font-family.js to recover the top-level fontFamily preset slug.",
+      "The isolated migrations and their shared candidate order with the later raw style overlay were independently verified byte-for-byte with the frozen Node oracle from abcf523 using the pinned package versions recorded in oracle-manifest.json."
+    ]
+  },
+  "reviewedRepairCount": 0
+}

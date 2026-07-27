@@ -1,0 +1,72 @@
+```json
+{
+"sections": [
+{
+"slug": "hero",
+"title": "Services Page Hero",
+"type": "page-hero",
+"purpose": "Orient the visitor to the Services page with a refined, image-led introduction to Dapper Tusk's grooming expertise and professional standards.",
+"content_notes": "Compact hero with background image of a groomed walrus in profile (studio portrait, sepia-tinted, rich low-key lighting). Headline in Playfair Display: "Professional Grooming Services" or "Specialized Walrus Care." Brief subheading in Spectral explaining that this page details the grooming offerings, expertise, and commitment to excellence. Pinned lower-left above a thin brass hairline rule with centered lozenge. Ample breathing room above the tusks. No CTA here—this is orientation only.",
+"layout_archetype": "full-bleed-cover",
+"background": "image",
+"vertical_density": "compact",
+"handoff": "Site header floats or sits above this full-bleed image hero. Below, a base-background centered-stack section begins the detailed service offerings."
+},
+{
+"slug": "service-offerings",
+"title": "Core Grooming Services",
+"type": "services",
+"purpose": "Present the specific grooming services Dapper Tusk offers in a clear, detailed hierarchy that builds trust through specificity and professional language.",
+"content_notes": "Centered-stack layout with a short introductory paragraph in warm, confident tone. Follow with 4–5 distinct service offerings (e.g., Tusk Polish & Buffing, Whisker Combing & Conditioning, Hide & Flipper Care, Full-Service Spa Treatment, Seasonal Maintenance). Each service is a short, scannable heading in Playfair Display (smaller weight than page hero) followed by 2–3 sentences in Spectral describing what is involved, why it matters, and the care standard applied. Use the brass hairline-with-lozenge motif once, centered above the service list, as a visual anchor. Generous margins and breathing room between services—this is not dense.",
+"layout_archetype": "centered-stack",
+"background": "base",
+"vertical_density": "standard",
+"handoff": "Sits on base background below the full-bleed image hero. Above: the image hero's lower edge. Below: an offset-grid gallery of service detail images."
+},
+{
+"slug": "service-gallery",
+"title": "Grooming in Practice",
+"type": "gallery",
+"purpose": "Showcase the quality and care of Dapper Tusk's work through a curated visual gallery, reinforcing the 'Heritage Grooming' aesthetic and professional competence.",
+"content_notes": "Offset-grid layout (staggered, not neat rows) featuring 6–8 images of grooming scenes: a walrus being groomed, close-ups of polished tusks, a walrus in a care station, detail shots of whisker work, etc. All images in sepia-tinted, richly-lit studio style per the design direction. Each image carries a thin brass hairline frame with centered lozenge at the bottom—reuse the signature device from the hero. No overlaid text; let the images speak. Captions appear below each frame in small Spectral, naming the service or care step depicted.",
+"layout_archetype": "offset-grid",
+"background": "base",
+"vertical_density": "compact",
+"handoff": "Sits on base background below the centered-stack services section. Above: service offerings. Below: a contrast-background section on expertise and credentials."
+},
+{
+"slug": "expertise-credentials",
+"title": "Our Expertise & Standards",
+"type": "expertise",
+"purpose": "Build confidence by detailing Dapper Tusk's professional credentials, years of experience, and commitment to specialized walrus care standards.",
+"content_notes": "Contrast background (dark teal #1B3A3A) with light cream text. Asymmetric-split layout: narrow left column (34%) carries a short, authoritative statement in Playfair Display—'Decades of Dedicated Craft'—in cream, followed by 2–3 lines of subtext in Spectral. Wider right column (66%) lists key credentials and standards: years of experience, specialized training, care certifications, commitment to animal welfare, hygiene protocols, and professional memberships (invent plausible details that reinforce trustworthiness). Use bullet points or short stacked paragraphs for scannability. Ample internal breathing room. No images in this section—let typography and contrast carry the authority.",
+"layout_archetype": "asymmetric-split",
+"background": "contrast",
+"vertical_density": "standard",
+"handoff": "Contrast band sits between the base-background gallery above and a tinted-background list section below. The dark band gives the eye a visual rest and shifts weight before the final service detail section."
+},
+{
+"slug": "service-process",
+"title": "The Grooming Process",
+"type": "process",
+"purpose": "Walk the visitor through the step-by-step care process, demonstrating professionalism and setting clear expectations for walrus owners.",
+"content_notes": "Tinted background (soft moss-teal secondary #3D5D57). Centered-stack layout with a short introduction: 'Every walrus receives the same meticulous care.' Follow with a numbered or stacked list of 5–6 process steps (e.g., Initial Assessment & Health Check, Tusk Preparation & Cleaning, Polish & Buffing Phase, Whisker & Hide Conditioning, Final Inspection, Care Instructions & Aftercare Guidance). Each step is a short heading in Playfair Display followed by 1–2 sentences of clear, warm explanation in Spectral. Generous vertical spacing between steps. This section prioritizes clarity and reassurance—no imagery needed.",
+"layout_archetype": "centered-stack",
+"background": "tinted",
+"vertical_density": "standard",
+"handoff": "Tinted background sits above a base-background closing CTA section. Above: the contrast expertise band. The softer teal tone provides visual variety and a gentle transition toward closure."
+},
+{
+"slug": "closing-cta",
+"title": "Schedule Your Walrus's Appointment",
+"type": "cta",
+"purpose": "Close the Services page with a clear, inviting next step that directs the visitor toward booking or contact.",
+"content_notes": "Base background. Asymmetric-split layout (66% left, 34% right). Left column carries a warm, brief invitation in Spectral: 'Your walrus deserves the Dapper Tusk difference. Reach out to schedule an appointment or discuss your walrus's specific grooming needs.' Small Playfair Display heading above if needed. Right column features a single, prominent primary CTA button in brass (#B0813B) with cream text: 'Contact Us' or 'Book Now,' linking to /contact/. Keep this section short and visually quiet—it closes rather than overwhelms. No imagery.",
+"layout_archetype": "asymmetric-split",
+"background": "base",
+"vertical_density": "spacious",
+"handoff": "Base background rests on the tinted process section above. Below: the site footer. This spacious closing beat gives the page breathing room before the footer, and the CTA is the final visual anchor before the visitor leaves the page."
+}
+]
+}
+```

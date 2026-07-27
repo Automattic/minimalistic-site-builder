@@ -372,3 +372,37 @@ test('reviewed site-title deprecations migrate legacy align and font family', fu
         $font,
     );
 });
+
+test('reviewed site-tagline deprecations migrate legacy align and font family', function () {
+    $align = (new Serializer())->transform(
+        '<!-- wp:site-tagline {"textAlign":"center"} /-->'
+    )->html;
+    assert_eq(
+        '<!-- wp:site-tagline {"style":{"typography":{"textAlign":"center"}}} /-->',
+        $align,
+    );
+
+    $font = (new Serializer())->transform(
+        '<!-- wp:site-tagline '
+        . '{"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}}} /-->'
+    )->html;
+    assert_eq(
+        '<!-- wp:site-tagline {"fontFamily":"heading",'
+        . '"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}}} /-->',
+        $font,
+    );
+});
+
+test('reviewed site identity deprecation candidates compose before raw style overlay', function () {
+    foreach (['site-title', 'site-tagline'] as $block) {
+        $result = (new Serializer())->transform(
+            '<!-- wp:' . $block . ' {"textAlign":"center",'
+            . '"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}}} /-->'
+        )->html;
+        assert_eq(
+            '<!-- wp:' . $block . ' {"fontFamily":"heading",'
+            . '"style":{"typography":{"fontFamily":"var:preset|font-family|heading"}}} /-->',
+            $result,
+        );
+    }
+});

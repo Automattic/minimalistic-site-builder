@@ -8,12 +8,19 @@ namespace Automattic\SiteBuild;
  *
  * Provider-native structured output is the primary correctness mechanism, but
  * defensive decoding still helps with providers/models that ignore it and with
- * historical prompt-only calls. Repairs here are deliberately syntax-safe:
- * unwrap one outer Markdown fence and remove trailing commas while leaving all
- * prose inside JSON strings untouched.
+ * historical prompt-only calls. Repairs here are deliberately conservative:
+ * unwrap one outer Markdown fence, escape paired quotes the model left
+ * unescaped in string values, and remove trailing commas only after the quote
+ * pass has established the JSON grammar. Structurally ambiguous input is left
+ * for model-driven recovery rather than guessed at locally.
  */
 final class JsonDecoder
 {
+    private const CONTEXT_ROOT = 0;
+    private const CONTEXT_OBJECT = 1;
+    private const CONTEXT_ARRAY = 2;
+    private const JSON_NUMBER_PATTERN = '/\G-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/';
+
     /** @return array<mixed>|null */
     public static function decode(string $text): ?array
     {
@@ -28,17 +35,34 @@ final class JsonDecoder
     public static function decodeResult(string $text): array
     {
         $json = self::stripEnvelope($text);
-        $first = self::decodeStrict($json);
-        if ($first['data'] !== null) {
-            return $first;
+        $result = self::decodeStrict($json);
+        if ($result['data'] !== null) {
+            return $result;
         }
 
-        $repaired = self::stripTrailingCommas($json);
-        if ($repaired !== $json) {
-            return self::decodeStrict($repaired);
+        // Quote repair also recognizes the surrounding JSON grammar. A null
+        // result means the input is structurally ambiguous, so do not feed a
+        // state-corrupted candidate into the trailing-comma pass.
+        $escaped = self::escapeInnerQuotes($json);
+        if ($escaped === null) {
+            return $result;
+        }
+        if ($escaped !== $json) {
+            $result = self::decodeStrict($escaped);
+            if ($result['data'] !== null) {
+                return $result;
+            }
         }
 
-        return $first;
+        $repaired = self::stripTrailingCommas($escaped);
+        if ($repaired !== $escaped) {
+            $result = self::decodeStrict($repaired);
+            if ($result['data'] !== null) {
+                return $result;
+            }
+        }
+
+        return $result;
     }
 
     /** @return array{data:?array,error:?string} */
@@ -101,7 +125,7 @@ final class JsonDecoder
             }
             if ($ch === ',') {
                 $j = $i + 1;
-                while ($j < $len && ctype_space($json[$j])) {
+                while ($j < $len && self::isJsonWhitespace($json[$j])) {
                     $j++;
                 }
                 if ($j < $len && ($json[$j] === '}' || $json[$j] === ']')) {
@@ -111,5 +135,298 @@ final class JsonDecoder
             $out .= $ch;
         }
         return $out;
+    }
+
+    /**
+     * Escape paired prose quotes in JSON string values while recognizing the
+     * complete surrounding grammar. Object keys are always parsed strictly,
+     * and adjacent JSON tokens or incompatible delimiters make the repair
+     * fail closed. A trailing comma is recognized but retained for the
+     * dedicated pass above.
+     *
+     * @return string|null null when the input cannot be repaired unambiguously
+     */
+    private static function escapeInnerQuotes(string $json): ?string
+    {
+        $offset = 0;
+        $changed = false;
+        $out = self::takeJsonWhitespace($json, $offset);
+        $value = self::repairJsonValue($json, $offset, $changed, self::CONTEXT_ROOT, 0);
+        if ($value === null) {
+            return null;
+        }
+        $out .= $value . self::takeJsonWhitespace($json, $offset);
+        if ($offset !== strlen($json)) {
+            return null;
+        }
+        return $changed ? $out : $json;
+    }
+
+    private static function repairJsonValue(
+        string $json,
+        int &$offset,
+        bool &$changed,
+        int $context,
+        int $depth,
+    ): ?string {
+        if ($depth > 512) {
+            return null;
+        }
+
+        $ch = $json[$offset] ?? '';
+        if ($ch === '{') {
+            return self::repairJsonObject($json, $offset, $changed, $depth + 1);
+        }
+        if ($ch === '[') {
+            return self::repairJsonArray($json, $offset, $changed, $depth + 1);
+        }
+        if ($ch === '"') {
+            return self::repairJsonValueString($json, $offset, $changed, $context);
+        }
+        foreach (['true', 'false', 'null'] as $literal) {
+            if (substr($json, $offset, strlen($literal)) === $literal) {
+                $offset += strlen($literal);
+                return $literal;
+            }
+        }
+        if ($ch === '-' || ($ch >= '0' && $ch <= '9')) {
+            $number = self::jsonNumberAt($json, $offset);
+            if ($number !== null) {
+                $offset += strlen($number);
+                return $number;
+            }
+        }
+        return null;
+    }
+
+    private static function repairJsonObject(
+        string $json,
+        int &$offset,
+        bool &$changed,
+        int $depth,
+    ): ?string {
+        $out = '{';
+        $offset++;
+        $out .= self::takeJsonWhitespace($json, $offset);
+        if (($json[$offset] ?? '') === '}') {
+            $offset++;
+            return $out . '}';
+        }
+
+        while (true) {
+            $key = self::takeStrictJsonString($json, $offset);
+            if ($key === null) {
+                return null;
+            }
+            $out .= $key . self::takeJsonWhitespace($json, $offset);
+            if (($json[$offset] ?? '') !== ':') {
+                return null;
+            }
+            $out .= ':';
+            $offset++;
+            $out .= self::takeJsonWhitespace($json, $offset);
+
+            $value = self::repairJsonValue($json, $offset, $changed, self::CONTEXT_OBJECT, $depth);
+            if ($value === null) {
+                return null;
+            }
+            $out .= $value . self::takeJsonWhitespace($json, $offset);
+
+            $next = $json[$offset] ?? '';
+            if ($next === '}') {
+                $offset++;
+                return $out . '}';
+            }
+            if ($next !== ',') {
+                return null;
+            }
+            $out .= ',';
+            $offset++;
+            $out .= self::takeJsonWhitespace($json, $offset);
+            if (($json[$offset] ?? '') === '}') {
+                $offset++;
+                return $out . '}';
+            }
+        }
+    }
+
+    private static function repairJsonArray(
+        string $json,
+        int &$offset,
+        bool &$changed,
+        int $depth,
+    ): ?string {
+        $out = '[';
+        $offset++;
+        $out .= self::takeJsonWhitespace($json, $offset);
+        if (($json[$offset] ?? '') === ']') {
+            $offset++;
+            return $out . ']';
+        }
+
+        while (true) {
+            $value = self::repairJsonValue($json, $offset, $changed, self::CONTEXT_ARRAY, $depth);
+            if ($value === null) {
+                return null;
+            }
+            $out .= $value . self::takeJsonWhitespace($json, $offset);
+
+            $next = $json[$offset] ?? '';
+            if ($next === ']') {
+                $offset++;
+                return $out . ']';
+            }
+            if ($next !== ',') {
+                return null;
+            }
+            $out .= ',';
+            $offset++;
+            $out .= self::takeJsonWhitespace($json, $offset);
+            if (($json[$offset] ?? '') === ']') {
+                $offset++;
+                return $out . ']';
+            }
+        }
+    }
+
+    /**
+     * Keys are never quote-repair targets. The first unescaped quote closes
+     * the key; if that was not the intended boundary, the required colon check
+     * in repairJsonObject rejects the payload.
+     */
+    private static function takeStrictJsonString(string $json, int &$offset): ?string
+    {
+        if (($json[$offset] ?? '') !== '"') {
+            return null;
+        }
+        $start = $offset++;
+        $len = strlen($json);
+        while ($offset < $len) {
+            $ch = $json[$offset];
+            if ($ch === '\\') {
+                if ($offset + 1 >= $len) {
+                    return null;
+                }
+                $offset += 2;
+                continue;
+            }
+            if ($ch === '"') {
+                $offset++;
+                return substr($json, $start, $offset - $start);
+            }
+            if (ord($ch) < 0x20) {
+                return null;
+            }
+            $offset++;
+        }
+        return null;
+    }
+
+    private static function repairJsonValueString(
+        string $json,
+        int &$offset,
+        bool &$changed,
+        int $context,
+    ): ?string {
+        $out = '"';
+        $offset++;
+        $insertedQuotes = 0;
+        $len = strlen($json);
+
+        while ($offset < $len) {
+            $ch = $json[$offset];
+            if ($ch === '\\') {
+                if ($offset + 1 >= $len) {
+                    return null;
+                }
+                $out .= $ch . $json[$offset + 1];
+                $offset += 2;
+                continue;
+            }
+            if ($ch !== '"') {
+                if (ord($ch) < 0x20) {
+                    return null;
+                }
+                $out .= $ch;
+                $offset++;
+                continue;
+            }
+
+            $nextOffset = $offset + 1;
+            while ($nextOffset < $len && self::isJsonWhitespace($json[$nextOffset])) {
+                $nextOffset++;
+            }
+            $next = $json[$nextOffset] ?? '';
+            $evenPair = $insertedQuotes % 2 === 0;
+            if (self::isStringTerminator($next, $context)) {
+                if ($evenPair) {
+                    $out .= '"';
+                    $offset++;
+                    return $out;
+                }
+                return null;
+            }
+            if (self::isUnsafeQuoteContinuation($json, $nextOffset)) {
+                return null;
+            }
+
+            $out .= '\\"';
+            $offset++;
+            $insertedQuotes++;
+            $changed = true;
+        }
+        return null;
+    }
+
+    private static function isStringTerminator(string $next, int $context): bool
+    {
+        if ($context === self::CONTEXT_ROOT) {
+            return $next === '';
+        }
+        if ($context === self::CONTEXT_OBJECT) {
+            return $next === ',' || $next === '}';
+        }
+        return $next === ',' || $next === ']';
+    }
+
+    /**
+     * If what follows can already begin another JSON token, treating the quote
+     * as prose could silently merge structural values or object members.
+     */
+    private static function isUnsafeQuoteContinuation(string $json, int $offset): bool
+    {
+        $next = $json[$offset] ?? '';
+        if ($next === '' || str_contains('"{}[],:', $next)) {
+            return true;
+        }
+        if ($next === '-' || ($next >= '0' && $next <= '9')) {
+            return self::jsonNumberAt($json, $offset) !== null;
+        }
+        foreach (['true', 'false', 'null'] as $literal) {
+            if (substr($json, $offset, strlen($literal)) === $literal) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function jsonNumberAt(string $json, int $offset): ?string
+    {
+        return preg_match(self::JSON_NUMBER_PATTERN, $json, $m, 0, $offset) === 1 ? $m[0] : null;
+    }
+
+    private static function takeJsonWhitespace(string $json, int &$offset): string
+    {
+        $start = $offset;
+        $len = strlen($json);
+        while ($offset < $len && self::isJsonWhitespace($json[$offset])) {
+            $offset++;
+        }
+        return substr($json, $start, $offset - $start);
+    }
+
+    private static function isJsonWhitespace(string $ch): bool
+    {
+        return $ch === ' ' || $ch === "\t" || $ch === "\n" || $ch === "\r";
     }
 }
