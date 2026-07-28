@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockSerializer\FixerReport;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -310,20 +311,25 @@ final class FixBlocksStep implements Step
 
     /**
      * Decode the fixer report's FAILED rows: files whose transformation was
-     * abandoned and whose pre-fixer bytes were delivered untouched.
+     * abandoned and whose pre-fixer bytes were delivered untouched. The
+     * BlockFixer interface hands this step a formatted string (possibly the
+     * concatenation of two fixer passes), so the rows are parsed back via the
+     * same FixerReport tokens that wrote them.
      *
      * @return list<array{0:string,1:string}> [file, reason] pairs, in report order
      */
     public static function failedFiles(string $report): array
     {
+        $tag = preg_quote(FixerReport::FAILED_TAG, '/');
+        $detail = preg_quote(FixerReport::FAILED_DETAIL, '/');
         $failures = [];
         $file = null;
         foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
-            if (preg_match('/^\s+FAILED\s+(.+?)\s*$/', $line, $match) === 1) {
+            if (preg_match("/^\\s+{$tag}\\s+(.+?)\\s*$/", $line, $match) === 1) {
                 $file = $match[1];
                 continue;
             }
-            if ($file !== null && preg_match('/^\s+! left unmodified:\s*(.*)$/', $line, $match) === 1) {
+            if ($file !== null && preg_match("/^\\s+{$detail}\\s*(.*)$/", $line, $match) === 1) {
                 $failures[$file . "\0" . $match[1]] = [$file, $match[1]];
             }
             $file = null;
