@@ -23,7 +23,7 @@ Design intelligence to encode as tokens:
     `display` — the hero masthead: a fluid `clamp()` reaching roughly 5–7rem at desktop widths, sized to the DESIGN DIRECTION's ambition (a broadsheet/poster direction earns ~7rem; a quiet editorial one ~5rem). Do NOT cap it near 3.5–4rem — an undersized hero headline reads as timid.
   Example: `0.875rem / 1.125rem / 1.375rem / 1.75rem / clamp(2.25rem, 3vw, 3rem) / clamp(3rem, 7vw, 6rem)`. Only caption and body are paragraph sizes (lead is for ONE short line per section); everything above is heading territory, and display exists for ONE hero/masthead moment per page.
 - **Line height.** Body 1.5–1.65; headings 1.1–1.3; never below 1.0. Set `styles.typography.lineHeight` and `styles.elements.heading.typography.lineHeight`.
-- **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` RARE: CTAs/interaction, plus at most the ONE micro-motif the DESIGN DIRECTION's `signature_device` explicitly commits accent to (e.g. eyebrow labels, hairline rules, hover underlines) — never body text, large-area backgrounds, or any motif the direction didn't name. Avoid purple-on-white and generic blue-gray.
+- **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` RARE: CTAs/interaction, plus at most the ONE micro-motif the DESIGN DIRECTION's `signature_device` explicitly commits accent to — never body text, large-area backgrounds, or any motif the direction didn't name. Avoid purple-on-white and generic blue-gray.
 - **CONTRAST REQUIREMENTS (WCAG 2.1, non-negotiable).** The contrast ratio is (L1+0.05)/(L2+0.05) over relative luminance; 4.5:1 is the minimum for normal text, 3:1 for large headings. A deterministic build step verifies these and rewrites colors that fail, so a palette that misses them will be altered — pick hexes that pass on your own terms instead:
     `contrast` on `base` ≥ 7:1 (body text; aim comfortably above the 4.5 floor — near-black on near-white territory, tinted toward the palette's hue is fine)
     `primary` on `base` ≥ 4.5:1 (it colors links and structural text at body size)
@@ -31,7 +31,7 @@ Design intelligence to encode as tokens:
     `base` on `accent` (or `primary` if buttons use it) ≥ 4.5:1 (button labels)
   Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
-- **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies, dramatic shadows and decorative borders over flat solids. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
+- **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool — lines belong only to a direction whose signature device explicitly commits to them. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
 
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 

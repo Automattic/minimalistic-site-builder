@@ -9,13 +9,472 @@
     "support:typography",
     "report:fixed"
   ],
-  "provenance": {
-    "kind": "post-oracle-authored",
-    "notes": [
-      "Input reproduces the generated site-tagline signature that previously failed fix-blocks on its unregistered top-level textAlign comment key.",
-      "The migrations are certified by @wordpress/block-library@9.42.0 site-tagline/deprecated.js: version 2 uses utils/migrate-text-align.js to move textAlign into style.typography.textAlign, and version 1 uses utils/migrate-font-family.js to recover the top-level fontFamily preset slug.",
-      "The isolated migrations and their shared candidate order with the later raw style overlay were independently verified byte-for-byte with the frozen Node oracle from abcf523 using the pinned package versions recorded in oracle-manifest.json."
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [
+      "deprecation:core/site-tagline:0",
+      "deprecation:core/site-tagline:1"
+    ],
+    "files": [
+      {
+        "path": "parts/tagline.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "ce9653c4096a036b8ae8d67b28466c3e70c9363bfe45369c347a811354bab921",
+        "outputSha256": "7fc461c6599d66bea9c2962e89f7dcbc0a77fc9d1d3b6941dc5a2c83116822c1",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 0,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": [
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ]
+                  },
+                  "afterAttributes": {
+                    "level": {
+                      "__type": "undefined"
+                    },
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "borderColor": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "anchor": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": {
+                      "__type": "undefined"
+                    },
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "typography": {
+                        "textAlign": "center"
+                      }
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "textAlign": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 0,
+                  "beforeAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "textAlign": "center",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "textAlign": "center",
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": [
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "fontFamily": "heading",
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "textAlign": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                },
+                {
+                  "blockName": "core/site-tagline",
+                  "deprecationIndex": 1,
+                  "beforeAttributes": {
+                    "level": 0,
+                    "levelOptions": [
+                      0,
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6
+                    ],
+                    "fontFamily": "heading",
+                    "style": {
+                      "typography": {
+                        "fontFamily": "var:preset|font-family|heading"
+                      }
+                    }
+                  },
+                  "afterAttributes": {
+                    "textAlign": {
+                      "__type": "undefined"
+                    },
+                    "backgroundColor": {
+                      "__type": "undefined"
+                    },
+                    "textColor": {
+                      "__type": "undefined"
+                    },
+                    "gradient": {
+                      "__type": "undefined"
+                    },
+                    "align": {
+                      "__type": "undefined"
+                    },
+                    "lock": {
+                      "__type": "undefined"
+                    },
+                    "className": {
+                      "__type": "undefined"
+                    },
+                    "fontFamily": "heading",
+                    "fontSize": {
+                      "__type": "undefined"
+                    },
+                    "style": {
+                      "__type": "undefined"
+                    },
+                    "metadata": {
+                      "__type": "undefined"
+                    }
+                  },
+                  "beforeInnerBlocks": [],
+                  "afterInnerBlocks": []
+                }
+              ]
+            }
+          }
+        ]
+      }
     ]
   },
-  "reviewedRepairCount": 0
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
 }
