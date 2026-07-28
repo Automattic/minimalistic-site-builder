@@ -131,7 +131,7 @@ final class TextBatchRecovery
                 // The markup intake (GeneratedMarkup via MarkupSalvage) trims
                 // an incomplete response to its last complete block, so a
                 // persistent truncation degrades one part, not the build.
-                fwrite(STDERR, "    (batch request '{$key}' still incomplete after {$attempt} regeneration(s) — "
+                Narrator::write("    (batch request '{$key}' still incomplete after {$attempt} regeneration(s) — "
                     . "{$error}; keeping the best partial response for salvage)\n");
                 $texts[$key] = (string) $candidates[$key]['text'];
                 $notes[$key][] = self::retainedNote($key, $attempt, $error);

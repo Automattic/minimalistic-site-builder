@@ -880,7 +880,7 @@ final class OpenAiCompatibleClient implements Llm
                     ? $fallback
                     : max($fallback, (int) $retryDelay($fallback));
                 $attempt++;
-                fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
+                Narrator::write("    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 if ($sleeper !== null) {
                     $sleeper($wait);
                 } else {
@@ -892,7 +892,7 @@ final class OpenAiCompatibleClient implements Llm
                     throw $e;
                 }
                 unset($body[$param]);
-                fwrite(STDERR, "    (model rejected '{$param}'; retrying without it)\n");
+                Narrator::write("    (model rejected '{$param}'; retrying without it)\n");
             }
         }
     }

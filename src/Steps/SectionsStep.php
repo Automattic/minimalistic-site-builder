@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\SectionRole;
@@ -183,7 +184,7 @@ final class SectionsStep implements Step
                     $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
                         . 'section dropped from the page plan';
                 }
-                fwrite(STDERR, "    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
+                Narrator::write("    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
             }
         }
 
@@ -292,7 +293,7 @@ final class SectionsStep implements Step
             try {
                 $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
             } catch (\Throwable $e) {
-                fwrite(STDERR, "    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+                Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
             }
             return;
         }

@@ -54,7 +54,7 @@ final class Env
     {
         $val = self::get($key);
         if ($val === null || $val === '') {
-            fwrite(STDERR, "Missing required env var: {$key}\n");
+            Narrator::write("Missing required env var: {$key}\n");
             exit(1);
         }
         return $val;

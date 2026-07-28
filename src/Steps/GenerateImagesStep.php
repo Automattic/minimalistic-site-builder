@@ -9,6 +9,7 @@ use Automattic\SiteBuild\Imagen;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
@@ -150,13 +151,13 @@ final class GenerateImagesStep implements Step
         $batches = array_chunk($pending, self::BATCH_SIZE, true);
         $batchCount = count($batches);
         if ($pending !== []) {
-            fwrite(STDERR, sprintf(
+            Narrator::write(sprintf(
                 "    generating %d image(s) in %d batch(es) of up to %d…\n",
                 count($pending), $batchCount, self::BATCH_SIZE
             ));
         }
         foreach ($batches as $b => $batch) {
-            fwrite(STDERR, sprintf("    batch %d/%d: %d image(s)\n", $b + 1, $batchCount, count($batch)));
+            Narrator::write(sprintf("    batch %d/%d: %d image(s)\n", $b + 1, $batchCount, count($batch)));
 
             // Map this batch's original indices to generation specs (order kept).
             $indices = array_keys($batch);
@@ -178,7 +179,7 @@ final class GenerateImagesStep implements Step
                 // instead of marking it failed outright.
                 if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
                     $error = (string) ($result['error'] ?? 'safety-filtered');
-                    fwrite(STDERR, "    FILTERED {$filename}: {$error}\n");
+                    Narrator::write("    FILTERED {$filename}: {$error}\n");
                     ImageLogger::log($filename, $this->requestLog($specs[$i], $batchSpecs[$pos], $imageGrade), [], $error);
                     $repairs[$i] = $error;
                     continue;
@@ -398,7 +399,7 @@ final class GenerateImagesStep implements Step
             $specs[$i]['url']    = $this->servedUrl($project, $filename);
             unset($specs[$i]['error']);
             $resolved[$specs[$i]['src']] = $specs[$i]['url'];
-            fwrite(STDERR, "    generated {$filename}\n");
+            Narrator::write("    generated {$filename}\n");
             ImageLogger::log($filename, $logRequest, [
                 'path'  => 'theme/assets/' . $filename,
                 'bytes' => strlen((string) $result['bytes']),
@@ -406,7 +407,7 @@ final class GenerateImagesStep implements Step
         } catch (\Throwable $e) {
             $specs[$i]['status'] = 'failed';
             $specs[$i]['error']  = $e->getMessage();
-            fwrite(STDERR, "    FAILED {$filename}: {$e->getMessage()}\n");
+            Narrator::write("    FAILED {$filename}: {$e->getMessage()}\n");
             ImageLogger::log($filename, $logRequest, [], $e->getMessage());
         }
     }
@@ -434,7 +435,7 @@ final class GenerateImagesStep implements Step
         string $imageGrade,
         array &$resolved
     ): void {
-        fwrite(STDERR, sprintf(
+        Narrator::write(sprintf(
             "    rewriting %d safety-filtered prompt(s) with %s…\n",
             count($repairs), $this->repairModel ?? 'the default model'
         ));
@@ -459,14 +460,14 @@ final class GenerateImagesStep implements Step
         try {
             $rewrites = $this->llm->completeBatch($requests)->texts;
         } catch (\Throwable $e) {
-            fwrite(STDERR, "    batched prompt repair failed ({$e->getMessage()}); retrying rewrites one by one\n");
+            Narrator::write("    batched prompt repair failed ({$e->getMessage()}); retrying rewrites one by one\n");
             $rewrites = [];
             foreach ($requests as $i => $req) {
                 try {
                     $rewrites[$i] = $this->llm->complete($req['prompt'], array_diff_key($req, ['prompt' => '']));
                 } catch (\Throwable $inner) {
                     $filename = (string) ($specs[$i]['filename'] ?? '');
-                    fwrite(STDERR, "    prompt rewrite failed for {$filename}: {$inner->getMessage()}\n");
+                    Narrator::write("    prompt rewrite failed for {$filename}: {$inner->getMessage()}\n");
                 }
             }
         }
@@ -483,7 +484,7 @@ final class GenerateImagesStep implements Step
                 $filename = (string) $specs[$i]['filename'];
                 $specs[$i]['status'] = 'failed';
                 $specs[$i]['error']  = $error;
-                fwrite(STDERR, "    FAILED {$filename}: no usable prompt rewrite\n");
+                Narrator::write("    FAILED {$filename}: no usable prompt rewrite\n");
                 continue;
             }
             $subjects[$i] = $subject;
