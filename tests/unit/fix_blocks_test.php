@@ -41,6 +41,44 @@ test('FixBlocksStep declares its durable warnings artifact', function () {
     assert_true(in_array('warnings.json', $writes, true));
 });
 
+test('FixBlocksStep records dropped alignment classes with the file that lost them', function () {
+    $report = implode("\n", [
+        '  FIXED parts/home.html',
+        '         ! DROPPED class `has-text-align-center` — not mirrored',
+        '         ! DROPPED class `alignfull` — not mirrored',
+        // Not alignment: theme and preset classes carry no fixed visual meaning
+        // of their own, so losing one is incidental styling the fixer may drop.
+        '         ! DROPPED class `has-base-color` — not mirrored',
+        '         ! DROPPED class `wp-block-heading` — not mirrored',
+        '         ! DROPPED class `masonry-3` — not mirrored',
+        // Near-miss tokens must not be swept in by a loose pattern.
+        '         ! DROPPED class `has-text-align-justify` — not mirrored',
+        '         ! DROPPED class `alignment-helper` — not mirrored',
+        '  FIXED parts/footer.html',
+        '         ! DROPPED class `alignwide` — not mirrored',
+    ]);
+
+    assert_eq([
+        ['parts/home.html', 'has-text-align-center'],
+        ['parts/home.html', 'alignfull'],
+        ['parts/footer.html', 'alignwide'],
+    ], FixBlocksStep::droppedAlignmentClasses($report));
+});
+
+test('FixBlocksStep reports each dropped alignment class once per file', function () {
+    $report = implode("\n", [
+        '  FIXED parts/home.html',
+        '         ! DROPPED class `has-text-align-center` — not mirrored',
+        '         ! DROPPED class `has-text-align-center` (x2) — not mirrored',
+    ]);
+
+    assert_eq([['parts/home.html', 'has-text-align-center']], FixBlocksStep::droppedAlignmentClasses($report));
+});
+
+test('FixBlocksStep finds no alignment drops in a clean report', function () {
+    assert_eq([], FixBlocksStep::droppedAlignmentClasses("  FIXED parts/home.html\n"));
+});
+
 test('FixBlocksStep classifies only dropped styles that affect vertical rhythm', function () {
     $report = implode("\n", [
         '         ! DROPPED style `padding:4rem 2rem` — not mirrored',
@@ -125,6 +163,40 @@ test('FixBlocksStep warns but does not fail when block repair drops vertical rhy
             implode("\n", $warnings['fix-blocks'] ?? []),
             'the non-fatal defect is durable, not only present in the human log',
         );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep records a heading that lost its centering', function () {
+    $tmp = sys_get_temp_dir() . '/fix-blocks-alignment-' . bin2hex(random_bytes(6));
+    $project = new Project($tmp);
+    // A legacy top-level textAlign plus an inline colour no attribute backs:
+    // the deprecated save cannot match either, so the recovered alignment class
+    // is dropped and the heading renders left-aligned instead of centred.
+    $project->writeText(
+        'theme/parts/signature.html',
+        '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
+            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
+            . 'style="color:var(--wp--preset--color--base)">Signature Flavours</h2>'
+            . '<!-- /wp:heading -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        $fixed = $project->readText('theme/parts/signature.html');
+        assert_contains('Signature Flavours', $fixed, 'the heading keeps its content');
+        assert_true(
+            !str_contains($fixed, 'has-text-align-center'),
+            'the alignment class is genuinely gone from the delivered markup'
+        );
+
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        $joined = implode("\n", $warnings);
+        assert_contains('has-text-align-center', $joined, 'the lost alignment reaches warnings.json');
+        assert_contains('parts/signature.html', $joined, 'the row names the file that lost it');
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }

@@ -137,6 +137,29 @@ final class FixBlocksStep implements Step
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
                 . 'see logs/' . self::LOG_FILE;
         }
+        // An alignment class is not the incidental HTML-only styling the fixer
+        // may discard: WordPress generates these tokens from block supports, so
+        // a heading that was centred renders left-aligned and the visitor sees
+        // it. Skip files whose loss is already recorded by the reviewed
+        // paragraph path — there the alignment was resolved, not lost, and a
+        // second row for one defect is noise rather than signal.
+        $alignmentDrops = array_values(array_filter(
+            self::droppedAlignmentClasses($deliveredSummary),
+            static fn (array $drop): bool => !in_array($drop[0], self::warnedFiles($paragraphStyleWarnings), true),
+        ));
+        foreach ($alignmentDrops as [$file, $class]) {
+            $warnings[] = "block re-serialization dropped alignment class `{$class}` in {$file}; "
+                . 'the block renders with the default alignment — see logs/' . self::LOG_FILE;
+        }
+        if ($alignmentDrops !== []) {
+            $summary .= "\n[alignment] WARNING: block re-serialization dropped alignment classes:\n  "
+                . implode("\n  ", array_map(
+                    static fn (array $drop): string => $drop[0] . ': ' . $drop[1],
+                    $alignmentDrops,
+                ));
+            echo '  [alignment] warning: ' . count($alignmentDrops)
+                . " alignment class(es) dropped; see warnings.json\n";
+        }
         // Files whose transformation the fixer abandoned (unsupported block,
         // unreviewed signature, non-convergence): their pre-fixer bytes were
         // delivered untouched — an isolated loss worth a durable record.
@@ -269,6 +292,61 @@ final class FixBlocksStep implements Step
             }
         }
         return $dropped;
+    }
+
+    /**
+     * Extract DROPPED class rows for support-generated alignment classes.
+     *
+     * The sibling rhythm helper above exists because losing spacing changes the
+     * page's authored rhythm. Alignment is the same kind of loss and not the
+     * "incidental HTML-only styling" the fixer is allowed to discard: a heading
+     * that was centred renders left-aligned, which the visitor sees. WordPress
+     * generates these tokens from block supports, so their visual meaning is
+     * fixed and does not depend on whether the theme happens to style them.
+     *
+     * @return list<string>
+     */
+    public static function droppedAlignmentClasses(string $report): array
+    {
+        $dropped = [];
+        $file = 'unknown file';
+        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
+            if (preg_match('/^\s+(?:FIXED|ok|skip)\s+(.+?)\s*$/', $line, $match) === 1) {
+                $file = trim($match[1]);
+                continue;
+            }
+            if (preg_match('/\bDROPPED\s+class\s+`([^`\r\n]+)`/i', $line, $match) !== 1) {
+                continue;
+            }
+            $token = trim($match[1]);
+            if (preg_match('/^(?:has-text-align-(?:left|center|right)|align(?:full|wide|left|right|center|none))$/', $token) !== 1) {
+                continue;
+            }
+            $entry = [$file, $token];
+            if (!in_array($entry, $dropped, true)) {
+                $dropped[] = $entry;
+            }
+        }
+        return $dropped;
+    }
+
+    /**
+     * Files already named by another warning, so one defect is not recorded
+     * twice in two vocabularies.
+     *
+     * @param list<string> $warnings
+     * @return list<string>
+     */
+    private static function warnedFiles(array $warnings): array
+    {
+        $files = [];
+        foreach ($warnings as $warning) {
+            if (preg_match('/(\S+\.html)\b/', $warning, $match) === 1
+                && !in_array($match[1], $files, true)) {
+                $files[] = $match[1];
+            }
+        }
+        return $files;
     }
 
     /**
