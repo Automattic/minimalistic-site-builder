@@ -174,10 +174,27 @@ test('keyOutBackground unmattes anti-aliased edge pixels instead of keeping them
 
     $px = new Imagick();
     $px->readImageBlob($out);
-    // The trim pads the 19..40 ink box; locate the blend column relative to it.
-    $pad = max(2, intdiv(max($px->getImageWidth(), $px->getImageHeight()), 50));
-    $blend = $px->getImagePixelColor($pad, $pad + 10);
-    $solid = $px->getImagePixelColor($pad + 10, $pad + 10);
+    // Scan the row rather than deriving the blend column from the trim: how
+    // many rows/columns the trim removes varies between ImageMagick builds, so
+    // a computed offset can land on solid ink on one platform and on the blend
+    // on another. Scanning asserts the same thing without the geometry
+    // assumption — if the unmatting pass did not run, no translucent pixel
+    // exists anywhere on the row and this still fails.
+    $row = intdiv($px->getImageHeight(), 2);
+    $blend = null;
+    $solid = null;
+    for ($x = 0; $x < $px->getImageWidth(); $x++) {
+        $pixel = $px->getImagePixelColor($x, $row);
+        $alpha = $pixel->getColorValue(Imagick::COLOR_ALPHA);
+        if ($blend === null && $alpha > 0.5 && $alpha < 0.95) {
+            $blend = $pixel;
+        }
+        if ($solid === null && $alpha > 0.99) {
+            $solid = $pixel;
+        }
+    }
+    assert_true($blend !== null, 'an unmatted, partially translucent edge pixel exists');
+    assert_true($solid !== null, 'a fully opaque ink pixel exists');
 
     assert_true($blend->getColorValue(Imagick::COLOR_ALPHA) < 0.95, 'blend pixel is translucent');
     assert_true($blend->getColorValue(Imagick::COLOR_ALPHA) > 0.5, 'blend pixel keeps its ink share');
