@@ -199,10 +199,16 @@ if ($withImages && $until === null) {
 $report->setRequestCount($llm->usageTotals()['requests']);
 
 // Surface the defects the build delivered through (warnings.json) so a
-// warned build never looks identical to a clean one on the console.
-$report->setWarnings(
-    $project->exists('warnings.json') ? $project->readJson('warnings.json') : []
-);
+// warned build never looks identical to a clean one on the console. A corrupt
+// warnings.json must not crash the summary of an otherwise finished build —
+// that would break the very promise it records.
+try {
+    $report->setWarnings(
+        $project->exists('warnings.json') ? $project->readJson('warnings.json') : []
+    );
+} catch (\RuntimeException $e) {
+    fwrite(STDERR, "warnings.json could not be read for the summary: {$e->getMessage()}\n");
+}
 
 echo $report->totalLine(), "\n";
 if (($imagesLine = $report->imagesLine()) !== null) {
