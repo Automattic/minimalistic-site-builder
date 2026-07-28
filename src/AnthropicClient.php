@@ -164,7 +164,7 @@ final class AnthropicClient implements Llm
         );
     }
 
-    public function completeBatch(array $requests): array
+    public function completeBatch(array $requests): TextBatchResult
     {
         return TextBatchRecovery::run(
             $requests,

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -123,9 +124,17 @@ final class SiteSpecStep implements Step
             'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
                 : ($multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE),
         ]);
-        $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
-
         $warnings = [];
+        try {
+            $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+        } catch (GeneratedJsonException $e) {
+            // Only terminal generated-content failures degrade. Transport,
+            // sender-contract, and programming exceptions remain fatal.
+            $spec = [];
+            $warnings[] = 'siteSpec.json: generated JSON remained unusable after its repair attempt ('
+                . $e->getMessage() . '); deterministic prompt-derived site spec delivered';
+        }
+
         $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);

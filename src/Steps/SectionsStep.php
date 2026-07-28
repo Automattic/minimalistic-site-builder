@@ -147,22 +147,24 @@ final class SectionsStep implements Step
     public function run(Project $project): void
     {
         $warnings = [];
-        self::persistPlanRepairs($project, $warnings);
-        $jobs = $this->jobs($project, $warnings);
+        $plan = $project->readJson('pages.json');
+        $pages = self::repairedPages(self::pages($project), $warnings);
+        $jobs = $this->jobs($project, $warnings, $pages);
         $requests = self::requestsFor($jobs);
         $this->warmSectionCache($requests);
-        $parts = $this->llm->completeBatch($requests);
+        $batch = $this->llm->completeBatch($requests);
+        $parts = $batch->texts;
 
         // Normalize EVERY part before writing any, so one bad part doesn't
         // leave a half-written set of files on disk. A part whose response is
         // unusable degrades instead of aborting: chrome falls back to a
         // deterministic minimal part, and a page section is dropped (and
         // pruned from pages.json below) so the rest of the paid-for build
-        // still ships. Only a build with NO usable page section left is fatal
-        // — there is no site to deliver.
+        // still ships. If every section is unusable, the deterministic chrome
+        // and an empty front page remain a meaningful partial site, so that
+        // generated-content failure degrades too.
         $files = [];
         $dropped = [];
-        $usableSections = 0;
         foreach ($jobs as $key => $job) {
             $isChrome = in_array($key, ['header', 'footer'], true);
             try {
@@ -170,9 +172,7 @@ final class SectionsStep implements Step
                     throw new \RuntimeException('the batch returned no result');
                 }
                 $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
-                if (!$isChrome) {
-                    $usableSections++;
-                }
+                array_push($warnings, ...$batch->notesFor($key));
             } catch (\RuntimeException $e) {
                 if ($isChrome) {
                     $files[$job['file']] = self::fallbackChrome($key);
@@ -187,20 +187,17 @@ final class SectionsStep implements Step
             }
         }
 
-        if ($usableSections === 0) {
-            // Only the chrome (or nothing) survived: a site with zero content
-            // sections is not a usable partial result.
-            throw new \RuntimeException(
-                'sections: no page section produced usable markup: ' . implode('; ', $warnings)
-            );
-        }
-
+        // Commit the repaired/pruned plan only after every generated response
+        // has been normalized. An operational batch failure above therefore
+        // leaves pages.json byte-for-byte unchanged. Pruning can change each
+        // survivor's positional role, so recompute roles after the cut.
+        $pages = self::pruneDroppedSections($pages, $dropped, $warnings);
+        $pages = self::repairedPages($pages, $warnings);
+        $plan['pages'] = $pages;
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
-        if ($dropped !== []) {
-            self::pruneDroppedSections($project, $dropped, $warnings);
-        }
+        $project->writeJson('pages.json', $plan);
         $project->addWarnings($this->id(), $warnings);
     }
 
@@ -226,14 +223,15 @@ final class SectionsStep implements Step
      * whole — an empty page in the nav is worse than an absent one — except
      * the front page, which templates and the seeder rely on.
      *
+     * @param array<int,array<string,mixed>> $sourcePages
      * @param array<string,true> $dropped part keys (partSlug) of dropped sections
      * @param list<string>       $warnings appended to in place
+     * @return array<int,array<string,mixed>>
      */
-    private static function pruneDroppedSections(Project $project, array $dropped, array &$warnings): void
+    private static function pruneDroppedSections(array $sourcePages, array $dropped, array &$warnings): array
     {
-        $plan = $project->readJson('pages.json');
         $pages = [];
-        foreach ((array) ($plan['pages'] ?? []) as $page) {
+        foreach ($sourcePages as $page) {
             if (!is_array($page)) {
                 continue;
             }
@@ -247,11 +245,13 @@ final class SectionsStep implements Step
                 $warnings[] = "page '{$pageSlug}': every section was dropped; page removed from the plan";
                 continue;
             }
+            if ($kept === []) {
+                $warnings[] = "front page '{$pageSlug}': every section was dropped; empty front page delivered";
+            }
             $page['sections'] = $kept;
             $pages[] = $page;
         }
-        $plan['pages'] = $pages;
-        $project->writeJson('pages.json', $plan);
+        return $pages;
     }
 
     /**
@@ -299,27 +299,6 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Persist the deterministic plan repairs (role from position, defaulted
-     * semantic type) back into pages.json before generating from them: a
-     * warning that says "corrected" must not leave the defect in the artifact
-     * every downstream consumer — including the later repair pass — reads.
-     *
-     * @param list<string> $warnings appended to in place
-     */
-    private static function persistPlanRepairs(Project $project, array &$warnings): void
-    {
-        $repairs = [];
-        $pages = self::repairedPages(self::pages($project), $repairs);
-        if ($repairs === []) {
-            return;
-        }
-        $plan = $project->readJson('pages.json');
-        $plan['pages'] = $pages;
-        $project->writeJson('pages.json', $plan);
-        array_push($warnings, ...$repairs);
-    }
-
-    /**
      * Deterministically repair plan drift in every page's section list: a
      * section role is a pure function of its position, and a missing semantic
      * type has a safe generic default. Each repair is noted in $warnings for
@@ -361,15 +340,16 @@ final class SectionsStep implements Step
     /**
      * Read Project state once and adapt it into self-contained unit inputs.
      * Plan drift is repaired via repairedPages() so the prompts always see a
-     * consistent plan; run() persists those repairs to pages.json first, so
-     * on the build path this pass finds nothing left to repair.
+     * consistent plan. run() passes its in-memory repaired pages here and
+     * commits them only after every generated response has been normalized.
      *
      * @param list<string> $warnings appended to in place
+     * @param array<int,array<string,mixed>>|null $sourcePages
      * @return array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}>
      */
-    private function jobs(Project $project, array &$warnings = []): array
+    private function jobs(Project $project, array &$warnings = [], ?array $sourcePages = null): array
     {
-        $pages = self::repairedPages(self::pages($project), $warnings);
+        $pages = self::repairedPages($sourcePages ?? self::pages($project), $warnings);
 
         $common = [
             'site_spec'        => $project->readText('siteSpec.json'),

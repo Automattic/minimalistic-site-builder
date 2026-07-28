@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -25,7 +26,7 @@ use Automattic\SiteBuild\StepDeclaration;
  * defaults, with every fill recorded in warnings.json — a missing slug never
  * aborts the build.
  */
-final class ThemeJsonStep implements ConcurrentStep
+final class ThemeJsonStep implements GeneratedJsonFallbackStep
 {
     use LlmOptions;
 
@@ -124,7 +125,26 @@ final class ThemeJsonStep implements ConcurrentStep
         if (!is_array($theme)) {
             throw new \RuntimeException('theme-json: missing model output');
         }
+        $this->writeTheme($project, $theme);
+    }
 
+    public function consumeGeneratedJsonFailure(
+        Project $project,
+        array $results,
+        array $failures,
+    ): void {
+        if (isset($results[self::REQ]) || !isset($failures[self::REQ])) {
+            throw new \RuntimeException('theme-json: inconsistent generated JSON failure routing');
+        }
+        $this->writeTheme($project, [], [
+            'theme/theme.json: generated JSON remained unusable after its repair attempt ('
+                . $failures[self::REQ] . '); deterministic base theme delivered',
+        ]);
+    }
+
+    /** @param array<mixed> $theme @param list<string> $warnings */
+    private function writeTheme(Project $project, array $theme, array $warnings = []): void
+    {
         // Force the schema fields and validate the contract templates rely on.
         $theme['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
         $theme['version'] = 3;
@@ -152,13 +172,13 @@ final class ThemeJsonStep implements ConcurrentStep
             ? $project->readJson('designDirection.json')
             : [];
         $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
-        [$theme, $warnings] = self::repairColors($theme, $preferred);
+        [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
         [$theme, $fontWarnings] = self::repairFonts($theme);
-        $warnings = array_merge($warnings, $fontWarnings);
+        $warnings = array_merge($warnings, $colorWarnings, $fontWarnings);
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
             echo '  [theme-json] warning: ' . count($warnings)
-                . " missing required slug(s) filled with defaults (recorded in warnings.json)\n";
+                . " generated theme defect(s) repaired with defaults (recorded in warnings.json)\n";
         }
 
         $project->writeJson('theme/theme.json', $theme);
@@ -166,7 +186,13 @@ final class ThemeJsonStep implements ConcurrentStep
 
     public function run(Project $project): void
     {
-        $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+        try {
+            $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+        } catch (GeneratedJsonException $e) {
+            // JsonBatchRecovery distinguishes malformed/refused/truncated
+            // generated content from transport and sender-contract failures.
+            $this->consumeGeneratedJsonFailure($project, $e->partialResults, $e->failures);
+        }
     }
 
     /**
@@ -276,9 +302,9 @@ final class ThemeJsonStep implements ConcurrentStep
 
     /**
      * Ensure every required palette slug exists, filling gaps from the design
-     * direction's committed hexes and then the neutral fallbacks. The model's
-     * palette entries are never altered — only missing slugs are appended.
-     * Pure — unit-testable.
+     * direction's committed hexes and then the neutral fallbacks. Malformed
+     * entries are removed at the smallest unit and recorded before a required
+     * slug is replaced. Pure — unit-testable.
      *
      * @param array<mixed>         $theme
      * @param array<string,mixed>  $preferredHexes role => "#RRGGBB" (direction palette)
@@ -292,10 +318,32 @@ final class ThemeJsonStep implements ConcurrentStep
             $warnings[] = 'theme.json missing settings.color.palette; rebuilt with default colors';
             $palette = [];
         }
-        $entries = array_values(array_filter($palette, 'is_array'));
-        if (($malformed = count($palette) - count($entries)) > 0) {
-            $warnings[] = "theme.json palette: removed {$malformed} malformed (non-object) entr"
-                . ($malformed === 1 ? 'y' : 'ies');
+        $entries = [];
+        $nonObjects = 0;
+        foreach ($palette as $entry) {
+            if (!is_array($entry)) {
+                $nonObjects++;
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '') {
+                $warnings[] = 'theme.json palette: entry with missing or invalid slug '
+                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                continue;
+            }
+            $color = $entry['color'] ?? null;
+            if (!is_string($color) || preg_match('/^#[0-9A-F]{3}(?:[0-9A-F]{3})?$/i', trim($color)) !== 1) {
+                $warnings[] = "theme.json palette slug '{$slug}': invalid color "
+                    . self::warningValue($color) . '; malformed entry removed';
+                continue;
+            }
+            $entry['slug'] = $slug;
+            $entry['color'] = trim($color);
+            $entries[] = $entry;
+        }
+        if ($nonObjects > 0) {
+            $warnings[] = "theme.json palette: removed {$nonObjects} malformed (non-object) entr"
+                . ($nonObjects === 1 ? 'y' : 'ies');
         }
         $palette = $entries;
         $slugs = array_column($palette, 'slug');
@@ -303,7 +351,8 @@ final class ThemeJsonStep implements ConcurrentStep
             if (in_array($needed, $slugs, true)) {
                 continue;
             }
-            $preferred = strtoupper(trim((string) ($preferredHexes[$needed] ?? '')));
+            $rawPreferred = $preferredHexes[$needed] ?? null;
+            $preferred = is_string($rawPreferred) ? strtoupper(trim($rawPreferred)) : '';
             $hex = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1
                 ? $preferred
                 : self::FALLBACK_COLORS[$needed];
@@ -329,10 +378,32 @@ final class ThemeJsonStep implements ConcurrentStep
             $warnings[] = 'theme.json missing settings.typography.fontFamilies; rebuilt with system stacks';
             $families = [];
         }
-        $entries = array_values(array_filter($families, 'is_array'));
-        if (($malformed = count($families) - count($entries)) > 0) {
-            $warnings[] = "theme.json fontFamilies: removed {$malformed} malformed (non-object) entr"
-                . ($malformed === 1 ? 'y' : 'ies');
+        $entries = [];
+        $nonObjects = 0;
+        foreach ($families as $entry) {
+            if (!is_array($entry)) {
+                $nonObjects++;
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '') {
+                $warnings[] = 'theme.json fontFamilies: entry with missing or invalid slug '
+                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                continue;
+            }
+            $family = $entry['fontFamily'] ?? null;
+            if (!is_string($family) || trim($family) === '') {
+                $warnings[] = "theme.json fontFamilies slug '{$slug}': invalid fontFamily "
+                    . self::warningValue($family) . '; malformed entry removed';
+                continue;
+            }
+            $entry['slug'] = $slug;
+            $entry['fontFamily'] = trim($family);
+            $entries[] = $entry;
+        }
+        if ($nonObjects > 0) {
+            $warnings[] = "theme.json fontFamilies: removed {$nonObjects} malformed (non-object) entr"
+                . ($nonObjects === 1 ? 'y' : 'ies');
         }
         $families = $entries;
         $slugs = array_column($families, 'slug');
@@ -346,5 +417,15 @@ final class ThemeJsonStep implements ConcurrentStep
         }
         $theme['settings']['typography']['fontFamilies'] = $families;
         return [$theme, $warnings];
+    }
+
+    /** Compact authored-value evidence for one actionable warnings.json row. */
+    private static function warningValue(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($encoded)) {
+            return get_debug_type($value);
+        }
+        return mb_strlen($encoded) > 160 ? mb_substr($encoded, 0, 157) . '...' : $encoded;
     }
 }

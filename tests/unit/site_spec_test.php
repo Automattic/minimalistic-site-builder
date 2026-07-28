@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -135,6 +137,61 @@ test('site-spec falls back to a prompt-derived name when the model returns none'
     assert_eq($spec['name'], $spec['title'], 'title falls back to the name');
     $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
     assert_contains('site spec has no "name"', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec delivers a prompt-derived fallback when repaired model JSON is still malformed', function () {
+    [$project, , $tmp] = make_sitespec_fixture();
+    $llm = new class implements Llm {
+        public int $rounds = 0;
+
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            return JsonBatchRecovery::run(
+                ['request' => ['prompt' => $prompt] + $opts],
+                function (array $subset): array {
+                    $this->rounds++;
+                    return ['request' => ['text' => '{"sections":[}']];
+                },
+            )['request'];
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('A Cozy Neighborhood Bakery', $spec['name']);
+    assert_eq(2, $llm->rounds, 'one malformed response and one malformed repair response');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('generated JSON remained unusable', $joined);
+    assert_contains('deterministic prompt-derived site spec delivered', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps an operational JSON failure fatal', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(); // no queued response => plain RuntimeException
+
+    assert_throws(fn () => (new SiteSpecStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+
+    assert_true(!$project->exists('siteSpec.json'), 'no fallback for an unclassified operational failure');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

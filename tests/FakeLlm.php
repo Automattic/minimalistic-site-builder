@@ -21,6 +21,8 @@ final class FakeLlm implements Llm
     public int $completeJsonCalls = 0;
     public int $completeBatchCalls = 0;
     public int $completeJsonBatchCalls = 0;
+    /** @var array<array-key,list<string>> keyed notes returned with the next raw-text batch */
+    public array $batchNotes = [];
 
     /**
      * Prompt substrings that fail permanently. complete() throws for a matching
@@ -95,9 +97,9 @@ final class FakeLlm implements Llm
      * input. Records each call's meta as opts so model-wiring assertions work.
      *
      * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,cached_prefixes?:list<string>}> $requests
-     * @return array<array-key,string>
+     * @return TextBatchResult
      */
-    public function completeBatch(array $requests): array
+    public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
     {
         $this->completeBatchCalls++;
         // All-or-nothing like the real clients: one failing request aborts
@@ -117,7 +119,9 @@ final class FakeLlm implements Llm
             }
             $out[$key] = array_shift($this->textQueue);
         }
-        return $out;
+        $notes = $this->batchNotes;
+        $this->batchNotes = [];
+        return new \Automattic\SiteBuild\TextBatchResult($out, $notes);
     }
 
     private function shouldFail(string $prompt): bool

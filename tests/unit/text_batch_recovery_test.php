@@ -18,11 +18,13 @@ test('TextBatchRecovery returns an all-complete batch without a retry', function
         ];
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $result = TextBatchRecovery::run($requests, $send);
+    $out = $result->texts;
 
     assert_eq([['header', 'page-home--hero']], $rounds, 'an all-complete batch is sent exactly once');
     assert_eq(['header', 'page-home--hero'], array_keys($out), 'input order is preserved');
     assert_eq('<!-- wp:cover --><!-- /wp:cover -->', $out['page-home--hero']);
+    assert_eq([], $result->notes);
 });
 
 test('TextBatchRecovery regenerates only the truncated sibling with a doubled budget', function () {
@@ -45,7 +47,8 @@ test('TextBatchRecovery regenerates only the truncated sibling with a doubled bu
         return ['page-home--hero' => ['text' => '<!-- wp:cover --><!-- /wp:cover -->', 'stop_reason' => 'end_turn']];
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $result = TextBatchRecovery::run($requests, $send);
+    $out = $result->texts;
 
     assert_eq([['header', 'page-home--hero'], ['page-home--hero']], $rounds, 'the complete sibling is retained');
     assert_eq('<!-- wp:cover --><!-- /wp:cover -->', $out['page-home--hero']);
@@ -56,6 +59,7 @@ test('TextBatchRecovery regenerates only the truncated sibling with a doubled bu
         !str_contains($regenerated['page-home--hero']['prompt'], '<!-- wp:cover {"url":"'),
         'the truncated text is not re-embedded (it cannot be repaired, only regenerated)',
     );
+    assert_eq([], $result->notes, 'a normally completed regeneration has no degradation note');
 });
 
 test('TextBatchRecovery doubles the calling client configurable default for a truncated retry', function () {
@@ -86,11 +90,14 @@ test('TextBatchRecovery keeps a salvageable initial response over a worse abnorm
             : ['part' => ['text' => $longerButUnsalvageable, 'stop_reason' => 'max_tokens']];
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $result = TextBatchRecovery::run($requests, $send);
+    $out = $result->texts;
 
     assert_eq(2, $rounds, 'the configured one regeneration is honored');
     assert_true(strlen($longerButUnsalvageable) > strlen($initial), 'the bad retry is deliberately longer');
     assert_eq($initial, $out['part'], 'the earlier salvageable markup is not overwritten by the worse retry');
+    assert_contains('max_tokens', implode(' ', $result->notesFor('part')));
+    assert_contains('best partial response retained', implode(' ', $result->notesFor('part')));
 });
 
 test('TextBatchRecovery upgrades an empty truncation to a non-empty abnormal retry', function () {
@@ -106,10 +113,12 @@ test('TextBatchRecovery upgrades an empty truncation to a non-empty abnormal ret
         ]];
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $result = TextBatchRecovery::run($requests, $send);
+    $out = $result->texts;
 
     assert_eq(2, $rounds);
     assert_eq($retry, $out['part'], 'a real partial response improves on an empty first attempt');
+    assert_contains('max_tokens', implode(' ', $result->notesFor('part')));
 });
 
 test('TextBatchRecovery keeps a prior abnormal candidate when regeneration throws', function () {
@@ -125,10 +134,14 @@ test('TextBatchRecovery keeps a prior abnormal candidate when regeneration throw
         throw new RuntimeException('retry budget exceeds model limit');
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $result = TextBatchRecovery::run($requests, $send);
+    $out = $result->texts;
 
     assert_eq(2, $rounds);
     assert_eq($initial, $out['part'], 'a retry transport exception does not discard the paid-for candidate');
+    $notes = implode(' ', $result->notesFor('part'));
+    assert_contains('max_tokens', $notes);
+    assert_contains('retry budget exceeds model limit', $notes);
 });
 
 test('TextBatchRecovery isolates retry failures so a successful sibling is retained and accounted', function () {
@@ -160,7 +173,8 @@ test('TextBatchRecovery isolates retry failures so a successful sibling is retai
         ]];
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $result = TextBatchRecovery::run($requests, $send);
+    $out = $result->texts;
 
     assert_eq(
         [['broken', 'healthy'], ['broken'], ['healthy']],
@@ -170,6 +184,8 @@ test('TextBatchRecovery isolates retry failures so a successful sibling is retai
     assert_eq(['healthy'], $accounted, 'the successful sibling retry completes its transport accounting path');
     assert_eq($brokenInitial, $out['broken'], 'the failed retry falls back to its original candidate');
     assert_contains('complete', $out['healthy'], 'the successful sibling retry is returned');
+    assert_contains('retry rejected by model', implode(' ', $result->notesFor('broken')));
+    assert_eq([], $result->notesFor('healthy'));
 });
 
 test('TextBatchRecovery regenerates a refusal without touching the budget', function () {
@@ -184,7 +200,7 @@ test('TextBatchRecovery regenerates a refusal without touching the budget', func
         return ['part' => ['text' => 'I cannot produce this section.', 'stop_reason' => 'refusal']];
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $out = TextBatchRecovery::run($requests, $send)->texts;
 
     assert_eq('<!-- wp:group --><!-- /wp:group -->', $out['part']);
     assert_eq(4000, $regenerated['part']['max_tokens'], 'a refusal retry keeps the original budget');
@@ -220,7 +236,7 @@ test('TextBatchRecovery preserves order and integer keys', function () {
         return $out;
     };
 
-    $out = TextBatchRecovery::run($requests, $send);
+    $out = TextBatchRecovery::run($requests, $send)->texts;
 
     assert_eq([7, 'part', 2], array_keys($out));
     assert_eq('text-7', $out[7]);

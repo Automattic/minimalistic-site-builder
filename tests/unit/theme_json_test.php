@@ -1,8 +1,14 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\ConcurrentGroup;
+use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
@@ -51,6 +57,132 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     assert_eq(false, $theme['settings']['typography']['defaultFontSizes']);
     assert_eq(false, $theme['settings']['spacing']['defaultSpacingSizes']);
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json delivers a deterministic base theme when repaired model JSON is still malformed', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $llm = new class implements Llm {
+        public int $rounds = 0;
+
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            return JsonBatchRecovery::run($requests, function (array $subset): array {
+                $this->rounds++;
+                $out = [];
+                foreach ($subset as $key => $_request) {
+                    $out[$key] = ['text' => '{"settings":{]'];
+                }
+                return $out;
+            });
+        }
+
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(3, $theme['version']);
+    assert_eq(
+        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        array_column($theme['settings']['color']['palette'], 'slug'),
+    );
+    assert_eq(2, $llm->rounds, 'one malformed response and one malformed repair response');
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('generated JSON remained unusable', $joined);
+    assert_contains('deterministic base theme delivered', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps an operational JSON failure fatal', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    assert_throws(fn () => (new ThemeJsonStep(
+        new FakeLlm(), // no queued response => plain RuntimeException
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+
+    assert_true(!$project->exists('theme/theme.json'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json fallback retains a valid concurrent sibling', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $sibling = new class implements ConcurrentStep {
+        public array $consumed = [];
+        public function id(): string { return 'sibling'; }
+        public function label(): string { return 'Sibling'; }
+        public function requests(Project $project): array { return ['result' => ['prompt' => 'Sibling']]; }
+        public function consume(Project $project, array $results): void { $this->consumed = $results; }
+        public function run(Project $project): void {}
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration($this->id(), $this->label(), [], ['sibling.json'], false);
+        }
+    };
+    $llm = new class implements Llm {
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            throw new RuntimeException('unused');
+        }
+        public function completeJsonBatch(array $requests): array
+        {
+            return JsonBatchRecovery::run($requests, function (array $subset): array {
+                $out = [];
+                foreach ($subset as $key => $_request) {
+                    $out[$key] = str_contains((string) $key, 'theme-json')
+                        ? ['text' => '{"settings":{]']
+                        : ['text' => '{"ok":"retained"}'];
+                }
+                return $out;
+            });
+        }
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    (new ConcurrentGroup($llm, [
+        new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))),
+        $sibling,
+    ]))->run($project);
+
+    assert_eq('retained', $sibling->consumed['result']['ok']);
+    assert_eq(3, $project->readJson('theme/theme.json')['version']);
+    assert_contains(
+        'generated JSON remained unusable',
+        implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -244,6 +376,39 @@ test('repairColors and repairFonts record the malformed entries they remove', fu
         ['settings' => ['typography' => ['fontFamilies' => ['bogus', 42]]]],
     );
     assert_contains('fontFamilies: removed 2 malformed (non-object) entries', implode(' ', $fontWarnings));
+});
+
+test('repairColors and repairFonts replace object-shaped required entries with no usable value', function () {
+    $theme = valid_theme_payload();
+    foreach ($theme['settings']['color']['palette'] as &$entry) {
+        if ($entry['slug'] === 'contrast') {
+            $entry = ['slug' => 'contrast'];
+        }
+    }
+    unset($entry);
+
+    [$theme, $warnings] = ThemeJsonStep::repairColors($theme);
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#111111', $bySlug['contrast']);
+    assert_contains("palette slug 'contrast': invalid color null; malformed entry removed", implode(' ', $warnings));
+    assert_contains("palette missing slug 'contrast'; filled with #111111", implode(' ', $warnings));
+
+    $theme = valid_theme_payload();
+    foreach ($theme['settings']['typography']['fontFamilies'] as &$entry) {
+        if ($entry['slug'] === 'heading') {
+            $entry = ['slug' => 'heading'];
+        }
+    }
+    unset($entry);
+
+    [$theme, $fontWarnings] = ThemeJsonStep::repairFonts($theme);
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_eq('system-ui, sans-serif', $bySlug['heading']);
+    assert_contains(
+        "fontFamilies slug 'heading': invalid fontFamily null; malformed entry removed",
+        implode(' ', $fontWarnings),
+    );
+    assert_contains("fontFamilies missing slug 'heading'; filled with the system stack", implode(' ', $fontWarnings));
 });
 
 test('theme-json forces useRootPaddingAwareAlignments when root side padding is set', function () {

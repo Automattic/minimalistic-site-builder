@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\JsonBatchRecovery;
 
 /** Run a callback and return the RuntimeException it is expected to throw. */
@@ -152,6 +153,7 @@ test('JsonBatchRecovery reports a concise diagnostic when the retry is still mal
     $message = $error->getMessage();
     $lower = strtolower($message);
 
+    assert_true($error instanceof GeneratedJsonException, 'terminal model JSON gets the narrow generated-content type');
     assert_eq(2, $round, 'the configured one repair attempt is honored');
     assert_contains('reservations', $message);
     assert_contains('syntax error', $lower, 'the JSON parser error is actionable');
@@ -160,6 +162,32 @@ test('JsonBatchRecovery reports a concise diagnostic when the retry is still mal
     assert_contains('/tmp/reservations-retry.log', $message, 'the latest transcript is identified');
     assert_true(!str_contains($message, 'RAW_RESPONSE_MUST_NOT_APPEAR'), 'raw model output is kept out of the exception');
     assert_true(strlen($message) < 600, 'the terminal diagnostic stays concise');
+});
+
+test('JsonBatchRecovery exposes valid siblings on a terminal generated JSON failure', function () {
+    $requests = [
+        'theme' => ['prompt' => 'Generate theme'],
+        'page'  => ['prompt' => 'Plan page'],
+    ];
+    $round = 0;
+    $send = function (array $subset) use (&$round): array {
+        $round++;
+        $out = [];
+        foreach ($subset as $key => $_request) {
+            $out[$key] = $key === 'theme'
+                ? ['text' => '{"ok":"theme"}']
+                : ['text' => '{"sections":[}'];
+        }
+        return $out;
+    };
+
+    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send));
+
+    assert_true($error instanceof GeneratedJsonException);
+    assert_eq(['page'], array_keys($error->failures));
+    assert_eq(['theme'], array_keys($error->partialResults));
+    assert_eq('theme', $error->partialResults['theme']['ok']);
+    assert_eq(2, $round);
 });
 
 test('JsonBatchRecovery fails loud when a sender omits an expected key', function () {
@@ -176,6 +204,7 @@ test('JsonBatchRecovery fails loud when a sender omits an expected key', functio
     $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send));
     $message = strtolower($error->getMessage());
 
+    assert_true(!($error instanceof GeneratedJsonException), 'broken sender contracts are not content failures');
     assert_eq(1, $calls, 'a broken sender contract is not treated as malformed model output');
     assert_true(
         str_contains($message, 'missing') || str_contains($message, 'omitted'),

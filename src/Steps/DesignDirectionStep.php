@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\LlmOptions;
@@ -115,7 +116,17 @@ final class DesignDirectionStep implements Step
             'site_spec'   => $spec,
             'seed'        => $seed,
         ]);
-        $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+        $warnings = [];
+        try {
+            $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+        } catch (GeneratedJsonException $e) {
+            // A syntactically unusable generated direction is content drift,
+            // not an operational failure. Plain RuntimeExceptions still
+            // propagate so transport and programming failures stay visible.
+            $payload = [];
+            $warnings[] = 'designDirection.json: generated JSON remained unusable after its repair attempt ('
+                . $e->getMessage() . '); deterministic seed-derived direction delivered';
+        }
 
         $direction = self::normalize($payload['direction'] ?? null);
         if ($direction === null) {
@@ -125,12 +136,11 @@ final class DesignDirectionStep implements Step
             // exists) rather than abort. Recorded durably: the site loses
             // the concept-variety this step exists to inject.
             $direction = self::fallbackDirection($seed);
-            $project->addWarnings($this->id(), [
-                'model returned no usable design direction; deterministic fallback direction delivered',
-            ]);
+            $warnings[] = 'model returned no usable design direction; deterministic fallback direction delivered';
             echo "  [design-direction] warning: no usable direction from the model; fallback delivered (recorded in warnings.json)\n";
         }
 
+        $project->addWarnings($this->id(), $warnings);
         $project->writeJson(self::FILE, $direction);
     }
 
