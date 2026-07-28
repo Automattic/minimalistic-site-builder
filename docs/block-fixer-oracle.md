@@ -36,7 +36,7 @@ SHA-256, and per-package versions (`@wordpress/blocks@15.15.0`,
 ## How to resurrect it
 
 ```sh
-git worktree add /tmp/oracle abcf523
+git worktree add /tmp/oracle block-fixer-oracle
 cd /tmp/oracle
 docker run --rm -it -v "$PWD":/repo -w /repo \
   docker.io/library/node:22.19.0-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90 \
@@ -76,7 +76,7 @@ golden case).
 
 `.github/workflows/block-fixer-oracle.yml` runs the resurrection above on every
 PR that touches `src/BlockSerializer/**` or the fixtures, and weekly. It
-materialises `abcf523` with `git worktree`, checks the runtime against the
+materialises the `block-fixer-oracle` tag with `git worktree`, checks the runtime against the
 frozen fingerprint, installs the locked dependencies, runs the oracle's own
 tests, and re-derives every frozen artifact — failing on drift.
 

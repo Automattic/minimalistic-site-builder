@@ -55,9 +55,13 @@ jobs:
       - name: Materialise the oracle from git history
         run: |
           set -euo pipefail
-          # The commit named in docs/block-fixer-oracle.md as the last one where
-          # the oracle and the PHP port coexisted green.
-          git worktree add /tmp/oracle abcf523
+          # The `block-fixer-oracle` tag pins abcf523, the last commit where the
+          # oracle and the PHP port coexisted green. Before the tag it was
+          # reachable only from a feature branch, so deleting that branch would
+          # have taken the oracle — and this gate — with it.
+          git fetch --no-tags --force origin \
+            'refs/tags/block-fixer-oracle:refs/tags/block-fixer-oracle'
+          git worktree add /tmp/oracle refs/tags/block-fixer-oracle
           test -d /tmp/oracle/bin/block-fixer
 
       - name: Set up the pinned Node
