@@ -173,7 +173,7 @@ test('assemble-pages skips a missing section part and warns instead of failing',
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('assemble-pages skips a page whose every section part is missing (front page kept empty)', function () {
+test('assemble-pages skips an interior page whose every section part is missing', function () {
     [$project, $tmp] = assemble_fixture();
     unlink($project->themePath('parts/page-menu--breads.html'));
 
@@ -186,6 +186,24 @@ test('assemble-pages skips a page whose every section part is missing (front pag
 
     $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
     assert_contains("page 'menu': no section markup survived; page skipped", $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages keeps the front page when every one of its section parts is missing', function () {
+    [$project, $tmp] = assemble_fixture();
+    unlink($project->themePath('parts/page-home--hero.html'));
+    unlink($project->themePath('parts/page-home--about.html'));
+
+    (new AssemblePagesStep())->run($project);
+
+    // The front page ships empty — templates and the seeder rely on its
+    // existence — while the interior page is untouched.
+    assert_eq('', trim($project->readText('plugin/pages/home.html')), 'front page shipped empty');
+    $manifest = $project->readJson('plugin/pages.json');
+    assert_eq(['home', 'menu'], array_column($manifest['pages'], 'slug'));
+
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains("front page 'home': no section markup survived; empty front page delivered", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
