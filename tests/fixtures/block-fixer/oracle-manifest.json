@@ -66,8 +66,8 @@
   },
   "fixtures": {
     "generatorVersion": "1.0.0",
-    "generatorSourceSha256": "7b9c736683f397bcb80e1431e2e982c698bf7d67cef33f5d3a9384c036068d15",
-    "definitionsSha256": "83a0cb8428cfb78d68a17b65c2d82a65f79106bfde1e4038360c040f61d464d5"
+    "generatorSourceSha256": "3a9cd09254fe055338640a01960debc30aa003578d4024724bc0b2b0344bd51a",
+    "definitionsSha256": "f6db910a385ab21cb2436b9f9769cdb2f966870c7f813fd5d03f3ff5dd2bc441"
   },
   "amendments": [],
   "amendmentPolicy": "registry.generatedPhpSha256 and registry.runtimeJsonSha256 are re-frozen hashes of the committed artifacts, enforced by tests/unit/oracle_manifest_consistency_test.php. Any post-oracle edit to those artifacts must be listed here with its certification evidence and must ship an end-to-end golden case; see docs/block-fixer-oracle.md for regeneration."

@@ -909,9 +909,25 @@ const REVIEWED_DEPRECATIONS = Object.freeze({
   'deprecation:core/site-tagline:1': 'explicit-adapter',
 });
 
+// Every repair code observed by the pinned instrumentation — built-in
+// recoveries and compatibility repairs alike — must have a reviewed
+// disposition. The fixture generator rejects either an unreviewed hit or a
+// stale disposition which is no longer exercised, exactly as it does for
+// REVIEWED_DEPRECATIONS. Per-case counted repairs live in each definition's
+// `repairs`; this ledger is the gate that keeps a *new* code from landing in
+// generated evidence without review.
+const REVIEWED_REPAIR_CODES = Object.freeze({
+  'anchor-recovery': 'pinned-built-in-recovery',
+  'aria-label-recovery': 'pinned-built-in-recovery',
+  'custom-class-recovery': 'pinned-built-in-recovery',
+  'media-type-inference': 'reviewed-compatibility-repair',
+  'nested-paragraph': 'reviewed-compatibility-repair',
+});
+
 module.exports = {
   CASES,
   REQUIRED_CAPABILITIES,
   REVIEWED_CASE_EXCLUSIONS,
   REVIEWED_DEPRECATIONS,
+  REVIEWED_REPAIR_CODES,
 };

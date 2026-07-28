@@ -64,9 +64,12 @@ per-package versions (`@wordpress/blocks@15.15.0`,
   `bin/block-fixer/lib/fixtureCases.js`, plus `coverage.json`.
 
 Both refuse to write when a case exercises a deprecation that is not listed in
-`REVIEWED_DEPRECATIONS`, or a block that is not in the reviewed support
-manifest. Those gates are the point: adding to the compatibility domain is a
-review step, not a regeneration side effect.
+`REVIEWED_DEPRECATIONS`, a repair code that is not listed in
+`REVIEWED_REPAIR_CODES`, or a block that is not in the reviewed support
+manifest. Each case's `repairs.json` is itself derived from the definition's
+`repairs` and byte-compared on every run, so editing a definition is the only
+way to change the reviewed repair contract. Those gates are the point: adding
+to the compatibility domain is a review step, not a regeneration side effect.
 
 ### What is *not* re-derived: `renderer-probes.json`
 
@@ -176,7 +179,9 @@ This is narrower than it looks. All four are replayed byte-for-byte by
 so a **port** regression in them cannot land green. The blocking fixed-point
 suite separately replays all four against Gutenberg and requires exactly the
 five reviewed mismatching files and output hashes. The committed-case inventory
-gate also rejects any case that is neither generated nor explicitly excluded.
+gate also rejects any case that is neither generated nor explicitly excluded,
+including a case directory that carries no `case.json` at all (which would
+otherwise still run as a PHP golden while invisible to the oracle gates).
 
 ### The two runtime divergences, precisely
 

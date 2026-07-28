@@ -1450,6 +1450,24 @@
     "unreviewed": [],
     "unobservedReviewed": []
   },
+  "repairCodes": {
+    "observed": [
+      "anchor-recovery",
+      "aria-label-recovery",
+      "custom-class-recovery",
+      "media-type-inference",
+      "nested-paragraph"
+    ],
+    "reviewed": {
+      "anchor-recovery": "pinned-built-in-recovery",
+      "aria-label-recovery": "pinned-built-in-recovery",
+      "custom-class-recovery": "pinned-built-in-recovery",
+      "media-type-inference": "reviewed-compatibility-repair",
+      "nested-paragraph": "reviewed-compatibility-repair"
+    },
+    "unreviewed": [],
+    "unobservedReviewed": []
+  },
   "rendererProbes": {
     "schemaVersion": 1,
     "sha256": "1c7073744e1197aabeedefbb6b93fbb5dd1b23f4a27f56a5d0635f2496dd6b71",
