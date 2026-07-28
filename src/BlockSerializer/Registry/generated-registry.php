@@ -11,7 +11,7 @@ return [
         'node' => [
             'version' => 'v22.19.0',
             'platform' => 'linux',
-            'architecture' => 'arm64',
+            'architecture' => 'x64',
             'v8' => '12.4.254.21-node.29',
             'icu' => '77.1',
         ],

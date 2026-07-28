@@ -1,8 +1,8 @@
-# Block-fixer oracle: where it lives and how to bring it back
+# Block-fixer oracle: what certifies the PHP port
 
 The pure-PHP block fixer (`PhpBlockFixer`) was ported from a Node implementation
-that doubled as the **oracle**: it ran the real `@wordpress/blocks` runtime in a
-pinned container and generated every frozen artifact the PHP port is certified
+that doubled as the **oracle**: it runs the real `@wordpress/blocks` runtime in a
+pinned environment and generates every frozen artifact the PHP port is certified
 against — `src/BlockSerializer/Registry/generated-registry.php`, the fixture
 snapshots under `tests/fixtures/block-fixer/`, and the golden cases under
 `tests/fixtures/block-fixer/cases/`. (What those artifacts contain and how the
@@ -13,55 +13,92 @@ The oracle and all regeneration tooling were removed in commit `619b8c9`
 are **back in the tree** as development tooling: `bin/block-fixer/` plus the two
 generators, an npm workspace beside `bin/screenshot`. Nothing in the PHP
 pipeline calls them and production still runs pure PHP — but regenerating the
-artifacts is now an ordinary repo operation rather than an archaeology
-exercise, which is what let the domain drift into hand-certification before.
+artifacts is now an ordinary repo operation rather than an archaeology exercise,
+which is what let the domain drift into hand-certification before.
 
 ```sh
 npm ci
 npm run oracle:verify --workspace=bin/block-fixer   # re-derive, fail on drift
-npm run oracle:update --workspace=bin/block-fixer   # regenerate (linux/x64)
+npm run oracle:update --workspace=bin/block-fixer   # regenerate
+npm test --workspace=bin/block-fixer                # the oracle's own suite
 ```
+
+Regenerating from a machine that is not linux/x64 needs the container — see
+[Which environment to regenerate from](#which-environment-to-regenerate-from).
 
 ## Where the oracle lives
 
-Everything needed is in commit `abcf523` ("Implement pure-PHP block fixer"),
-the last commit where the oracle and the PHP port coexisted green. It is pinned
-by the **`block-fixer-oracle`** tag: before that tag it was reachable only from a
-feature branch, so deleting the branch would have taken the oracle with it.
-
-| Piece | Path at `abcf523` |
+| Piece | Path |
 | --- | --- |
 | Oracle CLI + instrumentation | `bin/block-fixer/` (`oracle.js`, `fix-templates.js`, `lib/`, `test/`) |
 | Registry generator | `bin/generate-block-registry.js` |
 | Fixture/golden generator | `bin/generate-block-fixer-fixtures.js` |
 | Save-output probe tool | `bin/block-fixer/probe-save.js` |
-| CI harness (pinned container) | `.github/workflows/block-fixer-oracle.yml` |
+| CI harness | `.github/workflows/block-fixer-oracle.yml` |
+
+The version that predates the removal is still pinned by the
+**`block-fixer-oracle`** tag (commit `abcf523`, "Implement pure-PHP block
+fixer" — the last commit where the oracle and the PHP port coexisted green).
+Before that tag it was reachable only from a feature branch, so deleting the
+branch would have taken the oracle with it.
 
 The exact runtime environment is pinned in
-`tests/fixtures/block-fixer/oracle-manifest.json` under `fingerprint`:
-container image `node:22.19.0-bookworm-slim` by digest, `package-lock.json`
-SHA-256, and per-package versions (`@wordpress/blocks@15.15.0`,
+`tests/fixtures/block-fixer/oracle-manifest.json` under `fingerprint`: container
+image `node:22.19.0-bookworm-slim` by digest, `package-lock.json` SHA-256, and
+per-package versions (`@wordpress/blocks@15.15.0`,
 `@wordpress/block-library@9.42.0`, …).
 
-## How to resurrect it
+## What the generators derive
 
-```sh
-git worktree add /tmp/oracle block-fixer-oracle
-cd /tmp/oracle
-docker run --rm -it -v "$PWD":/repo -w /repo \
-  docker.io/library/node:22.19.0-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90 \
-  bash -c 'npm ci && npm test --workspace=bin/block-fixer'
-```
+- `bin/generate-block-registry.js` → `generated-registry.php`,
+  `registered-runtime.json`, `renderer-probes.json`, `coverage.json`, and the
+  `fingerprint` in `oracle-manifest.json`. Its inputs are
+  `bin/block-fixer/lib/supportManifest.js` (the reviewed support decisions) and
+  the runtime itself.
+- `bin/generate-block-fixer-fixtures.js` → the golden cases under
+  `tests/fixtures/block-fixer/cases/`, from the definitions in
+  `bin/block-fixer/lib/fixtureCases.js`.
 
-- `npm run oracle:verify --workspace=bin/block-fixer` re-derives every frozen
-  artifact and fails on drift.
-- `npm run oracle:update --workspace=bin/block-fixer` regenerates them
-  (`--update` on both generators). Copy regenerated artifacts into the current
-  tree, then **re-freeze** `oracle-manifest.json` (see below).
+Both refuse to write when a case exercises a deprecation that is not listed in
+`REVIEWED_DEPRECATIONS`, or a block that is not in the reviewed support
+manifest. Those gates are the point: adding to the compatibility domain is a
+review step, not a regeneration side effect.
 
 To certify against a *newer* Gutenberg, bump the pins in
-`bin/block-fixer/package.json` inside the worktree, regenerate, and record the
-new fingerprint in the manifest.
+`bin/block-fixer/package.json`, regenerate, and re-freeze the fingerprint.
+
+## Which environment to regenerate from
+
+The artifacts record `platform` and `architecture`, and CI checks the running
+runtime against them before it verifies anything — so **regenerating from the
+wrong architecture silently rewrites provenance and then fails the gate**.
+The frozen fingerprint is linux/x64.
+
+Everything else environment-derived — Node version, v8, ICU — comes from the
+Node release, and `fingerprint.container` is a constant the generator writes
+rather than something it probes, so running outside the container does not
+change it. Confirmed twice: regenerating on macOS/arm64 with `nvm`, and on
+linux/arm64 in the container, both re-derived `generated-registry.php` and
+`registered-runtime.json` **byte-identically apart from the recorded
+`platform`/`architecture`** (and the hashes over them). `v8` and `icu` matched
+exactly in both.
+
+So to *run or verify*, the pinned Node is enough — which is why CI uses
+`actions/setup-node` on `ubuntu-24.04`, already linux/x64, instead of the
+container. To *regenerate for commit* from anything that is not linux/x64, use
+the container, and pin the **linux/amd64 image digest** rather than the index
+digest:
+
+```sh
+docker run --rm -it -v "$PWD":/repo -w /repo \
+  docker.io/library/node:22.19.0-bookworm-slim@sha256:cff78eb5aa1cf27dc2b6aeea9d31366415a43e9a9ea0ddec00d780b2b66fad0f \
+  bash -c 'npm ci && npm run oracle:update --workspace=bin/block-fixer'
+```
+
+That digest is recorded as `fingerprint.container.linuxAmd64Digest`; the index
+digest beside it resolves to the host's architecture, which on Apple Silicon is
+arm64. `--platform linux/amd64` does not help — Docker rejects it alongside a
+digest reference.
 
 ## The amendment rule
 
@@ -77,54 +114,25 @@ re-freeze. Post-oracle changes to those artifacts are allowed only when:
    post-oracle template), and
 3. the `registry.*Sha256` hashes are updated to the new file contents.
 
-Prefer resurrecting the oracle over hand-certifying whenever the change is more
-than a strategy declaration — hand-written save output has already diverged
-once (attribute ordering on `core/details`, caught and fixed alongside the
-golden case).
+**The ledger is currently empty, and that is the healthy state**: every
+committed artifact is oracle-derived. The four amendments it used to carry were
+retired by folding their subjects back into the oracle's inputs — most visibly
+`core/details`, whose hand-written save output had already diverged from
+Gutenberg on attribute ordering. Hand-certifying is the escape hatch for when
+regenerating is impossible, not the default; now that the tooling is in the
+tree, it should almost never be reached for.
 
 ## Is it still alive? (CI)
 
-`.github/workflows/block-fixer-oracle.yml` runs the resurrection above on every
-PR that touches `src/BlockSerializer/**` or the fixtures, and weekly. It
-materialises the `block-fixer-oracle` tag with `git worktree`, checks the
-runtime against the frozen fingerprint, installs the locked dependencies, runs the oracle's own
-tests, and re-derives every frozen artifact — failing on drift.
+`.github/workflows/block-fixer-oracle.yml` runs on every PR that touches
+`src/BlockSerializer/**`, the oracle, or the fixtures, and on every push to
+trunk. It checks the runtime against the frozen fingerprint, installs the locked
+dependencies, and re-derives every frozen artifact — failing on drift. So a
+change to the serializer, the support manifest or the case definitions cannot
+land unless the real Gutenberg runtime agrees with it.
 
-That gate protects the *recipe*, not today's artifacts: it catches the tooling
-rotting unnoticed (a yanked or re-published dependency, a lockfile that stops
-resolving, a Node incompatibility), so the day the domain has to grow, the
-instructions above still work.
-
-### Docker is optional
-
-The container pins one thing the artifacts actually record: **platform and
-architecture**. Everything else environment-derived — Node version, v8, ICU —
-comes from the Node release, and `fingerprint.container` is a constant the
-generator writes rather than something it probes, so running outside the
-container does not change it.
-
-Verified 2026-07-28 on macOS/arm64 with Node v22.19.0 from `nvm` and no
-container: the oracle's own suite passes (13/13), the fixture generator
-verifies all 19 cases, and both `generated-registry.php` and
-`registered-runtime.json` re-derive **byte-identically apart from the recorded
-`platform`/`architecture`**. `v8` and `icu` matched the frozen manifest exactly.
-
-So: to *run or verify* the oracle, the pinned Node is enough — which is why CI
-uses `actions/setup-node` on `ubuntu-24.04` (already linux/x64) instead of the
-container. To *regenerate* artifacts for commit from a non-linux/x64 machine,
-use the container so the fingerprint matches.
-
-### Why this is not yet a parity gate on current artifacts
-
-The oracle at this pin cannot certify what the tree carries today: the
-compatibility domain has grown past it through the four hand-reviewed
-`amendments` in `oracle-manifest.json`. Running the generators against the
-current fixtures fails on the renderer-probe coverage for blocks the pinned
-`@wordpress/block-library@9.42.0` does not know — `core/details` most visibly.
-That is the amendment mechanism working as designed, not a defect.
-
-Turning this into a true differential gate means bumping the Gutenberg pins in
-`bin/block-fixer/package.json` inside the worktree, regenerating, re-freezing
-the fingerprint, and retiring the amendments those versions absorb. Until then
-the PHP-side invariants (`oracle_manifest_consistency_test.php`) remain the
-enforcement, and this workflow keeps the escape hatch usable.
+The oracle's own suite runs too, but **advisory rather than blocking**: its
+fixed-point test reports one committed golden the oracle disagrees with
+(`carried-elements-signatures`, where the PHP port drops a legacy heading
+alignment that the real runtime migrates into `className`). That divergence is a
+separate fix; when it lands, the step becomes a gate like the one above.

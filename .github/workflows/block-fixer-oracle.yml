@@ -71,7 +71,11 @@ jobs:
             for (const key of Object.keys(got)) {
               if (want[key] !== got[key]) {
                 throw new Error(
-                  `runtime ${key}: frozen ${want[key]}, running ${got[key]}`,
+                  `runtime ${key}: frozen ${want[key]}, running ${got[key]}. ` +
+                    "If the frozen value is the surprising one, the artifacts " +
+                    "were regenerated from the wrong environment — see " +
+                    "docs/block-fixer-oracle.md, 'Which environment to " +
+                    "regenerate from'.",
                 );
               }
             }
