@@ -30,6 +30,25 @@ test('FixerReport keeps summary first and normalized N M D T contract', function
     assert_eq('FIXED', $report->normalized()['files'][0]['status']);
 });
 
+test('FileReport failed rows carry their reason through format and normalized output', function () {
+    $failed = new FileReport('parts/broken.html', 'failed', error: 'did not converge within 5 passes');
+    $report = new FixerReport([
+        new FileReport('parts/a.html', 'ok'),
+        $failed,
+    ]);
+
+    assert_contains('1 file(s) left unmodified after a failed transformation.', $report->summary());
+    assert_contains('FAILED parts/broken.html', $report->format());
+    assert_contains('! left unmodified: did not converge within 5 passes', $report->format());
+    assert_eq(1, $report->failedCount());
+    assert_eq([$failed], $report->failures());
+    assert_eq('did not converge within 5 passes', $failed->normalized()['error']);
+
+    // The status and its reason must come together, both ways.
+    assert_throws(static fn () => new FileReport('parts/x.html', 'failed'));
+    assert_throws(static fn () => new FileReport('parts/x.html', 'ok', error: 'reason'));
+});
+
 test('ParagraphFixer ports nested paragraph attribute merging', function () {
     $input = '<!-- wp:paragraph --><p class="outer" style="color:red"><p class="inner" style="color:blue;font-size:1rem">Hi</p></p><!-- /wp:paragraph -->';
     $result = (new ParagraphFixer())->fix($input);

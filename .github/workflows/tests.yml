@@ -1,0 +1,78 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - trunk
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor composer.json declares, and a current release. The builder
+        # ships into hosts that pin either end.
+        php: ['8.1', '8.4']
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # imagick is optional at runtime — the transparency tests register
+          # themselves only when it is present — but pinning it here keeps that
+          # coverage from silently disappearing on a runner image change.
+          extensions: curl, json, mbstring, imagick
+          coverage: none
+
+      # The package autoloads itself (autoload.php), so there is nothing to
+      # install for the suite proper.
+      - name: Lint every PHP file
+        run: |
+          find src bin tests -name '*.php' -print0 \
+            | xargs -0 -n1 -P4 php -l > /dev/null
+
+      # The seeder sanitizes with WP_HTML_Processor, so the tests that hold the
+      # build-time and activation-time sanitizers to the same outcome need real
+      # WordPress. They skip themselves when it is absent — which would silently
+      # drop the adversarial XSS parity corpus, the one place both copies are
+      # compared. Fetch a copy so they actually run.
+      - name: Fetch WordPress for the HTML API
+        run: |
+          set -euo pipefail
+          curl -fsSL https://wordpress.org/latest.tar.gz -o /tmp/wordpress.tar.gz
+          tar -xzf /tmp/wordpress.tar.gz -C /tmp
+          test -f /tmp/wordpress/wp-includes/html-api/class-wp-html-processor.php
+          echo "SITEBUILD_WP_PATH=/tmp/wordpress" >> "$GITHUB_ENV"
+
+      - name: Unit tests
+        run: php tests/run.php
+
+      # Fail the job if the seeder parity tests skipped: a silent skip would
+      # leave the sanitizer parity corpus unenforced.
+      - name: Assert the sanitizer parity corpus ran
+        run: |
+          set -euo pipefail
+          php tests/run.php 2>&1 | tee /tmp/unit.log
+          if grep -q 'SKIP  generated seeder neutralizes' /tmp/unit.log; then
+            echo "::error::seeder sanitizer parity test skipped — WordPress HTML API not loaded"
+            exit 1
+          fi
+
+      - name: Integration tests
+        run: php tests/run-integration.php

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -125,7 +126,7 @@ test('design-direction falls back to a built-in seed when the seed call fails', 
             throw new RuntimeException('unused');
         }
 
-        public function completeBatch(array $requests): array
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
         {
             throw new RuntimeException('unused');
         }
@@ -323,15 +324,93 @@ test('format renders the canvas commitment with its executable meaning', functio
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
-test('design-direction throws when the model returns no usable direction', function () {
+test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => ['title' => 'Empty', 'description' => '   ']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new DesignDirectionStep($llm, $renderer))->run($project);
-    });
+
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    // The build continues on the fallback direction (built on the chosen
+    // seed), with the concept-variety loss recorded durably.
+    $direction = $project->readJson('designDirection.json');
+    assert_true(trim((string) $direction['description']) !== '', 'fallback carries a usable narrative');
+    assert_eq('full-bleed', $direction['canvas']);
+    $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('no usable design direction', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction delivers its deterministic fallback when repaired expansion JSON is still malformed', function () {
+    [$project, , $tmp] = make_designdir_fixture();
+    $llm = new class implements Llm {
+        public int $rounds = 0;
+        private int $jsonCalls = 0;
+
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            $this->jsonCalls++;
+            if ($this->jsonCalls === 1) {
+                return ['seeds' => designdir_seeds()];
+            }
+            return JsonBatchRecovery::run(
+                ['request' => ['prompt' => $prompt] + $opts],
+                function (array $subset): array {
+                    $this->rounds++;
+                    return ['request' => ['text' => '{"direction":{]']];
+                },
+            )['request'];
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $direction = $project->readJson('designDirection.json');
+    assert_true(trim((string) $direction['description']) !== '');
+    assert_eq(2, $llm->rounds, 'one malformed response and one malformed repair response');
+    $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('generated JSON remained unusable', $joined);
+    assert_contains('deterministic seed-derived direction delivered', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction keeps an operational expansion failure fatal', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    // No expansion response: FakeLlm throws a plain RuntimeException.
+
+    assert_throws(fn () => (new DesignDirectionStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+
+    assert_true(!$project->exists('designDirection.json'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('fallbackDirection builds on the chosen seed, generic brief otherwise', function () {
+    $seeded = DesignDirectionStep::fallbackDirection('Neon Dusk — electric gradients over charcoal.');
+    assert_eq('Neon Dusk — electric gradients over charcoal.', $seeded['description']);
+
+    $generic = DesignDirectionStep::fallbackDirection('');
+    assert_contains('bold', $generic['description']);
+    assert_eq('calm', $generic['motion']);
 });
 
 test('design-direction throws when meta prompt missing', function () {

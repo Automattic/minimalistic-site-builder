@@ -132,7 +132,9 @@ final class SectionsStep implements Step
                 'pages.json',
                 'designDirection.json',
             ],
-            writes: ['theme/parts/*'],
+            // pages.json: a section whose markup is unusable is dropped and
+            // pruned from the plan so downstream steps see a consistent site.
+            writes: ['theme/parts/*', 'pages.json', 'warnings.json'],
             concurrent: true,
         );
     }
@@ -144,24 +146,112 @@ final class SectionsStep implements Step
 
     public function run(Project $project): void
     {
-        $jobs = $this->jobs($project);
+        $warnings = [];
+        $plan = $project->readJson('pages.json');
+        $pages = self::repairedPages(self::pages($project), $warnings);
+        $jobs = $this->jobs($project, $warnings, $pages);
         $requests = self::requestsFor($jobs);
         $this->warmSectionCache($requests);
-        $parts = $this->llm->completeBatch($requests);
+        $batch = $this->llm->completeBatch($requests);
+        $parts = $batch->texts;
 
-        // Validate EVERY part before writing any, so one bad part doesn't leave
-        // a half-written set of files on disk (the build aborts either way).
+        // Normalize EVERY part before writing any, so one bad part doesn't
+        // leave a half-written set of files on disk. A part whose response is
+        // unusable degrades instead of aborting: chrome falls back to a
+        // deterministic minimal part, and a page section is dropped (and
+        // pruned from pages.json below) so the rest of the paid-for build
+        // still ships. If every section is unusable, the deterministic chrome
+        // and an empty front page remain a meaningful partial site, so that
+        // generated-content failure degrades too.
         $files = [];
+        $dropped = [];
         foreach ($jobs as $key => $job) {
-            if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
-                throw new \RuntimeException("sections: missing result for part '{$key}'");
+            $isChrome = in_array($key, ['header', 'footer'], true);
+            try {
+                if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
+                    throw new \RuntimeException('the batch returned no result');
+                }
+                $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
+                array_push($warnings, ...$batch->notesFor($key));
+            } catch (\RuntimeException $e) {
+                if ($isChrome) {
+                    $files[$job['file']] = self::fallbackChrome($key);
+                    $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
+                        . "deterministic minimal {$key} delivered";
+                } else {
+                    $dropped[$key] = true;
+                    $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
+                        . 'section dropped from the page plan';
+                }
+                fwrite(STDERR, "    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
             }
-            $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input']);
         }
 
+        // Commit the repaired/pruned plan only after every generated response
+        // has been normalized. An operational batch failure above therefore
+        // leaves pages.json byte-for-byte unchanged. Pruning can change each
+        // survivor's positional role, so recompute roles after the cut.
+        $pages = self::pruneDroppedSections($pages, $dropped, $warnings);
+        $pages = self::repairedPages($pages, $warnings);
+        $plan['pages'] = $pages;
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
+        $project->writeJson('pages.json', $plan);
+        $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * A deterministic minimal chrome part delivered when the generated
+     * header/footer markup is unusable: a constrained group carrying the site
+     * title, so templates referencing the part render something coherent.
+     */
+    public static function fallbackChrome(string $key): string
+    {
+        $tag = $key === 'header' ? 'header' : 'footer';
+        return '<!-- wp:group {"tagName":"' . $tag . '","layout":{"type":"constrained"},'
+            . '"style":{"spacing":{"padding":{"top":"var:preset|spacing|md","bottom":"var:preset|spacing|md"}}}} -->' . "\n"
+            . '<' . $tag . ' class="wp-block-group" style="padding-top:var(--wp--preset--spacing--md);'
+            . 'padding-bottom:var(--wp--preset--spacing--md)"><!-- wp:site-title /--></' . $tag . '>' . "\n"
+            . '<!-- /wp:group -->';
+    }
+
+    /**
+     * Remove dropped sections from pages.json so every downstream consumer
+     * (section-rhythm, assemble-pages, motion-sanity) sees the same plan the
+     * parts on disk satisfy. A page whose every section was dropped is removed
+     * whole — an empty page in the nav is worse than an absent one — except
+     * the front page, which templates and the seeder rely on.
+     *
+     * @param array<int,array<string,mixed>> $sourcePages
+     * @param array<string,true> $dropped part keys (partSlug) of dropped sections
+     * @param list<string>       $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    private static function pruneDroppedSections(array $sourcePages, array $dropped, array &$warnings): array
+    {
+        $pages = [];
+        foreach ($sourcePages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $pageSlug = (string) ($page['slug'] ?? '');
+            $kept = array_values(array_filter(
+                (array) ($page['sections'] ?? []),
+                static fn ($section): bool => !is_array($section)
+                    || !isset($dropped[self::partSlug($pageSlug, (string) ($section['slug'] ?? ''))]),
+            ));
+            if ($kept === [] && empty($page['front'])) {
+                $warnings[] = "page '{$pageSlug}': every section was dropped; page removed from the plan";
+                continue;
+            }
+            if ($kept === []) {
+                $warnings[] = "front page '{$pageSlug}': every section was dropped; empty front page delivered";
+            }
+            $page['sections'] = $kept;
+            $pages[] = $page;
+        }
+        return $pages;
     }
 
     /**
@@ -209,13 +299,57 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Read Project state once and adapt it into self-contained unit inputs.
+     * Deterministically repair plan drift in every page's section list: a
+     * section role is a pure function of its position, and a missing semantic
+     * type has a safe generic default. Each repair is noted in $warnings for
+     * warnings.json. Pure — unit-testable.
      *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    public static function repairedPages(array $pages, array &$warnings = []): array
+    {
+        foreach ($pages as $p => $page) {
+            $sections = (array) ($page['sections'] ?? []);
+            foreach ($sections as $i => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $role = trim((string) ($section['role'] ?? ''));
+                $expectedRole = SectionRole::forPosition($i, count($sections));
+                if ($role !== $expectedRole) {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
+                        . "role '{$role}' corrected to '{$expectedRole}' (derived from its position in the plan)";
+                    $sections[$i]['role'] = $expectedRole;
+                }
+                $type = trim((string) ($section['type'] ?? ''));
+                if ($type === '') {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
+                        . "missing semantic type; defaulted to 'content'";
+                    $sections[$i]['type'] = 'content';
+                }
+            }
+            $pages[$p]['sections'] = $sections;
+        }
+        return $pages;
+    }
+
+    /**
+     * Read Project state once and adapt it into self-contained unit inputs.
+     * Plan drift is repaired via repairedPages() so the prompts always see a
+     * consistent plan. run() passes its in-memory repaired pages here and
+     * commits them only after every generated response has been normalized.
+     *
+     * @param list<string> $warnings appended to in place
+     * @param array<int,array<string,mixed>>|null $sourcePages
      * @return array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}>
      */
-    private function jobs(Project $project): array
+    private function jobs(Project $project, array &$warnings = [], ?array $sourcePages = null): array
     {
-        $pages = self::pages($project);
+        $pages = self::repairedPages($sourcePages ?? self::pages($project), $warnings);
 
         $common = [
             'site_spec'        => $project->readText('siteSpec.json'),
@@ -251,21 +385,6 @@ final class SectionsStep implements Step
             // A compact outline of THIS page, so each section knows its place.
             $outline = self::outline($sections);
             foreach ($sections as $i => $section) {
-                $role = trim((string) ($section['role'] ?? ''));
-                $expectedRole = SectionRole::forPosition($i, count($sections));
-                if ($role !== $expectedRole) {
-                    $slug = (string) ($section['slug'] ?? "section-{$i}");
-                    throw new \RuntimeException(
-                        "sections: page '{$page['slug']}' section '{$slug}' has role '{$role}', expected '{$expectedRole}'"
-                    );
-                }
-                $type = trim((string) ($section['type'] ?? ''));
-                if ($type === '') {
-                    $slug = (string) ($section['slug'] ?? "section-{$i}");
-                    throw new \RuntimeException(
-                        "sections: page '{$page['slug']}' section '{$slug}' has missing semantic type"
-                    );
-                }
                 $input = $common + [
                     'outline'   => $outline,
                     'page'      => [

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -101,12 +103,7 @@ test('site-spec derives email_domain from multi-word slug when implausible', fun
 
 test('site-spec accepts a language name as well as a BCP-47 code', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
-    $llm->queueJson(['name' => 'Solo', 'language' => 'Spanish (Argentina)']);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    // Parenthesised region is not a plausible code or plain name -> reject.
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
 
     $llm->queueJson(['name' => 'Solo', 'language' => 'es-AR']);
     (new SiteSpecStep($llm, $renderer))->run($project);
@@ -116,34 +113,129 @@ test('site-spec accepts a language name as well as a BCP-47 code', function () {
     (new SiteSpecStep($llm, $renderer))->run($project);
     assert_eq('Spanish', $project->readJson('siteSpec.json')['language']);
 
+    // Parenthesised region is not a plausible code or plain name: the field
+    // is dropped with a durable warning — downstream prompts then follow the
+    // user prompt's language via languageOf() — instead of failing the build.
+    $llm->queueJson(['name' => 'Solo', 'language' => 'Spanish (Argentina)']);
+    (new SiteSpecStep($llm, $renderer))->run($project);
+    assert_eq('', $project->readJson('siteSpec.json')['language']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('not a plausible language', $joined);
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec throws when name missing', function () {
+test('site-spec falls back to a prompt-derived name when the model returns none', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $llm->queueJson(['topic' => 'no name here', 'language' => 'en']);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
+
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('A Cozy Neighborhood Bakery', $spec['name']);
+    assert_eq($spec['name'], $spec['title'], 'title falls back to the name');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('site spec has no "name"', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec throws when language missing or implausible', function () {
+test('site-spec delivers a prompt-derived fallback when repaired model JSON is still malformed', function () {
+    [$project, , $tmp] = make_sitespec_fixture();
+    $llm = new class implements Llm {
+        public int $rounds = 0;
+
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            return JsonBatchRecovery::run(
+                ['request' => ['prompt' => $prompt] + $opts],
+                function (array $subset): array {
+                    $this->rounds++;
+                    return ['request' => ['text' => '{"sections":[}']];
+                },
+            )['request'];
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('A Cozy Neighborhood Bakery', $spec['name']);
+    assert_eq(2, $llm->rounds, 'one malformed response and one malformed repair response');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('generated JSON remained unusable', $joined);
+    assert_contains('deterministic prompt-derived site spec delivered', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec keeps an operational JSON failure fatal', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(); // no queued response => plain RuntimeException
+
+    assert_throws(fn () => (new SiteSpecStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+
+    assert_true(!$project->exists('siteSpec.json'), 'no fallback for an unclassified operational failure');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec degrades a missing or implausible language with a durable warning', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     $llm->queueJson(['name' => 'Solo']); // no language
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
+    (new SiteSpecStep($llm, $renderer))->run($project);
+    assert_eq('', $project->readJson('siteSpec.json')['language']);
+    assert_eq(
+        'the language the user prompt is written in',
+        SiteSpecStep::languageOf($project),
+        'the empty field renders the follow-the-prompt instruction downstream',
+    );
 
     $llm->queueJson(['name' => 'Solo', 'language' => '12345']); // not a code or name
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
+    (new SiteSpecStep($llm, $renderer))->run($project);
+    assert_eq('', $project->readJson('siteSpec.json')['language']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('site spec has no "language"', $joined);
+    assert_contains('12345', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('nameFromPrompt derives a clean short name and floors at "New Site"', function () {
+    assert_eq('A Cozy Neighborhood Bakery', SiteSpecStep::nameFromPrompt('A cozy neighborhood bakery'));
+    assert_eq(
+        'Modern Portfolio For A Buenos Aires',
+        SiteSpecStep::nameFromPrompt('Modern portfolio for a Buenos Aires photographer, dark & moody'),
+        'first six words, punctuation stripped',
+    );
+    assert_eq('New Site', SiteSpecStep::nameFromPrompt('!!! ???'));
+    assert_eq(
+        'Ñoquis De La Abuela',
+        SiteSpecStep::nameFromPrompt('ñoquis de la abuela'),
+        'a leading multibyte letter is capitalized',
+    );
+    assert_eq(
+        'Buenos Aires Photo Diary',
+        SiteSpecStep::nameFromPrompt('Buenos-Aires photo diary'),
+        'hyphenated words stay separate instead of being joined',
+    );
 });
 
 test('site-spec normalizes the pages tree: slugs slugified and globally unique', function () {

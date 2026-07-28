@@ -71,7 +71,7 @@ final class CustomMotionStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['siteSpec.json', 'designDirection.json', 'theme/style.css', 'theme/parts/*', 'theme/templates/*'],
-            writes: ['theme/style.css'],
+            writes: ['theme/style.css', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -89,6 +89,12 @@ final class CustomMotionStep implements Step
             $message = "animation_request present but no '" . self::CLASS_NAME . "' tag in the markup; skipped";
             file_put_contents($project->logPath(self::LOG_FILE), $message . "\nREQUEST: {$request}\n");
             echo "  custom-motion: {$message} (no LLM call)\n";
+            // The user explicitly asked for this animation and the site ships
+            // without it — that's a delivered defect, not just a log line.
+            $project->addWarnings($this->id(), [
+                "user-requested animation \"{$request}\" not implemented: no section tagged a '"
+                    . self::CLASS_NAME . "' target — see logs/" . self::LOG_FILE,
+            ]);
             return;
         }
 
@@ -109,6 +115,12 @@ final class CustomMotionStep implements Step
             );
             echo '  custom-motion: CSS rejected (' . count($problems)
                 . ' problem(s)); skipped — see logs/' . self::LOG_FILE . "\n";
+            $project->addWarnings($this->id(), [sprintf(
+                'user-requested animation "%s" not implemented: model CSS rejected (%s) — see logs/%s',
+                $request,
+                implode('; ', $problems),
+                self::LOG_FILE,
+            )]);
             return;
         }
 

@@ -73,7 +73,7 @@ final class FontsPhpStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['theme/theme.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
-            writes: ['theme/fonts.php'],
+            writes: ['theme/fonts.php', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -111,6 +111,11 @@ final class FontsPhpStep implements Step
             );
             echo '  fonts-php: model output rejected (' . count($problems)
                 . ' problem(s)); using the deterministic fallback — see logs/' . self::LOG_FILE . "\n";
+            $project->addWarnings($this->id(), [sprintf(
+                'model fonts.php rejected (%s); deterministic scan-built fallback delivered — see logs/%s',
+                implode('; ', $problems),
+                self::LOG_FILE,
+            )]);
             $php = self::fallback($handle, $requirements);
         }
 

@@ -25,21 +25,24 @@ namespace Automattic\SiteBuild;
  * logged and accounted by the transport. Degrading one section beats
  * rejecting the entire theme. The transport callback owns the real calls,
  * usage accounting and logging; this orchestrator is pure apart from STDERR
- * notes.
+ * notes. A retained abnormal member carries a keyed degradation note in the
+ * TextBatchResult. The caller persists that note only when the corresponding
+ * normalized output is actually delivered; this layer has no Project to write
+ * to and structural salvage is not guaranteed to change balanced partial text.
  */
 final class TextBatchRecovery
 {
     /**
      * @param array<array-key,array<string,mixed>> $requests
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>|string> $send
-     * @return array<array-key,string> raw text keyed and ordered as the input
+     * @return TextBatchResult raw text and keyed degradation notes, ordered as the input
      */
     public static function run(
         array $requests,
         callable $send,
         int $maxRetries = 1,
         int $defaultMaxTokens = 16000,
-    ): array
+    ): TextBatchResult
     {
         if ($maxRetries < 0) {
             throw new \InvalidArgumentException('maxRetries must be zero or greater');
@@ -48,10 +51,12 @@ final class TextBatchRecovery
             throw new \InvalidArgumentException('defaultMaxTokens must be greater than zero');
         }
         if ($requests === []) {
-            return [];
+            return new TextBatchResult([]);
         }
 
         $texts = [];
+        /** @var array<array-key,list<string>> $notes */
+        $notes = [];
         /** @var array<array-key,array<string,mixed>> $candidates */
         $candidates = [];
         $pending = $requests;
@@ -79,6 +84,15 @@ final class TextBatchRecovery
                         $texts[$key] = (string) $candidates[$key]['text'];
                         unset($active[$key]);
                         $message = str_replace(["\r", "\n"], ' ', $e->getMessage());
+                        $termination = JsonBatchRecovery::terminationError(
+                            $candidates[$key]['stop_reason'] ?? null
+                        ) ?? 'the response ended abnormally';
+                        $notes[$key][] = self::retainedNote(
+                            $key,
+                            $attempt,
+                            $termination,
+                            $message !== '' ? "regeneration failed: {$message}" : 'regeneration failed',
+                        );
                         fwrite(
                             STDERR,
                             "    (regeneration failed for batch request '{$key}'"
@@ -120,6 +134,7 @@ final class TextBatchRecovery
                 fwrite(STDERR, "    (batch request '{$key}' still incomplete after {$attempt} regeneration(s) — "
                     . "{$error}; keeping the best partial response for salvage)\n");
                 $texts[$key] = (string) $candidates[$key]['text'];
+                $notes[$key][] = self::retainedNote($key, $attempt, $error);
             }
 
             if ($retry === []) {
@@ -142,7 +157,18 @@ final class TextBatchRecovery
             }
             $out[$key] = $texts[$key];
         }
-        return $out;
+        return new TextBatchResult($out, $notes);
+    }
+
+    private static function retainedNote(
+        string|int $key,
+        int $attempts,
+        string $termination,
+        ?string $retryFailure = null,
+    ): string {
+        $detail = $retryFailure === null ? '' : "; {$retryFailure}";
+        return "part '{$key}': model response remained abnormally terminated after {$attempts} regeneration(s) "
+            . "({$termination}{$detail}); best partial response retained and normalized partial markup delivered";
     }
 
     /**

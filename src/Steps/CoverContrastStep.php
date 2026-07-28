@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
@@ -34,11 +35,12 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  *
  * Mutations rewrite the block-comment JSON only, then the injected
  * BlockFixer re-serializes the saved HTML from those attributes (the same
- * contract as ContrastFixStep). A missing or invalid generation-completion
- * artifact is a phase-order violation and fails hard. Once that contract is
- * satisfied, image-analysis problems fail soft: no imagick, unreadable images,
- * or unparsable covers are skipped with a report line — a build must never die
- * on a readability polish.
+ * contract as ContrastFixStep). The generation-completion artifact is a
+ * required upstream input; missing, malformed, or incomplete state is fatal
+ * because running against untrustworthy pixels has no meaningful result.
+ * Once that contract is satisfied, image-analysis problems fail soft:
+ * no imagick, unreadable images, or unparsable covers are skipped with a
+ * report line.
  */
 final class CoverContrastStep implements Step
 {
@@ -84,19 +86,21 @@ final class CoverContrastStep implements Step
                 'theme/templates/*',
                 'plugin/pages/*',
             ],
-            writes: ['theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
+            writes: ['theme/parts/*', 'theme/templates/*', 'plugin/pages/*', 'warnings.json'],
             concurrent: false,
         );
     }
 
     public function run(Project $project): void
     {
-        if (!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT)) {
-            throw new \RuntimeException('cover-contrast: image generation has not completed');
-        }
+        // This marker is a declared, required upstream artifact. Project's
+        // read boundary keeps missing/unreadable/malformed inputs fatal.
         $completion = $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT);
         if (($completion['status'] ?? null) !== 'completed') {
-            throw new \RuntimeException('cover-contrast: image generation completion artifact is invalid');
+            throw new \RuntimeException(
+                'Cover contrast requires a completed image generation artifact: '
+                    . GenerateImagesStep::COMPLETION_ARTIFACT,
+            );
         }
 
         if (!$project->exists('theme/theme.json')) {
@@ -110,8 +114,9 @@ final class CoverContrastStep implements Step
         $linkDefault = is_string($globalLink) ? $helper->resolveColorValue($globalLink) : null;
 
         $report = [];
+        $warnings = [];
         $repaired = 0;
-        $written = []; // rel => original markup, for rollback on fixer failure
+        $written = []; // rel => pre-step markup + repair evidence, for per-file rollback
 
         if (!extension_loaded('imagick')) {
             $report[] = 'cover-contrast: imagick not available — covers not verified against images';
@@ -124,10 +129,19 @@ final class CoverContrastStep implements Step
                     $rel = $dir . '/' . basename($abs);
                     $original = $project->readText($rel);
                     $doc = BlockMarkup::parse($original);
+                    $reportStart = count($report);
                     $fileRepairs = $this->fixCovers($project, $doc, $helper, $linkDefault, $rel, $report);
                     if ($fileRepairs > 0) {
                         $project->writeText($rel, $doc->render());
-                        $written[$rel] = $original;
+                        $written[$rel] = [
+                            'original' => $original,
+                            'repairs' => $fileRepairs,
+                            'details' => array_values(array_filter(
+                                array_slice($report, $reportStart),
+                                static fn (string $line): bool => str_contains($line, ' cover block ')
+                                    && str_contains($line, ' repaired:'),
+                            )),
+                        ];
                         $repaired += $fileRepairs;
                     }
                 }
@@ -140,15 +154,28 @@ final class CoverContrastStep implements Step
         // templates/, parts/, and pages/ subdirs, so the plugin dir (markup in
         // pages/) goes through the same entry point as the theme.
         if ($written !== []) {
+            $rolledBack = [];
             try {
-                if (self::anyUnder($written, 'theme/')) {
-                    $this->fixer->fix($project->themePath());
-                }
-                if (self::anyUnder($written, 'plugin/')) {
-                    $this->fixer->fix($project->pluginPath());
+                foreach ([
+                    'theme/' => $project->themePath(),
+                    'plugin/' => $project->pluginPath(),
+                ] as $prefix => $root) {
+                    if (!self::anyUnder($written, $prefix)) {
+                        continue;
+                    }
+                    $outcome = BlockFixerOutcome::run($this->fixer, $root);
+                    $repaired -= self::rollbackFailedRepairs(
+                        $project,
+                        $written,
+                        $prefix,
+                        $outcome,
+                        $report,
+                        $warnings,
+                        $rolledBack,
+                    );
                 }
                 foreach (['theme/parts/header.html', 'theme/parts/footer.html'] as $rel) {
-                    if (!$project->exists($rel)) {
+                    if (!$project->exists($rel) || isset($rolledBack[$rel])) {
                         continue;
                     }
                     $markup = $project->readText($rel);
@@ -161,22 +188,19 @@ final class CoverContrastStep implements Step
                 // The repaired attributes were already persisted with the OLD
                 // saved HTML — without the fixer's re-serialization that drift
                 // would ship. Restore the originals instead of keeping it.
-                foreach ($written as $rel => $original) {
-                    $project->writeText($rel, $original);
+                foreach ($written as $rel => $change) {
+                    $project->writeText($rel, $change['original']);
                 }
                 $repaired = 0;
                 $report[] = 'cover-contrast: block re-serialization failed, cover repairs rolled back: '
                     . $e->getMessage();
+                self::writeReport($project, $report);
+                throw $e;
             }
         }
 
-        if ($report !== []) {
-            $project->writeText(
-                'logs/' . self::REPORT_FILE,
-                "-- cover contrast (measured against generated images) --\n"
-                . implode("\n", $report) . "\n"
-            );
-        }
+        self::writeReport($project, $report);
+        $project->addWarnings($this->id(), $warnings);
 
         echo sprintf(
             "  cover-contrast: %d cover(s) adjusted (details: logs/%s)\n",
@@ -187,7 +211,7 @@ final class CoverContrastStep implements Step
     /**
      * Whether any written file lives under the given project-relative prefix.
      *
-     * @param array<string,string> $written rel => original markup
+     * @param array<string,array{original:string,repairs:int,details:list<string>}> $written
      */
     private static function anyUnder(array $written, string $prefix): bool
     {
@@ -197,6 +221,66 @@ final class CoverContrastStep implements Step
             }
         }
         return false;
+    }
+
+    /** @param list<string> $report */
+    private static function writeReport(Project $project, array $report): void
+    {
+        if ($report === []) {
+            return;
+        }
+        $project->writeText(
+            'logs/' . self::REPORT_FILE,
+            "-- cover contrast (measured against generated images) --\n"
+                . implode("\n", $report) . "\n",
+        );
+    }
+
+    /**
+     * Restore only cover-mutated files whose block transformation was
+     * abandoned. Healthy siblings remain serialized and delivered.
+     *
+     * @param array<string,array{original:string,repairs:int,details:list<string>}> $written
+     * @param list<string> $report
+     * @param list<string> $warnings
+     * @param array<string,true> $rolledBack
+     */
+    private static function rollbackFailedRepairs(
+        Project $project,
+        array $written,
+        string $prefix,
+        BlockFixerOutcome $outcome,
+        array &$report,
+        array &$warnings,
+        array &$rolledBack,
+    ): int {
+        $removed = 0;
+        foreach ($outcome->failures() as $failure) {
+            $rel = $prefix . $failure->path;
+            if (!isset($written[$rel]) || isset($rolledBack[$rel])) {
+                continue;
+            }
+
+            $change = $written[$rel];
+            $project->writeText($rel, $change['original']);
+            $rolledBack[$rel] = true;
+            $removed += $change['repairs'];
+            $reason = str_replace(
+                ["\r", "\n"],
+                ' ',
+                $failure->error ?? 'unknown block transformation failure',
+            );
+            $report[] = "[{$rel}] {$change['repairs']} cover repair(s) rolled back: {$reason}";
+
+            $details = $change['details'] !== []
+                ? $change['details']
+                : ["[{$rel}] {$change['repairs']} attempted cover repair(s)"];
+            foreach ($details as $detail) {
+                $warnings[] = "{$detail}; removed because block re-serialization failed ({$reason}); "
+                    . 'pre-step markup delivered byte-for-byte';
+            }
+        }
+        return $removed;
     }
 
     /**
@@ -313,8 +397,8 @@ final class CoverContrastStep implements Step
             $repairs++;
 
             $report[] = sprintf(
-                '[%s] cover repaired: dimRatio %d → %d%s%s%s (%s)%s',
-                $rel, $dim, $plan['dim'],
+                '[%s] cover block %d repaired: dimRatio %d → %d%s%s%s (%s)%s',
+                $rel, $i, $dim, $plan['dim'],
                 $plan['overlay'] === null ? '' : ", overlay → solid {$plan['overlay']} (designed overlay ineffective behind the content)",
                 $plan['swaps'] === [] ? '' : ', text → ' . implode(', ', array_unique($plan['swaps'])),
                 $linkFixes === [] ? '' : ', links → ' . implode(', ', array_unique($linkFixes)),

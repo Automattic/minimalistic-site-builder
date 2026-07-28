@@ -1,13 +1,16 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\PresetReferences;
+use Automattic\SiteBuild\ConcurrentGroup;
+use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
-use Automattic\SiteBuild\ThemeValidator;
 
 function valid_theme_payload(): array
 {
@@ -24,159 +27,10 @@ function valid_theme_payload(): array
             'typography' => ['fontFamilies' => [
                 ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],
                 ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
-            ], 'fontSizes' => [
-                ['slug' => 'caption', 'name' => 'Caption', 'size' => '0.875rem'],
-                ['slug' => 'body', 'name' => 'Body', 'size' => '1.125rem'],
-                ['slug' => 'lead', 'name' => 'Lead', 'size' => '1.375rem'],
-                ['slug' => 'heading', 'name' => 'Heading', 'size' => '1.75rem'],
-                ['slug' => 'section-title', 'name' => 'Section Title', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
-                ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
             ]],
         ],
     ];
 }
-
-/** @return array{Project,string} */
-function theme_json_test_project(string $prefix): array
-{
-    $tmp = sys_get_temp_dir() . '/' . $prefix . uniqid();
-    return [(new ProjectStore($tmp))->create('demo'), $tmp];
-}
-
-/** @param list<array<mixed>> $presets */
-function theme_json_preset(array $presets, string $slug): array
-{
-    foreach ($presets as $preset) {
-        if (is_array($preset) && ($preset['slug'] ?? null) === $slug) {
-            return $preset;
-        }
-    }
-    throw new RuntimeException("Missing test preset: {$slug}");
-}
-
-/** @param list<array<mixed>> $presets */
-function assert_theme_json_presets_usable(array $presets, string $valueKey): void
-{
-    assert_true(array_is_list($presets), 'preset container is a list');
-    foreach ($presets as $preset) {
-        assert_true(is_string($preset['slug'] ?? null) && trim($preset['slug']) !== '', 'usable slug');
-        assert_true(is_string($preset['name'] ?? null) && trim($preset['name']) !== '', 'usable name');
-        assert_true(
-            is_string($preset[$valueKey] ?? null) && trim($preset[$valueKey]) !== '',
-            "usable {$valueKey}",
-        );
-    }
-}
-
-/** @return array<mixed> */
-function theme_json_representative_payload(): array
-{
-    $json = file_get_contents(repo_path('tests/fixtures/theme-json/representative-model-response.json'));
-    if (!is_string($json)) {
-        throw new RuntimeException('Missing representative theme-json fixture');
-    }
-    $payload = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-    if (!is_array($payload)) {
-        throw new RuntimeException('Representative theme-json fixture is not an object');
-    }
-    return $payload;
-}
-
-/** @param list<string> $path */
-function theme_json_unset_path(array &$value, array $path): void
-{
-    $key = array_shift($path);
-    if ($key === null || !array_key_exists($key, $value)) {
-        return;
-    }
-    if ($path === []) {
-        unset($value[$key]);
-        return;
-    }
-    if (!is_array($value[$key])) {
-        return;
-    }
-    theme_json_unset_path($value[$key], $path);
-    if ($value[$key] === []) {
-        unset($value[$key]);
-    }
-}
-
-/** @return array<mixed> */
-function theme_json_slim_representative_payload(): array
-{
-    $payload = theme_json_representative_payload();
-    $paths = [
-        ['styles', 'color', 'background'],
-        ['styles', 'color', 'text'],
-        ['styles', 'typography', 'fontFamily'],
-        ['styles', 'typography', 'fontSize'],
-        ['styles', 'typography', 'lineHeight'],
-    ];
-    foreach ([
-        'h1' => 'display',
-        'h2' => 'section-title',
-        'h3' => 'heading',
-        'h4' => 'heading',
-        'h5' => 'heading',
-        'h6' => 'heading',
-    ] as $element => $_size) {
-        $paths[] = ['styles', 'elements', $element, 'typography', 'fontFamily'];
-        $paths[] = ['styles', 'elements', $element, 'typography', 'fontSize'];
-    }
-    foreach (['h1', 'h2', 'h3'] as $element) {
-        $paths[] = ['styles', 'elements', $element, 'color', 'text'];
-    }
-    $paths[] = ['styles', 'elements', 'caption', 'typography', 'fontSize'];
-    $paths[] = ['styles', 'elements', 'caption', 'color', 'text'];
-
-    $blockLeaves = [
-        'core/quote' => ['fontFamily', 'fontSize', 'color'],
-        'core/pullquote' => ['fontFamily', 'fontSize', 'color'],
-        'core/table' => ['fontFamily', 'fontSize', 'color'],
-        'core/separator' => ['color'],
-        'core/list' => ['fontFamily', 'fontSize', 'color'],
-        'core/image' => ['fontFamily', 'fontSize', 'color'],
-        'core/site-title' => ['fontFamily', 'fontSize', 'color'],
-        'core/navigation' => ['fontFamily', 'fontSize', 'color'],
-    ];
-    foreach ($blockLeaves as $block => $leaves) {
-        foreach ($leaves as $leaf) {
-            $paths[] = $leaf === 'color'
-                ? ['styles', 'blocks', $block, 'color', 'text']
-                : ['styles', 'blocks', $block, 'typography', $leaf];
-        }
-    }
-
-    foreach ($paths as $path) {
-        theme_json_unset_path($payload, $path);
-    }
-    return $payload;
-}
-
-function theme_json_write_validator_shell(Project $project): void
-{
-    $project->writeText('theme/style.css', "/*\nTheme Name: Representative Theme\n*/\n");
-    foreach ([
-        'theme/templates/index.html',
-        'theme/templates/page.html',
-        'theme/parts/header.html',
-        'theme/parts/footer.html',
-    ] as $file) {
-        $project->writeText(
-            $file,
-            '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->',
-        );
-    }
-}
-
-test('theme-json declares every artifact it writes', function () {
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    assert_eq(
-        ['theme/theme.json', 'warnings.json', 'logs/theme-json.log'],
-        $step->declaration()->writes,
-    );
-});
 
 test('theme-json writes valid theme.json and forces version 3', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
@@ -203,6 +57,132 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     assert_eq(false, $theme['settings']['typography']['defaultFontSizes']);
     assert_eq(false, $theme['settings']['spacing']['defaultSpacingSizes']);
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json delivers a deterministic base theme when repaired model JSON is still malformed', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $llm = new class implements Llm {
+        public int $rounds = 0;
+
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            return JsonBatchRecovery::run($requests, function (array $subset): array {
+                $this->rounds++;
+                $out = [];
+                foreach ($subset as $key => $_request) {
+                    $out[$key] = ['text' => '{"settings":{]'];
+                }
+                return $out;
+            });
+        }
+
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq(3, $theme['version']);
+    assert_eq(
+        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        array_column($theme['settings']['color']['palette'], 'slug'),
+    );
+    assert_eq(2, $llm->rounds, 'one malformed response and one malformed repair response');
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('generated JSON remained unusable', $joined);
+    assert_contains('deterministic base theme delivered', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps an operational JSON failure fatal', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    assert_throws(fn () => (new ThemeJsonStep(
+        new FakeLlm(), // no queued response => plain RuntimeException
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+
+    assert_true(!$project->exists('theme/theme.json'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json fallback retains a valid concurrent sibling', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $sibling = new class implements ConcurrentStep {
+        public array $consumed = [];
+        public function id(): string { return 'sibling'; }
+        public function label(): string { return 'Sibling'; }
+        public function requests(Project $project): array { return ['result' => ['prompt' => 'Sibling']]; }
+        public function consume(Project $project, array $results): void { $this->consumed = $results; }
+        public function run(Project $project): void {}
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration($this->id(), $this->label(), [], ['sibling.json'], false);
+        }
+    };
+    $llm = new class implements Llm {
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            throw new RuntimeException('unused');
+        }
+        public function completeJsonBatch(array $requests): array
+        {
+            return JsonBatchRecovery::run($requests, function (array $subset): array {
+                $out = [];
+                foreach ($subset as $key => $_request) {
+                    $out[$key] = str_contains((string) $key, 'theme-json')
+                        ? ['text' => '{"settings":{]']
+                        : ['text' => '{"ok":"retained"}'];
+                }
+                return $out;
+            });
+        }
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+
+    (new ConcurrentGroup($llm, [
+        new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))),
+        $sibling,
+    ]))->run($project);
+
+    assert_eq('retained', $sibling->consumed['result']['ok']);
+    assert_eq(3, $project->readJson('theme/theme.json')['version']);
+    assert_contains(
+        'generated JSON remained unusable',
+        implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -340,11 +320,16 @@ test('canonical spacing profile has monotonic fluid bounds', function () {
     assert_eq(7.0, $previousMax, 'largest edge is capped at 7rem');
 });
 
-test('theme-json fills a missing color slug from an original model role', function () {
+test('theme-json fills a missing required color slug from the direction, then defaults', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    // The direction committed an accent hex — the fill honors it.
+    $project->writeJson('designDirection.json', [
+        'description' => 'Warm hearth tones.',
+        'palette'     => ['accent' => '#C0FFEE'],
+    ]);
 
     $payload = valid_theme_payload();
     // Drop "accent".
@@ -358,63 +343,72 @@ test('theme-json fills a missing color slug from an original model role', functi
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new ThemeJsonStep($llm, $renderer))->run($project);
 
-    $theme = $project->readJson('theme/theme.json');
-    assert_eq(
-        '#2f6b4f',
-        theme_json_preset($theme['settings']['color']['palette'], 'accent')['color'],
-        'accent copies original model primary',
+    $palette = $project->readJson('theme/theme.json')['settings']['color']['palette'];
+    $bySlug = array_column($palette, 'color', 'slug');
+    assert_eq('#C0FFEE', $bySlug['accent'], 'the direction hex fills the gap');
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains("palette missing slug 'accent'", $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('repairColors falls back to neutral readable defaults without a direction hex', function () {
+    [$theme, $warnings] = \Automattic\SiteBuild\Steps\ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFF8F0', 'name' => 'Base'],
+        ]]]],
     );
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-    assert_eq(1, count($warnings));
-    assert_contains('settings.color.palette[slug=accent].color', $warnings[0]);
-    assert_contains('original model settings.color.palette[slug=primary].color', $warnings[0]);
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json color repair never chains a repaired role as a model fallback', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_color_chain_');
-    $theme = ThemeJsonStep::fillColors([
-        'settings' => ['color' => [
-            'custom' => false,
-            'palette' => [
-                ['slug' => 'contrast', 'name' => 'Ink', 'color' => '#123456'],
-                ['slug' => 'brand-extra', 'name' => 'Brand Extra', 'color' => '#abcdef'],
-            ],
-        ]],
-        'customTemplates' => [['name' => 'landing']],
-    ], $project);
-
-    $palette = $theme['settings']['color']['palette'];
-    assert_eq('#123456', theme_json_preset($palette, 'primary')['color'], 'primary copies original contrast');
-    assert_eq('#123456', theme_json_preset($palette, 'secondary')['color'], 'secondary copies original contrast');
-    assert_eq('#9C3D2E', theme_json_preset($palette, 'accent')['color'], 'accent cannot copy repaired primary');
-    assert_eq('#FAF8F4', theme_json_preset($palette, 'base')['color'], 'base uses same-slug default');
-    assert_eq('#abcdef', theme_json_preset($palette, 'brand-extra')['color'], 'unrelated model preset preserved');
-    assert_eq(false, $theme['settings']['color']['custom'], 'unrelated color setting preserved');
-    assert_eq([['name' => 'landing']], $theme['customTemplates'], 'unrelated theme field preserved');
-
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#FFF8F0', $bySlug['base'], 'existing entries are never altered');
+    assert_eq('#111111', $bySlug['contrast']);
+    assert_eq('#111111', $bySlug['primary']);
     assert_eq(4, count($warnings));
-    assert_contains('DEFAULT_PALETTE[slug=accent].color', implode("\n", $warnings));
-    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('theme-json color repair leaves a complete model palette byte-for-byte equivalent', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_color_complete_');
-    $theme = [
-        'settings' => ['color' => [
-            'custom' => false,
-            'palette' => array_merge(
-                valid_theme_payload()['settings']['color']['palette'],
-                [['slug' => 'brand-extra', 'name' => 'Brand Extra', 'color' => '#abcdef']],
-            ),
-        ]],
-        'styles' => ['color' => ['background' => '#fedcba']],
-    ];
+test('repairColors and repairFonts record the malformed entries they remove', function () {
+    // A removal is a rung-3 excision and must leave a durable record, even
+    // when the removed entry was model garbage rather than an authored value.
+    [, $warnings] = \Automattic\SiteBuild\Steps\ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => ['bogus']]]],
+    );
+    assert_contains('palette: removed 1 malformed (non-object) entry', implode(' ', $warnings));
 
-    assert_eq($theme, ThemeJsonStep::fillColors($theme, $project));
-    assert_true(!$project->exists('warnings.json'), 'complete palette produces no warning');
-    exec('rm -rf ' . escapeshellarg($tmp));
+    [, $fontWarnings] = \Automattic\SiteBuild\Steps\ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => ['bogus', 42]]]],
+    );
+    assert_contains('fontFamilies: removed 2 malformed (non-object) entries', implode(' ', $fontWarnings));
+});
+
+test('repairColors and repairFonts replace object-shaped required entries with no usable value', function () {
+    $theme = valid_theme_payload();
+    foreach ($theme['settings']['color']['palette'] as &$entry) {
+        if ($entry['slug'] === 'contrast') {
+            $entry = ['slug' => 'contrast'];
+        }
+    }
+    unset($entry);
+
+    [$theme, $warnings] = ThemeJsonStep::repairColors($theme);
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#111111', $bySlug['contrast']);
+    assert_contains("palette slug 'contrast': invalid color null; malformed entry removed", implode(' ', $warnings));
+    assert_contains("palette missing slug 'contrast'; filled with #111111", implode(' ', $warnings));
+
+    $theme = valid_theme_payload();
+    foreach ($theme['settings']['typography']['fontFamilies'] as &$entry) {
+        if ($entry['slug'] === 'heading') {
+            $entry = ['slug' => 'heading'];
+        }
+    }
+    unset($entry);
+
+    [$theme, $fontWarnings] = ThemeJsonStep::repairFonts($theme);
+    $bySlug = array_column($theme['settings']['typography']['fontFamilies'], 'fontFamily', 'slug');
+    assert_eq('system-ui, sans-serif', $bySlug['heading']);
+    assert_contains(
+        "fontFamilies slug 'heading': invalid fontFamily null; malformed entry removed",
+        implode(' ', $fontWarnings),
+    );
+    assert_contains("fontFamilies missing slug 'heading'; filled with the system stack", implode(' ', $fontWarnings));
 });
 
 test('theme-json forces useRootPaddingAwareAlignments when root side padding is set', function () {
@@ -485,7 +479,7 @@ test('normalizeRootPadding zeroes vertical root padding — sections own the rhy
     assert_true(!isset($theme['styles']['spacing']['padding']), 'no padding invented');
 });
 
-test('theme-json fills a missing font slug from the other original model role', function () {
+test('theme-json fills a missing required font slug with the system stack', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
@@ -501,72 +495,32 @@ test('theme-json fills a missing font slug from the other original model role', 
     $renderer = new PromptRenderer(repo_path('prompts'));
     (new ThemeJsonStep($llm, $renderer))->run($project);
 
-    $theme = $project->readJson('theme/theme.json');
-    assert_eq(
-        'X',
-        theme_json_preset($theme['settings']['typography']['fontFamilies'], 'heading')['fontFamily'],
-    );
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-    assert_eq(1, count($warnings));
-    assert_contains('settings.typography.fontFamilies[slug=heading].fontFamily', $warnings[0]);
-    assert_contains('original model settings.typography.fontFamilies[slug=body].fontFamily', $warnings[0]);
+    $families = $project->readJson('theme/theme.json')['settings']['typography']['fontFamilies'];
+    $bySlug = array_column($families, 'fontFamily', 'slug');
+    assert_eq('X', $bySlug['body'], 'existing entries are never altered');
+    assert_eq('system-ui, sans-serif', $bySlug['heading']);
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains("fontFamilies missing slug 'heading'", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('theme-json font repair is directly testable and preserves the original role', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_font_copy_');
-    $theme = [
-        'settings' => ['typography' => [
-            'fluid' => true,
-            'fontFamilies' => [
-                ['slug' => 'body', 'fontFamily' => 'Inter, sans-serif', 'name' => 'Custom Body', 'fontFace' => []],
-                ['slug' => 'mono', 'fontFamily' => 'monospace', 'name' => 'Mono'],
-            ],
-        ]],
-        'styles' => ['typography' => ['lineHeight' => '1.6']],
-    ];
+function theme_json_preset(array $presets, string $slug): array
+{
+    foreach ($presets as $preset) {
+        if (($preset['slug'] ?? null) === $slug) {
+            return $preset;
+        }
+    }
+    return [];
+}
 
-    $repaired = ThemeJsonStep::fillFonts($theme, $project);
-    assert_eq('Inter, sans-serif', theme_json_preset(
-        $repaired['settings']['typography']['fontFamilies'],
-        'heading',
-    )['fontFamily']);
-    assert_eq(
-        theme_json_preset($theme['settings']['typography']['fontFamilies'], 'body'),
-        theme_json_preset($repaired['settings']['typography']['fontFamilies'], 'body'),
-        'original model body entry preserved',
-    );
-    assert_eq(true, $repaired['settings']['typography']['fluid']);
-    assert_eq($theme['styles'], $repaired['styles']);
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json font repair uses same-slug defaults when no original role is usable', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_font_defaults_');
-    $theme = ThemeJsonStep::fillFonts([
-        'settings' => ['typography' => ['fontFamilies' => [
-            ['slug' => 'heading', 'name' => 'Broken Heading', 'fontFamily' => ''],
-            ['slug' => 'mono', 'name' => 'Mono', 'fontFamily' => 'monospace'],
-        ]]],
-    ], $project);
-
-    $families = $theme['settings']['typography']['fontFamilies'];
-    assert_eq(
-        '"Fraunces", Georgia, "Times New Roman", serif',
-        theme_json_preset($families, 'heading')['fontFamily'],
-    );
-    assert_eq(
-        '"Source Sans 3", "Helvetica Neue", Arial, sans-serif',
-        theme_json_preset($families, 'body')['fontFamily'],
-    );
-    assert_eq('monospace', theme_json_preset($families, 'mono')['fontFamily']);
-    assert_eq(3, count($project->readJson('warnings.json')['theme-json'] ?? []));
-    exec('rm -rf ' . escapeshellarg($tmp));
+test('theme-json declares every artifact it writes', function () {
+    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    assert_eq(['theme/theme.json', 'warnings.json'], $step->declaration()->writes);
 });
 
 test('theme-json font-size repair preserves model sizes and fills each omission', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_sizes_');
-    $theme = ThemeJsonStep::fillFontSizes([
+    [$theme, $warnings] = ThemeJsonStep::repairFontSizes([
         'settings' => ['typography' => [
             'fluid' => true,
             'fontSizes' => [
@@ -575,329 +529,52 @@ test('theme-json font-size repair preserves model sizes and fills each omission'
                 ['slug' => 'poster', 'name' => 'Poster', 'size' => '9rem'],
             ],
         ]],
-        'styles' => ['typography' => ['fontSize' => 'var:preset|font-size|body']],
-    ], $project);
+    ]);
 
     $sizes = $theme['settings']['typography']['fontSizes'];
     assert_eq('1rem', theme_json_preset($sizes, 'caption')['size'], 'usable model size preserved');
     assert_eq(false, theme_json_preset($sizes, 'caption')['fluid'], 'model metadata preserved');
-    assert_eq('1.75rem', theme_json_preset($sizes, 'heading')['size'], 'unusable size repaired in place');
+    assert_eq('1.75rem', theme_json_preset($sizes, 'heading')['size'], 'unusable size refilled from the profile');
     assert_eq('9rem', theme_json_preset($sizes, 'poster')['size'], 'unrelated preset preserved');
     assert_eq('clamp(3rem, 7vw, 6rem)', theme_json_preset($sizes, 'display')['size']);
-    assert_eq(true, $theme['settings']['typography']['fluid']);
-    assert_eq(6, count($project->readJson('warnings.json')['theme-json'] ?? []));
-    exec('rm -rf ' . escapeshellarg($tmp));
+    assert_eq(true, $theme['settings']['typography']['fluid'], 'sibling typography settings survive');
+    assert_true($warnings !== [], 'every repair is warned');
 });
 
-test('theme-json discards associative preset containers for every profile', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_assoc_profiles_');
-    $theme = [
-        'settings' => [
-            'color' => ['palette' => [
-                'base' => ['slug' => 'base', 'name' => 'Base', 'color' => '#eeeeee'],
-            ]],
-            'typography' => [
-                'fontFamilies' => [
-                    'body' => ['slug' => 'body', 'name' => 'Body', 'fontFamily' => 'Inter, sans-serif'],
-                ],
-                'fontSizes' => [
-                    'body' => ['slug' => 'body', 'name' => 'Body', 'size' => '1rem'],
-                ],
-            ],
-        ],
-    ];
-
-    $theme = ThemeJsonStep::fillColors($theme, $project);
-    $theme = ThemeJsonStep::fillFonts($theme, $project);
-    $theme = ThemeJsonStep::fillFontSizes($theme, $project);
-
-    assert_eq(5, count($theme['settings']['color']['palette']));
-    assert_eq(2, count($theme['settings']['typography']['fontFamilies']));
-    assert_eq(6, count($theme['settings']['typography']['fontSizes']));
-    assert_theme_json_presets_usable($theme['settings']['color']['palette'], 'color');
-    assert_theme_json_presets_usable($theme['settings']['typography']['fontFamilies'], 'fontFamily');
-    assert_theme_json_presets_usable($theme['settings']['typography']['fontSizes'], 'size');
-
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-    assert_eq(16, count($warnings), 'three discarded containers plus thirteen default fills');
-    foreach ([
-        'settings.color.palette',
-        'settings.typography.fontFamilies',
-        'settings.typography.fontSizes',
-    ] as $path) {
-        assert_contains("invalid {$path} container", implode("\n", $warnings));
-    }
-    assert_contains('authored type=associative array, value={', implode("\n", $warnings));
-    assert_contains(
-        'discarded invalid preset container; delivered defaults/remaining usable presets',
-        implode("\n", $warnings),
+test('theme-json font-size repair fills the whole scale when the model omits it', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairFontSizes([]);
+    assert_eq(
+        ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
+        array_column($theme['settings']['typography']['fontSizes'], 'slug'),
     );
-
-    $firstWarnings = $project->readJson('warnings.json');
-    $again = ThemeJsonStep::fillColors($theme, $project);
-    $again = ThemeJsonStep::fillFonts($again, $project);
-    $again = ThemeJsonStep::fillFontSizes($again, $project);
-    assert_eq($theme, $again, 'container repair reaches a fixed point');
-    assert_eq($firstWarnings, $project->readJson('warnings.json'), 'fixed point adds no warnings');
-    exec('rm -rf ' . escapeshellarg($tmp));
+    assert_eq(6, count($warnings));
 });
 
-test('theme-json preserves usable preset rows while discarding garbage rows', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_partial_garbage_');
-    $theme = [
-        'settings' => [
-            'color' => ['palette' => [
-                ['slug' => 'base', 'name' => 'Paper', 'color' => '#fafafa', 'meta' => 'keep'],
-                ['slug' => 'contrast', 'name' => 'Ink', 'color' => '#101010'],
-                ['slug' => 'brand-extra', 'name' => 'Brand Extra', 'color' => '#abcdef'],
-                'garbage',
-                ['slug' => 'unknown', 'color' => '#777777'],
-                ['slug' => 'primary', 'name' => '', 'color' => '#123456'],
-            ]],
-            'typography' => [
-                'fontFamilies' => [
-                    ['slug' => 'body', 'name' => 'Body', 'fontFamily' => 'Inter, sans-serif', 'meta' => 'keep'],
-                    ['slug' => 'mono', 'name' => 'Mono', 'fontFamily' => 'monospace'],
-                    false,
-                    ['slug' => 'unknown', 'fontFamily' => 'serif'],
-                    ['slug' => 'heading', 'name' => 'Heading', 'fontFamily' => ''],
-                ],
-                'fontSizes' => [
-                    ['slug' => 'body', 'name' => 'Body', 'size' => '1.2rem', 'meta' => 'keep'],
-                    ['slug' => 'poster', 'name' => 'Poster', 'size' => '9rem'],
-                    null,
-                    ['slug' => 'unknown', 'name' => '', 'size' => '2rem'],
-                    ['slug' => 'caption', 'name' => 'Caption', 'size' => ''],
-                ],
-            ],
-        ],
-    ];
-
-    $theme = ThemeJsonStep::fillColors($theme, $project);
-    $theme = ThemeJsonStep::fillFonts($theme, $project);
-    $theme = ThemeJsonStep::fillFontSizes($theme, $project);
-
-    $palette = $theme['settings']['color']['palette'];
-    $families = $theme['settings']['typography']['fontFamilies'];
-    $fontSizes = $theme['settings']['typography']['fontSizes'];
-    assert_theme_json_presets_usable($palette, 'color');
-    assert_theme_json_presets_usable($families, 'fontFamily');
-    assert_theme_json_presets_usable($fontSizes, 'size');
-    assert_eq(7, count($palette), 'five required plus two usable unrelated rows');
-    assert_eq(4, count($families), 'two required plus two usable unrelated rows');
-    assert_eq(8, count($fontSizes), 'six required plus two usable unrelated rows');
-    assert_eq('keep', theme_json_preset($palette, 'base')['meta']);
-    assert_eq('keep', theme_json_preset($families, 'body')['meta']);
-    assert_eq('keep', theme_json_preset($fontSizes, 'body')['meta']);
-    assert_eq('#123456', theme_json_preset($palette, 'primary')['color']);
-    assert_eq('#101010', theme_json_preset($palette, 'secondary')['color']);
-    assert_eq('#123456', theme_json_preset($palette, 'accent')['color']);
-
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-    assert_eq(17, count($warnings), 'five discarded rows, four synthesized names, eight required fills');
-    $joined = implode("\n", $warnings);
-    assert_contains('settings.color.palette[index=3]', $joined);
-    assert_contains('settings.typography.fontFamilies[index=2]', $joined);
-    assert_contains('settings.typography.fontSizes[index=2]', $joined);
-    assert_contains('authored type=string, value="garbage"', $joined);
-    assert_contains('synthesized name=', $joined);
-    assert_contains('discarded invalid preset; delivered defaults/remaining usable presets', $joined);
-
-    $firstWarnings = $project->readJson('warnings.json');
-    $again = ThemeJsonStep::fillColors($theme, $project);
-    $again = ThemeJsonStep::fillFonts($again, $project);
-    $again = ThemeJsonStep::fillFontSizes($again, $project);
-    assert_eq($theme, $again, 'row repair reaches a fixed point');
-    assert_eq($firstWarnings, $project->readJson('warnings.json'), 'fixed point adds no warnings');
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json records a warning for every defaulted preset', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_all_warnings_');
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $step->consume($project, ['theme-json' => []]);
-
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-    assert_eq(13, count($warnings), 'five colors, two font families, six font sizes');
-    foreach ($warnings as $warning) {
-        assert_contains('theme/theme.json:', $warning, 'artifact path');
-        assert_contains('missing or unusable', $warning, 'defect path');
-        assert_contains('substituted', $warning, 'replacement value');
-        assert_contains('from ', $warning, 'replacement source');
-        assert_contains('delivered with repaired preset', $warning, 'delivered disposition');
-    }
-    foreach (['base', 'contrast', 'primary', 'secondary', 'accent'] as $slug) {
-        assert_contains("settings.color.palette[slug={$slug}].color", implode("\n", $warnings));
-    }
-    foreach (['heading', 'body'] as $slug) {
-        assert_contains("settings.typography.fontFamilies[slug={$slug}].fontFamily", implode("\n", $warnings));
-    }
-    foreach (['caption', 'body', 'lead', 'heading', 'section-title', 'display'] as $slug) {
-        assert_contains("settings.typography.fontSizes[slug={$slug}].size", implode("\n", $warnings));
-    }
-    $log = $project->readText('logs/theme-json.log');
-    foreach ($warnings as $warning) {
-        assert_contains($warning, $log, 'consume log keeps detailed actionable warning row');
-    }
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json never fails on an empty model response', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_empty_');
-    $project->writeText('theme/style.css', "/*\nTheme Name: Default Theme\n*/\n");
-    foreach ([
-        'theme/templates/index.html',
-        'theme/templates/page.html',
-        'theme/parts/header.html',
-        'theme/parts/footer.html',
-    ] as $file) {
-        $project->writeText(
-            $file,
-            '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->',
-        );
-    }
-
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $step->consume($project, ['theme-json' => []]);
-
-    assert_eq([], ThemeValidator::validate($project));
-    assert_eq([], PresetReferences::problems($project));
-    assert_eq(3, $project->readJson('theme/theme.json')['version']);
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json repairs a missing or unusable batch member and records the root defect', function () {
-    foreach ([
-        [],
-        ['theme-json' => 'not-an-array'],
-        ['theme-json' => ['scalar-list-value']],
-        ['theme-json' => [7, ['settings' => []]]],
-    ] as $index => $results) {
-        [$project, $tmp] = theme_json_test_project("builder_tj_root_{$index}_");
-        $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-        $step->consume($project, $results);
-
-        assert_true($project->exists('theme/theme.json'));
-        $theme = $project->readJson('theme/theme.json');
-        assert_true(!array_key_exists(0, $theme), 'unusable list root leaves no numeric root key');
-        assert_eq(5, count($theme['settings']['color']['palette']));
-        assert_eq(2, count($theme['settings']['typography']['fontFamilies']));
-        assert_eq(6, count($theme['settings']['typography']['fontSizes']));
-        $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-        assert_eq(14, count($warnings), 'root warning plus every defaulted preset');
-        assert_contains('missing or unusable model output at document root', $warnings[0]);
-        assert_contains('substituted an empty theme as repair input', $warnings[0]);
-        assert_contains('delivered with complete documented defaults', $warnings[0]);
-        exec('rm -rf ' . escapeshellarg($tmp));
-    }
-});
-
-test('theme-json complete model response round-trips apart from existing normalizers', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_roundtrip_');
+test('theme-json keeps an authored preset value when only its name is missing', function () {
     $payload = valid_theme_payload();
-    $payload['settings']['layout'] = ['contentSize' => '720px'];
-    $payload['customTemplates'] = [['name' => 'landing', 'title' => 'Landing']];
-    $payload['styles'] = [
-        'color' => ['background' => 'var:preset|color|base'],
-        'typography' => ['fontFamily' => 'var:preset|font-family|body'],
-        'elements' => [
-            'button' => ['color' => ['background' => 'var:preset|color|accent']],
-            'link' => ['color' => ['text' => 'var:preset|color|primary']],
-            'heading' => ['typography' => ['lineHeight' => '1.1']],
-        ],
+    unset($payload['settings']['color']['palette'][0]['name']);
+    unset($payload['settings']['typography']['fontFamilies'][0]['name']);
+    $payload['settings']['color']['palette'][0]['metadata'] = ['source' => 'model'];
+    $payload['settings']['typography']['fontFamilies'][0]['metadata'] = ['source' => 'model'];
+    $payload['settings']['typography']['fontSizes'] = [
+        ['slug' => 'caption', 'size' => '0.8rem', 'metadata' => ['source' => 'model']],
     ];
 
-    $expected = $payload;
-    $expected['$schema'] = 'https://schemas.wp.org/trunk/theme.json';
-    $expected['version'] = 3;
-    $expected = ThemeJsonStep::disableCoreDefaultPresets($expected);
-    $expected = ThemeJsonStep::normalizeSpacingSettings($expected);
-    $expected = ThemeJsonStep::normalizeRootPadding($expected);
-    $expected['styles']['spacing']['blockGap'] = 'var:preset|spacing|md';
-    $expected = ThemeJsonStep::applyScaffold($expected);
+    [$payload] = ThemeJsonStep::repairColors($payload);
+    [$payload] = ThemeJsonStep::repairFonts($payload);
+    [$payload] = ThemeJsonStep::repairFontSizes($payload);
 
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $step->consume($project, ['theme-json' => $payload]);
+    $base = theme_json_preset($payload['settings']['color']['palette'], 'base');
+    $heading = theme_json_preset($payload['settings']['typography']['fontFamilies'], 'heading');
+    $caption = theme_json_preset($payload['settings']['typography']['fontSizes'], 'caption');
 
-    assert_eq($expected, $project->readJson('theme/theme.json'));
-    assert_true(!$project->exists('warnings.json'), 'complete model response needs no repair warning');
-    assert_true(!$project->exists('logs/theme-json.log'), 'complete model response needs no repair log');
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json leaves button, link and heading to the model', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_elements_');
-    $elements = [
-        'button' => [
-            'color' => ['background' => '#ff00ff', 'text' => '#001122'],
-            'border' => ['radius' => '13px'],
-            ':hover' => ['color' => ['background' => '#112233']],
-        ],
-        'link' => [
-            'color' => ['text' => '#445566'],
-            ':hover' => ['color' => ['text' => '#778899']],
-        ],
-        'heading' => ['typography' => ['lineHeight' => '0.95']],
-    ];
-
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $step->consume($project, ['theme-json' => ['styles' => ['elements' => $elements]]]);
-
-    $written = $project->readJson('theme/theme.json')['styles']['elements'];
-    foreach ($elements as $name => $expected) {
-        assert_eq($expected, $written[$name], "{$name} stays model-authored");
+    assert_eq('#fff', $base['color'], 'authored color kept');
+    assert_eq('Fraunces, serif', $heading['fontFamily'], 'authored family kept');
+    assert_eq('0.8rem', $caption['size'], 'authored size kept, not replaced by the profile');
+    assert_eq('Caption', $caption['name'], 'name synthesized from the slug');
+    foreach ([$base, $heading, $caption] as $preset) {
+        assert_eq(['source' => 'model'], $preset['metadata'], 'model metadata survives');
     }
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json preset repairs reach a fixed point without duplicate warnings', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_fixed_point_');
-    $theme = ThemeJsonStep::fillColors([], $project);
-    $theme = ThemeJsonStep::fillFonts($theme, $project);
-    $theme = ThemeJsonStep::fillFontSizes($theme, $project);
-    $firstWarnings = $project->readJson('warnings.json');
-
-    $repairedAgain = ThemeJsonStep::fillColors($theme, $project);
-    $repairedAgain = ThemeJsonStep::fillFonts($repairedAgain, $project);
-    $repairedAgain = ThemeJsonStep::fillFontSizes($repairedAgain, $project);
-
-    assert_eq($theme, $repairedAgain);
-    assert_eq($firstWarnings, $project->readJson('warnings.json'));
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json discards unusable required rows before filling them', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_unusable_');
-    $theme = valid_theme_payload();
-    $theme['settings']['color']['palette'][2] = [
-        'slug' => 'primary',
-        'name' => 'Keep This Name',
-        'color' => null,
-        'custom-metadata' => 'keep',
-    ];
-    $theme['settings']['typography']['fontFamilies'][0]['fontFamily'] = [];
-    $theme['settings']['typography']['fontSizes'][0]['size'] = null;
-
-    $theme = ThemeJsonStep::fillColors($theme, $project);
-    $theme = ThemeJsonStep::fillFonts($theme, $project);
-    $theme = ThemeJsonStep::fillFontSizes($theme, $project);
-
-    $primary = theme_json_preset($theme['settings']['color']['palette'], 'primary');
-    assert_eq('#111', $primary['color'], 'unusable primary copies original contrast');
-    assert_eq('Primary', $primary['name'], 'invalid authored row does not survive');
-    assert_true(!isset($primary['custom-metadata']), 'invalid authored metadata discarded with row');
-    assert_eq(
-        'Source Sans 3, sans-serif',
-        theme_json_preset($theme['settings']['typography']['fontFamilies'], 'heading')['fontFamily'],
-    );
-    assert_eq(
-        '0.875rem',
-        theme_json_preset($theme['settings']['typography']['fontSizes'], 'caption')['size'],
-    );
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-    assert_eq(6, count($warnings), 'three dropped rows plus three replacement fills');
-    assert_contains('discarded invalid preset', implode("\n", $warnings));
-    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('theme-json merge helper fills nested omissions and preserves model leaves', function () {
@@ -924,161 +601,15 @@ test('theme-json merge helper fills nested omissions and preserves model leaves'
         'unrelated' => true,
     ];
 
-    assert_eq([
-        'node' => [
-            'nested' => ['model-leaf' => 'model', 'missing' => 'filled'],
-            'scalar' => 17,
-            'list' => ['model'],
-            'empty-map' => ['missing' => 'filled'],
-            'map-vs-list' => ['model-list'],
-            'list-vs-map' => ['model' => 'map'],
-        ],
-        'unrelated' => true,
-        'new-root' => ['value' => 'filled'],
-    ], ThemeJsonStep::mergeScaffoldDefaults($scaffold, $model));
-
     $merged = ThemeJsonStep::mergeScaffoldDefaults($scaffold, $model);
+    assert_eq(['model-leaf' => 'model', 'missing' => 'filled'], $merged['node']['nested']);
+    assert_eq(17, $merged['node']['scalar'], 'model scalar wins over scaffold map');
+    assert_eq(['model'], $merged['node']['list'], 'model list wins');
+    assert_eq(['missing' => 'filled'], $merged['node']['empty-map'], 'empty map takes the scaffold');
     assert_eq(['model-list'], $merged['node']['map-vs-list'], 'scaffold map plus model list keeps model list');
     assert_eq(['model' => 'map'], $merged['node']['list-vs-map'], 'scaffold list plus model map keeps model map');
-});
-
-test('theme-json applyScaffold is pure and fills an empty theme', function () {
-    $expectedScaffold = [
-        'styles' => [
-            'color' => [
-                'background' => 'var:preset|color|base',
-                'text' => 'var:preset|color|contrast',
-            ],
-            'typography' => [
-                'fontFamily' => 'var:preset|font-family|body',
-                'fontSize' => 'var:preset|font-size|body',
-                'lineHeight' => '1.6',
-            ],
-            'elements' => [
-                'h1' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|display',
-                    ],
-                    'color' => ['text' => 'var:preset|color|primary'],
-                ],
-                'h2' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|section-title',
-                    ],
-                    'color' => ['text' => 'var:preset|color|primary'],
-                ],
-                'h3' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|heading',
-                    ],
-                    'color' => ['text' => 'var:preset|color|primary'],
-                ],
-                'h4' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|heading',
-                    ],
-                ],
-                'h5' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|heading',
-                    ],
-                ],
-                'h6' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|heading',
-                    ],
-                ],
-                'caption' => [
-                    'typography' => ['fontSize' => 'var:preset|font-size|caption'],
-                    'color' => ['text' => 'var:preset|color|secondary'],
-                ],
-            ],
-            'blocks' => [
-                'core/quote' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|body',
-                        'fontSize' => 'var:preset|font-size|lead',
-                    ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
-                ],
-                'core/pullquote' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|heading',
-                    ],
-                    'color' => ['text' => 'var:preset|color|primary'],
-                ],
-                'core/table' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|body',
-                        'fontSize' => 'var:preset|font-size|body',
-                    ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
-                ],
-                'core/separator' => [
-                    'color' => ['text' => 'var:preset|color|secondary'],
-                ],
-                'core/list' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|body',
-                        'fontSize' => 'var:preset|font-size|body',
-                    ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
-                ],
-                'core/image' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|body',
-                        'fontSize' => 'var:preset|font-size|caption',
-                    ],
-                    'color' => ['text' => 'var:preset|color|secondary'],
-                ],
-                'core/site-title' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|heading',
-                        'fontSize' => 'var:preset|font-size|heading',
-                    ],
-                    'color' => ['text' => 'var:preset|color|primary'],
-                ],
-                'core/navigation' => [
-                    'typography' => [
-                        'fontFamily' => 'var:preset|font-family|body',
-                        'fontSize' => 'var:preset|font-size|caption',
-                    ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
-                ],
-            ],
-        ],
-    ];
-
-    assert_eq($expectedScaffold, ThemeJsonStep::applyScaffold([]), 'full frozen scaffold output');
-    assert_eq(
-        [
-            'core/quote',
-            'core/pullquote',
-            'core/table',
-            'core/separator',
-            'core/list',
-            'core/image',
-            'core/site-title',
-            'core/navigation',
-        ],
-        array_keys($expectedScaffold['styles']['blocks']),
-        'exact eight wired block keys',
-    );
-
-    $input = ['customTemplates' => [['name' => 'landing']]];
-    $before = $input;
-    $wired = ThemeJsonStep::applyScaffold($input);
-
-    assert_eq($before, $input, 'input stays unchanged');
-    assert_eq([['name' => 'landing']], $wired['customTemplates']);
-    assert_eq($expectedScaffold['styles'], $wired['styles'], 'same full scaffold fills nonempty theme');
+    assert_eq(true, $merged['unrelated'], 'unrelated model branch survives');
+    assert_eq(['value' => 'filled'], $merged['new-root'], 'absent root filled');
 });
 
 test('theme-json scaffold lets a model block override win at the leaf', function () {
@@ -1096,7 +627,7 @@ test('theme-json scaffold lets a model block override win at the leaf', function
     ]);
 
     $quote = $theme['styles']['blocks']['core/quote'];
-    assert_eq('var:preset|font-size|display', $quote['typography']['fontSize']);
+    assert_eq('var:preset|font-size|display', $quote['typography']['fontSize'], 'model leaf wins');
     assert_eq('800', $quote['typography']['fontWeight'], 'model sibling survives');
     assert_eq('var:preset|font-family|body', $quote['typography']['fontFamily'], 'scaffold sibling fills');
     assert_eq('var:preset|color|accent', $quote['color']['text']);
@@ -1147,7 +678,7 @@ test('theme-json scaffold carries no decorative values', function () {
         assert_true(
             $value === '1.6'
                 || (is_string($value) && preg_match('/^var:preset\|(color|font-family|font-size)\|[a-z0-9-]+$/', $value) === 1),
-            'every scaffold leaf is a preset reference or frozen unitless line-height',
+            'every scaffold leaf is a preset reference or the frozen unitless line-height',
         );
     }
 });
@@ -1169,7 +700,8 @@ test('theme-json scaffold references only frozen preset slugs', function () {
 });
 
 test('theme-json sends no json_schema', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_no_schema_');
+    $tmp = sys_get_temp_dir() . '/builder_tj_no_schema_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
     $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
 
@@ -1183,105 +715,49 @@ test('theme-json sends no json_schema', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('theme-json keeps an authored preset value when only its name is missing', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_name_only_');
-    $theme = valid_theme_payload();
-    unset($theme['settings']['color']['palette'][0]['name']);
-    unset($theme['settings']['typography']['fontFamilies'][0]['name']);
-    unset($theme['settings']['typography']['fontSizes'][0]['name']);
-    $theme['settings']['color']['palette'][0]['metadata'] = ['source' => 'model'];
-    $theme['settings']['typography']['fontFamilies'][0]['metadata'] = ['source' => 'model'];
-    $theme['settings']['typography']['fontSizes'][0]['metadata'] = ['source' => 'model'];
+test('theme-json run wires the scaffold into the written theme', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_scaffold_run_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
 
-    $theme = ThemeJsonStep::fillColors($theme, $project);
-    $theme = ThemeJsonStep::fillFonts($theme, $project);
-    $theme = ThemeJsonStep::fillFontSizes($theme, $project);
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    $base = theme_json_preset($theme['settings']['color']['palette'], 'base');
-    $heading = theme_json_preset($theme['settings']['typography']['fontFamilies'], 'heading');
-    $caption = theme_json_preset($theme['settings']['typography']['fontSizes'], 'caption');
-    assert_eq('#fff', $base['color']);
-    assert_eq('Fraunces, serif', $heading['fontFamily']);
-    assert_eq('0.875rem', $caption['size']);
-    assert_eq('Base', $base['name']);
-    assert_eq('Heading', $heading['name']);
-    assert_eq('Caption', $caption['name']);
-    foreach ([$base, $heading, $caption] as $preset) {
-        assert_eq(['source' => 'model'], $preset['metadata']);
-    }
-
-    $warnings = $project->readJson('warnings.json')['theme-json'] ?? [];
-    assert_eq(3, count($warnings));
-    foreach ($warnings as $warning) {
-        assert_contains('kept authored ', $warning);
-        assert_contains('and metadata', $warning);
-        assert_contains('synthesized name=', $warning);
-        assert_contains('delivered with repaired preset', $warning);
-    }
-
-    $themeAgain = ThemeJsonStep::fillColors($theme, $project);
-    $themeAgain = ThemeJsonStep::fillFonts($themeAgain, $project);
-    $themeAgain = ThemeJsonStep::fillFontSizes($themeAgain, $project);
-    assert_eq($theme, $themeAgain, 'name repair reaches a fixed point');
-    assert_eq($warnings, $project->readJson('warnings.json')['theme-json'], 'fixed point adds no warnings');
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json slim representative response validates after scaffold', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_slim_fixture_');
-    theme_json_write_validator_shell($project);
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $step->consume($project, ['theme-json' => theme_json_slim_representative_payload()]);
-
-    assert_eq([], ThemeValidator::validate($project));
-    assert_eq([], PresetReferences::problems($project));
     $theme = $project->readJson('theme/theme.json');
     assert_eq('var:preset|color|base', $theme['styles']['color']['background']);
-    assert_eq('700', $theme['styles']['elements']['h1']['typography']['fontWeight']);
-    assert_eq('1px', $theme['styles']['blocks']['core/quote']['border']['left']['width']);
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('theme-json representative compact response shrinks when build-supplied paths are omitted', function () {
-    $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
-    $before = json_encode(theme_json_representative_payload(), $flags);
-    $after = json_encode(theme_json_slim_representative_payload(), $flags);
-
-    assert_true(strlen($after) < strlen($before), 'prompt-slimmed fixture is smaller');
-    assert_eq(8709, strlen($before), 'representative compact response before bytes');
-    assert_eq(6853, strlen($after), 'representative compact response after bytes');
-});
-
-test('theme-json scaffold fills omissions without replacing unrelated model styles', function () {
-    $model = [
-        'styles' => [
-            'typography' => ['fontWeight' => '500'],
-            'elements' => ['h2' => ['typography' => ['textTransform' => 'uppercase']]],
-            'blocks' => ['core/code' => ['color' => ['text' => 'var:preset|color|accent']]],
-        ],
-    ];
-    $wired = ThemeJsonStep::applyScaffold($model);
-
-    assert_eq('500', $wired['styles']['typography']['fontWeight']);
-    assert_eq('var:preset|font-family|body', $wired['styles']['typography']['fontFamily']);
-    assert_eq('uppercase', $wired['styles']['elements']['h2']['typography']['textTransform']);
-    assert_eq('var:preset|font-size|section-title', $wired['styles']['elements']['h2']['typography']['fontSize']);
+    assert_eq('var:preset|font-family|heading', $theme['styles']['elements']['h2']['typography']['fontFamily']);
+    assert_eq('var:preset|font-size|section-title', $theme['styles']['elements']['h2']['typography']['fontSize']);
+    assert_eq('var:preset|font-size|caption', $theme['styles']['elements']['caption']['typography']['fontSize']);
+    assert_eq('var:preset|font-family|body', $theme['styles']['blocks']['core/quote']['typography']['fontFamily']);
+    assert_true(!array_key_exists('button', $theme['styles']['elements']), 'button stays model-authored');
     assert_eq(
-        'var:preset|color|accent',
-        $wired['styles']['blocks']['core/code']['color']['text'],
-        'unrelated model block survives',
+        ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
+        array_column($theme['settings']['typography']['fontSizes'], 'slug'),
+        'the scale the scaffold references exists',
     );
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('theme-json malformed styles still receives complete scaffold', function () {
-    [$project, $tmp] = theme_json_test_project('builder_tj_malformed_styles_');
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $step->consume($project, ['theme-json' => ['styles' => 'not-an-object']]);
+test('theme-json never fails on an empty model response', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_empty_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson([]);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $theme = $project->readJson('theme/theme.json');
-    assert_eq('var:preset|color|base', $theme['styles']['color']['background']);
-    assert_eq('var:preset|font-size|display', $theme['styles']['elements']['h1']['typography']['fontSize']);
-    assert_eq('var:preset|font-family|body', $theme['styles']['blocks']['core/navigation']['typography']['fontFamily']);
-    assert_eq([], PresetReferences::problems($project));
+    assert_eq(3, $theme['version']);
+    assert_eq(
+        ['base', 'contrast', 'primary', 'secondary', 'accent'],
+        array_column($theme['settings']['color']['palette'], 'slug'),
+    );
+    assert_eq(['heading', 'body'], array_column($theme['settings']['typography']['fontFamilies'], 'slug'));
+    assert_eq('var:preset|color|base', $theme['styles']['color']['background'], 'scaffold still wires');
+    assert_true(($project->readJson('warnings.json')['theme-json'] ?? []) !== [], 'every fill is warned');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

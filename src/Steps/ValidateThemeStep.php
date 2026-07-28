@@ -63,6 +63,8 @@ final class ValidateThemeStep implements Step
             ThemeValidator::validate($project),
             ThemeValidator::layoutWarnings($project),
             ThemeValidator::spacingWarnings($project),
+            ThemeValidator::typographyWarnings($project),
+            ThemeValidator::planWarnings($project),
             PresetReferences::problems($project),
         );
         $problems = array_values(array_unique($problems));
