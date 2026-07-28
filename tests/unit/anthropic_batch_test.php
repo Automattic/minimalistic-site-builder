@@ -609,3 +609,17 @@ test('bodyFor maps json_schema to Anthropic output_config.format', function () {
     ], $body['output_config']);
     assert_true(!array_key_exists('json_schema', $body), 'provider-neutral metadata does not leak onto the wire');
 });
+
+test('bodyFor disables thinking only on models that think by default (Opus 5)', function () {
+    // Opus 5 runs adaptive thinking when the param is omitted; the pipeline
+    // opts out explicitly to keep 4.8-era latency and token budgets.
+    $body = AnthropicClient::bodyFor(['prompt' => 'Hi'], 'claude-opus-5', 16000);
+    assert_eq(['type' => 'disabled'], $body['thinking']);
+
+    // Opus 4.8 and earlier already run without thinking when omitted, and
+    // Fable 5 400s on an explicit "disabled" - neither may get the key.
+    foreach (['claude-opus-4-8', 'claude-haiku-4-5', 'claude-fable-5'] as $model) {
+        $body = AnthropicClient::bodyFor(['prompt' => 'Hi'], $model, 16000);
+        assert_true(!array_key_exists('thinking', $body), "no thinking key for {$model}");
+    }
+});

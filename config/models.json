@@ -4,7 +4,7 @@
     "default_provider": "anthropic",
     "providers": {
         "anthropic": {
-            "large": "claude-opus-4-8",
+            "large": "claude-opus-5",
             "small": "claude-haiku-4-5"
         },
         "openai": {
