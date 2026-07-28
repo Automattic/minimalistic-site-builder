@@ -367,6 +367,14 @@ final class AnthropicClient implements Llm
         if (str_contains($error, 'cache_control')) {
             return 'cache_control';
         }
+        // Same bias for the thinking control: `thinking: {type: "disabled"}` is
+        // only valid at effort <= high, so a future request that raises effort
+        // would 400 on every large-tier call. Stripping it runs the model with
+        // its default adaptive thinking — a slower, more expensive request
+        // rather than an aborted build.
+        if (str_contains($error, 'thinking')) {
+            return 'thinking';
+        }
         return null;
     }
 

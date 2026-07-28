@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -180,7 +181,13 @@ function write_report(array $results): void
     $stepIds = ['scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction', 'theme-json+page-plan', 'sections', 'collect-images', 'fix-blocks', 'assemble-pages', 'finalize-theme'];
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
-    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . Env::get('LLM_MODEL', 'claude-opus-4-8') . "\n\n";
+    // Resolve the large tier the run actually used rather than naming a model
+    // literally: a hardcoded fallback silently mislabels every report the day
+    // the packaged default changes, and the report is the artifact a model
+    // rollout is judged on.
+    $provider = Env::get('LLM_PROVIDER') ?: ModelConfig::defaultProvider();
+    $model = Env::get('LLM_MODEL') ?: ModelConfig::tierModel($provider, 'large');
+    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . $model . "\n\n";
 
     // Speed table.
     $md .= "## Speed (seconds per step)\n\n";

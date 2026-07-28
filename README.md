@@ -62,7 +62,7 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 
 | Provider | large | small |
 |----------|-------|-------|
-| `anthropic` (default) | `claude-opus-4-8` | `claude-haiku-4-5` |
+| `anthropic` (default) | `claude-opus-5` | `claude-haiku-4-5` |
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
 | `xai` | `grok-4.5` | `grok-4.5` |
 | `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
