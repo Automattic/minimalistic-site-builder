@@ -550,6 +550,55 @@ test('theme-json font-size repair fills the whole scale when the model omits it'
     assert_eq(6, count($warnings));
 });
 
+test('theme-json font-size repair rejects invalid CSS and duplicate slugs', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairFontSizes([
+        'settings' => ['typography' => ['fontSizes' => [
+            ['slug' => 'body', 'name' => 'Broken body', 'size' => 'banana'],
+            ['slug' => 'caption', 'name' => 'Caption', 'size' => '1rem'],
+            ['slug' => 'caption', 'name' => 'Duplicate caption', 'size' => '2rem'],
+            [
+                'slug' => 'lead',
+                'name' => 'Lead',
+                'size' => 'clamp(1rem, calc(1rem + 1vw), 2rem)',
+            ],
+            ['slug' => 'poster', 'name' => 'Poster', 'size' => 'var(--wp--custom--poster-size)'],
+            ['slug' => 'unsafe-function', 'name' => 'Unsafe', 'size' => 'url(javascript:alert(1))'],
+            ['slug' => 'invalid-calc', 'name' => 'Invalid calc', 'size' => 'calc(banana)'],
+            ['slug' => 'injected', 'name' => 'Injected', 'size' => '1rem; color: red'],
+        ]]],
+    ]);
+
+    $sizes = $theme['settings']['typography']['fontSizes'];
+    assert_eq('1.125rem', theme_json_preset($sizes, 'body')['size'], 'invalid required size replaced');
+    assert_eq('1rem', theme_json_preset($sizes, 'caption')['size'], 'first valid duplicate wins');
+    assert_eq(
+        1,
+        count(array_filter($sizes, static fn (array $entry): bool => $entry['slug'] === 'caption')),
+        'duplicate removed',
+    );
+    assert_eq(
+        'clamp(1rem, calc(1rem + 1vw), 2rem)',
+        theme_json_preset($sizes, 'lead')['size'],
+        'safe nested sizing functions survive',
+    );
+    assert_eq(
+        'var(--wp--custom--poster-size)',
+        theme_json_preset($sizes, 'poster')['size'],
+        'safe custom-property reference survives',
+    );
+    foreach (['unsafe-function', 'invalid-calc', 'injected'] as $slug) {
+        assert_eq([], theme_json_preset($sizes, $slug), "{$slug} removed");
+    }
+    $joined = implode(' ', $warnings);
+    assert_contains("fontSizes slug 'body': invalid size \"banana\"", $joined);
+    assert_contains("fontSizes duplicate slug 'caption'", $joined);
+    assert_contains('disposition removed duplicate', $joined);
+
+    [$fixedPoint, $fixedPointWarnings] = ThemeJsonStep::repairFontSizes($theme);
+    assert_eq($theme, $fixedPoint, 'repair reaches a fixed point');
+    assert_eq([], $fixedPointWarnings, 'fixed point produces no warnings');
+});
+
 test('theme-json keeps an authored preset value when only its name is missing', function () {
     $payload = valid_theme_payload();
     unset($payload['settings']['color']['palette'][0]['name']);
@@ -577,7 +626,7 @@ test('theme-json keeps an authored preset value when only its name is missing', 
     }
 });
 
-test('theme-json merge helper fills nested omissions and preserves model leaves', function () {
+test('theme-json merge helper fills omissions and repairs malformed map nodes', function () {
     $scaffold = [
         'node' => [
             'nested' => ['model-leaf' => 'scaffold', 'missing' => 'filled'],
@@ -603,16 +652,106 @@ test('theme-json merge helper fills nested omissions and preserves model leaves'
 
     $merged = ThemeJsonStep::mergeScaffoldDefaults($scaffold, $model);
     assert_eq(['model-leaf' => 'model', 'missing' => 'filled'], $merged['node']['nested']);
-    assert_eq(17, $merged['node']['scalar'], 'model scalar wins over scaffold map');
+    assert_eq('scaffold', $merged['node']['scalar'], 'wrong scalar type replaced');
     assert_eq(['model'], $merged['node']['list'], 'model list wins');
     assert_eq(['missing' => 'filled'], $merged['node']['empty-map'], 'empty map takes the scaffold');
-    assert_eq(['model-list'], $merged['node']['map-vs-list'], 'scaffold map plus model list keeps model list');
+    assert_eq(
+        ['missing' => 'scaffold'],
+        $merged['node']['map-vs-list'],
+        'scaffold map replaces malformed model list',
+    );
     assert_eq(['model' => 'map'], $merged['node']['list-vs-map'], 'scaffold list plus model map keeps model map');
     assert_eq(true, $merged['unrelated'], 'unrelated model branch survives');
     assert_eq(['value' => 'filled'], $merged['new-root'], 'absent root filled');
 });
 
-test('theme-json scaffold lets a model block override win at the leaf', function () {
+test('theme-json repairs malformed scaffold shapes with durable actionable warnings', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_scaffold_shape_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+
+    $payload = valid_theme_payload();
+    $payload['styles'] = [
+        'spacing' => ['bad'],
+        'blocks' => ['bad'],
+        'elements' => [
+            'h1' => ['typography' => [
+                'fontFamily' => 17,
+                'fontSize' => false,
+                'fontWeight' => '800',
+            ]],
+            'h2' => ['typography' => ['fontSize' => ['bad']]],
+        ],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_true(!array_is_list($theme['styles']['blocks']), 'malformed blocks list replaced with scaffold map');
+    assert_eq(
+        'var:preset|font-size|display',
+        $theme['styles']['elements']['h1']['typography']['fontSize'],
+        'wrong scalar type replaced',
+    );
+    assert_eq(
+        'var:preset|font-family|heading',
+        $theme['styles']['elements']['h1']['typography']['fontFamily'],
+        'wrong scalar type replaced independently',
+    );
+    assert_eq(
+        'var:preset|font-size|section-title',
+        $theme['styles']['elements']['h2']['typography']['fontSize'],
+        'malformed array leaf replaced',
+    );
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['blockGap']);
+    assert_eq('800', $theme['styles']['elements']['h1']['typography']['fontWeight'], 'valid sibling retained');
+
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('theme/theme.json styles.spacing: authored ["bad"]', $joined);
+    assert_contains('theme/theme.json styles.blocks: authored ["bad"]', $joined);
+    assert_contains('theme/theme.json styles.elements.h1.typography.fontFamily: authored 17', $joined);
+    assert_contains('theme/theme.json styles.elements.h1.typography.fontSize: authored false', $joined);
+    assert_contains('theme/theme.json styles.elements.h2.typography.fontSize: authored ["bad"]', $joined);
+    assert_contains('delivered', $joined);
+    assert_contains('disposition replaced malformed shape with scaffold default', $joined);
+
+    [$fixedPoint, $fixedPointWarnings] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $fixedPoint, 'scaffold repair reaches a fixed point');
+    assert_eq([], $fixedPointWarnings, 'fixed point produces no warnings');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json repairs malformed top-level styles values with durable warnings', function () {
+    foreach (['bad', ['bad']] as $authored) {
+        $tmp = sys_get_temp_dir() . '/builder_tj_styles_shape_' . uniqid();
+        $project = (new ProjectStore($tmp))->create('demo');
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+
+        $payload = valid_theme_payload();
+        $payload['styles'] = $authored;
+        $llm = new FakeLlm();
+        $llm->queueJson($payload);
+        (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $theme = $project->readJson('theme/theme.json');
+        assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['blockGap']);
+        assert_eq('var:preset|color|base', $theme['styles']['color']['background']);
+        $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+        assert_contains(
+            'theme/theme.json styles: authored '
+                . json_encode($authored, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            $joined,
+        );
+        assert_contains('delivered build-supplied styles object', $joined);
+        assert_contains('disposition replaced malformed shape before normalization', $joined);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('theme-json scaffold lets a model typography override win at the leaf', function () {
     $theme = ThemeJsonStep::applyScaffold([
         'styles' => ['blocks' => [
             'core/quote' => [
@@ -620,7 +759,6 @@ test('theme-json scaffold lets a model block override win at the leaf', function
                     'fontSize' => 'var:preset|font-size|display',
                     'fontWeight' => '800',
                 ],
-                'color' => ['text' => 'var:preset|color|accent'],
             ],
             'core/group' => ['spacing' => ['blockGap' => 'var:preset|spacing|sm']],
         ]],
@@ -630,12 +768,76 @@ test('theme-json scaffold lets a model block override win at the leaf', function
     assert_eq('var:preset|font-size|display', $quote['typography']['fontSize'], 'model leaf wins');
     assert_eq('800', $quote['typography']['fontWeight'], 'model sibling survives');
     assert_eq('var:preset|font-family|body', $quote['typography']['fontFamily'], 'scaffold sibling fills');
-    assert_eq('var:preset|color|accent', $quote['color']['text']);
     assert_eq(
         'var:preset|spacing|sm',
         $theme['styles']['blocks']['core/group']['spacing']['blockGap'],
         'unrelated model block survives',
     );
+});
+
+test('theme-json removes context-free text colors with warnings and preserves siblings', function () {
+    [$theme, $warnings] = ThemeJsonStep::repairScaffold([
+        'styles' => [
+            'elements' => [
+                'h1' => ['color' => [
+                    'text' => 'var:preset|color|primary',
+                    'background' => 'var:preset|color|base',
+                ]],
+                'h2' => ['color' => ['bad']],
+                'h3' => ['color' => 'bad'],
+                'caption' => ['color' => ['text' => 'var:preset|color|secondary']],
+                'heading' => ['color' => ['text' => 'var:preset|color|primary']],
+            ],
+            'blocks' => [
+                'core/quote' => ['color' => [
+                    'text' => 'var:preset|color|accent',
+                    'background' => 'var:preset|color|base',
+                ]],
+                'core/group' => ['color' => ['background' => 'var:preset|color|base']],
+            ],
+        ],
+    ]);
+
+    assert_eq(
+        ['background' => 'var:preset|color|base'],
+        $theme['styles']['elements']['h1']['color'],
+        'element background sibling survives',
+    );
+    assert_true(!array_key_exists('color', $theme['styles']['elements']['h2']), 'malformed color removed');
+    assert_true(!array_key_exists('color', $theme['styles']['elements']['h3']), 'scalar color removed');
+    assert_true(!array_key_exists('color', $theme['styles']['elements']['caption']), 'empty color pruned');
+    assert_eq(
+        'var:preset|color|primary',
+        $theme['styles']['elements']['heading']['color']['text'],
+        'contrast-visible heading color survives',
+    );
+    assert_eq(
+        ['background' => 'var:preset|color|base'],
+        $theme['styles']['blocks']['core/quote']['color'],
+        'block background sibling survives',
+    );
+    assert_eq(
+        ['background' => 'var:preset|color|base'],
+        $theme['styles']['blocks']['core/group']['color'],
+        'unrelated block color survives',
+    );
+
+    $joined = implode(' ', $warnings);
+    assert_contains(
+        'theme/theme.json styles.elements.h1.color.text: authored "var:preset|color|primary"; delivered removed',
+        $joined,
+    );
+    assert_contains('theme/theme.json styles.elements.h2.color: authored ["bad"]; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.elements.h3.color: authored "bad"; delivered removed', $joined);
+    assert_contains(
+        'theme/theme.json styles.blocks.core/quote.color.text: authored "var:preset|color|accent"; delivered removed',
+        $joined,
+    );
+    assert_contains('disposition removed context-free text color invisible to contrast repair', $joined);
+
+    [$fixedPoint, $fixedPointWarnings] = ThemeJsonStep::repairScaffold($theme);
+    assert_eq($theme, $fixedPoint, 'context color repair reaches a fixed point');
+    assert_eq([], $fixedPointWarnings, 'fixed point produces no warnings');
 });
 
 test('theme-json scaffold never writes button, link or heading', function () {
@@ -653,6 +855,22 @@ test('theme-json scaffold never writes button, link or heading', function () {
     foreach ($modelElements as $name => $expected) {
         assert_eq($expected, $wired['styles']['elements'][$name], "{$name} preserved");
     }
+});
+
+test('theme-json scaffold adds no contextual block or element text colors', function () {
+    $styles = ThemeJsonStep::applyScaffold([])['styles'];
+    foreach ($styles['elements'] as $name => $element) {
+        assert_true(!array_key_exists('color', $element), "{$name} inherits its rendered context color");
+    }
+    foreach ($styles['blocks'] as $name => $block) {
+        assert_true(!array_key_exists('color', $block), "{$name} inherits its rendered context color");
+    }
+    assert_true(!array_key_exists('core/separator', $styles['blocks']), 'separator has no typography wiring');
+    assert_eq(
+        ['background' => 'var:preset|color|base', 'text' => 'var:preset|color|contrast'],
+        $styles['color'],
+        'only the global page colors are scaffolded',
+    );
 });
 
 test('theme-json scaffold carries no decorative values', function () {
@@ -778,8 +996,8 @@ test('theme-json scaffold sets no heading color ContrastFixStep cannot see', fun
 
 test('theme-json representative model response survives scaffold and validates', function () {
     // A real captured Opus response. Proves the scaffold + the three preset
-    // repairs leave a realistic theme structurally valid, and that a model
-    // that DOES author the build-supplied paths keeps its own values.
+    // repairs leave a realistic theme structurally valid. This pre-prompt
+    // response also proves forbidden context-free colors degrade safely.
     $tmp = sys_get_temp_dir() . '/builder_tj_representative_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
@@ -799,7 +1017,10 @@ test('theme-json representative model response survives scaffold and validates',
     $warnings = $project->exists('warnings.json')
         ? ($project->readJson('warnings.json')['theme-json'] ?? [])
         : [];
-    assert_eq([], $warnings, 'a complete response needs no repair');
+    assert_true($warnings !== [], 'legacy context-free colors are reported');
+    $joined = implode(' ', $warnings);
+    assert_contains('styles.elements.h1.color.text', $joined);
+    assert_contains('styles.blocks.core/quote.color.text', $joined);
     assert_eq(3, $theme['version']);
     assert_eq(
         ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
@@ -807,9 +1028,9 @@ test('theme-json representative model response survives scaffold and validates',
         'the model scale is preserved, not replaced',
     );
 
-    // The model authored every build-supplied path here, so it must win.
+    // Model typography and contrast-visible element colors still win.
     $el = $theme['styles']['elements'];
-    assert_eq('var(--wp--preset--color--contrast)', $el['h1']['color']['text'], 'model heading color wins');
+    assert_true(!array_key_exists('color', $el['h1']), 'context-free h1 color removed');
     assert_eq('1.05', $el['h1']['typography']['lineHeight'], 'model taste key survives');
     assert_eq('var(--wp--preset--font-size--lead)', $el['h4']['typography']['fontSize'], 'model h4 size wins over scaffold');
     assert_eq('var(--wp--preset--color--base)', $el['button']['color']['text'], 'button untouched');
@@ -818,7 +1039,25 @@ test('theme-json representative model response survives scaffold and validates',
         $theme['styles']['blocks']['core/quote']['typography']['fontFamily'],
         'model block wiring wins over scaffold',
     );
-    // Blocks the model never mentioned still get their wiring.
-    assert_eq('var:preset|color|contrast', $theme['styles']['blocks']['core/list']['color']['text']);
+    foreach ($theme['styles']['blocks'] as $name => $block) {
+        $color = is_array($block) ? ($block['color'] ?? null) : null;
+        assert_true(
+            !is_array($color) || !array_key_exists('text', $color),
+            "{$name} has no direct context-free text color",
+        );
+    }
+    // Blocks the model never mentioned still get their context-safe typography wiring.
+    assert_eq(
+        'var:preset|font-family|body',
+        $theme['styles']['blocks']['core/list']['typography']['fontFamily'],
+    );
+    assert_eq(
+        'var:preset|font-size|body',
+        $theme['styles']['blocks']['core/list']['typography']['fontSize'],
+    );
+    assert_true(
+        !array_key_exists('color', $theme['styles']['blocks']['core/list']),
+        'scaffold does not force a text color ContrastFix cannot see',
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });

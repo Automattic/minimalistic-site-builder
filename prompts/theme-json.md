@@ -35,8 +35,8 @@ Design intelligence to encode as tokens:
 
 Build-supplied wiring — do not emit it:
 
-- The build supplies global background/text and body typography wiring, h1–h6 and caption role wiring, and family/size/color wiring for exactly these blocks: `core/quote`, `core/pullquote`, `core/table`, `core/separator`, `core/list`, `core/image`, `core/site-title`, and `core/navigation`.
-- You may add `styles.blocks` decoration only where this site's design genuinely calls for it. Keep those choices site-specific; do not restate the build-supplied family/size/color wiring.
+- The build supplies global background/text and body typography wiring, h1–h6 and caption role wiring, and family/size wiring for exactly these blocks: `core/quote`, `core/pullquote`, `core/table`, `core/list`, `core/image`, `core/site-title`, and `core/navigation`.
+- You may add `styles.blocks` decoration only where this site's design genuinely calls for it. Keep those choices site-specific; do not restate the build-supplied family/size wiring. Do not set context-free `styles.blocks.*.color.text` or `styles.elements.{h1,h2,h3,h4,h5,h6,caption}.color.text` values: let them inherit the surrounding block's repaired text color so the build's rendered-background contrast pass stays accurate.
 
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 

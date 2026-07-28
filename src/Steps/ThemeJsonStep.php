@@ -100,8 +100,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * token whose actual color, family and size the model chose, so sites stay
      * visually distinct. No borders, radii, shadows or decorative treatment.
      *
-     * button, link and heading are deliberately absent: ContrastFixStep reads
-     * those paths and rewrites failing colors, so they stay model-authored.
+     * Context-free block/caption text colors are deliberately absent:
+     * ContrastFixStep evaluates rendered backgrounds but cannot see
+     * theme-level block defaults. button, link and heading are also absent:
+     * ContrastFixStep reads those paths and rewrites failing colors, so they
+     * stay model-authored.
      *
      * @var array<mixed>
      */
@@ -155,7 +158,6 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 ],
                 'caption' => [
                     'typography' => ['fontSize' => 'var:preset|font-size|caption'],
-                    'color' => ['text' => 'var:preset|color|secondary'],
                 ],
             ],
             'blocks' => [
@@ -164,52 +166,42 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                         'fontFamily' => 'var:preset|font-family|body',
                         'fontSize' => 'var:preset|font-size|lead',
                     ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
                 ],
                 'core/pullquote' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|heading',
                         'fontSize' => 'var:preset|font-size|heading',
                     ],
-                    'color' => ['text' => 'var:preset|color|primary'],
                 ],
                 'core/table' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|body',
                         'fontSize' => 'var:preset|font-size|body',
                     ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
-                ],
-                'core/separator' => [
-                    'color' => ['text' => 'var:preset|color|secondary'],
                 ],
                 'core/list' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|body',
                         'fontSize' => 'var:preset|font-size|body',
                     ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
                 ],
                 'core/image' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|body',
                         'fontSize' => 'var:preset|font-size|caption',
                     ],
-                    'color' => ['text' => 'var:preset|color|secondary'],
                 ],
                 'core/site-title' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|heading',
                         'fontSize' => 'var:preset|font-size|heading',
                     ],
-                    'color' => ['text' => 'var:preset|color|primary'],
                 ],
                 'core/navigation' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|body',
                         'fontSize' => 'var:preset|font-size|caption',
                     ],
-                    'color' => ['text' => 'var:preset|color|contrast'],
                 ],
             ],
         ],
@@ -294,8 +286,27 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // title/tagline stack) renders editor-only and the frontend falls back
         // to browser default margins. (settings.spacing.blockGap is already
         // forced non-null by normalizeSpacingSettings above.)
+        if (array_key_exists('styles', $theme)
+            && (!is_array($theme['styles'])
+                || ($theme['styles'] !== [] && array_is_list($theme['styles'])))) {
+            $warnings[] = 'theme/theme.json styles: authored '
+                . self::warningValue($theme['styles'])
+                . '; delivered build-supplied styles object'
+                . '; disposition replaced malformed shape before normalization';
+            $theme['styles'] = [];
+        }
         if (!is_array($theme['styles'] ?? null)) {
             $theme['styles'] = [];
+        }
+        if (array_key_exists('spacing', $theme['styles'])
+            && (!is_array($theme['styles']['spacing'])
+                || ($theme['styles']['spacing'] !== []
+                    && array_is_list($theme['styles']['spacing'])))) {
+            $warnings[] = 'theme/theme.json styles.spacing: authored '
+                . self::warningValue($theme['styles']['spacing'])
+                . '; delivered {"blockGap":"var:preset|spacing|md"}'
+                . '; disposition replaced malformed shape before normalization';
+            $theme['styles']['spacing'] = [];
         }
         if (!is_array($theme['styles']['spacing'] ?? null)) {
             $theme['styles']['spacing'] = [];
@@ -312,11 +323,17 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
         [$theme, $fontWarnings] = self::repairFonts($theme);
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
-        $warnings = array_merge($warnings, $colorWarnings, $fontWarnings, $sizeWarnings);
 
         // Last: the scaffold references the preset slugs repaired above, and
-        // every model-authored leaf wins over the wiring it fills in.
-        $theme = self::applyScaffold($theme);
+        // every well-shaped model-authored leaf wins over the wiring it fills in.
+        [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
+        $warnings = array_merge(
+            $warnings,
+            $colorWarnings,
+            $fontWarnings,
+            $sizeWarnings,
+            $scaffoldWarnings,
+        );
 
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
@@ -583,6 +600,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         }
 
         $entries = [];
+        $seen = [];
         foreach ($sizes as $entry) {
             if (!is_array($entry)) {
                 $warnings[] = 'theme.json fontSizes: removed malformed (non-object) entry '
@@ -596,13 +614,19 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 continue;
             }
             $size = $entry['size'] ?? null;
-            if (!is_string($size) || trim($size) === '') {
+            if (!is_string($size) || !self::isSafeFontSize($size)) {
                 $warnings[] = "theme.json fontSizes slug '{$slug}': invalid size "
                     . self::warningValue($size) . '; malformed entry removed';
                 continue;
             }
             $entry['slug'] = $slug;
             $entry['size'] = trim($size);
+            if (isset($seen[$slug])) {
+                $warnings[] = "theme.json fontSizes duplicate slug '{$slug}': authored size "
+                    . self::warningValue($entry['size']) . '; delivered first authored size '
+                    . self::warningValue($seen[$slug]) . '; disposition removed duplicate';
+                continue;
+            }
             // Only the name is missing — keep the authored size rather than
             // discarding a usable preset over a cosmetic field.
             if (!is_string($entry['name'] ?? null) || trim($entry['name']) === '') {
@@ -610,6 +634,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 $warnings[] = "theme.json fontSizes slug '{$slug}': missing name; "
                     . "kept authored size {$entry['size']}, synthesized name '{$entry['name']}'";
             }
+            $seen[$slug] = $entry['size'];
             $entries[] = $entry;
         }
 
@@ -628,7 +653,33 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * Fill the build-supplied wiring, letting any model-authored leaf win.
+     * The prompt's bounded font-size grammar: a CSS length/percentage, or a
+     * composition of the safe sizing functions it asks the model to use.
+     */
+    private static function isSafeFontSize(string $size): bool
+    {
+        $size = trim($size);
+        if ($size === '' || strlen($size) > 160) {
+            return false;
+        }
+        $number = '(?:\d+(?:\.\d+)?|\.\d+)';
+        $unit = '(?:px|r?em|vw|vh|vmin|vmax|%|ch|ex|cap|ic|lh|rlh|pt|pc|in|cm|mm|q)';
+        $length = '(?:0|' . $number . $unit . ')';
+        $variable = 'var\(\s*--[A-Za-z_][A-Za-z0-9_-]*(?:\s*,\s*' . $length . ')?\s*\)';
+        $calculation = 'calc\(\s*' . $length . '(?:\s*[+-]\s*' . $length . ')+\s*\)';
+        $component = '(?:' . $length . '|' . $variable . '|' . $calculation . ')';
+
+        return preg_match('/^' . $component . '$/i', $size) === 1
+            || preg_match(
+                '/^clamp\(\s*' . $component . '\s*,\s*' . $component . '\s*,\s*' . $component . '\s*\)$/i',
+                $size,
+            ) === 1
+            || preg_match('/^(?:min|max)\(\s*' . $component . '(?:\s*,\s*' . $component . ')+\s*\)$/i', $size) === 1;
+    }
+
+    /**
+     * Fill the build-supplied wiring, letting any well-shaped model-authored
+     * leaf win.
      * Pure — unit-testable.
      *
      * @param array<mixed> $theme
@@ -636,14 +687,111 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      */
     public static function applyScaffold(array $theme): array
     {
-        return self::mergeScaffoldDefaults(self::SCAFFOLD, $theme);
+        return self::repairScaffold($theme)[0];
+    }
+
+    /**
+     * Fill scaffold omissions and repair wrong-shaped scaffold-owned nodes.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairScaffold(array $theme): array
+    {
+        [$theme, $warnings] = self::removeUnverifiedContextColors($theme);
+        $shapeWarnings = [];
+        $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
+        return [$theme, array_merge($warnings, $shapeWarnings)];
+    }
+
+    /**
+     * Remove theme-level text colors the rendered-background contrast pass
+     * cannot see. The declaration is the smallest isolatable unit; sibling
+     * color properties and typography survive.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeUnverifiedContextColors(array $theme): array
+    {
+        $warnings = [];
+        foreach (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'caption'] as $element) {
+            self::removeContextTextColor(
+                $theme,
+                ['styles', 'elements', $element, 'color'],
+                "styles.elements.{$element}.color",
+                $warnings,
+            );
+        }
+        $blocks = $theme['styles']['blocks'] ?? null;
+        if (is_array($blocks) && ($blocks === [] || !array_is_list($blocks))) {
+            foreach (array_keys($blocks) as $block) {
+                if (!is_string($block)) {
+                    continue;
+                }
+                self::removeContextTextColor(
+                    $theme,
+                    ['styles', 'blocks', $block, 'color'],
+                    "styles.blocks.{$block}.color",
+                    $warnings,
+                );
+            }
+        }
+        return [$theme, $warnings];
+    }
+
+    /**
+     * @param array<mixed> $theme
+     * @param list<string> $path
+     * @param list<string> $warnings
+     */
+    private static function removeContextTextColor(
+        array &$theme,
+        array $path,
+        string $label,
+        array &$warnings,
+    ): void {
+        $leaf = array_pop($path);
+        if (!is_string($leaf)) {
+            return;
+        }
+        $parent =& $theme;
+        foreach ($path as $key) {
+            if (!is_array($parent) || !array_key_exists($key, $parent)) {
+                return;
+            }
+            $parent =& $parent[$key];
+        }
+        if (!is_array($parent) || !array_key_exists($leaf, $parent)) {
+            return;
+        }
+        if (!is_array($parent[$leaf])
+            || ($parent[$leaf] !== [] && array_is_list($parent[$leaf]))) {
+            $warnings[] = "theme/theme.json {$label}: authored "
+                . self::warningValue($parent[$leaf])
+                . '; delivered removed'
+                . '; disposition removed malformed context-free color container';
+            unset($parent[$leaf]);
+            return;
+        }
+        if (!array_key_exists('text', $parent[$leaf])) {
+            return;
+        }
+        $warnings[] = "theme/theme.json {$label}.text: authored "
+            . self::warningValue($parent[$leaf]['text'])
+            . '; delivered removed'
+            . '; disposition removed context-free text color invisible to contrast repair';
+        unset($parent[$leaf]['text']);
+        if ($parent[$leaf] === []) {
+            unset($parent[$leaf]);
+        }
     }
 
     /**
      * Recursively fill associative-map omissions while preserving every
-     * model-authored leaf. Non-empty lists and scalars are model leaves; an
-     * empty array is also PHP's representation of a decoded empty JSON object,
-     * so it receives the scaffold map.
+     * well-shaped model-authored leaf. An empty array is also PHP's
+     * representation of a decoded empty JSON object, so it receives the
+     * scaffold map.
      *
      * Pure — unit-testable.
      *
@@ -653,7 +801,24 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      */
     public static function mergeScaffoldDefaults(array $scaffold, array $model): array
     {
+        $warnings = [];
+        return self::mergeScaffoldDefaultsAtPath($scaffold, $model, '', $warnings);
+    }
+
+    /**
+     * @param array<mixed> $scaffold
+     * @param array<mixed> $model
+     * @param list<string> $warnings
+     * @return array<mixed>
+     */
+    private static function mergeScaffoldDefaultsAtPath(
+        array $scaffold,
+        array $model,
+        string $path,
+        array &$warnings,
+    ): array {
         foreach ($scaffold as $key => $scaffoldValue) {
+            $currentPath = $path === '' ? (string) $key : $path . '.' . $key;
             if (!array_key_exists($key, $model)) {
                 $model[$key] = $scaffoldValue;
                 continue;
@@ -665,7 +830,22 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $scaffoldIsMap = is_array($scaffoldValue)
                 && ($scaffoldValue === [] || !array_is_list($scaffoldValue));
             if ($modelIsMap && $scaffoldIsMap) {
-                $model[$key] = self::mergeScaffoldDefaults($scaffoldValue, $modelValue);
+                $model[$key] = self::mergeScaffoldDefaultsAtPath(
+                    $scaffoldValue,
+                    $modelValue,
+                    $currentPath,
+                    $warnings,
+                );
+                continue;
+            }
+            if (($scaffoldIsMap && !$modelIsMap)
+                || (!is_array($scaffoldValue)
+                    && get_debug_type($modelValue) !== get_debug_type($scaffoldValue))) {
+                $warnings[] = "theme/theme.json {$currentPath}: authored "
+                    . self::warningValue($modelValue) . '; delivered '
+                    . self::warningValue($scaffoldValue)
+                    . '; disposition replaced malformed shape with scaffold default';
+                $model[$key] = $scaffoldValue;
             }
         }
 
