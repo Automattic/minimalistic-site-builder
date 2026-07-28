@@ -4,20 +4,17 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Insert missing structural block closers when model markup closes an ancestor
- * while containers are still open (common after TOON→JSON expand).
+ * Insert missing structural block closers / wrapper tags when model markup is
+ * almost balanced but forgets a delimiter or a shell </div>.
  *
- * Example failure shape (Lumen self-care-toolkits):
+ * Cases:
  *
- *   <!-- wp:column -->
- *     <!-- wp:group ... -->
- *     <div class="wp-block-group">…</div>
- *   <!-- /wp:column -->   ← forgot <!-- /wp:group -->
+ * 1. Lumen: group still open when /wp:column appears → insert <!-- /wp:group -->
+ *    (and a column </div> when the model used one div for the group only).
  *
- * Without the group closer, BlockMarkup treats later closers as mismatched and
- * taints the whole tree, so document recovery fails even though the HTML is
- * almost balanced. This pass inserts the missing <!-- /wp:group --> (and the
- * same for columns/column/buttons) so recovery can continue.
+ * 2. Saltline: wp:buttons opens <div class="wp-block-buttons"> then closes
+ *    <!-- /wp:buttons --> without </div> → child-zone validation fails on the
+ *    blank/non-closed wrapper. Insert </div> before the buttons closer.
  */
 final class BlockCloserRepair
 {
@@ -68,16 +65,14 @@ final class BlockCloserRepair
                 $name = $cm[1];
                 // Insert auto-closers for structural containers above the target.
                 while ($stack !== [] && end($stack) !== $name) {
-                    $top = end($stack);
+                    $top = (string) end($stack);
                     if (!isset(self::AUTO_CLOSE[$top])) {
                         break;
                     }
                     $out .= "<!-- /wp:{$top} -->";
                     $notes[] = "inserted missing <!-- /wp:{$top} --> before <!-- /wp:{$name} -->";
                     // Models often close the group DIV then jump to /wp:column,
-                    // leaving the column's wrapper </div> unwritten. After we
-                    // re-insert the group block closer, still need the column
-                    // shell: …</div><!-- /wp:group --></div><!-- /wp:column -->
+                    // leaving the column's wrapper </div> unwritten.
                     if ($top === 'group' && $name === 'column') {
                         $out .= '</div>';
                         $notes[] = 'inserted missing </div> for column wrapper after auto-closed group';
@@ -85,11 +80,14 @@ final class BlockCloserRepair
                     array_pop($stack);
                 }
                 if ($stack !== [] && end($stack) === $name) {
+                    // Saltline: wp:buttons opens <div class="wp-block-buttons">
+                    // then omits </div> before <!-- /wp:buttons -->. Only buttons
+                    // always use a div shell (group may be <section> via tagName).
+                    if ($name === 'buttons' && !str_ends_with(rtrim($out), '</div>')) {
+                        $out .= '</div>';
+                        $notes[] = 'inserted missing </div> before <!-- /wp:buttons -->';
+                    }
                     array_pop($stack);
-                } else {
-                    // Closer for a name not on the stack (or blocked by a
-                    // non-auto-closeable frame): leave the closer; BlockMarkup
-                    // records the mismatch. Do not invent a matching opener.
                 }
                 $out .= $full;
                 $offset = $end + 3;

@@ -63,7 +63,7 @@ final class GeneratedMarkup
         $closerNotes = [];
         $text = BlockCloserRepair::repair($text, $closerNotes);
         foreach ($closerNotes as $note) {
-            fwrite(STDERR, "    (part '{$key}': {$note})\n");
+            $record($note);
         }
 
         $recoveryNotes = [];

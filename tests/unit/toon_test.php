@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\Toon;
 use Automattic\SiteBuild\ToonBlockAttrs;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
@@ -318,4 +319,45 @@ HTML;
     assert_eq(count($co[0]), count($cc[0]), 'every column has a closer');
     assert_contains('Download the log', $out);
     assert_contains('Next column.', $out);
+});
+
+test('inserts missing buttons wrapper div (Saltline next-step-cta shape)', function () {
+    // Model opened <div class="wp-block-buttons"> then closed <!-- /wp:buttons -->
+    // without </div> — assertComplete rejects non-block content in the child zone.
+    $broken = <<<'HTML'
+<!-- wp:group
+layout:
+  type: constrained
+-->
+<div class="wp-block-group">
+<!-- wp:buttons
+layout:
+  type: flex
+  justifyContent: center
+-->
+<div class="wp-block-buttons"><!-- wp:button
+backgroundColor: primary
+textColor: accent
+-->
+<div class="wp-block-button"><a class="wp-block-button__link has-accent-color has-primary-background-color" href="/contact/">Lock in your dates</a></div>
+<!-- /wp:button -->
+
+<!-- wp:button
+className: is-style-outline
+textColor: contrast
+-->
+<div class="wp-block-button is-style-outline"><a class="wp-block-button__link has-contrast-color" href="/life-aboard/">See life aboard</a></div>
+<!-- /wp:button -->
+<!-- /wp:buttons -->
+</div>
+<!-- /wp:group -->
+HTML;
+    $out = GeneratedMarkup::normalize($broken, 'saltline-cta');
+    assert_contains('Lock in your dates', $out);
+    assert_contains('See life aboard', $out);
+    assert_true(
+        (bool) preg_match('/<\/div>\s*<!--\s*\/wp:buttons\s*-->/', $out),
+        'buttons shell </div> must precede /wp:buttons',
+    );
+    BlockDocumentRecovery::assertComplete($out);
 });
