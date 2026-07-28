@@ -238,3 +238,84 @@ test('ToonBlockAttrs can still pass through JSON when requireToon is false', fun
     $notes = [];
     assert_eq($json, ToonBlockAttrs::expand($json, $notes, false));
 });
+
+test('repairs HTML-shaped paragraph comments from Fuego signature-drinks', function () {
+    // Model emitted <!-- wp:paragraph> … </wp:paragraph --> instead of real
+    // Gutenberg delimiters mid-section (Cascarilla de Coyoacán card).
+    $broken = <<<'HTML'
+<!-- wp:group
+layout:
+  type: constrained
+-->
+<div class="wp-block-group">
+<!-- wp:heading -->
+<h3 class="wp-block-heading">Cascarilla de Coyoacán</h3>
+<!-- /wp:heading -->
+
+<!-- wp:paragraph>
+</wp:paragraph -->
+<!-- wp:paragraph -->
+<p>Infusión fría de cascarilla.</p>
+<!-- /wp:paragraph -->
+</div>
+<!-- /wp:group -->
+HTML;
+    $out = GeneratedMarkup::normalize($broken, 'fuego-sig');
+    assert_true(!str_contains($out, '<!-- wp:paragraph>'), 'no HTML-shaped openers left');
+    assert_true(!str_contains($out, '</wp:paragraph'), 'no HTML-shaped closers left');
+    assert_contains('Cascarilla de Coyoacán', $out);
+    assert_contains('Infusión fría', $out);
+    assert_contains('<!-- wp:group {"layout":{"type":"constrained"}} -->', $out);
+});
+
+test('inserts missing group closer before column (Lumen self-care-toolkits shape)', function () {
+    // Model closed the group DIV then jumped to /wp:column, omitting
+    // <!-- /wp:group --> (and the column shell </div>).
+    $broken = <<<'HTML'
+<!-- wp:columns
+align: wide
+-->
+<div class="wp-block-columns">
+<!-- wp:column
+width: 32%
+-->
+<div class="wp-block-column" style="flex-basis:32%">
+<!-- wp:group
+className: hover-lift
+layout:
+  type: constrained
+-->
+<div class="wp-block-group hover-lift">
+<!-- wp:paragraph -->
+<p>Body copy.</p>
+<!-- /wp:paragraph -->
+<!-- wp:paragraph
+fontSize: caption
+-->
+<p class="has-caption-font-size"><a href="/resources/">Download the log</a></p>
+<!-- /wp:paragraph --></div>
+<!-- /wp:column -->
+
+<!-- wp:column
+width: 38%
+-->
+<div class="wp-block-column" style="flex-basis:38%">
+<!-- wp:paragraph -->
+<p>Next column.</p>
+<!-- /wp:paragraph -->
+</div>
+<!-- /wp:column -->
+</div>
+<!-- /wp:columns -->
+HTML;
+    $out = GeneratedMarkup::normalize($broken, 'lumen-toolkits');
+    // Count openers with a name boundary so "wp:columns" is not matched as "wp:column".
+    preg_match_all('/<!--\s*wp:group\b/', $out, $go);
+    preg_match_all('/<!--\s*\/wp:group\s*-->/', $out, $gc);
+    preg_match_all('/<!--\s*wp:column\b/', $out, $co);
+    preg_match_all('/<!--\s*\/wp:column\s*-->/', $out, $cc);
+    assert_eq(count($go[0]), count($gc[0]), 'every group has a closer');
+    assert_eq(count($co[0]), count($cc[0]), 'every column has a closer');
+    assert_contains('Download the log', $out);
+    assert_contains('Next column.', $out);
+});

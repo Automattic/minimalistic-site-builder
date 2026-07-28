@@ -40,6 +40,12 @@ final class ToonBlockAttrs
     public static function expand(string $markup, array &$notes = [], bool $requireToon = true): string
     {
         $notes = [];
+        // Models sometimes emit HTML-tag-shaped block comments:
+        //   <!-- wp:paragraph>
+        //   </wp:paragraph -->
+        // Normalize those before TOON attr conversion (Fuego signature-drinks).
+        $markup = self::repairHtmlShapedBlockComments($markup, $notes);
+
         $out = '';
         $offset = 0;
         $len = strlen($markup);
@@ -49,6 +55,13 @@ final class ToonBlockAttrs
             if ($start === false) {
                 $out .= substr($markup, $offset);
                 break;
+            }
+            // Only Gutenberg block comments (<!-- wp:… / <!-- /wp:…). Bare
+            // "<!--" inside attribute values must stay literal text.
+            if (!self::isBlockCommentStart($markup, $start)) {
+                $out .= substr($markup, $offset, $start + 4 - $offset);
+                $offset = $start + 4;
+                continue;
             }
             $out .= substr($markup, $offset, $start - $offset);
 
@@ -66,6 +79,45 @@ final class ToonBlockAttrs
         }
 
         return $out;
+    }
+
+    /** Whether $offset points at a Gutenberg block comment opener (`<!-- wp:` / `<!-- /wp:`). */
+    public static function isBlockCommentStart(string $markup, int $offset): bool
+    {
+        if (!str_starts_with(substr($markup, $offset), '<!--')) {
+            return false;
+        }
+        return preg_match('/\A<!--\s*\/?\s*wp:/', substr($markup, $offset, 24)) === 1;
+    }
+
+    /**
+     * Repair HTML-tag-shaped block delimiters into real Gutenberg comments.
+     *
+     * @param list<string> $notes
+     */
+    public static function repairHtmlShapedBlockComments(string $markup, array &$notes = []): string
+    {
+        // <!-- wp:name>  →  <!-- wp:name -->
+        $markup = (string) preg_replace_callback(
+            '/<!--\s*(wp:[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)\s*>/i',
+            static function (array $m) use (&$notes): string {
+                $notes[] = "repaired HTML-shaped opener <!-- {$m[1]} -->";
+                return "<!-- {$m[1]} -->";
+            },
+            $markup,
+        );
+
+        // </wp:name -->  →  <!-- /wp:name -->
+        $markup = (string) preg_replace_callback(
+            '/<\/wp:([a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)\s*-->/i',
+            static function (array $m) use (&$notes): string {
+                $notes[] = "repaired HTML-shaped closer <!-- /wp:{$m[1]} -->";
+                return "<!-- /wp:{$m[1]} -->";
+            },
+            $markup,
+        );
+
+        return $markup;
     }
 
     /**
@@ -171,12 +223,25 @@ final class ToonBlockAttrs
             return $original;
         }
 
+        // Garbage left after a broken HTML-shaped comment (e.g. ">\n</wp:paragraph")
+        // must not be forced through the TOON decoder.
+        if (self::looksLikeHtmlGarbage($rest)) {
+            $notes[] = "wp:{$name}: dropped non-TOON garbage attrs, using attr-less opener";
+            return $void ? "<!-- wp:{$name} /-->" : "<!-- wp:{$name} -->";
+        }
+
         try {
             $attrs = Toon::decode($rest);
         } catch (\Throwable $e) {
             throw new \RuntimeException(
                 "TOON block attrs for wp:{$name}: " . $e->getMessage()
             );
+        }
+        // Empty PHP array is both empty object and empty list in our model —
+        // treat as attr-less. Non-empty lists are never valid block attrs.
+        if (is_array($attrs) && $attrs === []) {
+            $notes[] = "wp:{$name}: empty TOON attrs → attr-less opener";
+            return $void ? "<!-- wp:{$name} /-->" : "<!-- wp:{$name} -->";
         }
         if (!is_array($attrs) || self::isList($attrs)) {
             throw new \RuntimeException(
@@ -189,6 +254,22 @@ final class ToonBlockAttrs
         return $void
             ? "<!-- wp:{$name} {$json} /-->"
             : "<!-- wp:{$name} {$json} -->";
+    }
+
+    /** Rest text that is clearly not TOON attrs (leftover HTML-shaped noise). */
+    private static function looksLikeHtmlGarbage(string $rest): bool
+    {
+        $trim = ltrim($rest);
+        if ($trim === '') {
+            return false;
+        }
+        if ($trim[0] === '>') {
+            return true;
+        }
+        if (str_contains($rest, '</wp:') || str_contains($rest, '</ wp:')) {
+            return true;
+        }
+        return false;
     }
 
     /**

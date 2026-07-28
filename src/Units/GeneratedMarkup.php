@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\BlockCloserRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
@@ -55,6 +56,14 @@ final class GeneratedMarkup
         }
         foreach ($toonNotes as $note) {
             $record($note);
+        }
+
+        // Insert missing structural closers (group/columns/column/buttons) when
+        // the model closed an ancestor too early — common after TOON expand.
+        $closerNotes = [];
+        $text = BlockCloserRepair::repair($text, $closerNotes);
+        foreach ($closerNotes as $note) {
+            fwrite(STDERR, "    (part '{$key}': {$note})\n");
         }
 
         $recoveryNotes = [];
