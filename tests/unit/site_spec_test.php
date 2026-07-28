@@ -169,6 +169,16 @@ test('nameFromPrompt derives a clean short name and floors at "New Site"', funct
         'first six words, punctuation stripped',
     );
     assert_eq('New Site', SiteSpecStep::nameFromPrompt('!!! ???'));
+    assert_eq(
+        'Ñoquis De La Abuela',
+        SiteSpecStep::nameFromPrompt('ñoquis de la abuela'),
+        'a leading multibyte letter is capitalized',
+    );
+    assert_eq(
+        'Buenos Aires Photo Diary',
+        SiteSpecStep::nameFromPrompt('Buenos-Aires photo diary'),
+        'hyphenated words stay separate instead of being joined',
+    );
 });
 
 test('site-spec normalizes the pages tree: slugs slugified and globally unique', function () {

@@ -143,13 +143,16 @@ final class SiteSpecStep implements Step
     public static function nameFromPrompt(string $prompt): string
     {
         $words = preg_split('/\s+/', trim($prompt), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        // Punctuation becomes a space (not deleted) so hyphenated words stay
+        // separate; MB_CASE_TITLE capitalizes a leading multibyte letter that
+        // byte-oriented ucwords() would leave lowercase.
         $name = trim((string) preg_replace(
-            '/[^\p{L}\p{N} ]/u',
-            '',
+            '/[^\p{L}\p{N}]+/u',
+            ' ',
             implode(' ', array_slice($words, 0, 6)),
         ));
         $name = trim(mb_substr($name, 0, 48));
-        return $name !== '' ? ucwords(mb_strtolower($name)) : 'New Site';
+        return $name !== '' ? mb_convert_case($name, MB_CASE_TITLE, 'UTF-8') : 'New Site';
     }
 
     /**
