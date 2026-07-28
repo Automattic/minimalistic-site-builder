@@ -292,7 +292,12 @@ final class ThemeJsonStep implements ConcurrentStep
             $warnings[] = 'theme.json missing settings.color.palette; rebuilt with default colors';
             $palette = [];
         }
-        $palette = array_values(array_filter($palette, 'is_array'));
+        $entries = array_values(array_filter($palette, 'is_array'));
+        if (($malformed = count($palette) - count($entries)) > 0) {
+            $warnings[] = "theme.json palette: removed {$malformed} malformed (non-object) entr"
+                . ($malformed === 1 ? 'y' : 'ies');
+        }
+        $palette = $entries;
         $slugs = array_column($palette, 'slug');
         foreach (self::REQUIRED_COLORS as $needed) {
             if (in_array($needed, $slugs, true)) {
@@ -324,7 +329,12 @@ final class ThemeJsonStep implements ConcurrentStep
             $warnings[] = 'theme.json missing settings.typography.fontFamilies; rebuilt with system stacks';
             $families = [];
         }
-        $families = array_values(array_filter($families, 'is_array'));
+        $entries = array_values(array_filter($families, 'is_array'));
+        if (($malformed = count($families) - count($entries)) > 0) {
+            $warnings[] = "theme.json fontFamilies: removed {$malformed} malformed (non-object) entr"
+                . ($malformed === 1 ? 'y' : 'ies');
+        }
+        $families = $entries;
         $slugs = array_column($families, 'slug');
         foreach (self::REQUIRED_FONTS as $needed) {
             if (in_array($needed, $slugs, true)) {

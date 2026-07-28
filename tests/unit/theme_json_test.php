@@ -232,6 +232,20 @@ test('repairColors falls back to neutral readable defaults without a direction h
     assert_eq(4, count($warnings));
 });
 
+test('repairColors and repairFonts record the malformed entries they remove', function () {
+    // A removal is a rung-3 excision and must leave a durable record, even
+    // when the removed entry was model garbage rather than an authored value.
+    [, $warnings] = \Automattic\SiteBuild\Steps\ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => ['bogus']]]],
+    );
+    assert_contains('palette: removed 1 malformed (non-object) entry', implode(' ', $warnings));
+
+    [, $fontWarnings] = \Automattic\SiteBuild\Steps\ThemeJsonStep::repairFonts(
+        ['settings' => ['typography' => ['fontFamilies' => ['bogus', 42]]]],
+    );
+    assert_contains('fontFamilies: removed 2 malformed (non-object) entries', implode(' ', $fontWarnings));
+});
+
 test('theme-json forces useRootPaddingAwareAlignments when root side padding is set', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
