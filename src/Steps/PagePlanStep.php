@@ -187,41 +187,52 @@ final class PagePlanStep implements ConcurrentStep
     {
         $pages = self::flattenPages($project->readJson('siteSpec.json'));
 
-        $out = [];
+        // First pass: normalize what the model returned, collecting every page
+        // that broke a rule so they can all be re-asked together below.
+        $sectionsBySlug = [];
+        $rejected = [];
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
-            $front = (bool) $page['front'];
             $plan = $results[$slug] ?? null;
             if (!is_array($plan)) {
                 throw new \RuntimeException("page-plan: missing model output for page '{$slug}'");
             }
 
             try {
-                $sections = self::normalize($plan['sections'] ?? null, $front);
+                $sections = self::normalize($plan['sections'] ?? null, (bool) $page['front']);
                 if ($sections === []) {
                     throw new \RuntimeException(
                         "page-plan: page '{$slug}' has no sections — return the full JSON object with a non-empty \"sections\" array"
                     );
                 }
+                $sectionsBySlug[$slug] = $sections;
             } catch (\RuntimeException $e) {
-                // The art-direction rules (adjacency, enums, card-grid cap,
-                // interior opening) are creative constraints the model
-                // occasionally violates. Re-ask ONCE per page with the
-                // specific rejections; if the repair still breaks the variety
-                // rules, reassign the offending archetypes mechanically
-                // instead of aborting the build.
-                $repaired = $this->repair($project, $slug, $plan, $e->getMessage());
-                try {
-                    $sections = self::normalize($repaired['sections'] ?? null, $front);
-                } catch (\RuntimeException $stillInvalid) {
-                    $sections = self::normalize(self::repairVariety($repaired['sections'] ?? null, $front), $front);
-                }
-                if ($sections === []) {
-                    throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
-                }
+                $rejected[$slug] = ['plan' => $plan, 'errors' => $e->getMessage()];
             }
+        }
 
-            $page['sections'] = $sections;
+        // The art-direction rules are creative constraints the model
+        // occasionally violates. Re-ask ONCE per rejected page, all of them in
+        // ONE batch; if a repair still breaks the variety rules, reassign the
+        // offending archetypes mechanically instead of aborting the build.
+        $frontBySlug = array_column($pages, 'front', 'slug');
+        foreach ($this->repairAll($project, $rejected) as $slug => $repaired) {
+            $slug = (string) $slug;
+            $front = (bool) ($frontBySlug[$slug] ?? false);
+            try {
+                $sections = self::normalize($repaired['sections'] ?? null, $front);
+            } catch (\RuntimeException $stillInvalid) {
+                $sections = self::normalize(self::repairVariety($repaired['sections'] ?? null, $front), $front);
+            }
+            if ($sections === []) {
+                throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
+            }
+            $sectionsBySlug[$slug] = $sections;
+        }
+
+        $out = [];
+        foreach ($pages as $page) {
+            $page['sections'] = $sectionsBySlug[(string) $page['slug']];
             $out[] = $page;
         }
 
@@ -229,16 +240,44 @@ final class PagePlanStep implements ConcurrentStep
     }
 
     /**
-     * One-shot repair call for one page: its original prompt + the rejected
-     * plan + every validation error, asking for a corrected full plan.
+     * Re-ask every rejected page in ONE batch: each page's original prompt plus
+     * its own rejected plan and validation errors, keyed back by page slug. No
+     * rejections means no LLM call, and the page prompts are rendered once for
+     * the whole batch rather than once per repair.
+     *
+     * @param array<string,array{plan:array<mixed>,errors:string}> $rejected
+     * @return array<array-key,array<mixed>>
+     */
+    private function repairAll(Project $project, array $rejected): array
+    {
+        if ($rejected === []) {
+            return [];
+        }
+
+        $prompts = $this->requests($project);
+        $requests = [];
+        foreach ($rejected as $slug => $rejection) {
+            $requests[$slug] = $this->withOptions([
+                'prompt'      => (string) $prompts[$slug]['prompt']
+                    . self::repairSuffix($rejection['plan'], $rejection['errors']),
+                'log_label'   => $this->id() . "-{$slug}-repair",
+                'json_schema' => ['name' => 'page_plan', 'schema' => self::jsonSchema()],
+            ]);
+        }
+
+        return $this->llm->completeJsonBatch($requests);
+    }
+
+    /**
+     * The correction appended to a page's original prompt: the rejected plan
+     * and every validation error, plus the rules a repair itself must respect.
+     * Pure — unit-testable.
      *
      * @param array<mixed> $plan
-     * @return array<mixed>
      */
-    private function repair(Project $project, string $pageSlug, array $plan, string $errors): array
+    private static function repairSuffix(array $plan, string $errors): string
     {
-        $prompt = $this->requests($project)[$pageSlug]['prompt']
-            . "\n\nYOUR PREVIOUS PLAN (JSON):\n"
+        return "\n\nYOUR PREVIOUS PLAN (JSON):\n"
             . json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
             . "\n\nIT WAS REJECTED FOR THESE REASONS:\n{$errors}\n"
             . "\nReturn the corrected full JSON object. Fix EVERY rejection above. "
@@ -248,11 +287,6 @@ final class PagePlanStep implements ConcurrentStep
             . 'If you change a section\'s layout_archetype, background, vertical_density, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
-
-        return $this->llm->completeJson($prompt, $this->withOptions([
-            'log_label'   => $this->id() . "-{$pageSlug}-repair",
-            'json_schema' => ['name' => 'page_plan', 'schema' => self::jsonSchema()],
-        ]));
     }
 
     public function run(Project $project): void
