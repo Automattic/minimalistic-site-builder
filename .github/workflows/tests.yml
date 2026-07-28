@@ -60,6 +60,46 @@ jobs:
           test -f /tmp/wordpress/wp-includes/html-api/class-wp-html-processor.php
           echo "SITEBUILD_WP_PATH=/tmp/wordpress" >> "$GITHUB_ENV"
 
+      - name: TEMP diagnose unmatteEdges
+        run: |
+          php -r '
+            echo "imagick ext: " . phpversion("imagick") . "\n";
+            $v = Imagick::getVersion();
+            echo "ImageMagick: " . $v["versionString"] . "\n";
+            echo "quantum: " . Imagick::getQuantum() . "\n";
+            $im = new Imagick();
+            $im->newImage(60, 60, new ImagickPixel("white"));
+            $d = new ImagickDraw();
+            $d->setFillColor(new ImagickPixel("red"));
+            $d->rectangle(20,20,40,40);
+            $d->setFillColor(new ImagickPixel("rgb(255,128,128)"));
+            $d->rectangle(19,20,19,40);
+            $im->drawImage($d);
+            $im->setImageFormat("png");
+            $im->setImageAlphaChannel(Imagick::ALPHACHANNEL_SET);
+            try {
+              $neg = clone $im; $neg->setImageAlphaChannel(Imagick::ALPHACHANNEL_OFF); $neg->negateImage(false);
+              $t = clone $neg; $t->separateImageChannel(Imagick::CHANNEL_RED);
+              foreach ([Imagick::CHANNEL_GREEN, Imagick::CHANNEL_BLUE] as $c) {
+                $o = clone $neg; $o->separateImageChannel($c);
+                $t->compositeImage($o, Imagick::COMPOSITE_LIGHTEN, 0, 0);
+              }
+              echo "levelImage...\n";
+              $t->levelImage(0.0, 1.0, 0.75 * Imagick::getQuantum());
+              echo "DIVIDEDST...\n";
+              $neg->compositeImage($t, Imagick::COMPOSITE_DIVIDEDST, 0, 0);
+              $neg->negateImage(false);
+              echo "COPYOPACITY...\n";
+              $ka = clone $im; $ka->separateImageChannel(Imagick::CHANNEL_ALPHA);
+              $t->compositeImage($ka, Imagick::COMPOSITE_MULTIPLY, 0, 0);
+              $neg->compositeImage($t, Imagick::COMPOSITE_COPYOPACITY, 0, 0);
+              echo "OK no throw\n";
+            } catch (Throwable $e) {
+              echo "THROWS: " . get_class($e) . ": " . $e->getMessage() . "\n";
+            }
+          '
+        continue-on-error: true
+
       - name: Unit tests
         run: php tests/run.php
 
