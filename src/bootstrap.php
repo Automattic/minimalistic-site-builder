@@ -43,6 +43,18 @@ function llm_temperature(string $envSuffix, ?float $default): ?float
     return StepDefaults::temperature($envSuffix, $default);
 }
 
+/** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
+function openrouter_api_key(): string
+{
+    foreach (['OPENROUTER_API_KEY', 'OPEN_ROUTER_API_KEY'] as $key) {
+        $value = Env::get($key);
+        if ($value !== null && trim($value) !== '') {
+            return trim($value);
+        }
+    }
+    return Env::getRequired('OPENROUTER_API_KEY');
+}
+
 /**
  * Build the production LLM transport from environment configuration.
  *
@@ -50,6 +62,7 @@ function llm_temperature(string $envSuffix, ?float $default): ?float
  *   - anthropic — Anthropic Messages API (ANTHROPIC_API_KEY)
  *   - xai       — OpenAI-compatible client pointed at api.x.ai (XAI_API_KEY)
  *   - openai    — OpenAI-compatible client (OPENAI_API_KEY, optional OPENAI_BASE_URL)
+ *   - openrouter — OpenAI-compatible client → https://openrouter.ai/api/v1 (OPENROUTER_API_KEY)
  *
  * Model IDs come from the provider's tiers in config/models.json (StepDefaults),
  * overridable per step via LLM_MODEL_* — so `--provider=openai` swaps the whole
@@ -76,8 +89,23 @@ function make_llm(): Llm
             baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1') ?? 'https://api.openai.com/v1',
             provider: 'openai',
         ),
+        'openrouter' => new OpenAiCompatibleClient(
+            apiKey:   openrouter_api_key(),
+            model:    default_llm_model(),
+            baseUrl:  'https://openrouter.ai/api/v1',
+            provider: 'openrouter',
+            // Kimi K3 currently defaults to maximum-effort reasoning. Those
+            // reasoning tokens share the completion budget with the visible
+            // answer, and long generations need more than the generic timeout.
+            // The client applies K3's larger token ceiling only to that model;
+            // K2.5 structural calls retain the normal 16k default.
+            timeoutSeconds: 1200,
+            // Demo processes run concurrently. Keep each site's markup fan-out
+            // bounded so three sites produce at most 12 simultaneous requests.
+            maxConcurrency: 4,
+        ),
         default => throw new RuntimeException(
-            "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, or openai."
+            "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, openai, or openrouter."
         ),
     };
 }

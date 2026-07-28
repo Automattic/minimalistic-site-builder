@@ -14,6 +14,10 @@
         "xai": {
             "large": "grok-4.5",
             "small": "grok-4.5"
+        },
+        "openrouter": {
+            "large": "moonshotai/kimi-k3",
+            "small": "moonshotai/kimi-k2.5:nitro"
         }
     },
     "step_tiers": {

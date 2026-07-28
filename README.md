@@ -20,6 +20,7 @@ seeder imports into the media library on activation). The homepage is a seeded p
 cp .env.example .env
 # Text/code LLM (default Anthropic): ANTHROPIC_API_KEY
 # Or xAI Grok: LLM_PROVIDER=xai, XAI_API_KEY, LLM_MODEL=grok-4.5 (and per-step models)
+# Or OpenRouter: LLM_PROVIDER=openrouter, OPENROUTER_API_KEY (models come from config/models.json)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
 npm ci   # optional; installs local Playground and screenshot helpers
@@ -53,7 +54,7 @@ php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu,
 
 ### Choosing the model / provider
 
-`--provider=<anthropic|openai|xai>` (or the `LLM_PROVIDER` env var) picks a whole
+`--provider=<anthropic|openai|xai|openrouter>` (or the `LLM_PROVIDER` env var) picks a whole
 model set at once. Each provider defines a **large** (quality-critical steps) and
 **small** (fast/cheap structural steps) model in
 [`config/models.json`](config/models.json), and each pipeline step is mapped to a
@@ -64,12 +65,22 @@ tier there — so switching providers needs no per-step configuration. Defaults:
 | `anthropic` (default) | `claude-opus-4-8` | `claude-haiku-4-5` |
 | `openai` | `gpt-5.5` | `gpt-5.4-mini` |
 | `xai` | `grok-4.5` | `grok-4.5` |
+| `openrouter` | `moonshotai/kimi-k3` | `moonshotai/kimi-k2.5:nitro` |
 
 Edit `config/models.json` to change those model ids. To override just one run or
 one step (any model id, wins over the config):
 
 - `LLM_MODEL` / `LLM_MODEL_SMALL` — the run-wide large / small tier
 - `LLM_MODEL_<STEP>` — a single step, e.g. `LLM_MODEL_SITE_SPEC=gpt-5.5`
+
+The OpenRouter profile uses K3 for every quality-critical large-tier step:
+`design-direction`, `theme-json`, `sections`, `page-styles`, `custom-motion`,
+and `fonts-php`. Fast K2.5 `:nitro`, with optional reasoning disabled, is
+reserved for the small structural steps. K3's maximum-effort reasoning shares
+its completion budget with the visible answer, so the transport gives it a
+larger token budget and timeout. OpenRouter demo batches run up to three sites
+in parallel and bound each site's internal request fan-out at four; pass
+`--parallel=<n>` to override the site cap.
 
 Output lands in `projects/<slug>/`. Each build also writes a run overview —
 per-step times and token spend, totals, and the image tally — to
@@ -85,13 +96,15 @@ in one command — useful as testing evidence for pipeline/theme changes:
 php bin/build-demos.php --with-images   # build every demo, with generated images
 ```
 
-The demos build **in parallel** — one `bin/build.php` child process per entry,
-output streamed with a `[slug]` prefix. After the builds, each home page is
+The demos build **in parallel** by default (up to three at once for OpenRouter) —
+one `bin/build.php` child process per entry, output streamed with a `[slug]`
+prefix. After the builds, each home page is
 booted headless in WordPress Playground and a full-page screenshot is saved to
 `projects/<slug>/logs/home.png`. Re-runs never overwrite prior output — each
 build goes to the next free slug (`tbilisi` → `tbilisi2` → …).
 
-Needs a text LLM key (`ANTHROPIC_API_KEY`, or `XAI_API_KEY` with `LLM_PROVIDER=xai`)
+Needs a text LLM key (`ANTHROPIC_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, or
+`OPENROUTER_API_KEY`, with the matching `LLM_PROVIDER`)
 and `GOOGLE_VERTEX_API_TOKEN` in `.env`, plus Node.js (for Playground) and a
 Chrome/Chromium binary (for the screenshot).
 
@@ -109,8 +122,9 @@ php bin/build-demos.php --with-images --serve            # serve all sites after
 each on its own port — and prints all the URLs, so the whole demo set can be
 inspected side by side. A single Ctrl-C stops all the servers.
 
-Each build fires up to ~10 concurrent Claude requests, so a full parallel batch
-is ~30 concurrent API requests; use `--parallel=<n>` if rate limits bite.
+Each build normally fires up to ~10 concurrent LLM requests. The OpenRouter
+profile caps that at four per site, so its default three-site batch reaches at
+most 12; use `--parallel=<n>` to tune the outer site concurrency.
 
 ## Publish a shareable Playground link
 
