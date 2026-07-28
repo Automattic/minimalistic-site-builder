@@ -17,7 +17,9 @@ This note is the map.
 ## Where the oracle lives
 
 Everything needed is in commit `abcf523` ("Implement pure-PHP block fixer"),
-the last commit where the oracle and the PHP port coexisted green:
+the last commit where the oracle and the PHP port coexisted green. It is pinned
+by the **`block-fixer-oracle`** tag: before that tag it was reachable only from a
+feature branch, so deleting the branch would have taken the oracle with it.
 
 | Piece | Path at `abcf523` |
 | --- | --- |
@@ -76,8 +78,8 @@ golden case).
 
 `.github/workflows/block-fixer-oracle.yml` runs the resurrection above on every
 PR that touches `src/BlockSerializer/**` or the fixtures, and weekly. It
-materialises the `block-fixer-oracle` tag with `git worktree`, checks the runtime against the
-frozen fingerprint, installs the locked dependencies, runs the oracle's own
+materialises the `block-fixer-oracle` tag with `git worktree`, checks the
+runtime against the frozen fingerprint, installs the locked dependencies, runs the oracle's own
 tests, and re-derives every frozen artifact — failing on drift.
 
 That gate protects the *recipe*, not today's artifacts: it catches the tooling
