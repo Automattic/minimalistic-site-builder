@@ -31,17 +31,27 @@ test('cover-contrast declaration does not depend on the shared contrast report',
     assert_true(!in_array('logs/cover-contrast-report.txt', $declaration->writes, true));
 });
 
-test('cover-contrast refuses to run without image-generation completion', function () {
+test('cover-contrast skips with a durable warning when image generation never completed', function () {
     $tmp = sys_get_temp_dir() . '/builder_cover_order_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    $fixer = new class implements BlockFixer {
+    $fixed = false;
+    $fixer = new class($fixed) implements BlockFixer {
+        public function __construct(private bool &$fixed) {}
         public function fix(string $themeDir): string
         {
+            $this->fixed = true;
             return 'block-fixer: ok';
         }
     };
 
-    assert_throws(fn () => (new CoverContrastStep($fixer))->run($project));
+    // A readability polish must never withhold the already-built theme: the
+    // pass skips, records the miss in warnings.json, and touches nothing.
+    (new CoverContrastStep($fixer))->run($project);
+
+    assert_true(!$fixed, 'skip must not invoke the fixer');
+    $joined = implode(' ', $project->readJson('warnings.json')['cover-contrast'] ?? []);
+    assert_contains('image generation has not completed', $joined);
+    assert_contains('cover text not verified', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

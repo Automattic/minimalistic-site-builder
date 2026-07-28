@@ -92,7 +92,7 @@ final class SiteSpecStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json'],
-            writes: ['siteSpec.json'],
+            writes: ['siteSpec.json', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -125,8 +125,31 @@ final class SiteSpecStep implements Step
         ]);
         $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
 
-        $spec = self::normalize($spec, $multiPage, $requested);
+        $warnings = [];
+        $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
+        if ($warnings !== []) {
+            $project->addWarnings($this->id(), $warnings);
+            echo '  [site-spec] warning: ' . count($warnings)
+                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n";
+        }
         $project->writeJson('siteSpec.json', $spec);
+    }
+
+    /**
+     * A deterministic site name derived from the user prompt, for specs whose
+     * model output carried none: the prompt's first few words, cleaned up.
+     * Pure — unit-testable.
+     */
+    public static function nameFromPrompt(string $prompt): string
+    {
+        $words = preg_split('/\s+/', trim($prompt), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $name = trim((string) preg_replace(
+            '/[^\p{L}\p{N} ]/u',
+            '',
+            implode(' ', array_slice($words, 0, 6)),
+        ));
+        $name = trim(mb_substr($name, 0, 48));
+        return $name !== '' ? ucwords(mb_strtolower($name)) : 'New Site';
     }
 
     /**
@@ -163,13 +186,20 @@ final class SiteSpecStep implements Step
      * @param array<mixed>                       $spec
      * @param array<int,array<string,mixed>>     $requested caller-fixed page
      *        list (already normalized by requestedPages); [] = model decides
+     * @param list<string>                       $warnings appended to in place
      * @return array<mixed>
      */
-    private static function normalize(array $spec, bool $multiPage, array $requested = []): array
-    {
+    private static function normalize(
+        array $spec,
+        bool $multiPage,
+        array $requested = [],
+        array &$warnings = [],
+        string $fallbackName = 'New Site',
+    ): array {
         $name = trim((string) ($spec['name'] ?? ''));
         if ($name === '') {
-            throw new \RuntimeException('site spec has no "name"');
+            $name = $fallbackName;
+            $warnings[] = "site spec has no \"name\"; using \"{$fallbackName}\" derived from the prompt";
         }
 
         $slug = ProjectStore::slugify((string) ($spec['slug'] ?? $name));
@@ -210,14 +240,17 @@ final class SiteSpecStep implements Step
             self::IDENTITY_KEYS,
         ));
 
-        // Every piece of site copy is written in this language; a spec without
-        // one would let each downstream prompt pick its own.
+        // Every piece of site copy is written in this language. A missing or
+        // implausible value degrades to '' — languageOf() then renders the
+        // "follow the user prompt's language" instruction downstream — with
+        // a durable warning, instead of aborting the build over one field.
         $language = trim((string) ($spec['language'] ?? ''));
         if ($language === '') {
-            throw new \RuntimeException('site spec has no "language"');
-        }
-        if (!self::plausibleLanguage($language)) {
-            throw new \RuntimeException("site spec \"language\" is not a plausible language code or name: {$language}");
+            $warnings[] = 'site spec has no "language"; downstream copy follows the user prompt\'s language';
+        } elseif (!self::plausibleLanguage($language)) {
+            $warnings[] = "site spec \"language\" is not a plausible language code or name: {$language}; "
+                . "dropped — downstream copy follows the user prompt's language";
+            $language = '';
         }
         $spec['language'] = $language;
 

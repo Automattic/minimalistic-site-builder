@@ -49,20 +49,29 @@ final class SectionRhythmStep implements Step
     public function run(Project $project): void
     {
         // Rewrite the complete ordered set of EVERY page before writing any
-        // file, so invalid plan data or one malformed root cannot leave a
-        // half-normalized site.
+        // file, so one malformed root cannot leave a half-normalized site.
+        // Isolation is per page: a page whose plan or parts are malformed
+        // keeps its authored spacing (a durable warning records the skip)
+        // while every other page is still normalized — page-level rhythm is
+        // a polish pass, not worth discarding a finished build over.
         $footerSurface = self::footerSurface($project);
         $writes = [];
         $adjustments = 0;
         $degradationWarnings = [];
         foreach (self::pages($project) as $page) {
-            [$entries, $rels] = self::planEntries($project, $page);
-            $result = SectionRhythm::rewrite($entries, $footerSurface);
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            try {
+                [$entries, $rels] = self::planEntries($project, $page);
+                $result = SectionRhythm::rewrite($entries, $footerSurface);
+            } catch (\RuntimeException $e) {
+                $degradationWarnings[] = "page '{$pageSlug}': section rhythm skipped ({$e->getMessage()}); "
+                    . 'authored section spacing delivered';
+                continue;
+            }
             foreach ($rels as $i => $rel) {
                 $writes['theme/' . $rel] = $result['markups'][$i];
             }
             $adjustments += count($result['notes']);
-            $pageSlug = trim((string) ($page['slug'] ?? ''));
             foreach ($result['degradations'] as $degradation) {
                 if ($degradation['newlyDetected']) {
                     $degradationWarnings[] = "page '{$pageSlug}', {$degradation['message']}";

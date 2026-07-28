@@ -119,6 +119,18 @@ final class FixBlocksStep implements Step
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
                 . 'see logs/' . self::LOG_FILE;
         }
+        // Files whose transformation the fixer abandoned (unsupported block,
+        // unreviewed signature, non-convergence): their pre-fixer bytes were
+        // delivered untouched — an isolated loss worth a durable record.
+        $failedFiles = self::failedFiles($summary);
+        foreach ($failedFiles as [$file, $why]) {
+            $warnings[] = "block re-serialization left {$file} unmodified ({$why}); "
+                . 'pre-fixer markup delivered — see logs/' . self::LOG_FILE;
+        }
+        if ($failedFiles !== []) {
+            echo '  [fix-blocks] warning: ' . count($failedFiles)
+                . " file(s) left unmodified after a failed transformation; see warnings.json\n";
+        }
         $project->addWarnings($this->id(), $warnings);
         if ($paragraphStyleWarnings !== []) {
             $summary .= "\n[paragraph-styles] WARNING: " . count($paragraphStyleWarnings)
@@ -294,6 +306,29 @@ final class FixBlocksStep implements Step
             );
         }
         return array_values(array_unique($warnings));
+    }
+
+    /**
+     * Decode the fixer report's FAILED rows: files whose transformation was
+     * abandoned and whose pre-fixer bytes were delivered untouched.
+     *
+     * @return list<array{0:string,1:string}> [file, reason] pairs, in report order
+     */
+    public static function failedFiles(string $report): array
+    {
+        $failures = [];
+        $file = null;
+        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
+            if (preg_match('/^\s+FAILED\s+(.+?)\s*$/', $line, $match) === 1) {
+                $file = $match[1];
+                continue;
+            }
+            if ($file !== null && preg_match('/^\s+! left unmodified:\s*(.*)$/', $line, $match) === 1) {
+                $failures[$file . "\0" . $match[1]] = [$file, $match[1]];
+            }
+            $file = null;
+        }
+        return array_values($failures);
     }
 
     /** @return array<string,string> theme-relative path => exact bytes */

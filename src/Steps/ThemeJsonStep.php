@@ -20,7 +20,10 @@ use Automattic\SiteBuild\StepDeclaration;
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the five color
- * slugs, the two font slugs) and fails loud if the model drifts from it.
+ * slugs, the two font slugs) and repairs drift deterministically: missing
+ * slugs are filled from the design direction's committed values, then neutral
+ * defaults, with every fill recorded in warnings.json — a missing slug never
+ * aborts the build.
  */
 final class ThemeJsonStep implements ConcurrentStep
 {
@@ -28,6 +31,34 @@ final class ThemeJsonStep implements ConcurrentStep
 
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
+
+    /**
+     * Readable neutral defaults for palette slugs the model omitted, used only
+     * when the design direction committed no hex for the role either. base and
+     * contrast bound the readability math; the roles all fall back to
+     * near-black so any repaired pairing stays WCAG-safe on base.
+     *
+     * @var array<string,string>
+     */
+    private const FALLBACK_COLORS = [
+        'base'      => '#FFFFFF',
+        'contrast'  => '#111111',
+        'primary'   => '#111111',
+        'secondary' => '#444444',
+        'accent'    => '#111111',
+    ];
+
+    /**
+     * System stacks for font slugs the model omitted: render everywhere, and
+     * FontsPhpStep's GENERIC list recognizes system-ui, so no Google Fonts
+     * request is ever minted for them.
+     *
+     * @var array<string,string>
+     */
+    private const FALLBACK_FONTS = [
+        'heading' => 'system-ui, sans-serif',
+        'body'    => 'system-ui, sans-serif',
+    ];
     /**
      * One bounded spacing vocabulary for every generated site.
      *
@@ -70,7 +101,7 @@ final class ThemeJsonStep implements ConcurrentStep
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
-            writes: ['theme/theme.json'],
+            writes: ['theme/theme.json', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -114,8 +145,21 @@ final class ThemeJsonStep implements ConcurrentStep
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
 
-        self::assertColors($theme);
-        self::assertFonts($theme);
+        // Missing required slugs are filled deterministically instead of
+        // aborting the build: the direction's committed hexes first, neutral
+        // readable defaults otherwise. Every fill is recorded durably.
+        $direction = $project->exists('designDirection.json')
+            ? $project->readJson('designDirection.json')
+            : [];
+        $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
+        [$theme, $warnings] = self::repairColors($theme, $preferred);
+        [$theme, $fontWarnings] = self::repairFonts($theme);
+        $warnings = array_merge($warnings, $fontWarnings);
+        if ($warnings !== []) {
+            $project->addWarnings($this->id(), $warnings);
+            echo '  [theme-json] warning: ' . count($warnings)
+                . " missing required slug(s) filled with defaults (recorded in warnings.json)\n";
+        }
 
         $project->writeJson('theme/theme.json', $theme);
     }
@@ -230,33 +274,67 @@ final class ThemeJsonStep implements ConcurrentStep
         return $theme;
     }
 
-    /** @param array<mixed> $theme */
-    private static function assertColors(array $theme): void
+    /**
+     * Ensure every required palette slug exists, filling gaps from the design
+     * direction's committed hexes and then the neutral fallbacks. The model's
+     * palette entries are never altered — only missing slugs are appended.
+     * Pure — unit-testable.
+     *
+     * @param array<mixed>         $theme
+     * @param array<string,mixed>  $preferredHexes role => "#RRGGBB" (direction palette)
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairColors(array $theme, array $preferredHexes = []): array
     {
+        $warnings = [];
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
-            throw new \RuntimeException('theme.json missing settings.color.palette');
+            $warnings[] = 'theme.json missing settings.color.palette; rebuilt with default colors';
+            $palette = [];
         }
+        $palette = array_values(array_filter($palette, 'is_array'));
         $slugs = array_column($palette, 'slug');
         foreach (self::REQUIRED_COLORS as $needed) {
-            if (!in_array($needed, $slugs, true)) {
-                throw new \RuntimeException("theme.json palette missing slug: {$needed}");
+            if (in_array($needed, $slugs, true)) {
+                continue;
             }
+            $preferred = strtoupper(trim((string) ($preferredHexes[$needed] ?? '')));
+            $hex = preg_match('/^#[0-9A-F]{6}$/', $preferred) === 1
+                ? $preferred
+                : self::FALLBACK_COLORS[$needed];
+            $palette[] = ['slug' => $needed, 'color' => $hex, 'name' => ucfirst($needed)];
+            $warnings[] = "theme.json palette missing slug '{$needed}'; filled with {$hex}";
         }
+        $theme['settings']['color']['palette'] = $palette;
+        return [$theme, $warnings];
     }
 
-    /** @param array<mixed> $theme */
-    private static function assertFonts(array $theme): void
+    /**
+     * Ensure both required font-family slugs exist, appending system stacks
+     * for the missing ones. Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairFonts(array $theme): array
     {
+        $warnings = [];
         $families = $theme['settings']['typography']['fontFamilies'] ?? null;
         if (!is_array($families)) {
-            throw new \RuntimeException('theme.json missing settings.typography.fontFamilies');
+            $warnings[] = 'theme.json missing settings.typography.fontFamilies; rebuilt with system stacks';
+            $families = [];
         }
+        $families = array_values(array_filter($families, 'is_array'));
         $slugs = array_column($families, 'slug');
         foreach (self::REQUIRED_FONTS as $needed) {
-            if (!in_array($needed, $slugs, true)) {
-                throw new \RuntimeException("theme.json fontFamilies missing slug: {$needed}");
+            if (in_array($needed, $slugs, true)) {
+                continue;
             }
+            $stack = self::FALLBACK_FONTS[$needed];
+            $families[] = ['slug' => $needed, 'name' => ucfirst($needed), 'fontFamily' => $stack];
+            $warnings[] = "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
         }
+        $theme['settings']['typography']['fontFamilies'] = $families;
+        return [$theme, $warnings];
     }
 }

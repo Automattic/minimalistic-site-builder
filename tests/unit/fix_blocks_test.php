@@ -185,7 +185,7 @@ test('FixBlocksStep degrades reviewed paragraph styles and records actionable wa
     }
 });
 
-test('FixBlocksStep keeps unreviewed validation failures fatal', function () {
+test('FixBlocksStep isolates unreviewed validation failures per file with a durable warning', function () {
     $cases = [
         'unsupported-block' => '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->',
         'unreviewed-style' => '<!-- wp:paragraph {"align":"center"} -->'
@@ -227,14 +227,21 @@ test('FixBlocksStep keeps unreviewed validation failures fatal', function () {
         $project = new Project($tmp);
         $project->writeText('theme/parts/section.html', $original);
         try {
-            assert_throws(
-                static fn () => (new FixBlocksStep(new PhpBlockFixer()))->run($project),
-                "{$name} must stay outside the reviewed warning-backed domain",
+            // Unreviewed signatures stay outside the transformation domain,
+            // but the failure is isolated to the file: its pre-fixer bytes
+            // are delivered untouched with a durable warnings.json record,
+            // and the build continues.
+            (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+            assert_eq(
+                $original,
+                $project->readText('theme/parts/section.html'),
+                "{$name} must deliver its pre-fixer bytes untouched",
             );
-            assert_eq($original, $project->readText('theme/parts/section.html'));
-            assert_true(
-                !$project->exists('warnings.json'),
-                "{$name} must not be mislabeled as an accepted degradation",
+            $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
+            assert_contains(
+                'left parts/section.html unmodified',
+                $joined,
+                "{$name} must be recorded as a delivered-through defect",
             );
         } finally {
             exec('rm -rf ' . escapeshellarg($tmp));
@@ -270,7 +277,7 @@ test('FixBlocksStep keeps operational fixer failures fatal', function () {
     }
 });
 
-test('FixBlocksStep rolls layout normalization back when strict validation fails', function () {
+test('FixBlocksStep still normalizes siblings when one file fails validation', function () {
     $tmp = sys_get_temp_dir() . '/builder_fix_strict_rollback_' . uniqid();
     $project = new Project($tmp);
     $layoutOriginal = '<!-- wp:group {"align":"full"} -->'
@@ -280,10 +287,14 @@ test('FixBlocksStep rolls layout normalization back when strict validation fails
     $project->writeText('theme/parts/b-unsupported.html', $unsupportedOriginal);
 
     try {
-        assert_throws(static fn () => (new FixBlocksStep(new PhpBlockFixer()))->run($project));
-        assert_eq($layoutOriginal, $project->readText('theme/parts/a-layout.html'));
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        // The unsupported file is delivered untouched with a durable record;
+        // its sibling's width-contract repair still lands.
         assert_eq($unsupportedOriginal, $project->readText('theme/parts/b-unsupported.html'));
-        assert_true(!$project->exists('warnings.json'));
+        assert_contains('"layout"', $project->readText('theme/parts/a-layout.html'));
+        $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('left parts/b-unsupported.html unmodified', $joined);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }

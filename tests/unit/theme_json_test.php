@@ -188,11 +188,16 @@ test('canonical spacing profile has monotonic fluid bounds', function () {
     assert_eq(7.0, $previousMax, 'largest edge is capped at 7rem');
 });
 
-test('theme-json throws when a required color slug is missing', function () {
+test('theme-json fills a missing required color slug from the direction, then defaults', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    // The direction committed an accent hex — the fill honors it.
+    $project->writeJson('designDirection.json', [
+        'description' => 'Warm hearth tones.',
+        'palette'     => ['accent' => '#C0FFEE'],
+    ]);
 
     $payload = valid_theme_payload();
     // Drop "accent".
@@ -204,10 +209,27 @@ test('theme-json throws when a required color slug is missing', function () {
     $llm = new FakeLlm();
     $llm->queueJson($payload);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new ThemeJsonStep($llm, $renderer))->run($project);
-    });
+    (new ThemeJsonStep($llm, $renderer))->run($project);
+
+    $palette = $project->readJson('theme/theme.json')['settings']['color']['palette'];
+    $bySlug = array_column($palette, 'color', 'slug');
+    assert_eq('#C0FFEE', $bySlug['accent'], 'the direction hex fills the gap');
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains("palette missing slug 'accent'", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('repairColors falls back to neutral readable defaults without a direction hex', function () {
+    [$theme, $warnings] = \Automattic\SiteBuild\Steps\ThemeJsonStep::repairColors(
+        ['settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'color' => '#FFF8F0', 'name' => 'Base'],
+        ]]]],
+    );
+    $bySlug = array_column($theme['settings']['color']['palette'], 'color', 'slug');
+    assert_eq('#FFF8F0', $bySlug['base'], 'existing entries are never altered');
+    assert_eq('#111111', $bySlug['contrast']);
+    assert_eq('#111111', $bySlug['primary']);
+    assert_eq(4, count($warnings));
 });
 
 test('theme-json forces useRootPaddingAwareAlignments when root side padding is set', function () {
@@ -278,7 +300,7 @@ test('normalizeRootPadding zeroes vertical root padding — sections own the rhy
     assert_true(!isset($theme['styles']['spacing']['padding']), 'no padding invented');
 });
 
-test('theme-json throws when a required font slug is missing', function () {
+test('theme-json fills a missing required font slug with the system stack', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
@@ -292,8 +314,13 @@ test('theme-json throws when a required font slug is missing', function () {
     $llm = new FakeLlm();
     $llm->queueJson($payload);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new ThemeJsonStep($llm, $renderer))->run($project);
-    });
+    (new ThemeJsonStep($llm, $renderer))->run($project);
+
+    $families = $project->readJson('theme/theme.json')['settings']['typography']['fontFamilies'];
+    $bySlug = array_column($families, 'fontFamily', 'slug');
+    assert_eq('X', $bySlug['body'], 'existing entries are never altered');
+    assert_eq('system-ui, sans-serif', $bySlug['heading']);
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains("fontFamilies missing slug 'heading'", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

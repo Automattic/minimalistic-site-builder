@@ -35,10 +35,11 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Mutations rewrite the block-comment JSON only, then the injected
  * BlockFixer re-serializes the saved HTML from those attributes (the same
  * contract as ContrastFixStep). A missing or invalid generation-completion
- * artifact is a phase-order violation and fails hard. Once that contract is
- * satisfied, image-analysis problems fail soft: no imagick, unreadable images,
- * or unparsable covers are skipped with a report line — a build must never die
- * on a readability polish.
+ * artifact skips the whole pass with a durable warning — the theme is
+ * already fully built, and a readability polish must never withhold it.
+ * Once that contract is satisfied, image-analysis problems fail soft too:
+ * no imagick, unreadable images, or unparsable covers are skipped with a
+ * report line.
  */
 final class CoverContrastStep implements Step
 {
@@ -84,19 +85,38 @@ final class CoverContrastStep implements Step
                 'theme/templates/*',
                 'plugin/pages/*',
             ],
-            writes: ['theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
+            writes: ['theme/parts/*', 'theme/templates/*', 'plugin/pages/*', 'warnings.json'],
             concurrent: false,
         );
     }
 
     public function run(Project $project): void
     {
-        if (!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT)) {
-            throw new \RuntimeException('cover-contrast: image generation has not completed');
+        // Without a valid generation-completion artifact the real pixels are
+        // not trustworthy, so the verification pass is skipped — a durable
+        // warning, not a fatal: this step only polishes readability, and the
+        // theme it would inspect is already fully built.
+        $completion = null;
+        if ($project->exists(GenerateImagesStep::COMPLETION_ARTIFACT)) {
+            try {
+                $completion = $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT);
+            } catch (\RuntimeException) {
+                $completion = null;
+            }
         }
-        $completion = $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT);
         if (($completion['status'] ?? null) !== 'completed') {
-            throw new \RuntimeException('cover-contrast: image generation completion artifact is invalid');
+            $skip = $completion === null
+                ? 'image generation has not completed (missing or unreadable completion artifact)'
+                : 'image generation completion artifact is invalid';
+            $project->addWarnings($this->id(), [
+                "{$skip}; cover text not verified against the real images",
+            ]);
+            $project->writeText(
+                'logs/' . self::REPORT_FILE,
+                "cover-contrast skipped: {$skip}\n"
+            );
+            echo "  [cover-contrast] warning: {$skip}; pass skipped (recorded in warnings.json)\n";
+            return;
         }
 
         if (!$project->exists('theme/theme.json')) {

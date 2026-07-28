@@ -199,24 +199,20 @@ test('sections throws when a planned section is missing composition fields', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections rejects a missing structural role or semantic type', function () {
+test('sections repairs a missing structural role or semantic type deterministically', function () {
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $pages = $project->readJson('pages.json');
 
+    // The role is a pure function of position, and the type has a safe
+    // generic default — both are corrected in place, not rejected.
     unset($pages['pages'][0]['sections'][0]['role']);
-    $project->writeJson('pages.json', $pages);
-    assert_throws(function () use ($renderer, $project) {
-        (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
-    }, "expected 'hero'");
-
-    $pages['pages'][0]['sections'][0]['role'] = 'hero';
     unset($pages['pages'][0]['sections'][0]['type']);
     $project->writeJson('pages.json', $pages);
-    assert_throws(function () use ($renderer, $project) {
-        (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
-    }, 'missing semantic type');
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
+    $hero = sections_request_text($reqs['page-home--hero']);
+    assert_contains('hero', $hero, 'the positional role reaches the prompt');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -445,7 +441,7 @@ test('sections strips a stray markdown code fence from a part response', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections throws when a part has no block markup', function () {
+test('sections drops a part with no block markup and prunes it from the plan', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
@@ -455,28 +451,58 @@ test('sections throws when a part has no block markup', function () {
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SectionsStep($llm, $renderer))->run($project);
-    });
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    // One unusable section is dropped; every paid-for sibling still ships,
+    // and the plan is pruned so downstream steps agree with the parts on disk.
+    assert_true(!$project->exists('theme/parts/page-home--hero.html'), 'unusable section not written');
+    assert_contains('<h2>About</h2>', $project->readText('theme/parts/page-home--about.html'));
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(['about'], array_column($sections, 'slug'), 'dropped section pruned from the plan');
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'page-home--hero': unusable generated markup", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections writes nothing when any part is invalid (no partial output)', function () {
+test('sections stays fatal only when NO page section produced usable markup', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header — valid
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
     $llm->queueText('just text, no blocks');                               // page-home--hero — invalid
-    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText('also just text, no blocks');                          // page-home--about — invalid
     $renderer = new PromptRenderer(repo_path('prompts'));
 
+    // Zero usable content sections means there is no site to deliver — the
+    // one remaining fatal in this step.
     assert_throws(function () use ($llm, $renderer, $project) {
         (new SectionsStep($llm, $renderer))->run($project);
     });
-    // The valid header/footer must NOT have been written before the bad part threw.
-    assert_true(!$project->exists('theme/parts/header.html'), 'no part written when a sibling is invalid');
-    assert_true(!$project->exists('theme/parts/footer.html'), 'no part written when a sibling is invalid');
+    // Nothing is written when the build aborts — no partial output.
+    assert_true(!$project->exists('theme/parts/header.html'), 'no part written when the build aborts');
+    assert_true(!$project->exists('theme/parts/footer.html'), 'no part written when the build aborts');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections falls back to deterministic chrome when the header markup is unusable', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('just prose, not a header');                            // header — invalid
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    $header = $project->readText('theme/parts/header.html');
+    assert_contains('wp:site-title', $header, 'fallback chrome carries the site title');
+    assert_contains('"layout":{"type":"constrained"}', $header);
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'header': unusable generated markup", $joined);
+    assert_contains('deterministic minimal header delivered', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -156,23 +156,50 @@ test('assemble-pages writes an empty image manifest when pages reference no asse
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('assemble-pages throws when a section part is missing', function () {
+test('assemble-pages skips a missing section part and warns instead of failing', function () {
     [$project, $tmp] = assemble_fixture();
-    unlink($project->themePath('parts/page-menu--breads.html'));
+    unlink($project->themePath('parts/page-home--about.html'));
 
-    assert_throws(function () use ($project) {
-        (new AssemblePagesStep())->run($project);
-    }, 'missing part');
+    (new AssemblePagesStep())->run($project);
+
+    // The page ships without the lost section; every sibling survives.
+    $home = $project->readText('plugin/pages/home.html');
+    assert_contains('<h2>Hero</h2>', $home);
+    assert_true(!str_contains($home, '<h2>About</h2>'), 'missing section skipped');
+    assert_contains('<h2>Breads</h2>', $project->readText('plugin/pages/menu.html'));
+
+    $warnings = $project->readJson('warnings.json')['assemble-pages'] ?? [];
+    assert_contains('missing generated part parts/page-home--about.html', implode(' ', $warnings));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('assemble-pages throws when the chrome parts are missing', function () {
+test('assemble-pages skips a page whose every section part is missing (front page kept empty)', function () {
+    [$project, $tmp] = assemble_fixture();
+    unlink($project->themePath('parts/page-menu--breads.html'));
+
+    (new AssemblePagesStep())->run($project);
+
+    // The interior page is dropped whole: no page file, no manifest entry.
+    assert_true(!$project->exists('plugin/pages/menu.html'), 'empty interior page skipped');
+    $manifest = $project->readJson('plugin/pages.json');
+    assert_eq(['home'], array_column($manifest['pages'], 'slug'));
+
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains("page 'menu': no section markup survived; page skipped", $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages warns and continues when the chrome parts are missing', function () {
     [$project, $tmp] = assemble_fixture();
     unlink($project->themePath('parts/header.html'));
 
-    assert_throws(function () use ($project) {
-        (new AssemblePagesStep())->run($project);
-    });
+    (new AssemblePagesStep())->run($project);
+
+    // The build still ships — the template references an absent part, which
+    // WordPress renders as empty chrome — with a durable warning.
+    assert_contains('<h2>Hero</h2>', $project->readText('plugin/pages/home.html'));
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains('missing parts/header.html', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

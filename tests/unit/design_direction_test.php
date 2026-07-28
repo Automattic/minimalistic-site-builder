@@ -323,15 +323,31 @@ test('format renders the canvas commitment with its executable meaning', functio
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
-test('design-direction throws when the model returns no usable direction', function () {
+test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => ['title' => 'Empty', 'description' => '   ']]);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new DesignDirectionStep($llm, $renderer))->run($project);
-    });
+
+    (new DesignDirectionStep($llm, $renderer))->run($project);
+
+    // The build continues on the fallback direction (built on the chosen
+    // seed), with the concept-variety loss recorded durably.
+    $direction = $project->readJson('designDirection.json');
+    assert_true(trim((string) $direction['description']) !== '', 'fallback carries a usable narrative');
+    assert_eq('full-bleed', $direction['canvas']);
+    $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('no usable design direction', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('fallbackDirection builds on the chosen seed, generic brief otherwise', function () {
+    $seeded = DesignDirectionStep::fallbackDirection('Neon Dusk — electric gradients over charcoal.');
+    assert_eq('Neon Dusk — electric gradients over charcoal.', $seeded['description']);
+
+    $generic = DesignDirectionStep::fallbackDirection('');
+    assert_contains('bold', $generic['description']);
+    assert_eq('calm', $generic['motion']);
 });
 
 test('design-direction throws when meta prompt missing', function () {

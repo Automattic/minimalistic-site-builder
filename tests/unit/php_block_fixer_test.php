@@ -329,7 +329,7 @@ test('PhpBlockFixer permits convergence on pass five', function () {
     }
 });
 
-test('PhpBlockFixer fails closed when pass five still changes bytes', function () {
+test('PhpBlockFixer isolates a file that still changes bytes on pass five', function () {
     $initial = '<!-- wp:paragraph --><p>state-0</p><!-- /wp:paragraph -->';
     $theme = php_block_fixer_test_theme(['parts/state.html' => $initial]);
     $writer = new PhpBlockFixerTestWriter();
@@ -343,21 +343,21 @@ test('PhpBlockFixer fails closed when pass five still changes bytes', function (
     );
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer($transformer, writer: $writer))->fix($theme)
-        );
+        $report = (new PhpBlockFixer($transformer, writer: $writer))->fix($theme);
 
-        assert_true($error instanceof RuntimeException);
-        assert_contains('did not converge within 5 passes for parts/state.html', $error->getMessage());
+        // Non-convergence abandons THIS file: pre-fixer bytes delivered
+        // untouched, a typed FAILED row on the record, nothing staged.
+        assert_contains('FAILED parts/state.html', $report);
+        assert_contains('did not converge within 5 passes', $report);
         assert_eq(5, count($transformer->calls));
-        assert_eq(0, $writer->stageCalls, 'non-convergence is detected before staging');
+        assert_eq(0, $writer->stageCalls, 'a failed file is never staged');
         assert_eq($initial, file_get_contents($theme . '/parts/state.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer leaves every file unchanged when a later transformation throws', function () {
+test('PhpBlockFixer isolates a throwing file and still fixes its siblings', function () {
     $aOriginal = '<!-- wp:paragraph --><p>dirty-a</p><!-- /wp:paragraph -->';
     $aCanonical = '<!-- wp:paragraph --><p>clean-a</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:paragraph --><p>dirty-b</p><!-- /wp:paragraph -->';
@@ -378,23 +378,23 @@ test('PhpBlockFixer leaves every file unchanged when a later transformation thro
     );
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer($transformer, writer: $writer))->fix($theme)
-        );
+        $report = (new PhpBlockFixer($transformer, writer: $writer))->fix($theme);
 
-        assert_true($error instanceof RuntimeException);
-        assert_contains('Block transformation failed for parts/b.html on pass 1', $error->getMessage());
-        assert_contains('injected renderer failure', $error->getMessage());
-        assert_eq(0, $writer->stageCalls, 'all transformations must finish before the first stage');
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
+        // The throwing file is isolated with its pre-fixer bytes delivered;
+        // the sibling's repair still lands — one bad file no longer discards
+        // the whole already-paid-for theme.
+        assert_contains('FAILED parts/b.html', $report);
+        assert_contains('injected renderer failure', $report);
+        assert_eq(1, $writer->stageCalls, 'only the fixed sibling is staged');
+        assert_eq(1, $writer->replaceCalls);
+        assert_eq($aCanonical, file_get_contents($theme . '/parts/a.html'));
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer preflights the real registry guard before staging any file', function () {
+test('PhpBlockFixer isolates a file carrying an unsupported registered block', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->';
     $theme = php_block_fixer_test_theme([
@@ -404,24 +404,19 @@ test('PhpBlockFixer preflights the real registry guard before staging any file',
     $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains(
-            "Registered block 'core/query' is outside the supported PHP domain",
-            $error->getMessage(),
-        );
-        assert_eq(0, $writer->stageCalls, 'registry preflight must finish before the first stage');
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
+        assert_contains('FAILED parts/b.html', $report);
+        assert_contains("Registered block 'core/query' is outside the supported PHP domain", $report);
+        assert_contains('FIXED  parts/a.html', $report, 'the supported sibling is still re-serialized');
+        assert_eq(1, $writer->replaceCalls);
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer rejects an unknown deprecation signature before staging any file', function () {
+test('PhpBlockFixer isolates a file carrying an unknown deprecation signature', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     $bOriginal = '<!-- wp:paragraph {"customTextColor":"#ff0000"} -->'
         . '<p style="color:#ff0000">Legacy</p><!-- /wp:paragraph -->';
@@ -432,25 +427,18 @@ test('PhpBlockFixer rejects an unknown deprecation signature before staging any 
     $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains(
-            "Unsupported comment attribute 'customTextColor' for core/paragraph",
-            $error->getMessage(),
-        );
-        assert_contains('a reviewed deprecation adapter is required', $error->getMessage());
-        assert_eq(0, $writer->stageCalls, 'deprecation preflight must finish before the first stage');
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
+        assert_contains('FAILED parts/b.html', $report);
+        assert_contains("Unsupported comment attribute 'customTextColor' for core/paragraph", $report);
+        assert_contains('a reviewed deprecation adapter is required', $report);
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer rejects a current-key historical style signature before staging', function () {
+test('PhpBlockFixer isolates a current-key historical style signature to its file', function () {
     $aOriginal = '<!-- wp:paragraph --><p>Supported</p><!-- /wp:paragraph -->';
     // An invalid paragraph whose root is not a <p> is outside the reviewed
     // selector-less carryover (paragraph-inline-color-carryover golden), so
@@ -465,24 +453,17 @@ test('PhpBlockFixer rejects a current-key historical style signature before stag
     $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
-        assert_contains(
-            'Unsupported deprecated core/paragraph style signature at 0: color',
-            $error->getMessage(),
-        );
-        assert_eq(0, $writer->stageCalls);
-        assert_eq(0, $writer->replaceCalls);
-        assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
+        assert_contains('FAILED parts/b.html', $report);
+        assert_contains('Unsupported deprecated core/paragraph style signature at 0: color', $report);
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer rejects an unsupported block-support family before staging', function () {
+test('PhpBlockFixer isolates an unsupported block-support family to its file', function () {
     // background is the one pinned-unimplemented family that stays
     // fail-closed: StyleEngine consumes style.background wholesale, so an
     // unreviewed shape could change the emitted bytes.
@@ -492,33 +473,29 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
     $writer = new PhpBlockFixerTestWriter();
 
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
 
+        assert_contains('FAILED parts/unsupported.html', $report);
         assert_contains(
             "Unsupported block-support path 'style.background.backgroundImage.id' for core/group at 0",
-            $error->getMessage(),
+            $report,
         );
         assert_eq(0, $writer->stageCalls);
-        assert_eq(0, $writer->replaceCalls);
         assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
 });
 
-test('PhpBlockFixer rejects unreviewed layout variants before staging', function () {
+test('PhpBlockFixer isolates unreviewed layout variants to their file', function () {
     $original = '<!-- wp:group {"layout":{"type":"grid"}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
     $writer = new PhpBlockFixerTestWriter();
     try {
-        php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: $writer))->fix($theme)
-        );
+        $report = (new PhpBlockFixer(writer: $writer))->fix($theme);
+        assert_contains('FAILED parts/unsupported.html', $report);
         assert_eq(0, $writer->stageCalls);
-        assert_eq(0, $writer->replaceCalls);
         assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
@@ -583,11 +560,10 @@ test('PhpBlockFixer deep-merges duplicate comment JSON keys instead of failing t
     $collapsedTheme = php_block_fixer_test_theme(['parts/page-home--contact-and-location.html' => $collapsed]);
     $theme = php_block_fixer_test_theme(['parts/page-home--contact-and-location.html' => $original]);
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($collapsedTheme)
-        );
-        assert_contains('Unsupported deprecated core/paragraph style signature', $error->getMessage());
-        assert_contains('margin-top', $error->getMessage());
+        $collapsedReport = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($collapsedTheme);
+        assert_contains('FAILED parts/page-home--contact-and-location.html', $collapsedReport);
+        assert_contains('Unsupported deprecated core/paragraph style signature', $collapsedReport);
+        assert_contains('margin-top', $collapsedReport);
 
         $report = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
         $fixed = file_get_contents($theme . '/parts/page-home--contact-and-location.html');

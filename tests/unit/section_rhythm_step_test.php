@@ -84,7 +84,7 @@ test('section rhythm step records only image degradations as durable warnings', 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('section rhythm step writes nothing when one section root is invalid', function () {
+test('section rhythm step skips a page whose section root is invalid and normalizes the rest', function () {
     $tmp = sys_get_temp_dir() . '/builder_rhythm_bad_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $original = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
@@ -106,16 +106,19 @@ test('section rhythm step writes nothing when one section root is invalid', func
             . '</div><!-- /wp:group -->',
     );
 
-    assert_throws(static fn () => (new SectionRhythmStep())->run($project));
-    assert_eq(
-        $original,
-        $project->readText('theme/parts/page-home--degradable.html'),
-        'an earlier degradable part remains untouched when a later root is fatal',
-    );
+    (new SectionRhythmStep())->run($project);
+
+    // The malformed page keeps its authored spacing (skip recorded durably);
+    // the healthy page is still normalized — per-page isolation, not a
+    // whole-build rejection.
     assert_true(
-        !$project->exists('warnings.json'),
-        'the staged degradation warning is not committed when a later root is fatal',
+        $original !== $project->readText('theme/parts/page-home--degradable.html'),
+        'the healthy page is still normalized when a sibling page is malformed',
     );
+    $warnings = $project->readJson('warnings.json')['section-rhythm'] ?? [];
+    $joined = implode(' ', $warnings);
+    assert_contains("page 'visit': section rhythm skipped", $joined);
+    assert_contains('authored section spacing delivered', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

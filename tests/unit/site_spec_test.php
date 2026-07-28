@@ -101,12 +101,7 @@ test('site-spec derives email_domain from multi-word slug when implausible', fun
 
 test('site-spec accepts a language name as well as a BCP-47 code', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
-    $llm->queueJson(['name' => 'Solo', 'language' => 'Spanish (Argentina)']);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    // Parenthesised region is not a plausible code or plain name -> reject.
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
 
     $llm->queueJson(['name' => 'Solo', 'language' => 'es-AR']);
     (new SiteSpecStep($llm, $renderer))->run($project);
@@ -116,34 +111,64 @@ test('site-spec accepts a language name as well as a BCP-47 code', function () {
     (new SiteSpecStep($llm, $renderer))->run($project);
     assert_eq('Spanish', $project->readJson('siteSpec.json')['language']);
 
+    // Parenthesised region is not a plausible code or plain name: the field
+    // is dropped with a durable warning — downstream prompts then follow the
+    // user prompt's language via languageOf() — instead of failing the build.
+    $llm->queueJson(['name' => 'Solo', 'language' => 'Spanish (Argentina)']);
+    (new SiteSpecStep($llm, $renderer))->run($project);
+    assert_eq('', $project->readJson('siteSpec.json')['language']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('not a plausible language', $joined);
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec throws when name missing', function () {
+test('site-spec falls back to a prompt-derived name when the model returns none', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $llm->queueJson(['topic' => 'no name here', 'language' => 'en']);
     $renderer = new PromptRenderer(repo_path('prompts'));
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
+
+    (new SiteSpecStep($llm, $renderer))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq('A Cozy Neighborhood Bakery', $spec['name']);
+    assert_eq($spec['name'], $spec['title'], 'title falls back to the name');
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('site spec has no "name"', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('site-spec throws when language missing or implausible', function () {
+test('site-spec degrades a missing or implausible language with a durable warning', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     $llm->queueJson(['name' => 'Solo']); // no language
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
+    (new SiteSpecStep($llm, $renderer))->run($project);
+    assert_eq('', $project->readJson('siteSpec.json')['language']);
+    assert_eq(
+        'the language the user prompt is written in',
+        SiteSpecStep::languageOf($project),
+        'the empty field renders the follow-the-prompt instruction downstream',
+    );
 
     $llm->queueJson(['name' => 'Solo', 'language' => '12345']); // not a code or name
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SiteSpecStep($llm, $renderer))->run($project);
-    });
+    (new SiteSpecStep($llm, $renderer))->run($project);
+    assert_eq('', $project->readJson('siteSpec.json')['language']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('site spec has no "language"', $joined);
+    assert_contains('12345', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('nameFromPrompt derives a clean short name and floors at "New Site"', function () {
+    assert_eq('A Cozy Neighborhood Bakery', SiteSpecStep::nameFromPrompt('A cozy neighborhood bakery'));
+    assert_eq(
+        'Modern Portfolio For A Buenos Aires',
+        SiteSpecStep::nameFromPrompt('Modern portfolio for a Buenos Aires photographer, dark & moody'),
+        'first six words, punctuation stripped',
+    );
+    assert_eq('New Site', SiteSpecStep::nameFromPrompt('!!! ???'));
 });
 
 test('site-spec normalizes the pages tree: slugs slugified and globally unique', function () {

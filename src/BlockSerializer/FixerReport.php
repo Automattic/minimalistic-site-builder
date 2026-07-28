@@ -34,9 +34,23 @@ final class FixerReport
         return array_sum(array_map(static fn (FileReport $file): int => count($file->repairs), $this->files));
     }
 
+    public function failedCount(): int
+    {
+        return count(array_filter($this->files, static fn (FileReport $file): bool => $file->status === 'failed'));
+    }
+
+    /** @return list<FileReport> the files delivered untouched after an abandoned transformation */
+    public function failures(): array
+    {
+        return array_values(array_filter(
+            $this->files,
+            static fn (FileReport $file): bool => $file->status === 'failed',
+        ));
+    }
+
     public function summary(): string
     {
-        return sprintf(
+        $summary = sprintf(
             '[fix-templates] %d/%d file(s) re-serialized, %d issue(s) fixed, %d style/class value(s) dropped across %d theme(s).',
             $this->changedCount(),
             $this->eligibleCount(),
@@ -44,6 +58,10 @@ final class FixerReport
             $this->droppedCount(),
             $this->themes,
         );
+        if (($failed = $this->failedCount()) > 0) {
+            $summary .= sprintf(' %d file(s) left unmodified after a failed transformation.', $failed);
+        }
+        return $summary;
     }
 
     public function format(): string
@@ -54,8 +72,12 @@ final class FixerReport
                 'fixed' => 'FIXED ',
                 'ok' => 'ok    ',
                 'skip' => 'skip  ',
+                'failed' => 'FAILED',
             };
             $lines[] = '  ' . $tag . ' ' . $file->path;
+            if ($file->error !== null) {
+                $lines[] = '         ! left unmodified: ' . str_replace(["\r", "\n"], ' ', $file->error);
+            }
             foreach ($file->dropped as $drop) {
                 $lines[] = '         ! ' . $drop->line();
             }
