@@ -162,6 +162,7 @@ final class SectionsStep implements Step
         // — there is no site to deliver.
         $files = [];
         $dropped = [];
+        $usableSections = 0;
         foreach ($jobs as $key => $job) {
             $isChrome = in_array($key, ['header', 'footer'], true);
             try {
@@ -169,6 +170,9 @@ final class SectionsStep implements Step
                     throw new \RuntimeException('the batch returned no result');
                 }
                 $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
+                if (!$isChrome) {
+                    $usableSections++;
+                }
             } catch (\RuntimeException $e) {
                 if ($isChrome) {
                     $files[$job['file']] = self::fallbackChrome($key);
@@ -183,7 +187,7 @@ final class SectionsStep implements Step
             }
         }
 
-        if ($dropped !== [] && count($files) <= 2) {
+        if ($usableSections === 0) {
             // Only the chrome (or nothing) survived: a site with zero content
             // sections is not a usable partial result.
             throw new \RuntimeException(
