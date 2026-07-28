@@ -1,0 +1,106 @@
+name: Block fixer oracle
+
+# The pure-PHP block fixer is certified against artifacts a Node oracle
+# generated from the real @wordpress/blocks runtime. That oracle was removed
+# from the tree in 619b8c9 (-13,519 lines) and now lives only in git history,
+# at abcf523 — the last commit where it and the PHP port coexisted green.
+#
+# This job proves it still resurrects. It checks the oracle out of history,
+# installs its locked dependencies, runs its own test suite, and re-derives
+# every artifact it froze, failing on any drift. What that protects against is
+# the tooling rotting unnoticed: a yanked or re-published dependency, a lockfile
+# that no longer resolves, a Node incompatibility. The day the compatibility
+# domain has to grow, the recipe in docs/block-fixer-oracle.md has to work.
+#
+# It does NOT certify today's artifacts. The domain has grown past the pinned
+# Gutenberg through four hand-reviewed amendments (see `amendments` in
+# tests/fixtures/block-fixer/oracle-manifest.json), so the oracle at this pin
+# cannot derive them. Making this a true parity gate means bumping the pin and
+# retiring those amendments; see docs/block-fixer-oracle.md.
+#
+# No container: the fingerprint's environment-derived fields are node version,
+# v8, ICU, platform and architecture. ubuntu-24.04 with this exact Node gives
+# linux/x64 and the same v8/ICU as the frozen manifest, so the recorded image
+# digest — a constant the generator writes, not something it probes — adds
+# nothing here. Regenerating artifacts from macOS/ARM does need the container.
+
+on:
+  pull_request:
+    paths:
+      - 'src/BlockSerializer/**'
+      - 'tests/fixtures/block-fixer/**'
+      - '.github/workflows/block-fixer-oracle.yml'
+  schedule:
+    # Weekly, so dependency rot surfaces on its own rather than on the day
+    # someone needs to regenerate artifacts under time pressure.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    name: Oracle resurrects from history
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      # Full history: the oracle commit is not an ancestor of the PR head.
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialise the oracle from git history
+        run: |
+          set -euo pipefail
+          # The commit named in docs/block-fixer-oracle.md as the last one where
+          # the oracle and the PHP port coexisted green.
+          git worktree add /tmp/oracle abcf523
+          test -d /tmp/oracle/bin/block-fixer
+
+      - name: Set up the pinned Node
+        uses: actions/setup-node@v4
+        with:
+          # Must match `fingerprint.node.version` in the frozen manifest: the
+          # artifacts record v8 and ICU, which move with the Node release.
+          node-version: '22.19.0'
+
+      - name: Confirm the runtime matches the frozen fingerprint
+        working-directory: /tmp/oracle
+        run: |
+          node -e '
+            const fs = require("fs");
+            const manifest = JSON.parse(
+              fs.readFileSync("tests/fixtures/block-fixer/oracle-manifest.json", "utf8"),
+            );
+            const want = manifest.fingerprint.node;
+            const got = {
+              version: process.version,
+              platform: process.platform,
+              architecture: process.arch,
+              v8: process.versions.v8,
+              icu: process.versions.icu,
+            };
+            for (const key of Object.keys(got)) {
+              if (want[key] !== got[key]) {
+                throw new Error(
+                  `runtime ${key}: frozen ${want[key]}, running ${got[key]}`,
+                );
+              }
+            }
+            console.log("runtime matches the frozen fingerprint");
+          '
+
+      - name: Install locked dependencies
+        working-directory: /tmp/oracle
+        run: npm ci
+
+      - name: Run the oracle's own test suite
+        working-directory: /tmp/oracle
+        run: npm test --workspace=bin/block-fixer
+
+      - name: Re-derive every frozen artifact and fail on drift
+        working-directory: /tmp/oracle
+        run: npm run oracle:verify --workspace=bin/block-fixer
