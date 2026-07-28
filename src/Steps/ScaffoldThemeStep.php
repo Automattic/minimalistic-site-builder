@@ -145,6 +145,24 @@ final class ScaffoldThemeStep implements Step
             padding-right: var(--wp--style--root--padding-right, var(--wp--preset--spacing--md));
         }
 
+        /* Raise the navigation's hamburger breakpoint from core's 600px to 720px
+           (BIGR-735). A tracked-uppercase title/nav row that fits comfortably at
+           768px can still wrap or overflow in the 600-719px band, where core's
+           overlayMenu:"mobile" has already switched back to the inline nav. Core
+           gates the swap with two 600px media queries; these two rules re-apply
+           the collapsed state for the band above them. The .wp-site-blocks
+           prefix outranks core's selectors regardless of enqueue order, and
+           scopes the fix to the front end. overlayMenu:"always" (hidden-by-
+           default) and the opened modal (is-menu-open) are untouched. */
+        @media (min-width: 600px) and (max-width: 719.98px) {
+            .wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown) {
+                display: flex;
+            }
+            .wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open) {
+                display: none;
+            }
+        }
+
         /* The root block-gap margin would open a page-background band between every pair
            of top-level template parts — above the hero (behind the transparent overlay
            header, where light text lands on the page background) and as a visible stripe
