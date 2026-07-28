@@ -2,7 +2,9 @@
 
 **Date:** 2026-07-28
 **Branch:** `fix/scaffold-theme-json`
-**Status:** approved after eng plan review; ready for implementation
+**Status:** implemented. Amended after merging `origin/trunk` — see "What changed during
+implementation" at the end for the two places the shipped code departs from the plan
+below.
 
 ## Problem
 
@@ -64,7 +66,7 @@ No borders, radii, striping, shadows or decorative treatments. Sites stay visual
 
 ### Ownership
 
-**Build-supplied, schema-blocked** (no slot in the request schema):
+**Build-supplied, prompt-suppressed** (the prompt no longer asks for these):
 - `styles.color` — background, text
 - `styles.typography` — body family, body size, line-height
 - `styles.elements.h4` / `h5` / `h6` / `caption`
@@ -86,23 +88,36 @@ No borders, radii, striping, shadows or decorative treatments. Sites stay visual
 
 **2. `ThemeJsonStep::applyScaffold()`** — pure static, applied in `consume()` as a fourth post-processor beside `disableCoreDefaultPresets`, `normalizeSpacingSettings`, `normalizeRootPadding`. Needs a small named recursive-merge helper; no general deep-merge utility exists in `src/` to reuse (the four that exist are domain-specific).
 
-**3. A coarse JSON schema** on the request. `requests()` currently sends none, which is why the model volunteers content freely. The schema blocks at the `styles` / `styles.elements` level only — `settings`, `styles.blocks`, and the h1/h2/h3 internals stay open, so nothing creative is constrained and legitimate keys like `textTransform` remain available. `PagePlanStep::jsonSchema()` is the pattern.
+**3. No request schema.** An earlier draft called for a "coarse" JSON schema that left `settings`, `styles.blocks` and the h1/h2/h3 internals open. That is not expressible: Anthropic structured outputs require `additionalProperties: false` on every object, and any other value is rejected. A schema permissive enough to keep the creative surface open cannot be written, so `requests()` sends none and the prompt alone carries the contract. (`additionalProperties: false` constrains which *keys* may appear, not their values — the constraint is on shape, not taste.)
 
 **4. `prompts/theme-json.md` rewrite** — delete the lines dictating build-supplied values; add a short section naming what the build supplies and the blocks already wired, inviting `styles.blocks` decoration only where the design calls for it.
 
 ## theme-json MUST NOT fail the build
 
-A hard requirement from review. Today the step throws in five places (`:94, :238, :243, :253, :258`). All five become degrade-with-warning:
+A hard requirement from review: no generated-content defect may abort the build.
 
-| omission | default | note |
+This is delivered by trunk's BIGR-731 repair layer (see the amendment below), extended
+with one repair this branch adds:
+
+| omission | repair | note |
 |---|---|---|
-| a `fontSizes` slug | the prompt's published scale (`0.875 / 1.125 / 1.375 / 1.75 / clamp(2.25rem,3vw,3rem) / clamp(3rem,7vw,6rem)`) | same move `SPACING_PROFILE` already makes |
-| a color slug | fallback chain reusing the model's own colors: `accent`→`primary`, `secondary`→`contrast`, `primary`→`contrast` | `ContrastFixStep` re-verifies and rewrites downstream |
-| a font slug | `heading`↔`body`; both missing → a documented pair | |
-| whole palette / fontFamilies absent | documented default profile | |
-| model output unusable | complete documented default theme | build proceeds; site is bland, not broken |
+| a color slug | `designDirection.json`'s committed hex for the role, then a neutral readable default | `ContrastFixStep` re-verifies and rewrites downstream |
+| a font slug | a system stack | |
+| a `fontSizes` slug | the published scale (`0.875 / 1.125 / 1.375 / 1.75 / clamp(2.25rem,3vw,3rem) / clamp(3rem,7vw,6rem)`) | added here; the scaffold references these slugs |
+| a malformed preset row | the row is dropped, with its authored value quoted in the warning | |
+| a row missing only `name` | the authored value is kept; the name is synthesized from the slug | never discard a usable preset over a cosmetic field |
+| the whole response unusable | `consumeGeneratedJsonFailure` writes a deterministic base theme | build proceeds; site is bland, not broken |
 
-Defaults fire **only on omission**, so a normal build never executes them and they cannot flatten a design. Every fill emits a **visible warning** (build report + stderr) naming what was missing and what was substituted — this is what keeps a degraded build from shipping silently, and it replaces the loudness the exceptions used to provide.
+Repairs fire **only on a defect**, so a normal build never executes them and they cannot
+flatten a design. Every repair is recorded in `warnings.json` naming what was wrong and
+what was substituted — that record is what keeps a degraded build from shipping silently,
+and it is what the future AI repair pass consumes.
+
+Fatals are **not** eliminated outright. Two remain, both outside the generated-content
+boundary: a missing model output (routed through `GeneratedJsonException` to the fallback
+above) and a failure-routing invariant. Narrowing fatals to I/O, corrupt build inputs and
+programming invariants is trunk's documented escalation ladder; a zero-throw rule would
+contradict it.
 
 ## Expected outcome
 
@@ -120,7 +135,7 @@ These are arithmetic projections from byte counts assuming emission time scales 
 - **`ContrastFixStep`** reads `styles.elements.link/button/heading`; the scaffold must never write those paths. Test it.
 - **`ThemeValidator`** must stay green on scaffolded output; `settings.spacing` is untouched.
 - **`PresetReferences`** scans markup, not theme.json, so it will not catch a scaffold reference to an undeclared slug — the fontSizes default above is what closes that hole.
-- **Schema strictness** — `settings` must stay permissive (the model invents gradient and shadow slugs). Coarse-only, per review.
+- **No schema means the prompt is the only contract.** `settings` had to stay permissive (the model invents gradient and shadow slugs), and no expressible schema does that — so drift shows up as a repair warning rather than a rejected response. That is the trade the repair layer above absorbs.
 - **Vendored copy** — wpcom vendors this as `a8c/site-builder`. Choosing a const over a config file means no sync change; still worth a PR note.
 
 ## Testing
@@ -129,11 +144,40 @@ These are arithmetic projections from byte counts assuming emission time scales 
 - Deep merge: a model-emitted `core/quote` key wins; sibling scaffold keys survive.
 - `applyScaffold()` never writes `styles.elements.button` / `.link` / `.heading`.
 - The recursive merge helper: nested maps, scalars, list-vs-map values.
-- Schema shape: blocked paths have no slot; `settings`, `styles.blocks`, h1/h2/h3 internals stay open.
+- `requests()` sends no `json_schema` — the request carries a prompt and nothing else.
 - **A completely empty model response yields a theme passing `ThemeValidator` and `PresetReferences`** — the never-fail guarantee.
 - Each default-fill emits its warning.
 - End-to-end via `FakeLlm` with a slim response.
 - The existing theme-json suite stays green.
+
+## What changed during implementation
+
+Two departures from the plan above, both recorded here rather than edited away.
+
+**1. The coarse schema was impossible.** Component 3 originally specified a schema that
+constrained `styles` while leaving `settings`, `styles.blocks` and the h1/h2/h3 internals
+open. Anthropic structured outputs require `additionalProperties: false` on every object
+and reject any other value, so no such schema exists. The request now sends none and the
+prompt carries the whole contract. This also retired the eng-review decision that rested
+on the schema being able to block paths.
+
+**2. Trunk shipped the never-fail layer first.** `origin/trunk`'s BIGR-731 (#152) landed
+`repairColors` / `repairFonts` / `consumeGeneratedJsonFailure` while this branch was
+building its own `fillColors` / `fillFonts`. Trunk's is better on two counts this branch
+did not plan for: it seeds a missing palette slug from `designDirection.json`'s committed
+hex before reaching for a neutral default — so a repaired site still looks like the design
+it asked for — and it strips malformed rows rather than only filling omissions.
+
+The merge kept trunk's layer and dropped this branch's duplicate, including the
+`DEFAULT_PALETTE` / `DEFAULT_FONT_FAMILIES` constants and the separate `theme-json.log`
+(warnings now land in `warnings.json` only, which is what the future repair pass reads).
+What this branch uniquely contributes survived: `FONT_SIZE_PROFILE` and `repairFontSizes`
+— trunk repairs colors and fonts but not sizes, and the scaffold references font-size
+slugs — plus the scaffold itself and the prompt rewrite.
+
+`repairFontSizes` was rewritten into trunk's pure `[$theme, $warnings]` shape so all three
+repairs read alike and none depends on `Project`. The scaffold is applied **after** them,
+so the presets it references are guaranteed to exist.
 
 ## Out of scope
 
