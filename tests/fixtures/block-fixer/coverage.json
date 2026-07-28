@@ -402,6 +402,38 @@
         "support:typography",
         "report:fixed"
       ]
+    },
+    "anchor-attribute-order": {
+      "milestone": "M4",
+      "capabilities": [
+        "block:core/group",
+        "block:core/heading",
+        "block:core/details",
+        "block:core/button",
+        "block:core/buttons",
+        "block:core/table",
+        "support:anchor",
+        "support:align",
+        "support:aria-label",
+        "report:fixed"
+      ]
+    },
+    "tbilisi60-traditional-offerings-fixed-point": {
+      "milestone": "M4",
+      "capabilities": [
+        "block:core/group",
+        "block:core/columns",
+        "block:core/column",
+        "block:core/heading",
+        "block:core/paragraph",
+        "block:core/separator",
+        "block:core/image",
+        "guard:carried-unreviewed-layout",
+        "deprecation:paragraph-legacy-font-style-key",
+        "repair:nested-paragraph",
+        "drop:legacy-text-align",
+        "report:fixed"
+      ]
     }
   },
   "reviewedCaseExclusions": {
@@ -426,13 +458,6 @@
         "parts/hidden-opacity.html": "ded3f0c36000d308c5d1bab6bc39842b3974cf07f033d131ba0f2dae4cdd37ee",
         "parts/opacity.html": "5f83240312c6663174efcabf1c59fb5e752ea06f4ddc045dac3ce38c2b24603b"
       }
-    },
-    "tbilisi60-traditional-offerings-fixed-point": {
-      "kind": "runtime-divergence",
-      "reason": "Gutenberg serializes the outer group class before its id; the reviewed PHP canonical output writes the id before the class.",
-      "runtimeMismatches": {
-        "parts/traditional-offerings.html": "1a2374a64c2ebf0d6630ab6713529819d29ba4469d1788dd08a83f58d47e3d07"
-      }
     }
   },
   "capabilityCases": {
@@ -443,7 +468,9 @@
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
       "generated-demo-layout-and-paragraph-signatures",
-      "group-layout-content-size"
+      "group-layout-content-size",
+      "anchor-attribute-order",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "repair:custom-class-recovery": [
       "group-html-attribute-repairs"
@@ -475,7 +502,9 @@
       "group-layout-content-size",
       "heading-legacy-text-align",
       "paragraph-inline-color-carryover",
-      "site-tagline-legacy-text-align"
+      "site-tagline-legacy-text-align",
+      "anchor-attribute-order",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "block:core/paragraph": [
       "nested-group-support",
@@ -490,7 +519,8 @@
       "details-static-renderer",
       "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "nested-blocks": [
       "nested-group-support",
@@ -503,7 +533,8 @@
       "nested-group-support",
       "tbilisi25-footer-fixed-point",
       "generated-demo-layout-and-paragraph-signatures",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "repair-gate:valid-paragraph": [
       "nested-group-support"
@@ -582,7 +613,8 @@
     "block:core/image": [
       "dropped-inner-image-content",
       "image-source-selector-branches",
-      "gallery-and-table-renderers"
+      "gallery-and-table-renderers",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "report:dropped-style": [
       "dropped-inner-image-content"
@@ -715,10 +747,12 @@
       "social-and-dynamic-strategies"
     ],
     "block:core/buttons": [
-      "structural-block-renderers"
+      "structural-block-renderers",
+      "anchor-attribute-order"
     ],
     "block:core/button": [
-      "structural-block-renderers"
+      "structural-block-renderers",
+      "anchor-attribute-order"
     ],
     "block:core/spacer": [
       "structural-block-renderers"
@@ -779,22 +813,26 @@
     "block:core/columns": [
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "block:core/column": [
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "support:alignment": [
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point"
     ],
     "support:anchor": [
-      "block-support-pipeline"
+      "block-support-pipeline",
+      "anchor-attribute-order"
     ],
     "support:aria-label": [
-      "block-support-pipeline"
+      "block-support-pipeline",
+      "anchor-attribute-order"
     ],
     "support:background-image-skip-serialization": [
       "block-support-pipeline"
@@ -915,7 +953,8 @@
       "gallery-and-table-renderers"
     ],
     "block:core/table": [
-      "gallery-and-table-renderers"
+      "gallery-and-table-renderers",
+      "anchor-attribute-order"
     ],
     "branch:gallery-caption": [
       "gallery-and-table-renderers"
@@ -1019,11 +1058,14 @@
       "tbilisi25-footer-fixed-point"
     ],
     "block:core/separator": [
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "block:core/heading": [
       "tbilisi25-footer-fixed-point",
-      "heading-legacy-text-align"
+      "heading-legacy-text-align",
+      "anchor-attribute-order",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "support:color-elements": [
       "tbilisi25-footer-fixed-point"
@@ -1032,7 +1074,8 @@
       "tbilisi25-footer-fixed-point"
     ],
     "block:core/details": [
-      "details-static-renderer"
+      "details-static-renderer",
+      "anchor-attribute-order"
     ],
     "render:name-before-open-order": [
       "details-static-renderer"
@@ -1084,6 +1127,18 @@
     ],
     "deprecation:site-tagline-font-family": [
       "site-tagline-legacy-text-align"
+    ],
+    "support:align": [
+      "anchor-attribute-order"
+    ],
+    "guard:carried-unreviewed-layout": [
+      "tbilisi60-traditional-offerings-fixed-point"
+    ],
+    "deprecation:paragraph-legacy-font-style-key": [
+      "tbilisi60-traditional-offerings-fixed-point"
+    ],
+    "drop:legacy-text-align": [
+      "tbilisi60-traditional-offerings-fixed-point"
     ]
   },
   "requiredCapabilities": [
@@ -1224,7 +1279,8 @@
       "details-static-renderer",
       "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "core/group": [
       "group-html-attribute-repairs",
@@ -1233,35 +1289,45 @@
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
       "generated-demo-layout-and-paragraph-signatures",
-      "group-layout-content-size"
+      "group-layout-content-size",
+      "anchor-attribute-order",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "core/column": [
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "core/columns": [
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "core/heading": [
       "tbilisi25-footer-fixed-point",
-      "heading-legacy-text-align"
+      "heading-legacy-text-align",
+      "anchor-attribute-order",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "core/image": [
       "dropped-inner-image-content",
       "image-source-selector-branches",
-      "gallery-and-table-renderers"
+      "gallery-and-table-renderers",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "core/separator": [
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "core/buttons": [
-      "structural-block-renderers"
+      "structural-block-renderers",
+      "anchor-attribute-order"
     ],
     "core/button": [
-      "structural-block-renderers"
+      "structural-block-renderers",
+      "anchor-attribute-order"
     ],
     "core/spacer": [
       "structural-block-renderers"
@@ -1276,7 +1342,8 @@
       "cover-renderer-branches"
     ],
     "core/details": [
-      "details-static-renderer"
+      "details-static-renderer",
+      "anchor-attribute-order"
     ],
     "core/media-text": [
       "media-text-type-inference"
@@ -1291,7 +1358,8 @@
       "gallery-and-table-renderers"
     ],
     "core/table": [
-      "gallery-and-table-renderers"
+      "gallery-and-table-renderers",
+      "anchor-attribute-order"
     ],
     "core/embed": [
       "quote-embed-and-raw-renderers"
@@ -1360,7 +1428,9 @@
       "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
       "heading-legacy-text-align",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "anchor-attribute-order",
+      "tbilisi60-traditional-offerings-fixed-point"
     ],
     "RAW_CONTENT": [
       "quote-embed-and-raw-renderers"
@@ -1446,24 +1516,6 @@
       "deprecation:core/site-tagline:1": "explicit-adapter",
       "deprecation:core/site-title:0": "explicit-adapter",
       "deprecation:core/site-title:1": "explicit-adapter"
-    },
-    "unreviewed": [],
-    "unobservedReviewed": []
-  },
-  "repairCodes": {
-    "observed": [
-      "anchor-recovery",
-      "aria-label-recovery",
-      "custom-class-recovery",
-      "media-type-inference",
-      "nested-paragraph"
-    ],
-    "reviewed": {
-      "anchor-recovery": "pinned-built-in-recovery",
-      "aria-label-recovery": "pinned-built-in-recovery",
-      "custom-class-recovery": "pinned-built-in-recovery",
-      "media-type-inference": "reviewed-compatibility-repair",
-      "nested-paragraph": "reviewed-compatibility-repair"
     },
     "unreviewed": [],
     "unobservedReviewed": []

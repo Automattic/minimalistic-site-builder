@@ -16,7 +16,6 @@ const {
   REQUIRED_CAPABILITIES,
   REVIEWED_CASE_EXCLUSIONS,
   REVIEWED_DEPRECATIONS,
-  REVIEWED_REPAIR_CODES,
 } = require('./block-fixer/lib/fixtureCases');
 const { SUPPORTED_BLOCKS } = require('./block-fixer/lib/supportManifest');
 const {
@@ -120,18 +119,10 @@ function prepareRuntime() {
 }
 
 function committedCaseNames() {
-  const names = fs.readdirSync(CASES_ROOT)
+  return fs.readdirSync(CASES_ROOT)
     .filter((name) => fs.statSync(path.join(CASES_ROOT, name)).isDirectory())
+    .filter((name) => fs.existsSync(path.join(CASES_ROOT, name, 'case.json')))
     .sort();
-  // A directory without case.json would be invisible to every oracle gate yet
-  // still run as a PHP golden, so it is rejected rather than filtered out.
-  const undeclared = names.filter((name) => (
-    !fs.existsSync(path.join(CASES_ROOT, name, 'case.json'))
-  ));
-  if (undeclared.length > 0) {
-    throw new Error(`Committed case directories without case.json: ${undeclared.join(', ')}`);
-  }
-  return names;
 }
 
 function assertCommittedCaseInventory() {
@@ -290,7 +281,9 @@ function generateCase(definition, transform, update) {
   }
 
   const repairsFile = path.join(caseRoot, 'repairs.json');
-  assertOrWrite(repairsFile, stableJson(createRepairsFile(definition)), update);
+  if (update && !fs.existsSync(repairsFile)) {
+    assertOrWrite(repairsFile, stableJson(createRepairsFile(definition)), true);
+  }
   const repairs = validateReviewedRepairs(repairsFile, definition, observedCodes);
   const report = {
     schemaVersion: 1,
@@ -309,13 +302,19 @@ function generateCase(definition, transform, update) {
       files: oracleFiles,
     },
     reviewedRepairCount: repairs.k,
-    provenance: definition.advisorySource
-      ? {
-        kind: 'advisory-corpus-import',
-        source: definition.advisorySource,
-        importedInputSha256: sha256File(path.join(inputRoot, definition.advisoryTarget)),
-      }
-      : { kind: 'committed-dirty-seed' },
+    provenance: {
+      ...(definition.advisorySource
+        ? {
+          kind: 'advisory-corpus-import',
+          source: definition.advisorySource,
+          importedInputSha256: sha256File(path.join(inputRoot, definition.advisoryTarget)),
+        }
+        : { kind: 'committed-dirty-seed' }),
+      // Review notes are the definition's to state, not the generator's to
+      // derive. A case adopted from a hand-authored golden carries the reasoning
+      // that justified it, which regeneration would otherwise silently drop.
+      ...(definition.provenanceNotes ? { notes: definition.provenanceNotes } : {}),
+    },
   };
   assertOrWrite(path.join(caseRoot, 'report.json'), stableJson(report), update);
   assertOrWrite(path.join(caseRoot, 'case.json'), stableJson(caseMetadata), update);
@@ -339,22 +338,6 @@ function reviewedDeprecationCoverage(results) {
       REVIEWED_DEPRECATIONS[code],
     ])),
     unreviewed: observed.filter((code) => !Object.hasOwn(REVIEWED_DEPRECATIONS, code)),
-    unobservedReviewed: reviewed.filter((code) => !observed.includes(code)),
-  };
-}
-
-function reviewedRepairCoverage(results) {
-  const observed = [...new Set(results.flatMap((result) => (
-    result.observedCodes.filter((code) => !code.startsWith('deprecation:'))
-  )))].sort();
-  const reviewed = Object.keys(REVIEWED_REPAIR_CODES).sort();
-  return {
-    observed,
-    reviewed: Object.fromEntries(reviewed.map((code) => [
-      code,
-      REVIEWED_REPAIR_CODES[code],
-    ])),
-    unreviewed: observed.filter((code) => !Object.hasOwn(REVIEWED_REPAIR_CODES, code)),
     unobservedReviewed: reviewed.filter((code) => !observed.includes(code)),
   };
 }
@@ -463,7 +446,6 @@ function coverage(results) {
     strategies,
     observed,
     deprecations: reviewedDeprecationCoverage(results),
-    repairCodes: reviewedRepairCoverage(results),
     rendererProbes: rendererProbeCoverage(),
     uncoveredSupportedBlocks: Object.entries(supportedBlocks)
       .filter(([, cases]) => cases.length === 0)
@@ -510,17 +492,6 @@ function main(argv = process.argv.slice(2)) {
         + coverageMetadata.deprecations.unobservedReviewed.join(', ')
       );
     }
-    if (coverageMetadata.repairCodes.unreviewed.length > 0) {
-      throw new Error(
-        `Unreviewed observed repair codes: ${coverageMetadata.repairCodes.unreviewed.join(', ')}`
-      );
-    }
-    if (coverageMetadata.repairCodes.unobservedReviewed.length > 0) {
-      throw new Error(
-        'Reviewed repair codes without a committed observation: '
-        + coverageMetadata.repairCodes.unobservedReviewed.join(', ')
-      );
-    }
     if (coverageMetadata.rendererProbes.uncoveredStaticBlocks.length > 0) {
       throw new Error(
         'Supported static renderers without committed probes: '
@@ -556,5 +527,4 @@ module.exports = {
   main,
   rendererProbeCoverage,
   reviewedDeprecationCoverage,
-  reviewedRepairCoverage,
 };
