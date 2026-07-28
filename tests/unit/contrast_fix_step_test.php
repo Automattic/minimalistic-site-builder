@@ -85,6 +85,10 @@ test('an unfixable failing button warns instead of disappearing', function () {
         'no improvement available — the authored color stays');
     assert_contains('no palette color improves it (warning)', $project->readText('logs/contrast-report.txt'));
 
+    // Unrepairable pairs are delivered-through defects: durable, not log-only.
+    $joined = implode(' ', $project->readJson('warnings.json')['contrast-fix'] ?? []);
+    assert_contains('no palette color improves it', $joined);
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

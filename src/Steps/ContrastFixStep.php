@@ -59,7 +59,7 @@ final class ContrastFixStep implements Step
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
             reads: ['theme/theme.json', 'pages.json', 'theme/parts/*'],
-            writes: ['theme/theme.json', 'theme/parts/*'],
+            writes: ['theme/theme.json', 'theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -111,6 +111,14 @@ final class ContrastFixStep implements Step
         }
 
         $this->lintOverlayHeader($project, $fix, is_string($defaultText) ? $defaultText : null, $report, $warnings);
+
+        // Every unrepairable pair is a defect the build delivers through:
+        // record it durably for the later repair pass, not just in the log.
+        // Repaired rows stay out — nothing was lost.
+        $project->addWarnings($this->id(), array_values(array_filter(
+            $report,
+            static fn (string $row): bool => str_ends_with($row, '(warning)'),
+        )));
 
         if ($report === []) {
             $report[] = 'All text/background and link/background pairs pass WCAG thresholds.';

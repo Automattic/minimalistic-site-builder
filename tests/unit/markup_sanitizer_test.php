@@ -292,3 +292,45 @@ test('sanitize treats a spaced closer as text, not a raw-text boundary', functio
     assert_eq('<style>a</ style><img src=x onerror=alert(1)>', $out);
     assert_eq('', MarkupSanitizer::sanitize('<iframe>x</ iframe><img src=x onerror=alert(1)>'));
 });
+
+test('sanitize and normalize report their removals through the notes out-param', function () {
+    $notes = [];
+    MarkupSanitizer::sanitize(
+        '<script>alert(1)</script>'
+        . '<!-- wp:paragraph --><p onclick="alert(2)"><a href="javascript:alert(3)">x</a></p><!-- /wp:paragraph -->',
+        $notes
+    );
+    $joined = implode(' | ', $notes);
+    assert_contains('removed script-capable element markup', $joined);
+    assert_contains('removed 1 inline event handler attribute(s)', $joined);
+    assert_contains('neutralized 1 executable URL value(s)', $joined);
+
+    // A clean part produces no notes — warnings.json stays actionable.
+    $clean = [];
+    MarkupSanitizer::sanitize('<!-- wp:paragraph --><p>Safe.</p><!-- /wp:paragraph -->', $clean);
+    assert_eq([], $clean);
+
+    // The intake normalize prefixes each note with its part key, so the
+    // caller can route them into warnings.json verbatim.
+    $intake = [];
+    GeneratedMarkup::normalize(
+        '<!-- wp:html --><script>alert(1)</script><!-- /wp:html -->'
+        . '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->',
+        'section-test',
+        $intake
+    );
+    assert_contains("part 'section-test': sanitized script-capable markup", implode(' | ', $intake));
+});
+
+test('normalize reports truncation salvage through the notes out-param', function () {
+    $kept = '<!-- wp:paragraph --><p>Kept.</p><!-- /wp:paragraph -->';
+    $notes = [];
+    $out = GeneratedMarkup::normalize(
+        $kept . "\n<!-- wp:group -->\n<div class=\"wp-block-group\"><p>cut off mid-",
+        'section-test',
+        $notes
+    );
+    assert_eq($kept, $out);
+    assert_true($notes !== [], 'salvage produces a durable note');
+    assert_contains("part 'section-test':", $notes[0]);
+});

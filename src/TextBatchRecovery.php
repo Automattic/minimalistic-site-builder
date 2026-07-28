@@ -25,7 +25,10 @@ namespace Automattic\SiteBuild;
  * logged and accounted by the transport. Degrading one section beats
  * rejecting the entire theme. The transport callback owns the real calls,
  * usage accounting and logging; this orchestrator is pure apart from STDERR
- * notes.
+ * notes. A retained abnormal member gets its DURABLE record downstream, at
+ * markup intake: GeneratedMarkup::normalize's salvage pass trims it to its
+ * last complete block and reports the loss for warnings.json — this layer
+ * has no Project to write to.
  */
 final class TextBatchRecovery
 {
