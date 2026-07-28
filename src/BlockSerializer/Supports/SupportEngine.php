@@ -8,6 +8,18 @@ use Automattic\SiteBuild\BlockSerializer\Save\BlockProps;
 /** Pinned blocks.getSaveContent.extraProps pipeline, in effective hook order. */
 final class SupportEngine
 {
+    /**
+     * Blocks whose generated class slot opens *after* the support styles rather
+     * than before them, so the class attribute trails the style attribute in
+     * the saved markup.
+     *
+     * Where the slot opens is a property of each block's save(), not a rule the
+     * engine can derive, so it is recorded here rather than guessed. Every other
+     * block in the domain opens it right after the props save() writes itself —
+     * verified against the pinned runtime, block by block.
+     */
+    private const CLASS_SLOT_AFTER_STYLES = ['core/button', 'core/table'];
+
     public function __construct(private ?StyleEngine $styles = null)
     {
         $this->styles ??= new StyleEngine();
@@ -45,6 +57,14 @@ final class SupportEngine
         if ($ariaSupport && !$this->skipFeature($ariaSkip, 'ariaLabel')
             && array_key_exists('ariaLabel', $attributes)) {
             $props->set('aria-label', $attributes['ariaLabel'] === '' ? null : $attributes['ariaLabel']);
+        }
+
+        // React inserts the generated class here: after the props save() writes
+        // itself, and before the support styles. A support that *prepends* a
+        // class — align, textAlign — has already opened the slot earlier, which
+        // is where the real runtime puts it too, so this leaves it alone.
+        if (!in_array($name, self::CLASS_SLOT_AFTER_STYLES, true)) {
+            $props->reserveClass();
         }
 
         if (($supports['customClassName'] ?? true) && !empty($attributes['className'])) {

@@ -51,6 +51,14 @@ final class BlockProps
         $this->props['className'] = implode(' ', array_keys(array_fill_keys($tokens, true)));
     }
 
+    /** Open the generated class slot in place; a support may already have. */
+    public function reserveClass(): void
+    {
+        if (!isset($this->props['className'])) {
+            $this->props['className'] = '';
+        }
+    }
+
     public function set(string $name, mixed $value): void
     {
         $this->props[$name] = $value;
