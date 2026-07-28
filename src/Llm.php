@@ -81,7 +81,8 @@ interface Llm
      * refusal) per member and regenerate only that member — a truncation with
      * a doubled output budget (TextBatchRecovery). A member that still
      * terminates abnormally after the retry is returned as-is (best effort)
-     * rather than aborting the batch; callers own any structural salvage.
+     * rather than aborting the batch. Its keyed degradation note lets callers
+     * persist a warning only if that member survives structural salvage.
      *
      * @param array<array-key,array{prompt:string,system?:string,model?:string,max_tokens?:int,temperature?:float,json_schema?:array{name:string,schema:array<string,mixed>},cached_prefixes?:list<string>}> $requests
      *        cached_prefixes are ordered reusable text layers prepended before
@@ -94,7 +95,7 @@ interface Llm
      *        all preceding message content, through the reused boundary. On
      *        Anthropic Sonnet, the cumulative prefix through a breakpoint must
      *        meet the model's minimum cacheable size (1,024 tokens on Sonnet-tier; higher on some tiers) or it silently will not cache.
-     * @return array<array-key,string> raw assistant text keyed as the input
+     * @return TextBatchResult raw assistant text and keyed degradation notes
      */
-    public function completeBatch(array $requests): array;
+    public function completeBatch(array $requests): TextBatchResult;
 }

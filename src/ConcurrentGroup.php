@@ -190,17 +190,55 @@ final class ConcurrentGroup implements Step
             }
         }
 
-        $results = $this->llm->completeJsonBatch($merged);
+        $failures = [];
+        try {
+            $results = $this->llm->completeJsonBatch($merged);
+        } catch (GeneratedJsonException $e) {
+            // JsonBatchRecovery has already retained every valid sibling. Route
+            // those normally, and give only explicitly fallback-capable steps
+            // the generated failures they know how to replace.
+            $results = $e->partialResults;
+            $failures = $e->failures;
+        }
 
         // Route results back to the step that asked for them.
         $byStep = array_fill_keys(array_keys($this->steps), []);
         foreach ($results as $globalKey => $data) {
+            if (!array_key_exists($globalKey, $owner)) {
+                throw new \RuntimeException("Concurrent JSON batch returned unknown key '{$globalKey}'");
+            }
             [$i, $key] = $owner[$globalKey];
             $byStep[$i][$key] = $data;
         }
 
+        $failuresByStep = array_fill_keys(array_keys($this->steps), []);
+        foreach ($failures as $globalKey => $message) {
+            if (!array_key_exists($globalKey, $owner)) {
+                throw new \RuntimeException("Concurrent JSON batch failed unknown key '{$globalKey}'");
+            }
+            [$i, $key] = $owner[$globalKey];
+            $failuresByStep[$i][$key] = $message;
+        }
+
+        $unhandled = [];
         foreach ($this->steps as $i => $step) {
-            $step->consume($project, $byStep[$i]);
+            if ($failuresByStep[$i] === []) {
+                $step->consume($project, $byStep[$i]);
+                continue;
+            }
+            if ($step instanceof GeneratedJsonFallbackStep) {
+                $step->consumeGeneratedJsonFailure($project, $byStep[$i], $failuresByStep[$i]);
+                continue;
+            }
+            foreach ($failuresByStep[$i] as $key => $message) {
+                $unhandled["{$i}:{$key}"] = $message;
+            }
+        }
+
+        if ($unhandled !== []) {
+            // Members without a reviewed fallback stay fatal. Valid and
+            // fallback-capable siblings have nevertheless been delivered.
+            throw new GeneratedJsonException($unhandled, $results);
         }
     }
 }

@@ -66,11 +66,14 @@ final class JsonBatchRecovery
                     $retry[$key] = self::repairRequest($key, $requests[$key], $response, $error);
                     continue;
                 }
-                $failures[] = self::failure($key, $requests[$key], $response, $error, $attempt);
+                $failures[$key] = self::failure($key, $requests[$key], $response, $error, $attempt);
             }
 
             if ($failures !== []) {
-                throw new \RuntimeException(implode("\n", $failures));
+                throw new GeneratedJsonException(
+                    $failures,
+                    self::orderedResults($requests, $decoded),
+                );
             }
             if ($retry === []) {
                 break;
@@ -85,12 +88,29 @@ final class JsonBatchRecovery
             $pending = $retry;
         }
 
-        $out = [];
+        $out = self::orderedResults($requests, $decoded);
         foreach ($requests as $key => $_request) {
-            if (!array_key_exists($key, $decoded)) {
+            if (!array_key_exists($key, $out)) {
                 throw new \RuntimeException("JSON batch recovery lost request '{$key}'");
             }
-            $out[$key] = $decoded[$key];
+        }
+        return $out;
+    }
+
+    /**
+     * Restore input order while retaining only results decoded so far.
+     *
+     * @param array<array-key,array<string,mixed>> $requests
+     * @param array<array-key,array<mixed>>        $decoded
+     * @return array<array-key,array<mixed>>
+     */
+    private static function orderedResults(array $requests, array $decoded): array
+    {
+        $out = [];
+        foreach ($requests as $key => $_request) {
+            if (array_key_exists($key, $decoded)) {
+                $out[$key] = $decoded[$key];
+            }
         }
         return $out;
     }

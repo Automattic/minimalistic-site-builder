@@ -68,7 +68,7 @@ final class MotionSanityStep implements Step
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
             reads: ['designDirection.json', 'pages.json', 'theme/parts/*'],
-            writes: ['theme/parts/*'],
+            writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -91,6 +91,14 @@ final class MotionSanityStep implements Step
                 }
             }
         }
+
+        // Each strip removed an authored class from the delivered markup —
+        // deliberate policy enforcement, but still a change the build shipped
+        // through; record it durably for the later repair pass.
+        $project->addWarnings($this->id(), array_map(
+            static fn (string $row): string => "motion class stripped: {$row}",
+            $report,
+        ));
 
         if ($report === []) {
             $report[] = "Motion profile '{$profile}': all motion classes within budget.";

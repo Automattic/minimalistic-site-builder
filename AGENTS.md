@@ -14,16 +14,38 @@ Issues for this repo are tracked in the Linear project **[Generated themes: repl
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.
 
-## Generated-content validation: repair, warn, and deliver
+## Generated-content validation: fix, degrade, warn — never crash the build
 
-`warnings.json` is the shared record of non-fatal defects in output the build still delivered. For mutating deterministic repair or serialization steps, validation is repair-first: an explicitly reviewed content incompatibility must not withhold the entire generated site when a deterministic, semantics-safe usable fallback exists.
+Every validator and fixer in this pipeline exists because an LLM produced imperfect content. **A defect in generated content must never abort the build.** The user asked for a site; shipping a site with a slightly wrong margin, a missing decorative section, or a dropped inline style is always better than shipping nothing after paying for every LLM call in the graph.
 
-1. Attempt a bounded, semantics-safe deterministic repair first. Successful repairs should be represented in the step/fixer report and covered by a regression test.
-2. If the exact defect signature and fallback have been reviewed, but the fallback cannot preserve every authored value, deliver the usable fallback, emit a typed repair/report row, record an actionable defect with `Project::addWarnings(<step-id>, ...)` in the project-root `warnings.json`, write the detailed evidence to the step log, and continue the build.
-3. Any step that can add durable warnings must declare `warnings.json` in `StepDeclaration::writes`.
-4. Do not treat an arbitrary validator exception as permission for a mutating step to ship unchecked transformations. Unknown or unreviewed signatures, malformed block structure or CSS, unsupported registered blocks/support shapes, transformations with possible content loss, and non-convergence remain fatal, as do I/O failures, missing required inputs, corrupt artifacts, and programming invariants.
-5. Advisory validators that inspect an already usable final artifact without mutating it (for example, `ValidateThemeStep`) may record residual problems as warnings and deliver the artifact; make that non-mutating boundary explicit.
-6. Tests for mutating repair steps must cover both sides of the boundary: the exact reviewed degradation must retain content, reach a fixed point, continue the build, and write actionable file/block/value/disposition context to `warnings.json`; representative near misses and unsupported inputs must still throw without partial writes.
+`warnings.json` (written via `Project::addWarnings(<step-id>, ...)`, read by the future repair pass, BIGR-722) is the durable, machine-readable record of every defect the build chose to deliver through.
+
+### The escalation ladder
+
+Apply these in order. Only fall to the next rung when the one above genuinely cannot apply.
+
+1. **Fix it deterministically.** Best effort, bounded, semantics-safe, idempotent (a repair pass must reach a fixed point). This is the default and covers most rules: canonicalizing preset references, mirroring HTML-only declarations into comment attributes, swapping a failing `textColor`, migrating a block through a reviewed deprecation, synthesizing missing closers for a truncated response. Successful repairs go in the step/fixer report and get a regression test. No warning is needed — nothing was lost.
+2. **Leave harmless defects alone.** If the defect has no effect on what the visitor sees or on WordPress's ability to parse and render the markup, do not touch it and do not warn. Inert values (an unexpanded spacing slug that never rendered), cosmetic non-canonical spellings, and extra attributes WordPress ignores are noise, not defects. Suppressing this class is a feature: `warnings.json` is only useful if every row in it is actionable.
+3. **Remove the smallest non-harmless part you cannot fix.** When something is actively harmful — unsafe (`<script>`, `on*` handlers, `javascript:` URLs), over-budget, unsupported by the frozen block domain, structurally broken, or dead UI — excise it and keep the rest. Always cut at the *smallest* unit that isolates the defect, escalating only as far as needed: one CSS declaration → one attribute → one block → one section part → one page. Removing a decorative section is acceptable; removing the whole theme is not. Record the removal per rung 4.
+4. **Warn and continue.** Any defect that survives rungs 1–3 — including every removal from rung 3 and every fallback that could not preserve an authored value — is recorded with `Project::addWarnings()` and the build continues. A warning row must be actionable on its own: file, block path, the authored value, the delivered value (or `removed`), and the disposition. Detailed evidence goes to the step log; the *actionable summary* goes in `warnings.json`. STDERR or a step log alone is **not** sufficient for a defect that changed the delivered output.
+5. **(Future) hand it to an AI fixer.** `warnings.json` is the queue for a later LLM repair pass. Write rows with that consumer in mind — enough context to locate and fix the defect without re-running the build.
+
+### What may still be fatal
+
+Only conditions that are not about generated content, and where no partial output is meaningful:
+
+- I/O failures (unreadable/unwritable paths, failed atomic replace, failed staging).
+- Missing or corrupt **build inputs and artifacts** the step is contractually given (`meta.json` has no prompt; a required upstream artifact is absent or is not valid JSON).
+- Programming invariants: `StepGraph`/`StepDeclaration` validation, unknown step ids, misconfigured environment overrides. These are our bugs, not the model's.
+
+Everything else — unknown or unreviewed block signatures, malformed block structure or CSS, unsupported registered blocks and support shapes, non-convergence of a fixed-point pass, a transformation that would lose content, a plan that violates its own contract — must degrade under rungs 1–4 rather than throw. When a step cannot safely transform a file, prefer delivering that file's **pre-transformation** bytes with a warning over aborting the run. A repair step may still throw *internally* to abandon one file, block, or unit, but the step boundary must catch it, isolate the loss, warn, and continue.
+
+### Mechanics
+
+- Any step that can add durable warnings must declare `warnings.json` in `StepDeclaration::writes`.
+- Mutating repair steps stay transactional at the *unit* they isolate: never leave a half-written file or a half-normalized page. Snapshot and restore the unit rather than the whole run.
+- Advisory validators that inspect an already-usable final artifact without mutating it (for example `ValidateThemeStep`) record residual problems as warnings and deliver the artifact. Make that non-mutating boundary explicit in the class docblock.
+- Tests for repair steps cover both sides of every boundary: the reviewed degradation must retain the surviving content, reach a fixed point, continue the build, and write actionable file/block/value/disposition context to `warnings.json`; and the isolated-loss path must be shown to cut only the intended unit, leaving siblings byte-for-byte intact.
 
 ## Posting screenshots / images in PR & issue comments
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\LlmOptions;
@@ -94,7 +95,7 @@ final class DesignDirectionStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json'],
-            writes: ['designDirection.json'],
+            writes: ['designDirection.json', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -115,14 +116,63 @@ final class DesignDirectionStep implements Step
             'site_spec'   => $spec,
             'seed'        => $seed,
         ]);
-        $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+        $warnings = [];
+        try {
+            $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+        } catch (GeneratedJsonException $e) {
+            // A syntactically unusable generated direction is content drift,
+            // not an operational failure. Plain RuntimeExceptions still
+            // propagate so transport and programming failures stay visible.
+            $payload = [];
+            $warnings[] = 'designDirection.json: generated JSON remained unusable after its repair attempt ('
+                . $e->getMessage() . '); deterministic seed-derived direction delivered';
+        }
 
         $direction = self::normalize($payload['direction'] ?? null);
         if ($direction === null) {
-            throw new \RuntimeException('design-direction: model returned no usable direction');
+            // A build without a committed direction still works — every
+            // downstream step tolerates empty fields — so deliver the
+            // deterministic fallback (built on the chosen seed when one
+            // exists) rather than abort. Recorded durably: the site loses
+            // the concept-variety this step exists to inject.
+            $direction = self::fallbackDirection($seed);
+            $warnings[] = 'model returned no usable design direction; deterministic fallback direction delivered';
+            echo "  [design-direction] warning: no usable direction from the model; fallback delivered (recorded in warnings.json)\n";
         }
 
+        $project->addWarnings($this->id(), $warnings);
         $project->writeJson(self::FILE, $direction);
+    }
+
+    /**
+     * The deterministic direction delivered when the model's payload is
+     * unusable: the chosen seed's one-sentence commitment as the narrative
+     * (or the generic "be bold" brief when even seeding failed), no palette
+     * or type commitments (downstream steps then decide inline), full-bleed
+     * canvas, default motion profile. Pure — unit-testable.
+     *
+     * @return array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string}
+     */
+    public static function fallbackDirection(string $seed = ''): array
+    {
+        $seed = trim($seed);
+        $description = $seed !== '' && $seed !== self::SEED_FALLBACK
+            ? $seed
+            : 'Make bold, specific, non-generic design choices that fit the brand, and consciously '
+                . 'avoid default treatments like a centered hero, all-sans-serif typography, and a '
+                . 'blue/teal palette.';
+        return [
+            'title'            => '',
+            'description'      => $description,
+            'palette'          => [],
+            'type'             => ['heading' => '', 'body' => ''],
+            'image_grade'      => '',
+            'canvas'           => 'full-bleed',
+            'motion'           => Motion::DEFAULT_PROFILE,
+            'motion_note'      => '',
+            'signature_device' => '',
+            'hero_composition' => '',
+        ];
     }
 
     /**

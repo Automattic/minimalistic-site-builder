@@ -110,3 +110,25 @@ test('Anthropic batch transport preserves abnormal empty responses but retries o
     assert_eq(false, $ordinary['ok'], 'ordinary empty successes retain transport retry behavior');
     assert_eq(true, $ordinary['transient']);
 });
+
+test('Anthropic batch transport retries a stream severed before its terminal message_delta', function () {
+    // A dropped connection can cut every multiplexed stream mid-response with
+    // no cURL error and HTTP 200: text arrived, but the message_delta carrying
+    // stop_reason never did. The partial text must not be mistaken for a
+    // completion — downstream salvage would trim it and quietly ship a mostly
+    // empty section.
+    $severed = implode("\n", [
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":40,"output_tokens":5}}}',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"<!-- wp:group -->"}}',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"<div class=\"wp-block-gro"}}',
+        '',
+    ]);
+
+    $method = new ReflectionMethod(AnthropicClient::class, 'interpretStream');
+    $method->setAccessible(true);
+
+    $outcome = $method->invoke(null, $severed, 0, '', 200, 0.25);
+    assert_eq(false, $outcome['ok'], 'a severed stream is not a completion');
+    assert_eq(true, $outcome['transient'], 'severed streams are retried, not fatal');
+    assert_contains('severed before completion', $outcome['error']);
+});

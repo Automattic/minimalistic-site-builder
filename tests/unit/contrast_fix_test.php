@@ -299,6 +299,7 @@ test('mid-tone background takes the best partial repair when nothing passes', fu
     $res = $fix->process($src);
     assert_eq(true, $res['changed']);
     assert_contains('best available', $res['findings'][0]['detail']);
+    assert_eq(true, $res['findings'][0]['residual'] ?? false, 'partial repair retains a warning disposition');
 });
 
 test('swapping an explicit preset color also swaps the stale class in the HTML', function () {

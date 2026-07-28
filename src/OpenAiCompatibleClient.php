@@ -182,7 +182,7 @@ final class OpenAiCompatibleClient implements Llm
         return $requests;
     }
 
-    public function completeBatch(array $requests): array
+    public function completeBatch(array $requests): TextBatchResult
     {
         $requests = $this->withEffectiveMaxTokens($requests);
         return TextBatchRecovery::run(

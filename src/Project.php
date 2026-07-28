@@ -92,7 +92,11 @@ final class Project
         if (!is_file($full)) {
             throw new \RuntimeException("Missing file: {$full}");
         }
-        return (string) file_get_contents($full);
+        $content = @file_get_contents($full);
+        if ($content === false) {
+            throw new \RuntimeException("Could not read file: {$full}");
+        }
+        return $content;
     }
 
     /** @param array<mixed> $data */

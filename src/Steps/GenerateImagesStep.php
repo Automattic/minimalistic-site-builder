@@ -457,7 +457,7 @@ final class GenerateImagesStep implements Step
         // costs only its own image; the ones that fail again just keep their
         // original filtered failure (handled below as "no usable rewrite").
         try {
-            $rewrites = $this->llm->completeBatch($requests);
+            $rewrites = $this->llm->completeBatch($requests)->texts;
         } catch (\Throwable $e) {
             fwrite(STDERR, "    batched prompt repair failed ({$e->getMessage()}); retrying rewrites one by one\n");
             $rewrites = [];

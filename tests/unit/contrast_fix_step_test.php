@@ -60,6 +60,9 @@ test('button repair on a mid-tone background keeps the failure on the record', f
 
     $report = $project->readText('logs/contrast-report.txt');
     assert_contains('still below threshold', $report);
+    assert_contains('(repaired) (warning)', $report);
+    $joined = implode(' ', $project->readJson('warnings.json')['contrast-fix'] ?? []);
+    assert_contains('still below threshold', $joined, 'the residual failure is durable, not log-only');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -84,6 +87,10 @@ test('an unfixable failing button warns instead of disappearing', function () {
     assert_eq('var(--wp--preset--color--contrast)', $theme['styles']['elements']['button']['color']['text'],
         'no improvement available — the authored color stays');
     assert_contains('no palette color improves it (warning)', $project->readText('logs/contrast-report.txt'));
+
+    // Unrepairable pairs are delivered-through defects: durable, not log-only.
+    $joined = implode(' ', $project->readJson('warnings.json')['contrast-fix'] ?? []);
+    assert_contains('no palette color improves it', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
