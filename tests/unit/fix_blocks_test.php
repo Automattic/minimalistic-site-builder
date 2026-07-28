@@ -700,3 +700,4 @@ HTML;
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
 });
+
