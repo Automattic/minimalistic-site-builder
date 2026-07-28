@@ -775,3 +775,50 @@ test('theme-json scaffold sets no heading color ContrastFixStep cannot see', fun
     }
     assert_eq('var:preset|color|contrast', ThemeJsonStep::applyScaffold([])['styles']['color']['text']);
 });
+
+test('theme-json representative model response survives scaffold and validates', function () {
+    // A real captured Opus response. Proves the scaffold + the three preset
+    // repairs leave a realistic theme structurally valid, and that a model
+    // that DOES author the build-supplied paths keeps its own values.
+    $tmp = sys_get_temp_dir() . '/builder_tj_representative_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+
+    $payload = json_decode(
+        file_get_contents(repo_path('tests/fixtures/theme-json/representative-model-response.json')),
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    $warnings = $project->exists('warnings.json')
+        ? ($project->readJson('warnings.json')['theme-json'] ?? [])
+        : [];
+    assert_eq([], $warnings, 'a complete response needs no repair');
+    assert_eq(3, $theme['version']);
+    assert_eq(
+        ['caption', 'body', 'lead', 'heading', 'section-title', 'display'],
+        array_column($theme['settings']['typography']['fontSizes'], 'slug'),
+        'the model scale is preserved, not replaced',
+    );
+
+    // The model authored every build-supplied path here, so it must win.
+    $el = $theme['styles']['elements'];
+    assert_eq('var(--wp--preset--color--contrast)', $el['h1']['color']['text'], 'model heading color wins');
+    assert_eq('1.05', $el['h1']['typography']['lineHeight'], 'model taste key survives');
+    assert_eq('var(--wp--preset--font-size--lead)', $el['h4']['typography']['fontSize'], 'model h4 size wins over scaffold');
+    assert_eq('var(--wp--preset--color--base)', $el['button']['color']['text'], 'button untouched');
+    assert_eq(
+        'var(--wp--preset--font-family--heading)',
+        $theme['styles']['blocks']['core/quote']['typography']['fontFamily'],
+        'model block wiring wins over scaffold',
+    );
+    // Blocks the model never mentioned still get their wiring.
+    assert_eq('var:preset|color|contrast', $theme['styles']['blocks']['core/list']['color']['text']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
