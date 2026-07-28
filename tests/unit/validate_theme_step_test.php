@@ -100,3 +100,32 @@ test('addWarnings accumulates across steps and dedupes within a step', function 
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+test('validate-theme also runs the typography and plan validators', function () {
+    [$project, $tmp] = final_validation_project();
+    // Hardcoded font size → typographyWarnings; an interior page opening at
+    // homepage-hero scale → planWarnings. Both were orphaned in bin/eval.php
+    // before — the final gate must run every advisory validator.
+    $project->writeText(
+        'theme/parts/hardcoded.html',
+        '<!-- wp:paragraph {"fontSize":"1.25rem"} --><p>Sized</p><!-- /wp:paragraph -->'
+    );
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'hero', 'layout_archetype' => 'full-bleed-cover'],
+        ]],
+        ['slug' => 'about', 'front' => false, 'sections' => [
+            ['slug' => 'about-hero', 'layout_archetype' => 'full-bleed-cover'],
+        ]],
+    ]]);
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+        assert_contains('hardcoded font-size values bypass the fontSizes scale', $joined);
+        assert_contains("interior page 'about' opens with a full-bleed-cover section", $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
