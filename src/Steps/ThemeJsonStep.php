@@ -90,6 +90,7 @@ final class ThemeJsonStep implements ConcurrentStep
         ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
     ];
     private const REQ = 'theme-json';
+    private const LOG_FILE = 'theme-json.log';
 
     public function __construct(
         private Llm $llm,
@@ -114,7 +115,7 @@ final class ThemeJsonStep implements ConcurrentStep
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
-            writes: ['theme/theme.json', 'warnings.json'],
+            writes: ['theme/theme.json', 'warnings.json', 'logs/theme-json.log'],
             concurrent: false,
         );
     }
@@ -133,13 +134,14 @@ final class ThemeJsonStep implements ConcurrentStep
 
     public function consume(Project $project, array $results): void
     {
+        $repairWarnings = [];
         $theme = $results[self::REQ] ?? null;
-        if (!is_array($theme)) {
+        if (!is_array($theme) || ($theme !== [] && array_is_list($theme))) {
             $theme = [];
-            $project->addWarnings(self::REQ, [
-                'theme/theme.json: missing or unusable model output at document root; '
-                    . 'substituted an empty theme as repair input; delivered with complete documented defaults',
-            ]);
+            $rootWarning = 'theme/theme.json: missing or unusable model output at document root; '
+                . 'substituted an empty theme as repair input; delivered with complete documented defaults';
+            $repairWarnings[] = $rootWarning;
+            $project->addWarnings(self::REQ, [$rootWarning]);
         }
 
         // Force the schema fields and validate the contract templates rely on.
@@ -162,11 +164,25 @@ final class ThemeJsonStep implements ConcurrentStep
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
 
-        $theme = self::assertColors($theme, $project);
-        $theme = self::assertFonts($theme, $project);
-        $theme = self::assertFontSizes($theme, $project);
+        $theme = self::assertColors($theme, $project, $repairWarnings);
+        $theme = self::assertFonts($theme, $project, $repairWarnings);
+        $theme = self::assertFontSizes($theme, $project, $repairWarnings);
 
         $project->writeJson('theme/theme.json', $theme);
+
+        if ($repairWarnings !== []) {
+            $project->writeText(
+                'logs/' . self::LOG_FILE,
+                'theme-json delivered with ' . count($repairWarnings)
+                    . " deterministic repair(s); actionable warnings:\n- "
+                    . implode("\n- ", $repairWarnings) . "\n",
+            );
+            fwrite(
+                STDERR,
+                '  [theme-json] warning: ' . count($repairWarnings)
+                    . ' repair(s) recorded in warnings.json; see logs/' . self::LOG_FILE . "\n",
+            );
+        }
     }
 
     public function run(Project $project): void
@@ -285,24 +301,29 @@ final class ThemeJsonStep implements ConcurrentStep
      * so a repaired role cannot silently become another role's model source.
      *
      * @param array<mixed> $theme
+     * @param list<string>|null $repairWarnings
      * @return array<mixed>
      */
-    public static function assertColors(array $theme, Project $project): array
+    public static function assertColors(
+        array $theme,
+        Project $project,
+        ?array &$repairWarnings = null,
+    ): array
     {
-        $palette = $theme['settings']['color']['palette'] ?? null;
-        if (!is_array($palette)) {
-            $palette = [];
-        }
+        $colorSettings = $theme['settings']['color'] ?? null;
+        $palettePresent = is_array($colorSettings) && array_key_exists('palette', $colorSettings);
+        $palette = self::normalizePresetRows(
+            $palettePresent ? $colorSettings['palette'] : [],
+            $palettePresent,
+            'settings.color.palette',
+            'color',
+            $project,
+            $repairWarnings,
+        );
 
         $originalColors = [];
         foreach ($palette as $preset) {
-            if (
-                is_array($preset)
-                && is_string($preset['slug'] ?? null)
-                && is_string($preset['color'] ?? null)
-                && trim($preset['color']) !== ''
-                && !isset($originalColors[$preset['slug']])
-            ) {
+            if (!isset($originalColors[$preset['slug']])) {
                 $originalColors[$preset['slug']] = $preset['color'];
             }
         }
@@ -319,19 +340,7 @@ final class ThemeJsonStep implements ConcurrentStep
         $warnings = [];
 
         foreach (self::REQUIRED_COLORS as $needed) {
-            $targetKey = null;
-            $usable = false;
-            foreach ($palette as $key => $preset) {
-                if (!is_array($preset) || ($preset['slug'] ?? null) !== $needed) {
-                    continue;
-                }
-                $targetKey ??= $key;
-                if (is_string($preset['color'] ?? null) && trim($preset['color']) !== '') {
-                    $usable = true;
-                    break;
-                }
-            }
-            if ($usable) {
+            if (in_array($needed, array_column($palette, 'slug'), true)) {
                 continue;
             }
 
@@ -344,13 +353,9 @@ final class ThemeJsonStep implements ConcurrentStep
                 $source = "DEFAULT_PALETTE[slug={$needed}].color";
             }
 
-            if ($targetKey !== null) {
-                $palette[$targetKey]['color'] = $value;
-            } else {
-                $replacement = $defaults[$needed];
-                $replacement['color'] = $value;
-                $palette[] = $replacement;
-            }
+            $replacement = $defaults[$needed];
+            $replacement['color'] = $value;
+            $palette[] = $replacement;
             $encoded = json_encode(
                 $value,
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
@@ -361,6 +366,9 @@ final class ThemeJsonStep implements ConcurrentStep
 
         $theme['settings']['color']['palette'] = $palette;
         $project->addWarnings(self::REQ, $warnings);
+        if ($repairWarnings !== null) {
+            array_push($repairWarnings, ...$warnings);
+        }
         return $theme;
     }
 
@@ -369,24 +377,29 @@ final class ThemeJsonStep implements ConcurrentStep
      * only from the other role in the original generated profile.
      *
      * @param array<mixed> $theme
+     * @param list<string>|null $repairWarnings
      * @return array<mixed>
      */
-    public static function assertFonts(array $theme, Project $project): array
+    public static function assertFonts(
+        array $theme,
+        Project $project,
+        ?array &$repairWarnings = null,
+    ): array
     {
-        $families = $theme['settings']['typography']['fontFamilies'] ?? null;
-        if (!is_array($families)) {
-            $families = [];
-        }
+        $typography = $theme['settings']['typography'] ?? null;
+        $familiesPresent = is_array($typography) && array_key_exists('fontFamilies', $typography);
+        $families = self::normalizePresetRows(
+            $familiesPresent ? $typography['fontFamilies'] : [],
+            $familiesPresent,
+            'settings.typography.fontFamilies',
+            'fontFamily',
+            $project,
+            $repairWarnings,
+        );
 
         $originalFamilies = [];
         foreach ($families as $preset) {
-            if (
-                is_array($preset)
-                && is_string($preset['slug'] ?? null)
-                && is_string($preset['fontFamily'] ?? null)
-                && trim($preset['fontFamily']) !== ''
-                && !isset($originalFamilies[$preset['slug']])
-            ) {
+            if (!isset($originalFamilies[$preset['slug']])) {
                 $originalFamilies[$preset['slug']] = $preset['fontFamily'];
             }
         }
@@ -399,19 +412,7 @@ final class ThemeJsonStep implements ConcurrentStep
         $warnings = [];
 
         foreach (self::REQUIRED_FONTS as $needed) {
-            $targetKey = null;
-            $usable = false;
-            foreach ($families as $key => $preset) {
-                if (!is_array($preset) || ($preset['slug'] ?? null) !== $needed) {
-                    continue;
-                }
-                $targetKey ??= $key;
-                if (is_string($preset['fontFamily'] ?? null) && trim($preset['fontFamily']) !== '') {
-                    $usable = true;
-                    break;
-                }
-            }
-            if ($usable) {
+            if (in_array($needed, array_column($families, 'slug'), true)) {
                 continue;
             }
 
@@ -424,13 +425,9 @@ final class ThemeJsonStep implements ConcurrentStep
                 $source = "DEFAULT_FONT_FAMILIES[slug={$needed}].fontFamily";
             }
 
-            if ($targetKey !== null) {
-                $families[$targetKey]['fontFamily'] = $value;
-            } else {
-                $replacement = $defaults[$needed];
-                $replacement['fontFamily'] = $value;
-                $families[] = $replacement;
-            }
+            $replacement = $defaults[$needed];
+            $replacement['fontFamily'] = $value;
+            $families[] = $replacement;
             $encoded = json_encode(
                 $value,
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
@@ -441,6 +438,9 @@ final class ThemeJsonStep implements ConcurrentStep
 
         $theme['settings']['typography']['fontFamilies'] = $families;
         $project->addWarnings(self::REQ, $warnings);
+        if ($repairWarnings !== null) {
+            array_push($repairWarnings, ...$warnings);
+        }
         return $theme;
     }
 
@@ -449,39 +449,34 @@ final class ThemeJsonStep implements ConcurrentStep
      * profile while preserving model-authored sizes and unrelated presets.
      *
      * @param array<mixed> $theme
+     * @param list<string>|null $repairWarnings
      * @return array<mixed>
      */
-    public static function assertFontSizes(array $theme, Project $project): array
+    public static function assertFontSizes(
+        array $theme,
+        Project $project,
+        ?array &$repairWarnings = null,
+    ): array
     {
-        $fontSizes = $theme['settings']['typography']['fontSizes'] ?? null;
-        if (!is_array($fontSizes)) {
-            $fontSizes = [];
-        }
+        $typography = $theme['settings']['typography'] ?? null;
+        $fontSizesPresent = is_array($typography) && array_key_exists('fontSizes', $typography);
+        $fontSizes = self::normalizePresetRows(
+            $fontSizesPresent ? $typography['fontSizes'] : [],
+            $fontSizesPresent,
+            'settings.typography.fontSizes',
+            'size',
+            $project,
+            $repairWarnings,
+        );
 
         $warnings = [];
         foreach (self::FONT_SIZE_PROFILE as $fallback) {
             $needed = $fallback['slug'];
-            $targetKey = null;
-            $usable = false;
-            foreach ($fontSizes as $key => $preset) {
-                if (!is_array($preset) || ($preset['slug'] ?? null) !== $needed) {
-                    continue;
-                }
-                $targetKey ??= $key;
-                if (is_string($preset['size'] ?? null) && trim($preset['size']) !== '') {
-                    $usable = true;
-                    break;
-                }
-            }
-            if ($usable) {
+            if (in_array($needed, array_column($fontSizes, 'slug'), true)) {
                 continue;
             }
 
-            if ($targetKey !== null) {
-                $fontSizes[$targetKey]['size'] = $fallback['size'];
-            } else {
-                $fontSizes[] = $fallback;
-            }
+            $fontSizes[] = $fallback;
             $encoded = json_encode(
                 $fallback['size'],
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
@@ -493,6 +488,82 @@ final class ThemeJsonStep implements ConcurrentStep
 
         $theme['settings']['typography']['fontSizes'] = $fontSizes;
         $project->addWarnings(self::REQ, $warnings);
+        if ($repairWarnings !== null) {
+            array_push($repairWarnings, ...$warnings);
+        }
         return $theme;
+    }
+
+    /**
+     * Keep only structurally usable generated presets. This is deliberately
+     * bounded to reviewed preset-list signatures; surrounding theme structure
+     * and all I/O/programming failures remain outside the repair boundary.
+     *
+     * @param list<string>|null $repairWarnings
+     * @return list<array<mixed>>
+     */
+    private static function normalizePresetRows(
+        mixed $container,
+        bool $present,
+        string $path,
+        string $valueKey,
+        Project $project,
+        ?array &$repairWarnings,
+    ): array {
+        if (!$present) {
+            return [];
+        }
+
+        $warnings = [];
+        if (!is_array($container) || !array_is_list($container)) {
+            $type = is_array($container) ? 'associative array' : get_debug_type($container);
+            $encoded = json_encode(
+                $container,
+                JSON_UNESCAPED_SLASHES
+                    | JSON_UNESCAPED_UNICODE
+                    | JSON_INVALID_UTF8_SUBSTITUTE
+                    | JSON_PARTIAL_OUTPUT_ON_ERROR,
+            );
+            $warnings[] = "theme/theme.json: invalid {$path} container; authored type={$type}, value={$encoded}; "
+                . 'discarded invalid preset container; delivered defaults/remaining usable presets';
+            $project->addWarnings(self::REQ, $warnings);
+            if ($repairWarnings !== null) {
+                array_push($repairWarnings, ...$warnings);
+            }
+            return [];
+        }
+
+        $usable = [];
+        foreach ($container as $index => $preset) {
+            $valid = is_array($preset)
+                && is_string($preset['slug'] ?? null)
+                && trim($preset['slug']) !== ''
+                && is_string($preset['name'] ?? null)
+                && trim($preset['name']) !== ''
+                && is_string($preset[$valueKey] ?? null)
+                && trim($preset[$valueKey]) !== '';
+            if ($valid) {
+                $usable[] = $preset;
+                continue;
+            }
+
+            $type = get_debug_type($preset);
+            $encoded = json_encode(
+                $preset,
+                JSON_UNESCAPED_SLASHES
+                    | JSON_UNESCAPED_UNICODE
+                    | JSON_INVALID_UTF8_SUBSTITUTE
+                    | JSON_PARTIAL_OUTPUT_ON_ERROR,
+            );
+            $warnings[] = "theme/theme.json: invalid {$path}[index={$index}]; "
+                . "authored type={$type}, value={$encoded}; discarded invalid preset; "
+                . 'delivered defaults/remaining usable presets';
+        }
+
+        $project->addWarnings(self::REQ, $warnings);
+        if ($repairWarnings !== null) {
+            array_push($repairWarnings, ...$warnings);
+        }
+        return $usable;
     }
 }
