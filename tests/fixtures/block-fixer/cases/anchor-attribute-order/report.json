@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "totals": {
+    "N": 10,
+    "M": 10,
+    "D": 0,
+    "T": 1
+  },
+  "files": [
+    {
+      "path": "parts/button-anchor-and-style.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/details-anchor-with-align.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/details-anchor-without-align.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/group-anchor-align-and-style.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/group-anchor-aria-label-align.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/group-anchor-with-align.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/group-anchor-without-align.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/heading-anchor-with-align.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/heading-anchor-without-align.html",
+      "status": "FIXED",
+      "dropped": []
+    },
+    {
+      "path": "parts/table-anchor-and-style.html",
+      "status": "FIXED",
+      "dropped": []
+    }
+  ]
+}

@@ -68,21 +68,9 @@ final class CoreBlockRenderer
     /** @param array<string,mixed> $attrs */
     private function group(array $attrs, string $inner): ElementNode
     {
-        $initial = [];
-        if (!array_key_exists('className', $attrs)) {
-            if (array_key_exists('anchor', $attrs)) {
-                $initial['id'] = $attrs['anchor'] === '' ? null : $attrs['anchor'];
-            }
-            if (array_key_exists('ariaLabel', $attrs)) {
-                $initial['aria-label'] = $attrs['ariaLabel'] === '' ? null : $attrs['ariaLabel'];
-            }
-            // Reserve the generated class slot after authored HTML attrs but
-            // before support styles, matching React prop insertion order.
-            $initial['className'] = '';
-        }
         return new ElementNode(
             (string) ($attrs['tagName'] ?? 'div'),
-            $this->props('core/group', $attrs, $initial),
+            $this->props('core/group', $attrs),
             [new RawNode($inner)],
         );
     }
@@ -127,12 +115,7 @@ final class CoreBlockRenderer
         // Gutenberg's save spreads blockProps first, then name={name || undefined}
         // and open={showContent}: the anchor id and support classes/styles land
         // before both attributes, and an empty name is omitted entirely.
-        $initial = [];
-        if (array_key_exists('anchor', $attrs)) {
-            $initial['id'] = $attrs['anchor'] === '' ? null : $attrs['anchor'];
-        }
-        $initial['className'] = 'wp-block-details';
-        $props = $this->props('core/details', $attrs, $initial);
+        $props = $this->props('core/details', $attrs);
         $name = $attrs['name'] ?? null;
         $props['name'] = is_string($name) && $name !== '' ? $name : null;
         $props['open'] = !empty($attrs['showContent']);
@@ -146,9 +129,7 @@ final class CoreBlockRenderer
     private function heading(array $attrs): ElementNode
     {
         $level = $attrs['level'] ?? 2;
-        return new ElementNode('h' . (string) $level, $this->props('core/heading', $attrs, [
-            'className' => '',
-        ]), [
+        return new ElementNode('h' . (string) $level, $this->props('core/heading', $attrs), [
             new RawNode((string) ($attrs['content'] ?? '')),
         ]);
     }
