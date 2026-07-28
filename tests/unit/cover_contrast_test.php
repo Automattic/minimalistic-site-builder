@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
@@ -31,7 +32,7 @@ test('cover-contrast declaration does not depend on the shared contrast report',
     assert_true(!in_array('logs/cover-contrast-report.txt', $declaration->writes, true));
 });
 
-test('cover-contrast skips with a durable warning when image generation never completed', function () {
+test('cover-contrast keeps a missing or malformed completion artifact fatal', function () {
     $tmp = sys_get_temp_dir() . '/builder_cover_order_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $fixed = false;
@@ -44,14 +45,14 @@ test('cover-contrast skips with a durable warning when image generation never co
         }
     };
 
-    // A readability polish must never withhold the already-built theme: the
-    // pass skips, records the miss in warnings.json, and touches nothing.
-    (new CoverContrastStep($fixer))->run($project);
-
+    assert_throws(static fn () => (new CoverContrastStep($fixer))->run($project));
     assert_true(!$fixed, 'skip must not invoke the fixer');
-    $joined = implode(' ', $project->readJson('warnings.json')['cover-contrast'] ?? []);
-    assert_contains('image generation has not completed', $joined);
-    assert_contains('cover text not verified', $joined);
+    assert_true(!$project->exists('warnings.json'), 'a missing required artifact is not a content warning');
+
+    $project->writeText(GenerateImagesStep::COMPLETION_ARTIFACT, '{"status":');
+    assert_throws(static fn () => (new CoverContrastStep($fixer))->run($project));
+    assert_true(!$fixed, 'malformed completion state must not invoke the fixer');
+    assert_true(!$project->exists('warnings.json'), 'a corrupt required artifact stays fatal');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -227,8 +228,11 @@ function cover_step_run(Project $project, bool $failFixer = false): void
             }
         };
     ob_start();
-    (new CoverContrastStep($fixer))->run($project);
-    ob_end_clean();
+    try {
+        (new CoverContrastStep($fixer))->run($project);
+    } finally {
+        ob_end_clean();
+    }
 }
 
 test('cover-contrast writes its own report without changing the shared contrast report', function () {
@@ -319,11 +323,70 @@ test('a fixer failure rolls the persisted cover repairs back', function () {
         . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
         . '</div></div>' . "\n" . '<!-- /wp:cover -->';
     [$project, $tmp] = cover_step_project($markup, 'white');
-    cover_step_run($project, failFixer: true);
+    assert_throws(static fn () => cover_step_run($project, failFixer: true));
     assert_eq($markup, $project->readText('theme/templates/front-page.html'),
         'attribute edits must not ship without the fixer re-sync');
     assert_contains('rolled back', $project->readText('logs/cover-contrast-report.txt'));
+    assert_true(!$project->exists('warnings.json'), 'an operational failure is not a delivered-content warning');
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('cover-contrast rolls back only files in a real PHP fixer FAILED report', function () {
+    if (!extension_loaded('imagick')) {
+        return;
+    }
+    $healthy = '<!-- wp:cover {"url":"theme:./assets/hero.png","dimRatio":40} -->' . "\n"
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Unstyled over a bright photo</p><!-- /wp:paragraph -->'
+        . '</div></div>' . "\n" . '<!-- /wp:cover -->';
+    $failed = str_replace(
+        '</div></div>',
+        '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query --></div></div>',
+        $healthy,
+    );
+    [$project, $tmp] = cover_step_project($failed, 'white');
+    $project->writeText('theme/templates/page.html', $healthy);
+    $project->writeText('plugin/pages/broken.html', $failed);
+    $project->writeText('plugin/pages/healthy.html', $healthy);
+
+    try {
+        ob_start();
+        (new CoverContrastStep(new PhpBlockFixer()))->run($project);
+        $console = (string) ob_get_clean();
+
+        assert_eq(
+            $failed,
+            $project->readText('theme/templates/front-page.html'),
+            'the failed theme file gets its pre-step bytes',
+        );
+        assert_eq(
+            $failed,
+            $project->readText('plugin/pages/broken.html'),
+            'the failed plugin page gets its pre-step bytes',
+        );
+        assert_true(
+            !str_contains($project->readText('theme/templates/page.html'), '"dimRatio":40'),
+            'a healthy theme sibling keeps its cover repair',
+        );
+        assert_true(
+            !str_contains($project->readText('plugin/pages/healthy.html'), '"dimRatio":40'),
+            'a healthy plugin sibling keeps its cover repair',
+        );
+        assert_contains('cover-contrast: 2 cover(s) adjusted', $console);
+
+        $warnings = $project->readJson('warnings.json')['cover-contrast'] ?? [];
+        assert_eq(2, count($warnings), 'one actionable warning per rolled-back cover');
+        $joined = implode("\n", $warnings);
+        assert_contains('theme/templates/front-page.html', $joined);
+        assert_contains('plugin/pages/broken.html', $joined);
+        assert_contains('cover block 0', $joined);
+        assert_contains('dimRatio 40 → 60', $joined);
+        assert_contains("Registered block 'core/query'", $joined);
+        assert_contains('pre-step markup delivered byte-for-byte', $joined);
+        assert_contains('cover repair(s) rolled back', $project->readText('logs/cover-contrast-report.txt'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('regionStats measures the sampled half and spreads low/high on a split image', function () {
@@ -388,8 +451,9 @@ test('a fixer failure rolls plugin-page cover repairs back too', function () {
         'white'
     );
     $project->writeText('plugin/pages/menu.html', $markup);
-    cover_step_run($project, failFixer: true);
+    assert_throws(static fn () => cover_step_run($project, failFixer: true));
     assert_eq($markup, $project->readText('plugin/pages/menu.html'),
         'plugin-page attribute edits must not ship without the fixer re-sync');
+    assert_contains('rolled back', $project->readText('logs/cover-contrast-report.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -34,12 +34,7 @@ final class FixerReport
         return array_sum(array_map(static fn (FileReport $file): int => count($file->repairs), $this->files));
     }
 
-    /**
-     * Report tokens for a failed file's rows. The BlockFixer interface hands
-     * steps the formatted report string, and FixBlocksStep::failedFiles()
-     * parses these two tokens back into (file, reason) pairs — they are
-     * load-bearing on both sides, so change them only together.
-     */
+    /** Stable labels in the human-readable report. */
     public const FAILED_TAG = 'FAILED';
     public const FAILED_DETAIL = '! left unmodified:';
 

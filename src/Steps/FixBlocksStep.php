@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockFixer;
-use Automattic\SiteBuild\BlockSerializer\FixerReport;
+use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -55,9 +55,16 @@ final class FixBlocksStep implements Step
     public function run(Project $project): void
     {
         $beforeInitialPass = self::snapshotThemeFiles($project);
+        $outcomes = [];
+        $failedFiles = [];
         try {
             $layoutNotes = self::normalizeLayouts($project);
-            $summary = $this->fixer->fix($project->themePath());
+            $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
+            $outcomes[] = $initialOutcome;
+            $summary = $initialOutcome->formatted;
+            self::appendFailures($failedFiles, $initialOutcome);
+            self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
+            $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -70,12 +77,17 @@ final class FixBlocksStep implements Step
         // actually changed comment attributes so the authored HTML stays in
         // sync with them.
         try {
-            $postRepairLayoutNotes = self::normalizeLayouts($project);
+            $postRepairLayoutNotes = self::normalizeLayouts($project, self::failurePaths($failedFiles));
             $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
             if ($postRepairLayoutNotes !== []) {
-                $followUpSummary = $this->fixer->fix($project->themePath());
+                $followUpOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
+                $outcomes[] = $followUpOutcome;
+                $followUpSummary = $followUpOutcome->formatted;
                 $summary .= "\n[layout] post-repair normalization required a second block-fixer pass:\n  "
                     . str_replace("\n", "\n  ", $followUpSummary);
+                self::appendFailures($failedFiles, $followUpOutcome);
+                self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
+                $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural
@@ -102,7 +114,12 @@ final class FixBlocksStep implements Step
         // theme, and discarding the whole build over it means the user gets no
         // site at all rather than one whose spacing is slightly off. Record it
         // as a prominent warning and let the build continue.
-        $rhythmDrops = self::droppedVerticalRhythmStyles($summary);
+        $failedPaths = self::failurePaths($failedFiles);
+        $deliveredSummary = implode("\n", array_map(
+            static fn (BlockFixerOutcome $outcome): string => $outcome->formattedExcluding($failedPaths),
+            $outcomes,
+        ));
+        $rhythmDrops = self::droppedVerticalRhythmStyles($deliveredSummary);
         if ($rhythmDrops !== []) {
             $summary .= "\n[rhythm] WARNING: block re-serialization dropped vertical rhythm CSS:\n  "
                 . implode("\n  ", $rhythmDrops);
@@ -114,7 +131,7 @@ final class FixBlocksStep implements Step
         // all had a chance to preserve it. The current-schema save is the
         // deterministic fallback; keep that usable output, but make every loss
         // durable for the later repair pass rather than hiding it in this log.
-        $paragraphStyleWarnings = self::degradedParagraphStyles($summary);
+        $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
         $warnings = $paragraphStyleWarnings;
         foreach ($rhythmDrops as $drop) {
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
@@ -123,10 +140,9 @@ final class FixBlocksStep implements Step
         // Files whose transformation the fixer abandoned (unsupported block,
         // unreviewed signature, non-convergence): their pre-fixer bytes were
         // delivered untouched — an isolated loss worth a durable record.
-        $failedFiles = self::failedFiles($summary);
         foreach ($failedFiles as [$file, $why]) {
             $warnings[] = "block re-serialization left {$file} unmodified ({$why}); "
-                . 'pre-fixer markup delivered — see logs/' . self::LOG_FILE;
+                . 'pre-step markup delivered byte-for-byte — see logs/' . self::LOG_FILE;
         }
         if ($failedFiles !== []) {
             echo '  [fix-blocks] warning: ' . count($failedFiles)
@@ -144,9 +160,10 @@ final class FixBlocksStep implements Step
 
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert
-        // the header/footer layout contract afterwards regardless.
+        // the header/footer layout contract on files whose transaction
+        // succeeded; a failed file must remain at its exact step-entry bytes.
         foreach (['parts/header.html', 'parts/footer.html'] as $rel) {
-            if (!$project->exists('theme/' . $rel)) {
+            if (!$project->exists('theme/' . $rel) || in_array($rel, $failedPaths, true)) {
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
@@ -170,14 +187,20 @@ final class FixBlocksStep implements Step
      * attributes and the following re-serialization syncs the HTML with them.
      * A post-repair pass handles markup that only became parseable afterwards.
      *
+     * @param list<string> $excluded fixer-relative paths that have already
+     *        failed this step and must remain at their step-entry bytes
      * @return string[]
      */
-    public static function normalizeLayouts(Project $project): array
+    public static function normalizeLayouts(Project $project, array $excluded = []): array
     {
         $notes = [];
+        $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
         foreach (self::themeFiles($project) as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
             $markup = $project->readText('theme/' . $rel);
             $result = LayoutFixer::fix($markup, LayoutFixer::roleFor($rel), $contentSize, $spacingSlugs);
             if ($result['markup'] !== $markup) {
@@ -309,32 +332,49 @@ final class FixBlocksStep implements Step
         return array_values(array_unique($warnings));
     }
 
-    /**
-     * Decode the fixer report's FAILED rows: files whose transformation was
-     * abandoned and whose pre-fixer bytes were delivered untouched. The
-     * BlockFixer interface hands this step a formatted string (possibly the
-     * concatenation of two fixer passes), so the rows are parsed back via the
-     * same FixerReport tokens that wrote them.
-     *
-     * @return list<array{0:string,1:string}> [file, reason] pairs, in report order
-     */
-    public static function failedFiles(string $report): array
+    /** @param array<string,array{0:string,1:string}> $failures */
+    private static function appendFailures(array &$failures, BlockFixerOutcome $outcome): void
     {
-        $tag = preg_quote(FixerReport::FAILED_TAG, '/');
-        $detail = preg_quote(FixerReport::FAILED_DETAIL, '/');
-        $failures = [];
-        $file = null;
-        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
-            if (preg_match("/^\\s+{$tag}\\s+(.+?)\\s*$/", $line, $match) === 1) {
-                $file = $match[1];
-                continue;
-            }
-            if ($file !== null && preg_match("/^\\s+{$detail}\\s*(.*)$/", $line, $match) === 1) {
-                $failures[$file . "\0" . $match[1]] = [$file, $match[1]];
-            }
-            $file = null;
+        foreach ($outcome->failures() as $failure) {
+            $reason = str_replace(["\r", "\n"], ' ', $failure->error ?? 'unknown transformation failure');
+            $failures[$failure->path] = [$failure->path, $reason];
         }
-        return array_values($failures);
+    }
+
+    /** @param array<string,array{0:string,1:string}> $failures @return list<string> */
+    private static function failurePaths(array $failures): array
+    {
+        return array_keys($failures);
+    }
+
+    /**
+     * A fixer failure abandons this step's complete transaction for that file,
+     * including LayoutFixer mutations made before either fixer pass.
+     *
+     * @param array<string,string> $snapshot
+     * @param list<string> $failedPaths
+     */
+    private static function restoreFailedThemeFiles(Project $project, array $snapshot, array $failedPaths): void
+    {
+        foreach ($failedPaths as $relative) {
+            if (!array_key_exists($relative, $snapshot)) {
+                throw new \LogicException("Block fixer reported an unknown theme file: {$relative}");
+            }
+            $project->writeText('theme/' . $relative, $snapshot[$relative]);
+        }
+    }
+
+    /** @param list<string> $notes @param list<string> $failedPaths @return list<string> */
+    private static function withoutFailedLayoutNotes(array $notes, array $failedPaths): array
+    {
+        return array_values(array_filter($notes, static function (string $note) use ($failedPaths): bool {
+            foreach ($failedPaths as $relative) {
+                if (str_starts_with($note, $relative . ': ')) {
+                    return false;
+                }
+            }
+            return true;
+        }));
     }
 
     /** @return array<string,string> theme-relative path => exact bytes */

@@ -13,7 +13,7 @@ use Automattic\SiteBuild\BlockSerializer\StagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\TemplateTransformer;
 
 /** Pure-PHP, fixed-point Gutenberg compatibility fixer. */
-final class PhpBlockFixer implements BlockFixer
+final class PhpBlockFixer implements ReportingBlockFixer
 {
     private const MAX_PASSES = 5;
 
@@ -148,7 +148,7 @@ final class PhpBlockFixer implements BlockFixer
     private function discover(string $themeDir): array
     {
         $files = [];
-        foreach (['templates', 'parts'] as $directory) {
+        foreach (['templates', 'parts', 'pages'] as $directory) {
             $path = $themeDir . DIRECTORY_SEPARATOR . $directory;
             if (!is_dir($path)) {
                 continue;

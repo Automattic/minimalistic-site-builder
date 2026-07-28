@@ -2,8 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockSerializer\FileReport;
+use Automattic\SiteBuild\BlockSerializer\FixerReport;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ReportingBlockFixer;
 use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\ThemeValidator;
@@ -295,6 +298,91 @@ test('FixBlocksStep still normalizes siblings when one file fails validation', f
         assert_contains('"layout"', $project->readText('theme/parts/a-layout.html'));
         $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
         assert_contains('left parts/b-unsupported.html unmodified', $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep restores step-entry bytes when layout normalization and validation fail in one file', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_compound_failure_' . uniqid();
+    $project = new Project($tmp);
+    $failedOriginal = '<!-- wp:group {"align":"full"} -->'
+        . '<div class="wp-block-group alignfull">'
+        . '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->'
+        . '</div><!-- /wp:group -->';
+    $siblingOriginal = '<!-- wp:group {"align":"full"} -->'
+        . '<div class="wp-block-group alignfull"></div><!-- /wp:group -->';
+    // Use header.html so the final constrained-part reassertion is also proven
+    // not to mutate a file whose complete step transaction was abandoned.
+    $project->writeText('theme/parts/header.html', $failedOriginal);
+    $project->writeText('theme/parts/b-sibling.html', $siblingOriginal);
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        assert_eq(
+            $failedOriginal,
+            $project->readText('theme/parts/header.html'),
+            'the failed file rolls LayoutFixer back too, not merely PhpBlockFixer',
+        );
+        assert_contains(
+            '"layout":{"type":"constrained"}',
+            $project->readText('theme/parts/b-sibling.html'),
+            'a healthy sibling keeps its successful layout and serialization work',
+        );
+        $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('parts/header.html', $joined);
+        assert_contains("Registered block 'core/query'", $joined);
+        assert_contains('pre-step markup delivered byte-for-byte', $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep restores step-entry bytes when the typed follow-up fixer pass fails', function () {
+    $fixer = new class implements ReportingBlockFixer {
+        public int $calls = 0;
+
+        public function fix(string $themeDir): string
+        {
+            throw new LogicException('FixBlocksStep must consume the typed fixer contract');
+        }
+
+        public function fixReport(string $themeDir): FixerReport
+        {
+            $this->calls++;
+            $path = $themeDir . '/parts/section.html';
+            if ($this->calls === 1) {
+                file_put_contents(
+                    $path,
+                    '<!-- wp:group {"align":"full"} -->'
+                        . '<div class="wp-block-group alignfull"></div><!-- /wp:group -->',
+                );
+                return new FixerReport([new FileReport('parts/section.html', 'fixed')]);
+            }
+            return new FixerReport([
+                new FileReport(
+                    'parts/section.html',
+                    'failed',
+                    error: 'follow-up serializer rejected the normalized layout',
+                ),
+            ]);
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/builder_fix_typed_followup_' . uniqid();
+    $project = new Project($tmp);
+    $original = '<!-- wp:group {"align":"full"} --><div>';
+    $project->writeText('theme/parts/section.html', $original);
+
+    try {
+        (new FixBlocksStep($fixer))->run($project);
+
+        assert_eq(2, $fixer->calls);
+        assert_eq($original, $project->readText('theme/parts/section.html'));
+        $joined = implode(' ', $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('follow-up serializer rejected the normalized layout', $joined);
+        assert_contains('pre-step markup delivered byte-for-byte', $joined);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }

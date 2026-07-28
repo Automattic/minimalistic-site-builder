@@ -21,7 +21,8 @@ use Automattic\SiteBuild\StepDeclaration;
  * within one rendered page, and the footer (which renders on every page)
  * supplies each page's following surface. Image bands that cannot safely own
  * cover spacing are delivered with solid-band spacing and recorded as durable
- * warnings; ordinary deterministic spacing adjustments are not warnings.
+ * warnings. Malformed generated plan values skip only their page with the same
+ * durable record; ordinary deterministic spacing adjustments are not warnings.
  */
 final class SectionRhythmStep implements Step
 {
@@ -63,7 +64,7 @@ final class SectionRhythmStep implements Step
             try {
                 [$entries, $rels] = self::planEntries($project, $page);
                 $result = SectionRhythm::rewrite($entries, $footerSurface);
-            } catch (\RuntimeException $e) {
+            } catch (\RuntimeException|\InvalidArgumentException $e) {
                 $degradationWarnings[] = "page '{$pageSlug}': section rhythm skipped ({$e->getMessage()}); "
                     . 'authored section spacing delivered';
                 continue;
@@ -86,7 +87,7 @@ final class SectionRhythmStep implements Step
         echo "  section rhythm: {$adjustments} root spacing adjustment(s)\n";
         if ($degradationWarnings !== []) {
             echo '  [section-rhythm] warning: ' . count($degradationWarnings)
-                . " degraded image section(s) recorded in warnings.json\n";
+                . " degradation(s) recorded in warnings.json\n";
         }
     }
 

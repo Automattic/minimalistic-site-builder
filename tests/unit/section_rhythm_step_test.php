@@ -122,3 +122,37 @@ test('section rhythm step skips a page whose section root is invalid and normali
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('section rhythm step skips invalid generated plan values per page', function () {
+    $tmp = sys_get_temp_dir() . '/builder_rhythm_bad_plan_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $original = rhythm_step_part();
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'bad-density', 'background' => 'base', 'vertical_density' => 'gigantic'],
+        ]],
+        ['slug' => 'visit', 'front' => false, 'sections' => [
+            ['slug' => 'healthy', 'background' => 'base', 'vertical_density' => 'compact'],
+        ]],
+    ]]);
+    $project->writeText('theme/parts/page-home--bad-density.html', $original);
+    $project->writeText('theme/parts/page-visit--healthy.html', $original);
+
+    (new SectionRhythmStep())->run($project);
+
+    assert_eq(
+        $original,
+        $project->readText('theme/parts/page-home--bad-density.html'),
+        'the malformed page remains byte-for-byte authored',
+    );
+    assert_true(
+        $original !== $project->readText('theme/parts/page-visit--healthy.html'),
+        'a healthy sibling page is still normalized',
+    );
+    $joined = implode(' ', $project->readJson('warnings.json')['section-rhythm'] ?? []);
+    assert_contains("page 'home': section rhythm skipped", $joined);
+    assert_contains("invalid density 'gigantic'", $joined);
+    assert_contains('authored section spacing delivered', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
