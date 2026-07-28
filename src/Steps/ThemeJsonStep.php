@@ -281,9 +281,10 @@ final class ThemeJsonStep implements ConcurrentStep
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
 
-        $theme = self::assertColors($theme, $project, $repairWarnings);
-        $theme = self::assertFonts($theme, $project, $repairWarnings);
-        $theme = self::assertFontSizes($theme, $project, $repairWarnings);
+        $theme = self::applyScaffold($theme);
+        $theme = self::fillColors($theme, $project, $repairWarnings);
+        $theme = self::fillFonts($theme, $project, $repairWarnings);
+        $theme = self::fillFontSizes($theme, $project, $repairWarnings);
 
         $project->writeJson('theme/theme.json', $theme);
 
@@ -413,6 +414,52 @@ final class ThemeJsonStep implements ConcurrentStep
     }
 
     /**
+     * Fill model omissions with the frozen mechanical preset-to-role wiring.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function applyScaffold(array $theme): array
+    {
+        return self::mergeScaffoldDefaults(self::SCAFFOLD, $theme);
+    }
+
+    /**
+     * Recursively fill associative-map omissions while preserving every
+     * model-authored leaf. Non-empty lists and scalars are model leaves; an
+     * empty array is also PHP's representation of a decoded empty JSON object,
+     * so it receives the scaffold map.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $scaffold
+     * @param array<mixed> $model
+     * @return array<mixed>
+     */
+    public static function mergeScaffoldDefaults(array $scaffold, array $model): array
+    {
+        foreach ($scaffold as $key => $scaffoldValue) {
+            if (!array_key_exists($key, $model)) {
+                $model[$key] = $scaffoldValue;
+                continue;
+            }
+
+            $modelValue = $model[$key];
+            $modelIsMap = is_array($modelValue)
+                && ($modelValue === [] || !array_is_list($modelValue));
+            $scaffoldIsMap = is_array($scaffoldValue)
+                && ($scaffoldValue === [] || !array_is_list($scaffoldValue));
+            if ($modelIsMap && $scaffoldIsMap) {
+                $model[$key] = self::mergeScaffoldDefaults($scaffoldValue, $modelValue);
+            }
+        }
+
+        return $model;
+    }
+
+    /**
      * Fill missing or unusable required color roles without replacing usable
      * model presets. Model fallbacks are read from the original palette only,
      * so a repaired role cannot silently become another role's model source.
@@ -421,7 +468,7 @@ final class ThemeJsonStep implements ConcurrentStep
      * @param list<string>|null $repairWarnings
      * @return array<mixed>
      */
-    public static function assertColors(
+    public static function fillColors(
         array $theme,
         Project $project,
         ?array &$repairWarnings = null,
@@ -497,7 +544,7 @@ final class ThemeJsonStep implements ConcurrentStep
      * @param list<string>|null $repairWarnings
      * @return array<mixed>
      */
-    public static function assertFonts(
+    public static function fillFonts(
         array $theme,
         Project $project,
         ?array &$repairWarnings = null,
@@ -569,7 +616,7 @@ final class ThemeJsonStep implements ConcurrentStep
      * @param list<string>|null $repairWarnings
      * @return array<mixed>
      */
-    public static function assertFontSizes(
+    public static function fillFontSizes(
         array $theme,
         Project $project,
         ?array &$repairWarnings = null,
@@ -652,13 +699,38 @@ final class ThemeJsonStep implements ConcurrentStep
 
         $usable = [];
         foreach ($container as $index => $preset) {
-            $valid = is_array($preset)
+            $slugUsable = is_array($preset)
                 && is_string($preset['slug'] ?? null)
-                && trim($preset['slug']) !== ''
-                && is_string($preset['name'] ?? null)
-                && trim($preset['name']) !== ''
+                && trim($preset['slug']) !== '';
+            $valueUsable = is_array($preset)
                 && is_string($preset[$valueKey] ?? null)
                 && trim($preset[$valueKey]) !== '';
+            $nameUsable = is_array($preset)
+                && is_string($preset['name'] ?? null)
+                && trim($preset['name']) !== '';
+            if ($slugUsable && $valueUsable && !$nameUsable) {
+                $slug = trim($preset['slug']);
+                $name = ucwords(str_replace(['-', '_'], ' ', $slug));
+                $preset['name'] = $name;
+                $usable[] = $preset;
+                $encodedValue = json_encode(
+                    $preset[$valueKey],
+                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+                );
+                $encodedName = json_encode(
+                    $name,
+                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+                );
+                $warnings[] = "theme/theme.json: missing or unusable {$path}[index={$index}].name; "
+                    . "kept authored {$valueKey}={$encodedValue} and metadata; "
+                    . "synthesized name={$encodedName} from slug={$slug}; delivered with repaired preset";
+                continue;
+            }
+
+            $valid = is_array($preset)
+                && $slugUsable
+                && $nameUsable
+                && $valueUsable;
             if ($valid) {
                 $usable[] = $preset;
                 continue;
