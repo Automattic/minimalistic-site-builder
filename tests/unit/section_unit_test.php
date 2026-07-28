@@ -146,6 +146,10 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'content_notes'     => $input['section']['content_notes'],
         'composition'       => $composition,
         'image_instructions' => $renderer->render('image-generation.md', []),
+        'block_markup_output_contract' => rtrim(
+            $renderer->render('block-markup-output-contract.md', []),
+            "\r\n",
+        ),
     ]);
     $withoutMarkers = rtrim(str_replace([
         "<!-- section-cache-layer:build -->\n",
