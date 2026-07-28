@@ -761,3 +761,17 @@ test('theme-json never fails on an empty model response', function () {
     assert_true(($project->readJson('warnings.json')['theme-json'] ?? []) !== [], 'every fill is warned');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('theme-json scaffold sets no heading color ContrastFixStep cannot see', function () {
+    // ContrastFixStep models heading color as elements.heading.color.text ??
+    // styles.color.text and never reads h1/h2/h3. A scaffold color on those
+    // would render one color while the contrast pass reasoned about another.
+    $elements = ThemeJsonStep::applyScaffold([])['styles']['elements'];
+    foreach (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as $heading) {
+        assert_true(
+            !array_key_exists('color', $elements[$heading]),
+            "{$heading} inherits the global text color",
+        );
+    }
+    assert_eq('var:preset|color|contrast', ThemeJsonStep::applyScaffold([])['styles']['color']['text']);
+});

@@ -63,8 +63,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * The type scale the scaffold wires roles to. Every slug here is
      * referenced by SCAFFOLD, so a missing one would leave a dangling
-     * var:preset|font-size|… that PresetReferences cannot see (it scans
-     * markup, not theme.json). Filling them is what closes that hole.
+     * var:preset|font-size|… — PresetReferences does scan theme.json's own
+     * strings and would report it, but as a build-time problem rather than a
+     * rendered site. Filling them keeps the scaffold's references valid.
      *
      * @var list<array{slug: string, name: string, size: string}>
      */
@@ -121,21 +122,18 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                         'fontFamily' => 'var:preset|font-family|heading',
                         'fontSize' => 'var:preset|font-size|display',
                     ],
-                    'color' => ['text' => 'var:preset|color|primary'],
                 ],
                 'h2' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|heading',
                         'fontSize' => 'var:preset|font-size|section-title',
                     ],
-                    'color' => ['text' => 'var:preset|color|primary'],
                 ],
                 'h3' => [
                     'typography' => [
                         'fontFamily' => 'var:preset|font-family|heading',
                         'fontSize' => 'var:preset|font-size|heading',
                     ],
-                    'color' => ['text' => 'var:preset|color|primary'],
                 ],
                 'h4' => [
                     'typography' => [

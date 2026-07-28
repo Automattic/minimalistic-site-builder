@@ -72,7 +72,7 @@ No borders, radii, striping, shadows or decorative treatments. Sites stay visual
 - `styles.elements.h4` / `h5` / `h6` / `caption`
 
 **Build-supplied, model may override** (deep merge, model wins at the leaf):
-- `styles.elements.h1` / `h2` / `h3` — `typography.fontFamily`, `typography.fontSize`, `color`
+- `styles.elements.h1` / `h2` / `h3` — `typography.fontFamily`, `typography.fontSize` only. **Not `color`:** `ContrastFixStep` models heading color as `elements.heading.color.text ?? styles.color.text` and never reads `h1`/`h2`/`h3`, so a scaffold color there would render one thing while the contrast pass reasoned about another. Headings inherit the global text color instead.
 - `styles.blocks` — wiring only, for `core/quote`, `core/pullquote`, `core/table`, `core/separator`, `core/list`, `core/image`, `core/site-title`, `core/navigation`
 
 **Model-authored, untouched:**
@@ -134,7 +134,7 @@ These are arithmetic projections from byte counts assuming emission time scales 
 
 - **`ContrastFixStep`** reads `styles.elements.link/button/heading`; the scaffold must never write those paths. Test it.
 - **`ThemeValidator`** must stay green on scaffolded output; `settings.spacing` is untouched.
-- **`PresetReferences`** scans markup, not theme.json, so it will not catch a scaffold reference to an undeclared slug — the fontSizes default above is what closes that hole.
+- **`PresetReferences`** scans theme.json's own strings as well as markup (`src/PresetReferences.php:88-92`), so it *would* catch a scaffold reference to an undeclared slug — but as a build-time failure. Repairing the fontSizes scale keeps the references valid so that never fires.
 - **No schema means the prompt is the only contract.** `settings` had to stay permissive (the model invents gradient and shadow slugs), and no expressible schema does that — so drift shows up as a repair warning rather than a rejected response. That is the trade the repair layer above absorbs.
 - **Vendored copy** — wpcom vendors this as `a8c/site-builder`. Choosing a const over a config file means no sync change; still worth a PR note.
 
