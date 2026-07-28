@@ -322,38 +322,17 @@
         "support:typography"
       ]
     },
-    "heading-legacy-text-align": {
-      "milestone": "M2",
+    "details-static-renderer": {
+      "milestone": "M4",
       "capabilities": [
-        "block:core/heading",
-        "deprecation:heading-text-align",
-        "support:text-color",
-        "support:font-family",
-        "report:fixed"
-      ]
-    },
-    "group-layout-content-size": {
-      "milestone": "M2",
-      "capabilities": [
-        "block:core/group",
+        "block:core/details",
         "block:core/paragraph",
-        "support:layout",
-        "support:layout-content-size",
+        "render:name-before-open-order",
+        "render:empty-name-omitted",
+        "render:anchor-id-slot",
+        "support:color",
         "support:spacing",
-        "report:fixed"
-      ]
-    },
-    "paragraph-inline-color-carryover": {
-      "milestone": "M2",
-      "capabilities": [
-        "block:core/paragraph",
-        "deprecation:paragraph-selectorless",
-        "repair:nested-paragraph",
-        "repair:nested-paragraph-style-merge",
-        "support:text-color",
-        "support:font-size",
-        "support:font-family",
-        "support:typography",
+        "report:ok",
         "report:fixed"
       ]
     },
@@ -378,6 +357,51 @@
         "support:spacing",
         "report:fixed"
       ]
+    },
+    "group-layout-content-size": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/group",
+        "block:core/paragraph",
+        "support:layout",
+        "support:layout-content-size",
+        "support:spacing",
+        "report:fixed"
+      ]
+    },
+    "heading-legacy-text-align": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/heading",
+        "deprecation:heading-text-align",
+        "support:text-color",
+        "support:font-family",
+        "report:fixed"
+      ]
+    },
+    "paragraph-inline-color-carryover": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/paragraph",
+        "deprecation:paragraph-selectorless",
+        "repair:nested-paragraph",
+        "repair:nested-paragraph-style-merge",
+        "support:text-color",
+        "support:font-size",
+        "support:font-family",
+        "support:typography",
+        "report:fixed"
+      ]
+    },
+    "site-tagline-legacy-text-align": {
+      "milestone": "M4",
+      "capabilities": [
+        "block:core/site-tagline",
+        "deprecation:site-tagline-align",
+        "deprecation:site-tagline-font-family",
+        "support:typography",
+        "report:fixed"
+      ]
     }
   },
   "capabilityCases": {
@@ -387,8 +411,8 @@
       "json-comment-boundaries",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "repair:custom-class-recovery": [
       "group-html-attribute-repairs"
@@ -415,10 +439,12 @@
       "group-html-attribute-repairs",
       "observed-deprecation-adapters",
       "report-order-status-and-skip",
-      "heading-legacy-text-align",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
+      "heading-legacy-text-align",
       "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "site-tagline-legacy-text-align"
     ],
     "block:core/paragraph": [
       "nested-group-support",
@@ -430,9 +456,10 @@
       "quote-embed-and-raw-renderers",
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "paragraph-inline-color-carryover"
     ],
     "nested-blocks": [
       "nested-group-support",
@@ -444,8 +471,8 @@
     "repair:nested-paragraph": [
       "nested-group-support",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "paragraph-inline-color-carryover"
     ],
     "repair-gate:valid-paragraph": [
       "nested-group-support"
@@ -468,14 +495,15 @@
       "nested-group-support",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "support:layout": [
       "nested-group-support",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "rich-text:literal-nbsp": [
       "rich-text-literal-nbsp"
@@ -486,7 +514,8 @@
     "report:ok": [
       "rich-text-literal-nbsp",
       "pre-paragraph-repair-noop",
-      "report-order-status-and-skip"
+      "report-order-status-and-skip",
+      "details-static-renderer"
     ],
     "oracle:authoritative-changed-flag": [
       "pre-paragraph-repair-noop"
@@ -785,7 +814,8 @@
     "support:typography": [
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "site-tagline-legacy-text-align"
     ],
     "block:core/cover": [
       "cover-renderer-branches"
@@ -811,8 +841,8 @@
     "deprecation:paragraph-selectorless": [
       "cover-renderer-branches",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "paragraph-inline-color-carryover"
     ],
     "branch:cover-focal-point": [
       "cover-renderer-branches"
@@ -921,7 +951,8 @@
       "social-and-dynamic-strategies"
     ],
     "block:core/site-tagline": [
-      "social-and-dynamic-strategies"
+      "social-and-dynamic-strategies",
+      "site-tagline-legacy-text-align"
     ],
     "block:core/template-part": [
       "social-and-dynamic-strategies"
@@ -969,14 +1000,20 @@
     "support:preset-variables": [
       "tbilisi25-footer-fixed-point"
     ],
-    "deprecation:heading-text-align": [
-      "heading-legacy-text-align"
+    "block:core/details": [
+      "details-static-renderer"
     ],
-    "support:layout-content-size": [
-      "group-layout-content-size"
+    "render:name-before-open-order": [
+      "details-static-renderer"
     ],
-    "repair:nested-paragraph-style-merge": [
-      "paragraph-inline-color-carryover"
+    "render:empty-name-omitted": [
+      "details-static-renderer"
+    ],
+    "render:anchor-id-slot": [
+      "details-static-renderer"
+    ],
+    "support:color": [
+      "details-static-renderer"
     ],
     "deprecation:columns-element-link": [
       "generated-demo-layout-and-paragraph-signatures"
@@ -1001,6 +1038,21 @@
     ],
     "support:short-spacing-preset-signature": [
       "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "support:layout-content-size": [
+      "group-layout-content-size"
+    ],
+    "deprecation:heading-text-align": [
+      "heading-legacy-text-align"
+    ],
+    "repair:nested-paragraph-style-merge": [
+      "paragraph-inline-color-carryover"
+    ],
+    "deprecation:site-tagline-align": [
+      "site-tagline-legacy-text-align"
+    ],
+    "deprecation:site-tagline-font-family": [
+      "site-tagline-legacy-text-align"
     ]
   },
   "requiredCapabilities": [
@@ -1009,14 +1061,10 @@
     "freeform:before-between-after",
     "missing-block:paired",
     "missing-block:void",
-    "legacy:group-top-level-border-drop",
-    "legacy:group-top-level-shadow-drop",
     "delimiter:balanced",
     "delimiter:mismatched",
     "delimiter:stray-closer",
     "delimiter:unclosed",
-    "deprecation:columns-element-link",
-    "deprecation:group-element-link",
     "delimiter:malformed-json",
     "serializer:rendered-content-void-paired",
     "strategy:static-renderer",
@@ -1039,7 +1087,6 @@
     "rich-text:literal-nbsp",
     "rich-text:br",
     "rich-text:inline-formatting",
-    "deprecation:heading-text-align",
     "deprecation:paragraph-align",
     "deprecation:paragraph-pre-font-support",
     "deprecation:paragraph-selectorless",
@@ -1063,7 +1110,6 @@
     "json:wrong-type",
     "json:defaults",
     "repair:nested-paragraph",
-    "repair:nested-paragraph-style-merge",
     "repair:media-type-inference",
     "repair:custom-class-recovery",
     "repair:anchor-recovery",
@@ -1114,15 +1160,10 @@
     "support:font-size",
     "support:gradient",
     "support:layout",
-    "support:layout-content-size",
-    "support:layout-align-items",
-    "support:layout-default",
     "support:layout-flex",
-    "support:layout-wide-size",
     "support:preset-variables",
     "support:self-stretch",
     "support:shadow",
-    "support:short-spacing-preset-signature",
     "support:spacing",
     "support:typography"
   ],
@@ -1138,9 +1179,10 @@
       "quote-embed-and-raw-renderers",
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "paragraph-inline-color-carryover"
     ],
     "core/group": [
       "group-html-attribute-repairs",
@@ -1148,8 +1190,8 @@
       "json-comment-boundaries",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "core/column": [
       "block-support-pipeline",
@@ -1190,6 +1232,9 @@
     ],
     "core/cover": [
       "cover-renderer-branches"
+    ],
+    "core/details": [
+      "details-static-renderer"
     ],
     "core/media-text": [
       "media-text-type-inference"
@@ -1238,7 +1283,8 @@
       "social-and-dynamic-strategies"
     ],
     "core/site-tagline": [
-      "social-and-dynamic-strategies"
+      "social-and-dynamic-strategies",
+      "site-tagline-legacy-text-align"
     ],
     "core/site-title": [
       "observed-deprecation-adapters",
@@ -1268,10 +1314,11 @@
       "social-and-dynamic-strategies",
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
-      "heading-legacy-text-align",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "heading-legacy-text-align",
+      "paragraph-inline-color-carryover"
     ],
     "RAW_CONTENT": [
       "quote-embed-and-raw-renderers"
@@ -1289,7 +1336,8 @@
       "observed-deprecation-adapters",
       "social-and-dynamic-strategies",
       "report-order-status-and-skip",
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "site-tagline-legacy-text-align"
     ]
   },
   "observed": [
@@ -1337,6 +1385,8 @@
       "deprecation:core/paragraph:0",
       "deprecation:core/paragraph:1",
       "deprecation:core/paragraph:6",
+      "deprecation:core/site-tagline:0",
+      "deprecation:core/site-tagline:1",
       "deprecation:core/site-title:0",
       "deprecation:core/site-title:1"
     ],
@@ -1350,6 +1400,8 @@
       "deprecation:core/paragraph:0": "explicit-adapter",
       "deprecation:core/paragraph:1": "explicit-adapter",
       "deprecation:core/paragraph:6": "explicit-adapter",
+      "deprecation:core/site-tagline:0": "explicit-adapter",
+      "deprecation:core/site-tagline:1": "explicit-adapter",
       "deprecation:core/site-title:0": "explicit-adapter",
       "deprecation:core/site-title:1": "explicit-adapter"
     },
@@ -1412,6 +1464,6 @@
   "uncoveredSupportedBlocks": [],
   "registeredSnapshot": {
     "count": 106,
-    "sha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716"
+    "sha256": "64754f3055b3c016472833c536517e7122576dad83d0a9c345b8a609c82676a1"
   }
 }

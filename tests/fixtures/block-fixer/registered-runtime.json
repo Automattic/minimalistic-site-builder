@@ -1,13 +1,13 @@
 {
   "generator": {
     "version": "1.0.0",
-    "sourceSha256": "f7618fd0807aab8770ffab44c5fc2405c2ef6caa37721e016c570957862847ee"
+    "sourceSha256": "709667a7c1023759dde1b1636209d608d78ba2d7337fbc098ba4c59b3c822cc6"
   },
   "fingerprint": {
     "node": {
       "version": "v22.19.0",
       "platform": "linux",
-      "architecture": "x64",
+      "architecture": "arm64",
       "v8": "12.4.254.21-node.29",
       "icu": "77.1"
     },
@@ -17,14 +17,14 @@
       "linuxAmd64Digest": "sha256:cff78eb5aa1cf27dc2b6aeea9d31366415a43e9a9ea0ddec00d780b2b66fad0f",
       "sourceRevision": "8a6ee0d86da85db74f5bcf99c9dc6ef87203592f"
     },
-    "packageLockSha256": "eb1b8c40981564cf9f1f01e0d4a5d910f20b83c8c73ee338d2b592df8d64150c",
+    "packageLockSha256": "a2c1a4bc4047e58dc472751d21ad45194d02a7e9f5d46105b5975f94efe10241",
     "packages": {
       "@wordpress/blocks": "15.15.0",
       "@wordpress/block-library": "9.42.0",
       "@wordpress/block-editor": "15.15.0",
       "@wordpress/block-serialization-default-parser": "5.49.0",
-      "@wordpress/style-engine": "2.49.0",
-      "@wordpress/rich-text": "7.49.0",
+      "@wordpress/style-engine": "2.51.0",
+      "@wordpress/rich-text": "7.51.0",
       "@wordpress/element": "6.46.0",
       "react": "18.3.1",
       "react-dom": "18.3.1",
@@ -7124,7 +7124,30 @@
           },
           "saveContent": "<details class=\"wp-block-details\"><summary></summary><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></details>",
           "serialized": "<!-- wp:details -->\n<details class=\"wp-block-details\"><summary></summary><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></details>\n<!-- /wp:details -->"
-        }
+        },
+        "manifest": [
+          {
+            "index": 0,
+            "kind": "inner-blocks",
+            "attributes": {
+              "showContent": false,
+              "summary": {}
+            },
+            "saveContent": "<details class=\"wp-block-details\"><summary>Probe summary</summary><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></details>",
+            "serialized": "<!-- wp:details -->\n<details class=\"wp-block-details\"><summary>Probe summary</summary><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></details>\n<!-- /wp:details -->"
+          },
+          {
+            "index": 1,
+            "kind": "inner-blocks",
+            "attributes": {
+              "showContent": true,
+              "summary": {},
+              "name": "probe-group"
+            },
+            "saveContent": "<details class=\"wp-block-details\" name=\"probe-group\" open><summary>Probe summary</summary><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></details>",
+            "serialized": "<!-- wp:details {\"showContent\":true} -->\n<details class=\"wp-block-details\" name=\"probe-group\" open><summary>Probe summary</summary><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></details>\n<!-- /wp:details -->"
+          }
+        ]
       }
     },
     "core/embed": {

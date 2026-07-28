@@ -41,9 +41,13 @@ test('oracle manifest hashes match the committed registry artifacts', function (
 
 test('oracle manifest records post-oracle amendments with a policy', function (): void {
     $manifest = oracle_manifest();
+    // An EMPTY ledger is the healthy state: it means every committed artifact
+    // was derived by the oracle rather than hand-certified. What must always
+    // hold is that the ledger exists and that anything in it carries its
+    // evidence, so a hand-edit can never be recorded as a bare assertion.
     assert_true(
-        is_array($manifest['amendments'] ?? null) && $manifest['amendments'] !== [],
-        'manifest must list post-oracle amendments'
+        is_array($manifest['amendments'] ?? null),
+        'manifest must carry the post-oracle amendment ledger'
     );
     foreach ($manifest['amendments'] as $amendment) {
         assert_true(is_string($amendment['commit'] ?? null) && $amendment['commit'] !== '');

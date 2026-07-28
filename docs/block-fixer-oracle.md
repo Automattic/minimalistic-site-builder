@@ -9,10 +9,18 @@ snapshots under `tests/fixtures/block-fixer/`, and the golden cases under
 PHP pipeline consumes them is documented in `docs/block-fixer-architecture.md`.)
 
 The oracle and all regeneration tooling were removed in commit `619b8c9`
-("Remove the Node block fixer"). That is safe while the compatibility domain
-stays frozen, but the moment Gutenberg drifts — or the domain grows — the
-artifacts must be regenerated, and the tooling only exists in git history.
-This note is the map.
+("Remove the Node block fixer") and lived only in git history for a while. They
+are **back in the tree** as development tooling: `bin/block-fixer/` plus the two
+generators, an npm workspace beside `bin/screenshot`. Nothing in the PHP
+pipeline calls them and production still runs pure PHP — but regenerating the
+artifacts is now an ordinary repo operation rather than an archaeology
+exercise, which is what let the domain drift into hand-certification before.
+
+```sh
+npm ci
+npm run oracle:verify --workspace=bin/block-fixer   # re-derive, fail on drift
+npm run oracle:update --workspace=bin/block-fixer   # regenerate (linux/x64)
+```
 
 ## Where the oracle lives
 

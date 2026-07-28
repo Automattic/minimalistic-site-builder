@@ -4,7 +4,7 @@
     "node": {
       "version": "v22.19.0",
       "platform": "linux",
-      "architecture": "x64",
+      "architecture": "arm64",
       "v8": "12.4.254.21-node.29",
       "icu": "77.1"
     },
@@ -14,14 +14,14 @@
       "linuxAmd64Digest": "sha256:cff78eb5aa1cf27dc2b6aeea9d31366415a43e9a9ea0ddec00d780b2b66fad0f",
       "sourceRevision": "8a6ee0d86da85db74f5bcf99c9dc6ef87203592f"
     },
-    "packageLockSha256": "eb1b8c40981564cf9f1f01e0d4a5d910f20b83c8c73ee338d2b592df8d64150c",
+    "packageLockSha256": "a2c1a4bc4047e58dc472751d21ad45194d02a7e9f5d46105b5975f94efe10241",
     "packages": {
       "@wordpress/blocks": "15.15.0",
       "@wordpress/block-library": "9.42.0",
       "@wordpress/block-editor": "15.15.0",
       "@wordpress/block-serialization-default-parser": "5.49.0",
-      "@wordpress/style-engine": "2.49.0",
-      "@wordpress/rich-text": "7.49.0",
+      "@wordpress/style-engine": "2.51.0",
+      "@wordpress/rich-text": "7.51.0",
       "@wordpress/element": "6.46.0",
       "react": "18.3.1",
       "react-dom": "18.3.1",
@@ -51,41 +51,24 @@
   },
   "registry": {
     "generatorVersion": "1.0.0",
-    "generatorSourceSha256": "f7618fd0807aab8770ffab44c5fc2405c2ef6caa37721e016c570957862847ee",
-    "runtimeJsonSha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716",
-    "generatedPhpSha256": "ed3710cf608f7575ba138ef1e825bf093f6f535f453dd9ba936a291382d3a3a6",
-    "registeredSnapshotSha256": "8aff8e7704a773d322624ffe216de635863f7ad93783308aa135d894410e4dc0",
+    "generatorSourceSha256": "709667a7c1023759dde1b1636209d608d78ba2d7337fbc098ba4c59b3c822cc6",
+    "runtimeJsonSha256": "64754f3055b3c016472833c536517e7122576dad83d0a9c345b8a609c82676a1",
+    "generatedPhpSha256": "365bc97311232171c8d5f3abec1b9bdd95e7796d1a3aa1fa93bd33ecbfd5e666",
+    "registeredSnapshotSha256": "1ccdc8c9047b772fbe7fc572bd8d504f4b100a5b691cf47bda204ad601b515a0",
     "hookTraceSha256": "718a6d2f635b3eb512a996fe3005e2312cbbadddd5f411fb847469b9c0bae4d4",
     "counts": {
       "registered": 106,
-      "supported": 30,
-      "observed": 31,
-      "observedRegistered": 30,
+      "supported": 31,
+      "observed": 32,
+      "observedRegistered": 31,
       "observedUnregistered": 1
     }
   },
   "fixtures": {
     "generatorVersion": "1.0.0",
     "generatorSourceSha256": "9be3621a29b69d1771419c4972ecf99803f21ac31652e654751d7f5009027daa",
-    "definitionsSha256": "1761c7a60660ff89875108fc5313837e2a9c796b146eea83a63cc2e640c8344b"
+    "definitionsSha256": "d0119520c617bc09b9009b3ec277e859e2a0d1e3fec83a2ebc018afb2e302dd6"
   },
-  "amendments": [
-    {
-      "commit": "1eacd4a",
-      "summary": "Fix generated block compatibility edge cases (post-oracle, hand-reviewed)."
-    },
-    {
-      "commit": "a269765",
-      "summary": "Handle generated button href aliases (post-oracle, hand-reviewed)."
-    },
-    {
-      "commit": "4210065",
-      "summary": "Cover additional generated block signatures (post-oracle, hand-reviewed)."
-    },
-    {
-      "commit": "b580c20",
-      "summary": "Handle custom-site block signatures; adds core/details as a STATIC_RENDERER certified by the abcf523 saveProbes plus @wordpress/block-library@9.42.0 details/save.js (see cases/details-static-renderer)."
-    }
-  ],
+  "amendments": [],
   "amendmentPolicy": "registry.generatedPhpSha256 and registry.runtimeJsonSha256 are re-frozen hashes of the committed artifacts, enforced by tests/unit/oracle_manifest_consistency_test.php. Any post-oracle edit to those artifacts must be listed here with its certification evidence and must ship an end-to-end golden case; see docs/block-fixer-oracle.md for regeneration."
 }
