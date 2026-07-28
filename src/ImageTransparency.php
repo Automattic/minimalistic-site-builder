@@ -72,6 +72,22 @@ final class ImageTransparency
     }
 
     /**
+     * The "turn the alpha channel off" selector for this Imagick build.
+     *
+     * ImageMagick 7 spells it ALPHACHANNEL_OFF. The 6.x line — still what most
+     * Linux distributions package, and what CI runs — defines only
+     * ALPHACHANNEL_DEACTIVATE, so naming the 7-only constant raises an Error
+     * on the first line of unmatteEdges(). Resolving it at call time keeps the
+     * unmatting pass working on both.
+     */
+    private static function alphaChannelOff(): int
+    {
+        return defined('Imagick::ALPHACHANNEL_OFF')
+            ? \Imagick::ALPHACHANNEL_OFF
+            : \Imagick::ALPHACHANNEL_DEACTIVATE;
+    }
+
+    /**
      * Key the background of a PNG — border-connected regions plus enclosed
      * background-colored pockets, per the class docblock — to transparency
      * and return the re-encoded PNG bytes. Fails soft: when imagick is
@@ -158,7 +174,7 @@ final class ImageTransparency
         try {
             // N = 1 - C: per-channel white contamination.
             $neg = clone $im;
-            $neg->setImageAlphaChannel(\Imagick::ALPHACHANNEL_OFF);
+            $neg->setImageAlphaChannel(self::alphaChannelOff());
             $neg->negateImage(false);
 
             // t = max channel of N, boosted so solid ink saturates to 1.
@@ -185,8 +201,12 @@ final class ImageTransparency
 
             $neg->compositeImage($t, \Imagick::COMPOSITE_COPYOPACITY, 0, 0);
             $im->setImage($neg);
-        } catch (\Throwable) {
-            // keep the hard-keyed image
+        } catch (\Throwable $e) {
+            // Keep the hard-keyed image: a fringe beats no asset. Say so
+            // though — swallowing this silently is what let an Imagick 7-only
+            // constant ship a white fringe on every anti-aliased edge for
+            // every ImageMagick 6 host, invisibly.
+            fwrite(STDERR, "    (image: edge unmatting skipped: {$e->getMessage()})\n");
         }
     }
 
