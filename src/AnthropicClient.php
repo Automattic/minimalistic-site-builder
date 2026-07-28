@@ -508,9 +508,9 @@ final class AnthropicClient implements Llm
      * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
      * @return array<int,array<array-key,array<string,mixed>>>
      */
-    public static function concurrencyWindows(array $bodies): array
+    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
     {
-        return array_chunk($bodies, self::MAX_CONCURRENCY, true);
+        return array_chunk($bodies, max(1, $maxConcurrency ?? self::MAX_CONCURRENCY), true);
     }
 
     /**
