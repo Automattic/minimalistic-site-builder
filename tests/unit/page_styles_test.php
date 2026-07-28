@@ -188,6 +188,9 @@ test('run drops offending declarations and ships the rest of the appendix', func
     $log = $project->readText('logs/page-styles.log');
     assert_contains('SALVAGED', $log);
     assert_contains('raw color literal', $log);
+    // Each dropped declaration is recorded durably for the repair pass.
+    $joined = implode(' ', $project->readJson('warnings.json')['page-styles'] ?? []);
+    assert_contains('dropped offending CSS declaration', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -257,6 +260,10 @@ test('run rejects invalid CSS, leaves style.css untouched, and logs the problems
 
     assert_eq($before, $project->readText('theme/style.css'), 'style.css untouched');
     assert_contains('not scoped', $project->readText('logs/page-styles.log'));
+    // The skipped appendix costs every used utility its CSS — durable record.
+    $joined = implode(' ', $project->readJson('warnings.json')['page-styles'] ?? []);
+    assert_contains('model CSS appendix rejected', $joined);
+    assert_contains('overlap-up', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

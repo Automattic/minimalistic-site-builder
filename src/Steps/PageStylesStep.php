@@ -123,7 +123,7 @@ final class PageStylesStep implements Step
                 'theme/parts/*',
                 'theme/templates/*',
             ],
-            writes: ['theme/style.css'],
+            writes: ['theme/style.css', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -162,6 +162,12 @@ final class PageStylesStep implements Step
                 );
                 echo '  page-styles: CSS rejected (' . count($problems)
                     . ' problem(s)); appendix skipped — see logs/' . self::LOG_FILE . "\n";
+                $project->addWarnings($this->id(), [sprintf(
+                    'model CSS appendix rejected (%s); layout utility class(es) %s ship without their CSS — see logs/%s',
+                    implode('; ', $problems),
+                    implode(', ', $used),
+                    self::LOG_FILE,
+                )]);
                 return;
             }
             file_put_contents(
@@ -171,6 +177,11 @@ final class PageStylesStep implements Step
             );
             echo '  page-styles: dropped ' . count($dropped)
                 . ' offending declaration(s), kept the rest — see logs/' . self::LOG_FILE . "\n";
+            $project->addWarnings($this->id(), array_map(
+                static fn (string $declaration): string =>
+                    "dropped offending CSS declaration `{$declaration}` from the page-styles appendix",
+                $dropped,
+            ));
             $css = $salvaged;
         }
         $project->writeText(

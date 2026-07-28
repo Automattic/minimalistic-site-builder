@@ -24,7 +24,12 @@ final class MarkupSanitizer
         'href', 'src', 'xlink:href', 'formaction', 'action',
     ];
 
-    public static function sanitize(string $markup): string
+    /**
+     * @param list<string> $notes out-param: one line per class of removal, so
+     *        callers can record the delivered-content change durably
+     *        (warnings.json) instead of the strip staying silent.
+     */
+    public static function sanitize(string $markup, array &$notes = []): string
     {
         // Container bodies go entirely. Even inert/fallback content cannot be
         // left behind: it may contain block-looking comments that recovery
@@ -54,21 +59,37 @@ final class MarkupSanitizer
         // `<script>` a browser would never have parsed from the input. Repeat
         // until stable. This terminates because a pass that changes anything
         // strictly shortens the markup.
+        $removedBytes = 0;
         do {
             $before = $markup;
             $markup = HtmlBlockContext::removeElements($markup, $containers);
             $markup = HtmlBlockContext::removeTags($markup, $tags);
+            $removedBytes += strlen($before) - strlen($markup);
         } while ($markup !== $before);
+        if ($removedBytes > 0) {
+            $notes[] = "removed script-capable element markup ({$removedBytes} byte(s))";
+        }
         // Attribute tokens follow browser-like quote, whitespace, and slash
         // states. This matters for malformed-but-active forms such as
         // `<svg/onload=...>` and for `/` inside an unquoted ordinary value.
-        return HtmlBlockContext::rewriteOpeningTags(
+        $handlers = 0;
+        $urls = 0;
+        $markup = HtmlBlockContext::rewriteOpeningTags(
             $markup,
-            self::sanitizeOpeningTag(...),
+            static function (string $tag) use (&$handlers, &$urls): string {
+                return self::sanitizeOpeningTag($tag, $handlers, $urls);
+            },
         );
+        if ($handlers > 0) {
+            $notes[] = "removed {$handlers} inline event handler attribute(s)";
+        }
+        if ($urls > 0) {
+            $notes[] = "neutralized {$urls} executable URL value(s)";
+        }
+        return $markup;
     }
 
-    private static function sanitizeOpeningTag(string $tag): string
+    private static function sanitizeOpeningTag(string $tag, int &$handlers = 0, int &$urls = 0): string
     {
         $attributes = self::attributes($tag);
         $eventStarts = [];
@@ -94,6 +115,7 @@ final class MarkupSanitizer
                     // preceding name or unquoted value after deletion.
                     'replacement' => $needsSeparator ? ' ' : '',
                 ];
+                $handlers++;
                 continue;
             }
 
@@ -112,6 +134,7 @@ final class MarkupSanitizer
                     'end' => $attribute['valueEnd'],
                     'replacement' => '#',
                 ];
+                $urls++;
             }
         }
 

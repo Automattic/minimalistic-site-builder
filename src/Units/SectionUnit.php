@@ -107,9 +107,9 @@ final class SectionUnit extends AbstractMarkupUnit
         return $request;
     }
 
-    public function finish(string $raw, array $input): string
+    public function finish(string $raw, array $input, array &$notes = []): string
     {
-        return GeneratedMarkup::normalize($raw, $this->key($input));
+        return GeneratedMarkup::normalize($raw, $this->key($input), $notes);
     }
 
     /** @return array<string,mixed> */

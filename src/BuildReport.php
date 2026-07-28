@@ -30,6 +30,9 @@ final class BuildReport
 
     private int $requests = 0;
 
+    /** @var array<string,int> step id => count of delivered-through defects */
+    private array $warningCounts = [];
+
     public function __construct(
         private string $prompt,
         private string $slug,
@@ -60,6 +63,24 @@ final class BuildReport
     public function setRequestCount(int $requests): void
     {
         $this->requests = $requests;
+    }
+
+    /**
+     * Record the project's warnings.json content — the defects the build
+     * delivered through instead of failing on — so the run overview surfaces
+     * them instead of a warned build looking identical to a clean one.
+     *
+     * @param array<mixed> $warningsByStep decoded warnings.json (step id => messages)
+     */
+    public function setWarnings(array $warningsByStep): void
+    {
+        $this->warningCounts = [];
+        foreach ($warningsByStep as $stepId => $messages) {
+            $count = is_array($messages) ? count($messages) : 0;
+            if ($count > 0) {
+                $this->warningCounts[(string) $stepId] = $count;
+            }
+        }
     }
 
     public function totalSecs(): float
@@ -109,6 +130,26 @@ final class BuildReport
         );
     }
 
+    /**
+     * The warnings summary line, or null when the build delivered clean.
+     * One line, per-step counts — the details live in warnings.json. Pure.
+     */
+    public function warningsLine(): ?string
+    {
+        if ($this->warningCounts === []) {
+            return null;
+        }
+        $parts = [];
+        foreach ($this->warningCounts as $stepId => $count) {
+            $parts[] = "{$stepId}: {$count}";
+        }
+        return sprintf(
+            'Warnings: %d defect(s) delivered through — see warnings.json (%s)',
+            array_sum($this->warningCounts),
+            implode(', ', $parts)
+        );
+    }
+
     /** The images summary line, or null when no image step ran. Pure. */
     public function imagesLine(): ?string
     {
@@ -154,6 +195,9 @@ final class BuildReport
         $lines[] = 'LLM requests : ' . $this->requests;
         if (($img = $this->imagesLine()) !== null) {
             $lines[] = $img;
+        }
+        if (($warnings = $this->warningsLine()) !== null) {
+            $lines[] = $warnings;
         }
         $lines[] = $rule;
         $lines[] = '';

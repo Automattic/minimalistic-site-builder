@@ -442,10 +442,10 @@ test('layout fixer leaves explicit non-object style shapes for the gate', functi
         . '<div class="wp-block-group" style="padding-left:1rem"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/invalid-style-shape.html' => $markup]);
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme)
-        );
-        assert_contains("Unsupported comment attribute 'spacing' for core/group", $error->getMessage());
+        $report = (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme);
+        assert_contains('FAILED parts/invalid-style-shape.html', $report);
+        assert_contains("Unsupported comment attribute 'spacing' for core/group", $report);
+        assert_eq($markup, file_get_contents($theme . '/parts/invalid-style-shape.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }
@@ -463,10 +463,10 @@ test('normalize-layout repair lets the PHP block fixer serialize the atlas repro
 
     $theme = php_block_fixer_test_theme(['parts/page-home--trust-builders.html' => $pre]);
     try {
-        $error = php_block_fixer_test_exception(
-            static fn () => (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme)
-        );
-        assert_contains("Unsupported comment attribute 'spacing' for core/group", $error->getMessage());
+        $report = (new \Automattic\SiteBuild\PhpBlockFixer())->fix($theme);
+        assert_contains('FAILED parts/page-home--trust-builders.html', $report);
+        assert_contains("Unsupported comment attribute 'spacing' for core/group", $report);
+        assert_eq($pre, file_get_contents($theme . '/parts/page-home--trust-builders.html'));
     } finally {
         php_block_fixer_test_remove(dirname($theme));
     }

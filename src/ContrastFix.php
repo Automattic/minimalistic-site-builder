@@ -90,7 +90,7 @@ final class ContrastFix
      * transparently over the hero and would be mis-repaired against `base`).
      *
      * @return array{markup: string, changed: bool,
-     *               findings: list<array{kind:string, block:string, detail:string, repaired:bool}>}
+     *               findings: list<array{kind:string, block:string, detail:string, repaired:bool, residual?:bool}>}
      */
     public function process(string $markup, bool $repair = true): array
     {
@@ -262,6 +262,7 @@ final class ContrastFix
                     'detail' => $detail . " → textColor={$bestSlug} (" . sprintf('%.2f', $bestRatio) . ')'
                         . ($passes ? '' : ' — best available, still below threshold'),
                     'repaired' => true,
+                    'residual' => !$passes,
                 ];
             } else {
                 $this->findings[] = [

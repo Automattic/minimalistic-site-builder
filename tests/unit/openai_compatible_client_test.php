@@ -578,7 +578,7 @@ test('Kimi K3 text recovery doubles its effective 65k budget without changing ot
             $retry = $subset['section'];
             return ['section' => ['text' => '<!-- wp:group --><!-- /wp:group -->', 'stop_reason' => 'stop']];
         },
-    );
+    )->texts;
 
     assert_eq('<!-- wp:group --><!-- /wp:group -->', $out['section']);
     assert_eq(131072, $retry['max_tokens'], 'the text retry grows from K3’s effective budget');

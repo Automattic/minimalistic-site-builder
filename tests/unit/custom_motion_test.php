@@ -109,6 +109,9 @@ test('custom-motion skips without an LLM call when the markup carries no tag', f
 
     assert_eq([], $llm->calls);
     assert_contains('no', $project->readText('logs/custom-motion.log'));
+    // The user's explicit request went unimplemented — a durable defect.
+    $joined = implode(' ', $project->readJson('warnings.json')['custom-motion'] ?? []);
+    assert_contains('not implemented', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -174,6 +177,12 @@ test('custom-motion rejects bad CSS, logs, and leaves style.css untouched', func
 
     assert_eq($before, $project->readText('theme/style.css'));
     assert_contains('PROBLEMS', $project->readText('logs/custom-motion.log'));
+
+    // The user explicitly asked for this animation; shipping without it is a
+    // delivered defect, recorded durably for the later repair pass.
+    $joined = implode(' ', $project->readJson('warnings.json')['custom-motion'] ?? []);
+    assert_contains('not implemented', $joined);
+    assert_contains('model CSS rejected', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

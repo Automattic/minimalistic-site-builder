@@ -72,6 +72,24 @@ final class ImageTransparency
     }
 
     /**
+     * Whether this Imagick build can run the edge-unmatting pass.
+     *
+     * The pass is written against ImageMagick 7 semantics: it names
+     * ALPHACHANNEL_OFF (7-only; 6.x has ALPHACHANNEL_DEACTIVATE), and its
+     * coverage math relies on 7's DivideDst and levelImage behaviour —
+     * swapping the constant alone makes 6.x turn the *subject* translucent
+     * rather than the fringe. Most Linux distributions still package the 6.x
+     * line, so this is a live limitation, not a theoretical one: on those
+     * hosts a decorative .png keeps the white baked into its anti-aliased
+     * edges (a fringe on dark pages). Detected rather than discovered by
+     * exception, so the skip is deliberate and reported.
+     */
+    public static function canUnmatteEdges(): bool
+    {
+        return self::available() && defined('Imagick::ALPHACHANNEL_OFF');
+    }
+
+    /**
      * Key the background of a PNG — border-connected regions plus enclosed
      * background-colored pockets, per the class docblock — to transparency
      * and return the re-encoded PNG bytes. Fails soft: when imagick is
@@ -155,6 +173,13 @@ final class ImageTransparency
      */
     private static function unmatteEdges(\Imagick $im): void
     {
+        if (!self::canUnmatteEdges()) {
+            fwrite(
+                STDERR,
+                "    (image: edge unmatting needs ImageMagick 7; keeping hard-keyed edges)\n",
+            );
+            return;
+        }
         try {
             // N = 1 - C: per-channel white contamination.
             $neg = clone $im;
@@ -185,8 +210,12 @@ final class ImageTransparency
 
             $neg->compositeImage($t, \Imagick::COMPOSITE_COPYOPACITY, 0, 0);
             $im->setImage($neg);
-        } catch (\Throwable) {
-            // keep the hard-keyed image
+        } catch (\Throwable $e) {
+            // Keep the hard-keyed image: a fringe beats no asset. Say so
+            // though — swallowing this silently is what let an Imagick 7-only
+            // constant ship a white fringe on every anti-aliased edge for
+            // every ImageMagick 6 host, invisibly.
+            fwrite(STDERR, "    (image: edge unmatting skipped: {$e->getMessage()})\n");
         }
     }
 

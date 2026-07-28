@@ -236,6 +236,11 @@ test('motion-sanity step visits sections in plan order so the hero wins page bud
     );
     assert_contains('page-home--about', $project->readText('logs/motion-sanity.txt'));
 
+    // Every strip removed an authored class from delivered markup: durable.
+    $warnings = $project->readJson('warnings.json')['motion-sanity'] ?? [];
+    assert_true($warnings !== [], 'strips are recorded in warnings.json');
+    assert_contains('motion class stripped', $warnings[0]);
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

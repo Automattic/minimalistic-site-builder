@@ -64,6 +64,7 @@ final class AssemblePagesStep implements Step
                 'theme/templates/page.html',
                 'theme/templates/index.html',
                 'theme/theme.json',
+                'warnings.json',
             ],
             concurrent: false,
         );
@@ -77,15 +78,22 @@ final class AssemblePagesStep implements Step
             throw new \RuntimeException('assemble-pages: pages.json has no pages');
         }
 
-        // Chrome must exist before the templates reference it.
+        $warnings = [];
+
+        // The templates reference the chrome parts; a missing one renders as
+        // an empty template-part in WordPress — degraded but usable, so warn
+        // and continue rather than discard the whole build.
         foreach (['parts/header.html', 'parts/footer.html'] as $rel) {
             if (!$project->exists('theme/' . $rel)) {
-                throw new \RuntimeException("assemble-pages: missing {$rel}");
+                $warnings[] = "missing {$rel}; the templates reference an absent part (renders empty)";
             }
         }
 
         // Gather every page's section markup BEFORE writing or deleting
-        // anything, so a missing part aborts with the theme untouched.
+        // anything. A missing part loses one section, not the page; a page
+        // with NO surviving section markup is skipped whole (an empty page in
+        // the nav is worse than an absent one) — except the front page, which
+        // the templates and the seeder rely on.
         $contents = [];
         $manifest = [];
         foreach ($pages as $page) {
@@ -95,9 +103,17 @@ final class AssemblePagesStep implements Step
                 $part = SectionsStep::partSlug($slug, (string) ($section['slug'] ?? ''));
                 $rel = "theme/parts/{$part}.html";
                 if (!$project->exists($rel)) {
-                    throw new \RuntimeException("assemble-pages: missing part parts/{$part}.html");
+                    $warnings[] = "page '{$slug}': missing generated part parts/{$part}.html; section skipped";
+                    continue;
                 }
                 $markups[] = rtrim($project->readText($rel));
+            }
+            if ($markups === [] && empty($page['front'])) {
+                $warnings[] = "page '{$slug}': no section markup survived; page skipped";
+                continue;
+            }
+            if ($markups === []) {
+                $warnings[] = "front page '{$slug}': no section markup survived; empty front page delivered";
             }
             $contents[$slug] = self::pageContent($markups);
             $manifest[] = [
@@ -108,6 +124,17 @@ final class AssemblePagesStep implements Step
                 'parent'     => isset($page['parent']) && $page['parent'] !== null ? (string) $page['parent'] : null,
             ];
         }
+        // A skipped page may still be named as another page's parent; the
+        // seeder can't attach a child to a page that was never created.
+        $kept = array_fill_keys(array_column($manifest, 'slug'), true);
+        foreach ($manifest as &$entry) {
+            if ($entry['parent'] !== null && !isset($kept[$entry['parent']])) {
+                $warnings[] = "page '{$entry['slug']}': parent '{$entry['parent']}' was skipped; promoted to top level";
+                $entry['parent'] = null;
+            }
+        }
+        unset($entry);
+        $project->addWarnings($this->id(), $warnings);
 
         foreach ($contents as $slug => $content) {
             $project->writeText("plugin/pages/{$slug}.html", $content);
