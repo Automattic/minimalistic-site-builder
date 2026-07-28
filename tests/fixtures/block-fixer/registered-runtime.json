@@ -31,10 +31,10 @@
       "jsdom": "29.0.1"
     },
     "implementationSources": {
-      "bin/block-fixer/fix-templates.js": "6fe510e2f869d89a29f263734e9aff0f9a82d2767ecc7a93413d18bc03f943a7",
-      "bin/block-fixer/oracle.js": "34b863c7f6300e2190ba318601136d5f676b24ae3d9faeb1cbcd37b76d5508b4",
-      "bin/block-fixer/lib/blockFixer.js": "959145cbd9ee7ef90c4436a6e29f16180c5d3cc5bdfdffa06ee5a89523f19f42",
-      "bin/block-fixer/lib/paragraphFixer.js": "e11812214c0dbbf7643005462af1c7469268af330b1d854dabc532fe44cf6ed3",
+      "bin/block-fixer/fix-templates.js": "346c5142552e2be8fccd51260ab84a5d2ead2cfdeb558ce90d8ccfb8ced73457",
+      "bin/block-fixer/oracle.js": "44e1a521c61693bb0d6546b4fcdcfe4ebc72ae0d77385124710e9161dfdd8755",
+      "bin/block-fixer/lib/blockFixer.js": "83b5d70fa516ff7591c64ceab907a78fd54f7503126d5a816e6b594ac380c820",
+      "bin/block-fixer/lib/paragraphFixer.js": "d0757bc23f0680fe694a186abbe47c3b1e8850daed67c91c71ae2a4d9362193c",
       "bin/block-fixer/lib/domEnvironment.js": "e4b799188c0afddd1fd99d4458e21a83e6cd84e4b16792998e006b556efc7fcd",
       "bin/block-fixer/lib/droppedContentDetector.js": "e814e907fa16ec54c06f3a52a73423add68c3cc3af7bebdaabd4bd71aade3cbc",
       "bin/block-fixer/lib/fixedPoint.js": "fd0d96de99bd8d32de189c2457ba37417436d98028b905955832f0c9939018e7",

@@ -63,6 +63,6 @@ console.error(
 	'\nIf the running value is the surprising one, install the pinned Node.\n' +
 		'If the frozen value is, the artifacts were regenerated from the wrong\n' +
 		'environment — see docs/block-fixer-oracle.md, "Which environment to\n' +
-		'regenerate from".'
+		'verify or regenerate from".'
 );
 process.exit(1);

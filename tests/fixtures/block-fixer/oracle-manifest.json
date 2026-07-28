@@ -28,10 +28,10 @@
       "jsdom": "29.0.1"
     },
     "implementationSources": {
-      "bin/block-fixer/fix-templates.js": "6fe510e2f869d89a29f263734e9aff0f9a82d2767ecc7a93413d18bc03f943a7",
-      "bin/block-fixer/oracle.js": "34b863c7f6300e2190ba318601136d5f676b24ae3d9faeb1cbcd37b76d5508b4",
-      "bin/block-fixer/lib/blockFixer.js": "959145cbd9ee7ef90c4436a6e29f16180c5d3cc5bdfdffa06ee5a89523f19f42",
-      "bin/block-fixer/lib/paragraphFixer.js": "e11812214c0dbbf7643005462af1c7469268af330b1d854dabc532fe44cf6ed3",
+      "bin/block-fixer/fix-templates.js": "346c5142552e2be8fccd51260ab84a5d2ead2cfdeb558ce90d8ccfb8ced73457",
+      "bin/block-fixer/oracle.js": "44e1a521c61693bb0d6546b4fcdcfe4ebc72ae0d77385124710e9161dfdd8755",
+      "bin/block-fixer/lib/blockFixer.js": "83b5d70fa516ff7591c64ceab907a78fd54f7503126d5a816e6b594ac380c820",
+      "bin/block-fixer/lib/paragraphFixer.js": "d0757bc23f0680fe694a186abbe47c3b1e8850daed67c91c71ae2a4d9362193c",
       "bin/block-fixer/lib/domEnvironment.js": "e4b799188c0afddd1fd99d4458e21a83e6cd84e4b16792998e006b556efc7fcd",
       "bin/block-fixer/lib/droppedContentDetector.js": "e814e907fa16ec54c06f3a52a73423add68c3cc3af7bebdaabd4bd71aade3cbc",
       "bin/block-fixer/lib/fixedPoint.js": "fd0d96de99bd8d32de189c2457ba37417436d98028b905955832f0c9939018e7",
@@ -52,7 +52,7 @@
   "registry": {
     "generatorVersion": "1.0.0",
     "generatorSourceSha256": "2c7e583270b3720da9c6b51c7fc1816c8ed5b29dd555023f363a63915e4fbc11",
-    "runtimeJsonSha256": "81463e10dbe16182674b8c713afa984a7f13b2963d25052ebb60c5324868f000",
+    "runtimeJsonSha256": "6f333f89fccd6967a7d1fbc174d3961f675988fa45cd020ce80017ae3a776589",
     "generatedPhpSha256": "a7479ab7698d85b95f311048dba3e5f8bb35783f0873c2537e0b2369ba95aa9d",
     "registeredSnapshotSha256": "1ccdc8c9047b772fbe7fc572bd8d504f4b100a5b691cf47bda204ad601b515a0",
     "hookTraceSha256": "718a6d2f635b3eb512a996fe3005e2312cbbadddd5f411fb847469b9c0bae4d4",
@@ -66,8 +66,8 @@
   },
   "fixtures": {
     "generatorVersion": "1.0.0",
-    "generatorSourceSha256": "9be3621a29b69d1771419c4972ecf99803f21ac31652e654751d7f5009027daa",
-    "definitionsSha256": "d0119520c617bc09b9009b3ec277e859e2a0d1e3fec83a2ebc018afb2e302dd6"
+    "generatorSourceSha256": "7b9c736683f397bcb80e1431e2e982c698bf7d67cef33f5d3a9384c036068d15",
+    "definitionsSha256": "83a0cb8428cfb78d68a17b65c2d82a65f79106bfde1e4038360c040f61d464d5"
   },
   "amendments": [],
   "amendmentPolicy": "registry.generatedPhpSha256 and registry.runtimeJsonSha256 are re-frozen hashes of the committed artifacts, enforced by tests/unit/oracle_manifest_consistency_test.php. Any post-oracle edit to those artifacts must be listed here with its certification evidence and must ship an end-to-end golden case; see docs/block-fixer-oracle.md for regeneration."

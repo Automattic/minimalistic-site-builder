@@ -23,7 +23,7 @@ cp .env.example .env
 # Or OpenRouter: LLM_PROVIDER=openrouter, OPENROUTER_API_KEY (models come from config/models.json)
 # Images (optional): GOOGLE_VERTEX_API_TOKEN
 
-npm ci   # optional; installs local Playground and screenshot helpers
+npm ci   # optional; installs Playground, screenshot helpers, and block-fixer oracle tooling
 ```
 
 Theme generation and block fixing require PHP 8.1+ only. No Composer is needed:

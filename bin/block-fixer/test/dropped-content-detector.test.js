@@ -50,3 +50,13 @@ test('detector reports repeated loss as one record with xN', () => {
     ['DROPPED class `gone` (x3) — not mirrored in the block comment JSON attributes']
   );
 });
+
+test('detector preserves numeric-string style and class values', () => {
+  assert.deepEqual(
+    detectDroppedContent('<p class="0" style="0">x</p>', '<p>x</p>'),
+    [
+      'DROPPED style `0` — not mirrored in the block comment JSON attributes',
+      'DROPPED class `0` — not mirrored in the block comment JSON attributes',
+    ]
+  );
+});

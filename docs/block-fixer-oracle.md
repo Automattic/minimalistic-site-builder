@@ -2,11 +2,12 @@
 
 The pure-PHP block fixer (`PhpBlockFixer`) was ported from a Node implementation
 that doubled as the **oracle**: it runs the real `@wordpress/blocks` runtime in a
-pinned environment and generates every frozen artifact the PHP port is certified
-against — `src/BlockSerializer/Registry/generated-registry.php`, the fixture
-snapshots under `tests/fixtures/block-fixer/`, and the golden cases under
-`tests/fixtures/block-fixer/cases/`. (What those artifacts contain and how the
-PHP pipeline consumes them is documented in `docs/block-fixer-architecture.md`.)
+pinned environment and generates the registry, runtime snapshot, coverage
+metadata, and generated golden cases the PHP port is certified against. Four
+reviewed cases deliberately remain outside generation, and `renderer-probes.json`
+is still pinned rather than re-derived; both boundaries are documented below.
+(How PHP consumes these artifacts is documented in
+`docs/block-fixer-architecture.md`.)
 
 The oracle and all regeneration tooling were removed in commit `619b8c9`
 ("Remove the Node block fixer") and lived only in git history for a while. They
@@ -17,15 +18,18 @@ artifacts is now an ordinary repo operation rather than an archaeology exercise,
 which is what let the domain drift into hand-certification before.
 
 ```sh
-npm ci
 node bin/block-fixer/check-fingerprint.js           # is this the pinned runtime?
+npm ci
 npm run oracle:verify --workspace=bin/block-fixer   # re-derive, fail on drift
 npm run oracle:update --workspace=bin/block-fixer   # regenerate
-npm test --workspace=bin/block-fixer                # the oracle's own suite
+npm run test:gates --workspace=bin/block-fixer      # structural oracle gates
+npm run test:fixed-point --workspace=bin/block-fixer # every committed case
 ```
 
-Regenerating from a machine that is not linux/x64 needs the container — see
-[Which environment to regenerate from](#which-environment-to-regenerate-from).
+Verifying or regenerating from a machine that is not linux/x64 needs the
+container because both operations reproduce the frozen environment fingerprint.
+The oracle's unit suites can run directly with the pinned Node. See
+[Which environment to verify or regenerate from](#which-environment-to-verify-or-regenerate-from).
 
 ## Where the oracle lives
 
@@ -85,7 +89,7 @@ fixtures and the goldens — and not yet of the probe snapshot.
 To certify against a *newer* Gutenberg, bump the pins in
 `bin/block-fixer/package.json`, regenerate, and re-freeze the fingerprint.
 
-## Which environment to regenerate from
+## Which environment to verify or regenerate from
 
 The artifacts record `platform` and `architecture`, and CI checks the running
 runtime against them before it verifies anything — so **regenerating from the
@@ -101,11 +105,11 @@ linux/arm64 in the container, both re-derived `generated-registry.php` and
 `platform`/`architecture`** (and the hashes over them). `v8` and `icu` matched
 exactly in both.
 
-So to *run or verify*, the pinned Node is enough — which is why CI uses
-`actions/setup-node` on `ubuntu-24.04`, already linux/x64, instead of the
-container. To *regenerate for commit* from anything that is not linux/x64, use
-the container, and pin the **linux/amd64 image digest** rather than the index
-digest:
+The unit suites can run anywhere with the pinned Node. `oracle:verify` and
+`oracle:update` both reproduce the recorded fingerprint, so they must run in
+the frozen linux/x64 environment. CI gets that environment from
+`actions/setup-node` on `ubuntu-24.04`; from any other platform, use the
+container and pin the **linux/amd64 image digest** rather than the index digest:
 
 ```sh
 docker run --rm -it -v "$PWD":/repo -w /repo \
@@ -115,8 +119,8 @@ docker run --rm -it -v "$PWD":/repo -w /repo \
 
 That digest is recorded as `fingerprint.container.linuxAmd64Digest`; the index
 digest beside it resolves to the host's architecture, which on Apple Silicon is
-arm64. `--platform linux/amd64` does not help — Docker rejects it alongside a
-digest reference.
+arm64. The platform-specific digest makes the intended architecture explicit;
+there is no need to combine it with `--platform`.
 
 ## The amendment rule
 
@@ -149,28 +153,32 @@ dependencies, and re-derives every frozen artifact — failing on drift. So a
 change to the serializer, the support manifest or the case definitions cannot
 land unless the real Gutenberg runtime agrees with it.
 
-The oracle's own suite runs too, split in two: `test:gates` is blocking, and
-`test:fixed-point` — the replay of every committed case — is **advisory**,
-because it reports one golden the oracle disagrees with.
+The oracle's own suite runs too, split in two. Both `test:gates` and
+`test:fixed-point` are blocking. The latter replays every committed case,
+including the reviewed exclusions below, before reporting any failures. Known
+differences are pinned to their exact runtime-output hashes, so a new difference
+or a change to an existing one fails CI.
 
 ### What the oracle gate does and does not cover
 
-`oracle:verify` only regenerates the cases listed in `fixtureCases.js`. Three
-committed case directories are deliberately not in that list:
+`oracle:verify` only regenerates the 25 cases listed in `fixtureCases.js`. Four
+committed case directories are deliberately not generated:
 
 | case | why it is held back | what still gates it |
 | --- | --- | --- |
-| `carried-elements-signatures` | the oracle disagrees with the committed golden — see below | PHP golden test |
-| `paragraph-conflicting-text-align` | asserts our reviewed *degradation* policy, which the oracle cannot express — Gutenberg validates, it does not degrade | PHP golden test |
-| `paragraph-opacity-reviewed-drop` | same (BIGR-728) | PHP golden test |
+| `carried-elements-signatures` | documented PHP/Gutenberg runtime divergence — see below | PHP golden test + exact oracle-output hash |
+| `paragraph-conflicting-text-align` | reviewed *degradation* policy, which Gutenberg validation does not express | PHP golden test + exact oracle-output hash |
+| `paragraph-opacity-reviewed-drop` | reviewed opacity-removal policy (BIGR-728), which Gutenberg reserialization does not implement | PHP golden test + exact oracle-output hashes |
+| `tbilisi60-traditional-offerings-fixed-point` | documented cosmetic attribute-order divergence — see below | PHP golden test + exact oracle-output hash |
 
-This is narrower than it looks. All three are replayed byte-for-byte by
+This is narrower than it looks. All four are replayed byte-for-byte by
 `php_block_fixer_golden_test.php`, which runs in the blocking `Tests` workflow,
-so a **port** regression in them cannot land green. What is only advisory is
-whether their committed goldens still match the **runtime** — and for two of the
-three that comparison is meaningless by construction.
+so a **port** regression in them cannot land green. The blocking fixed-point
+suite separately replays all four against Gutenberg and requires exactly the
+five reviewed mismatching files and output hashes. The committed-case inventory
+gate also rejects any case that is neither generated nor explicitly excluded.
 
-### The one divergence, precisely
+### The two runtime divergences, precisely
 
 In `carried-elements-signatures`, a `core/heading` with a legacy top-level
 `textAlign` loses its centering in the port and keeps it in the real runtime.
@@ -192,3 +200,9 @@ the A/B above: it is not about carried style families — `style.spacing`, fully
 reviewed and not carried, behaves identically — and it is not a missing
 `fixCustomClassname`. `CompatibilityRepairs::apply()` is a faithful port of that
 rescue and does run; the adapter then consumes what it rescued.
+
+In `tbilisi60-traditional-offerings-fixed-point`, both implementations preserve
+the same group attributes and rendered meaning. Gutenberg writes the outer
+group's `class` before its `id`; the reviewed PHP canonical output writes `id`
+before `class`. The exact Gutenberg output hash is pinned so even this cosmetic
+difference cannot change unnoticed.

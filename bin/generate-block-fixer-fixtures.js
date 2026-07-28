@@ -14,6 +14,7 @@ const {
 const {
   CASES,
   REQUIRED_CAPABILITIES,
+  REVIEWED_CASE_EXCLUSIONS,
   REVIEWED_DEPRECATIONS,
 } = require('./block-fixer/lib/fixtureCases');
 const { SUPPORTED_BLOCKS } = require('./block-fixer/lib/supportManifest');
@@ -59,7 +60,7 @@ function assertOrWrite(file, content, update) {
 
 function listHtmlFiles(root) {
   const files = [];
-  for (const subdirectory of ['parts', 'templates']) {
+  for (const subdirectory of ['pages', 'parts', 'templates']) {
     const directory = path.join(root, subdirectory);
     if (!fs.existsSync(directory)) continue;
     for (const name of fs.readdirSync(directory)) {
@@ -114,7 +115,59 @@ function prepareRuntime() {
   }
   const blockFixer = require('./block-fixer/lib/blockFixer');
   blockFixer.initializeBlockRegistry({ throwOnError: true });
-  return blockFixer.fixBlocksInTemplate;
+  return (html) => blockFixer.fixBlocksInTemplate(html, { throwOnError: true });
+}
+
+function committedCaseNames() {
+  return fs.readdirSync(CASES_ROOT)
+    .filter((name) => fs.statSync(path.join(CASES_ROOT, name)).isDirectory())
+    .filter((name) => fs.existsSync(path.join(CASES_ROOT, name, 'case.json')))
+    .sort();
+}
+
+function assertCommittedCaseInventory() {
+  const generated = CASES.map((definition) => definition.name);
+  const generatedSet = new Set(generated);
+  if (generatedSet.size !== generated.length) {
+    const duplicates = generated.filter((name, index) => generated.indexOf(name) !== index);
+    throw new Error(`Duplicate generated fixture definitions: ${[...new Set(duplicates)].join(', ')}`);
+  }
+
+  const excluded = Object.keys(REVIEWED_CASE_EXCLUSIONS);
+  const overlap = excluded.filter((name) => generatedSet.has(name));
+  if (overlap.length > 0) {
+    throw new Error(`Fixture cases cannot be both generated and excluded: ${overlap.join(', ')}`);
+  }
+
+  for (const [name, exclusion] of Object.entries(REVIEWED_CASE_EXCLUSIONS)) {
+    if (!['degradation-policy', 'runtime-divergence'].includes(exclusion.kind)) {
+      throw new Error(`Reviewed fixture exclusion ${name} has invalid kind ${exclusion.kind}`);
+    }
+    if (typeof exclusion.reason !== 'string' || exclusion.reason.trim() === '') {
+      throw new Error(`Reviewed fixture exclusion ${name} needs a non-empty reason`);
+    }
+    const mismatches = exclusion.runtimeMismatches;
+    if (!mismatches || Object.keys(mismatches).length === 0) {
+      throw new Error(`Reviewed fixture exclusion ${name} needs an exact runtime mismatch`);
+    }
+    for (const [file, hash] of Object.entries(mismatches)) {
+      if (!file.endsWith('.html') || !/^[a-f0-9]{64}$/.test(hash)) {
+        throw new Error(`Reviewed runtime mismatch ${name}/${file} is malformed`);
+      }
+    }
+  }
+
+  const committed = committedCaseNames();
+  const expected = [...generated, ...excluded].sort();
+  const missing = expected.filter((name) => !committed.includes(name));
+  const unexpected = committed.filter((name) => !expected.includes(name));
+  if (missing.length > 0 || unexpected.length > 0) {
+    throw new Error(
+      'Committed fixture inventory differs from generated definitions plus reviewed exclusions'
+      + `; missing: ${missing.join(', ') || '(none)'}`
+      + `; unexpected: ${unexpected.join(', ') || '(none)'}`
+    );
+  }
 }
 
 function fixedPoint(original, transform) {
@@ -287,7 +340,8 @@ function rendererProbeCoverage() {
   if (!fs.existsSync(RENDERER_PROBES)) {
     throw new Error(
       `Missing renderer probe snapshot ${relativeFixturePath(RENDERER_PROBES)}; `
-      + 'run tests/tools/block_renderer_differential.php --update-snapshot'
+      + 'restore the reviewed snapshot (there is currently no bulk generator; '
+      + 'bin/block-fixer/probe-save.js only probes JSON supplied on stdin)'
     );
   }
   const snapshot = JSON.parse(fs.readFileSync(RENDERER_PROBES, 'utf8'));
@@ -378,6 +432,7 @@ function coverage(results) {
         capabilities: result.definition.capabilities,
       },
     ])),
+    reviewedCaseExclusions: REVIEWED_CASE_EXCLUSIONS,
     capabilityCases,
     requiredCapabilities: REQUIRED_CAPABILITIES,
     uncoveredCapabilities,
@@ -406,6 +461,7 @@ function main(argv = process.argv.slice(2)) {
   }
   const update = argv.includes('--update');
   try {
+    assertCommittedCaseInventory();
     const transform = prepareRuntime();
     const results = CASES.map((definition) => generateCase(definition, transform, update));
     const coverageMetadata = coverage(results);
@@ -457,6 +513,8 @@ if (require.main === module) {
 
 module.exports = {
   GENERATOR_VERSION,
+  assertCommittedCaseInventory,
+  committedCaseNames,
   coverage,
   fixedPoint,
   generateCase,

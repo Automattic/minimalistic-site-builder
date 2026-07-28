@@ -143,9 +143,12 @@ function fixBlockRecursively(block, compatibilityRepairs = [], blockPath = []) {
 /**
  * Fix block validation issues in template HTML.
  * Invalid blocks are recreated using createBlock() to regenerate clean markup.
+ * Runtime callers keep the original bytes on an internal failure; oracle
+ * callers opt into throwOnError so a broken reference transform cannot be
+ * mistaken for a successful fixed point.
  */
-function fixBlocksInTemplate(htmlContent) {
-  initializeBlockRegistry();
+function fixBlocksInTemplate(htmlContent, { throwOnError = false } = {}) {
+  initializeBlockRegistry({ throwOnError });
 
   try {
     // Apply manual fixes before WordPress block parsing
@@ -267,6 +270,9 @@ function fixBlocksInTemplate(htmlContent) {
     };
   } catch (error) {
     console.error('[BlockFixer] Error fixing blocks:', error);
+    if (throwOnError) {
+      throw error;
+    }
     return {
       html: htmlContent,
       changed: false,

@@ -17,7 +17,7 @@ function prepareTransform() {
   ]) console[method] = noop;
   const fixer = require('./lib/blockFixer');
   fixer.initializeBlockRegistry({ throwOnError: true });
-  return fixer.fixBlocksInTemplate;
+  return (html) => fixer.fixBlocksInTemplate(html, { throwOnError: true });
 }
 
 /** Fixed-point oracle over one or more disposable theme directory copies. */

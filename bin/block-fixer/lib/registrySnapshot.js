@@ -140,7 +140,7 @@ function scanObservedBlocks(fixturesRoot) {
   const casesRoot = path.join(fixturesRoot, 'cases');
   if (!fs.existsSync(casesRoot)) return [];
   for (const caseName of fs.readdirSync(casesRoot).sort()) {
-    for (const subdirectory of ['parts', 'templates']) {
+    for (const subdirectory of ['pages', 'parts', 'templates']) {
       const directory = path.join(casesRoot, caseName, 'input', subdirectory);
       if (!fs.existsSync(directory)) continue;
       for (const name of fs.readdirSync(directory).sort()) {

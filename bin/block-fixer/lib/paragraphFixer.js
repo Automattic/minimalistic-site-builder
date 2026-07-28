@@ -117,8 +117,9 @@ function fixNestedParagraphsDetailed(htmlContent) {
   // Pattern to match WordPress paragraph blocks with their content
   const wpParagraphBlockPattern = /(<!-- wp:paragraph[^>]*-->)([\s\S]*?)(<!-- \/wp:paragraph -->)/g;
 
-  // Pattern to match nested <p> tags
-  const nestedPPattern = /<p(\s[^>]*)?>(\s*)<p(\s[^>]*)?>([^]*?)<\/p>(\s*)<\/p>/gi;
+  // Match nested <p> tags without treating > inside a quoted attribute value
+  // as the end of either opening tag.
+  const nestedPPattern = /<p((?:\s+(?:[^"'<>]|"[^"]*"|'[^']*')*)?)>(\s*)<p((?:\s+(?:[^"'<>]|"[^"]*"|'[^']*')*)?)>([\s\S]*?)<\/p>(\s*)<\/p>/gi;
 
   let result = htmlContent;
   let totalFixCount = 0;

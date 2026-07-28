@@ -21,9 +21,10 @@
  *
  * Each <themeDir> is a block-theme root; this production-compatibility runner
  * applies one transform pass to every
- * templates/*.html and parts/*.html file under it in place. Exits non-zero only
- * on a hard error; files with no block markup are skipped. Development tools
- * use oracle.js to repeat this exact pass to the five-pass-capped fixed point.
+ * templates/*.html, parts/*.html, and pages/*.html file under it in place.
+ * Exits non-zero only on a hard error; files with no block markup are skipped.
+ * Development tools use oracle.js to repeat this exact pass to the
+ * five-pass-capped fixed point.
  */
 
 const fs = require('node:fs');
@@ -52,10 +53,10 @@ function loadFixBlocksInTemplate() {
   return require('./lib/blockFixer.js').fixBlocksInTemplate;
 }
 
-/** Collect templates/*.html and parts/*.html under a theme directory. */
+/** Collect templates/*.html, parts/*.html, and pages/*.html under a theme directory. */
 function collectFiles(themeDir) {
   const files = [];
-  for (const sub of ['templates', 'parts']) {
+  for (const sub of ['templates', 'parts', 'pages']) {
     const dir = path.join(themeDir, sub);
     if (!fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir)) {

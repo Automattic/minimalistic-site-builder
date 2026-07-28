@@ -494,6 +494,7 @@ After`,
     ],
     files: {
       'templates/a-ok.html': '<!-- wp:site-title /-->',
+      'pages/about.html': '<!-- wp:paragraph --><p>Generated page</p><!-- /wp:paragraph -->',
       'parts/z-skipped.html': '<main>Plain HTML without block comments.</main>\n',
       'parts/a-fixed.html': '<!-- wp:paragraph --><p>Compact</p><!-- /wp:paragraph -->',
     },
@@ -719,6 +720,45 @@ After`,
 ];
 
 /*
+ * These committed cases intentionally remain outside CASES because their
+ * expected bytes express reviewed PHP behavior which the Gutenberg oracle
+ * either cannot model or is known not to reproduce. The replay test still
+ * runs every file and pins the exact Gutenberg output hash, so an exclusion
+ * cannot silently grow into a blanket exemption.
+ */
+const REVIEWED_CASE_EXCLUSIONS = Object.freeze({
+  'carried-elements-signatures': Object.freeze({
+    kind: 'runtime-divergence',
+    reason: 'Gutenberg keeps a recovered legacy heading alignment when an unbacked inline color prevents its deprecation from matching; the reviewed PHP adapter removes it.',
+    runtimeMismatches: Object.freeze({
+      'parts/carried.html': '4ed57eeb8e62215b63b5730a12c180e3de58773b068dc46ce79fda3b5ac0020e',
+    }),
+  }),
+  'paragraph-conflicting-text-align': Object.freeze({
+    kind: 'degradation-policy',
+    reason: 'The PHP fixer removes contradictory center and justify declarations because there is no unambiguous winner; Gutenberg validation does not express that degradation policy.',
+    runtimeMismatches: Object.freeze({
+      'parts/conflicting-align.html': '69add2d7c023ad7d7fe39306731fbebe964b5a4d85fe0c8c82e62d58650840b7',
+    }),
+  }),
+  'paragraph-opacity-reviewed-drop': Object.freeze({
+    kind: 'degradation-policy',
+    reason: 'The PHP fixer explicitly removes unsupported opacity while preserving readable paragraph content; Gutenberg reserialization does not implement the same reviewed degradation contract.',
+    runtimeMismatches: Object.freeze({
+      'parts/hidden-opacity.html': 'ded3f0c36000d308c5d1bab6bc39842b3974cf07f033d131ba0f2dae4cdd37ee',
+      'parts/opacity.html': '5f83240312c6663174efcabf1c59fb5e752ea06f4ddc045dac3ce38c2b24603b',
+    }),
+  }),
+  'tbilisi60-traditional-offerings-fixed-point': Object.freeze({
+    kind: 'runtime-divergence',
+    reason: 'Gutenberg serializes the outer group class before its id; the reviewed PHP canonical output writes the id before the class.',
+    runtimeMismatches: Object.freeze({
+      'parts/traditional-offerings.html': '1a2374a64c2ebf0d6630ab6713529819d29ba4469d1788dd08a83f58d47e3d07',
+    }),
+  }),
+});
+
+/*
  * Reviewable cutover contract for fixture coverage. Block-name completeness is
  * computed from SUPPORTED_BLOCKS; this list covers behavior that cannot be
  * inferred merely from a name appearing in a delimiter.
@@ -729,10 +769,14 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'freeform:before-between-after',
   'missing-block:paired',
   'missing-block:void',
+  'legacy:group-top-level-border-drop',
+  'legacy:group-top-level-shadow-drop',
   'delimiter:balanced',
   'delimiter:mismatched',
   'delimiter:stray-closer',
   'delimiter:unclosed',
+  'deprecation:columns-element-link',
+  'deprecation:group-element-link',
   'delimiter:malformed-json',
   'serializer:rendered-content-void-paired',
   'strategy:static-renderer',
@@ -755,6 +799,7 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'rich-text:literal-nbsp',
   'rich-text:br',
   'rich-text:inline-formatting',
+  'deprecation:heading-text-align',
   'deprecation:paragraph-align',
   'deprecation:paragraph-pre-font-support',
   'deprecation:paragraph-selectorless',
@@ -778,6 +823,7 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'json:wrong-type',
   'json:defaults',
   'repair:nested-paragraph',
+  'repair:nested-paragraph-style-merge',
   'repair:media-type-inference',
   'repair:custom-class-recovery',
   'repair:anchor-recovery',
@@ -828,10 +874,15 @@ const REQUIRED_CAPABILITIES = Object.freeze([
   'support:font-size',
   'support:gradient',
   'support:layout',
+  'support:layout-content-size',
+  'support:layout-align-items',
+  'support:layout-default',
   'support:layout-flex',
+  'support:layout-wide-size',
   'support:preset-variables',
   'support:self-stretch',
   'support:shadow',
+  'support:short-spacing-preset-signature',
   'support:spacing',
   'support:typography',
 ]);
@@ -861,5 +912,6 @@ const REVIEWED_DEPRECATIONS = Object.freeze({
 module.exports = {
   CASES,
   REQUIRED_CAPABILITIES,
+  REVIEWED_CASE_EXCLUSIONS,
   REVIEWED_DEPRECATIONS,
 };

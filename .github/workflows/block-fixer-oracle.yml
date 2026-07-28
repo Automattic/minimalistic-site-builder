@@ -64,12 +64,8 @@ jobs:
       - name: Run the oracle's own gates
         run: npm run test:gates --workspace=bin/block-fixer
 
-      # The one test that is not yet a gate. It replays every committed case —
-      # including the ones held back from the generator, which nothing else
-      # checks — and reports the single golden the oracle disagrees with:
-      # carried-elements-signatures, where a heading keeps its alignment class in
-      # the real runtime and loses it here. See docs/block-fixer-oracle.md, "The
-      # one divergence, precisely". Once that fix lands this becomes a gate too.
-      - name: Replay every committed case against the runtime (advisory)
+      # Replays every committed case, including the reviewed exclusions held
+      # outside the generator. Their exact expected runtime-output hashes are
+      # allowlisted, so a new or changed divergence fails this blocking step.
+      - name: Replay every committed case against the runtime
         run: npm run test:fixed-point --workspace=bin/block-fixer
-        continue-on-error: true

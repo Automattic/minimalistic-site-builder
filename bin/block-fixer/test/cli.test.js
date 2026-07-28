@@ -19,17 +19,19 @@ test('CLI module is importable without executing main', () => {
   assert.equal(result.stderr, '');
 });
 
-test('collectFiles returns normalized lexical paths across parts and templates', (t) => {
+test('collectFiles returns normalized lexical paths across pages, parts, and templates', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'block-fixer-cli-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'pages'));
   fs.mkdirSync(path.join(root, 'parts'));
   fs.mkdirSync(path.join(root, 'templates'));
   fs.writeFileSync(path.join(root, 'templates', 'z.html'), '');
+  fs.writeFileSync(path.join(root, 'pages', 'landing.html'), '');
   fs.writeFileSync(path.join(root, 'parts', 'b.html'), '');
   fs.writeFileSync(path.join(root, 'parts', 'a.html'), '');
   assert.deepEqual(
     collectFiles(root).map((file) => path.relative(root, file).split(path.sep).join('/')),
-    ['parts/a.html', 'parts/b.html', 'templates/z.html']
+    ['pages/landing.html', 'parts/a.html', 'parts/b.html', 'templates/z.html']
   );
 });
 
