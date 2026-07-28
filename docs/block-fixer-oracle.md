@@ -18,6 +18,7 @@ which is what let the domain drift into hand-certification before.
 
 ```sh
 npm ci
+node bin/block-fixer/check-fingerprint.js           # is this the pinned runtime?
 npm run oracle:verify --workspace=bin/block-fixer   # re-derive, fail on drift
 npm run oracle:update --workspace=bin/block-fixer   # regenerate
 npm test --workspace=bin/block-fixer                # the oracle's own suite

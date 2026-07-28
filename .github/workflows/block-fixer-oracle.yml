@@ -54,33 +54,7 @@ jobs:
           node-version: '22.19.0'
 
       - name: Confirm the runtime matches the frozen fingerprint
-        run: |
-          node -e '
-            const fs = require("fs");
-            const manifest = JSON.parse(
-              fs.readFileSync("tests/fixtures/block-fixer/oracle-manifest.json", "utf8"),
-            );
-            const want = manifest.fingerprint.node;
-            const got = {
-              version: process.version,
-              platform: process.platform,
-              architecture: process.arch,
-              v8: process.versions.v8,
-              icu: process.versions.icu,
-            };
-            for (const key of Object.keys(got)) {
-              if (want[key] !== got[key]) {
-                throw new Error(
-                  `runtime ${key}: frozen ${want[key]}, running ${got[key]}. ` +
-                    "If the frozen value is the surprising one, the artifacts " +
-                    "were regenerated from the wrong environment — see " +
-                    "docs/block-fixer-oracle.md, 'Which environment to " +
-                    "regenerate from'.",
-                );
-              }
-            }
-            console.log("runtime matches the frozen fingerprint");
-          '
+        run: node bin/block-fixer/check-fingerprint.js
 
       - name: Install locked dependencies
         run: npm ci
