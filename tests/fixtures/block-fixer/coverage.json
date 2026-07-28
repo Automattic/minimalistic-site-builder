@@ -322,38 +322,17 @@
         "support:typography"
       ]
     },
-    "heading-legacy-text-align": {
-      "milestone": "M2",
+    "details-static-renderer": {
+      "milestone": "M4",
       "capabilities": [
-        "block:core/heading",
-        "deprecation:heading-text-align",
-        "support:text-color",
-        "support:font-family",
-        "report:fixed"
-      ]
-    },
-    "group-layout-content-size": {
-      "milestone": "M2",
-      "capabilities": [
-        "block:core/group",
+        "block:core/details",
         "block:core/paragraph",
-        "support:layout",
-        "support:layout-content-size",
+        "render:name-before-open-order",
+        "render:empty-name-omitted",
+        "render:anchor-id-slot",
+        "support:color",
         "support:spacing",
-        "report:fixed"
-      ]
-    },
-    "paragraph-inline-color-carryover": {
-      "milestone": "M2",
-      "capabilities": [
-        "block:core/paragraph",
-        "deprecation:paragraph-selectorless",
-        "repair:nested-paragraph",
-        "repair:nested-paragraph-style-merge",
-        "support:text-color",
-        "support:font-size",
-        "support:font-family",
-        "support:typography",
+        "report:ok",
         "report:fixed"
       ]
     },
@@ -378,6 +357,82 @@
         "support:spacing",
         "report:fixed"
       ]
+    },
+    "group-layout-content-size": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/group",
+        "block:core/paragraph",
+        "support:layout",
+        "support:layout-content-size",
+        "support:spacing",
+        "report:fixed"
+      ]
+    },
+    "heading-legacy-text-align": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/heading",
+        "deprecation:heading-text-align",
+        "support:text-color",
+        "support:font-family",
+        "report:fixed"
+      ]
+    },
+    "paragraph-inline-color-carryover": {
+      "milestone": "M2",
+      "capabilities": [
+        "block:core/paragraph",
+        "deprecation:paragraph-selectorless",
+        "repair:nested-paragraph",
+        "repair:nested-paragraph-style-merge",
+        "support:text-color",
+        "support:font-size",
+        "support:font-family",
+        "support:typography",
+        "report:fixed"
+      ]
+    },
+    "site-tagline-legacy-text-align": {
+      "milestone": "M4",
+      "capabilities": [
+        "block:core/site-tagline",
+        "deprecation:site-tagline-align",
+        "deprecation:site-tagline-font-family",
+        "support:typography",
+        "report:fixed"
+      ]
+    }
+  },
+  "reviewedCaseExclusions": {
+    "carried-elements-signatures": {
+      "kind": "runtime-divergence",
+      "reason": "Gutenberg keeps a recovered legacy heading alignment when an unbacked inline color prevents its deprecation from matching; the reviewed PHP adapter removes it.",
+      "runtimeMismatches": {
+        "parts/carried.html": "4ed57eeb8e62215b63b5730a12c180e3de58773b068dc46ce79fda3b5ac0020e"
+      }
+    },
+    "paragraph-conflicting-text-align": {
+      "kind": "degradation-policy",
+      "reason": "The PHP fixer removes contradictory center and justify declarations because there is no unambiguous winner; Gutenberg validation does not express that degradation policy.",
+      "runtimeMismatches": {
+        "parts/conflicting-align.html": "69add2d7c023ad7d7fe39306731fbebe964b5a4d85fe0c8c82e62d58650840b7"
+      }
+    },
+    "paragraph-opacity-reviewed-drop": {
+      "kind": "degradation-policy",
+      "reason": "The PHP fixer explicitly removes unsupported opacity while preserving readable paragraph content; Gutenberg reserialization does not implement the same reviewed degradation contract.",
+      "runtimeMismatches": {
+        "parts/hidden-opacity.html": "ded3f0c36000d308c5d1bab6bc39842b3974cf07f033d131ba0f2dae4cdd37ee",
+        "parts/opacity.html": "5f83240312c6663174efcabf1c59fb5e752ea06f4ddc045dac3ce38c2b24603b"
+      }
+    },
+    "tbilisi60-traditional-offerings-fixed-point": {
+      "kind": "runtime-divergence",
+      "reason": "Gutenberg serializes the outer group class before its id; the reviewed PHP canonical output writes the id before the class.",
+      "runtimeMismatches": {
+        "parts/traditional-offerings.html": "1a2374a64c2ebf0d6630ab6713529819d29ba4469d1788dd08a83f58d47e3d07"
+      }
     }
   },
   "capabilityCases": {
@@ -387,8 +442,8 @@
       "json-comment-boundaries",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "repair:custom-class-recovery": [
       "group-html-attribute-repairs"
@@ -415,10 +470,12 @@
       "group-html-attribute-repairs",
       "observed-deprecation-adapters",
       "report-order-status-and-skip",
-      "heading-legacy-text-align",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
+      "heading-legacy-text-align",
       "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "site-tagline-legacy-text-align"
     ],
     "block:core/paragraph": [
       "nested-group-support",
@@ -430,9 +487,10 @@
       "quote-embed-and-raw-renderers",
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "paragraph-inline-color-carryover"
     ],
     "nested-blocks": [
       "nested-group-support",
@@ -444,8 +502,8 @@
     "repair:nested-paragraph": [
       "nested-group-support",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "paragraph-inline-color-carryover"
     ],
     "repair-gate:valid-paragraph": [
       "nested-group-support"
@@ -468,14 +526,15 @@
       "nested-group-support",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "support:layout": [
       "nested-group-support",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "rich-text:literal-nbsp": [
       "rich-text-literal-nbsp"
@@ -486,7 +545,8 @@
     "report:ok": [
       "rich-text-literal-nbsp",
       "pre-paragraph-repair-noop",
-      "report-order-status-and-skip"
+      "report-order-status-and-skip",
+      "details-static-renderer"
     ],
     "oracle:authoritative-changed-flag": [
       "pre-paragraph-repair-noop"
@@ -785,7 +845,8 @@
     "support:typography": [
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover"
+      "paragraph-inline-color-carryover",
+      "site-tagline-legacy-text-align"
     ],
     "block:core/cover": [
       "cover-renderer-branches"
@@ -811,8 +872,8 @@
     "deprecation:paragraph-selectorless": [
       "cover-renderer-branches",
       "tbilisi25-footer-fixed-point",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "paragraph-inline-color-carryover"
     ],
     "branch:cover-focal-point": [
       "cover-renderer-branches"
@@ -921,7 +982,8 @@
       "social-and-dynamic-strategies"
     ],
     "block:core/site-tagline": [
-      "social-and-dynamic-strategies"
+      "social-and-dynamic-strategies",
+      "site-tagline-legacy-text-align"
     ],
     "block:core/template-part": [
       "social-and-dynamic-strategies"
@@ -969,14 +1031,20 @@
     "support:preset-variables": [
       "tbilisi25-footer-fixed-point"
     ],
-    "deprecation:heading-text-align": [
-      "heading-legacy-text-align"
+    "block:core/details": [
+      "details-static-renderer"
     ],
-    "support:layout-content-size": [
-      "group-layout-content-size"
+    "render:name-before-open-order": [
+      "details-static-renderer"
     ],
-    "repair:nested-paragraph-style-merge": [
-      "paragraph-inline-color-carryover"
+    "render:empty-name-omitted": [
+      "details-static-renderer"
+    ],
+    "render:anchor-id-slot": [
+      "details-static-renderer"
+    ],
+    "support:color": [
+      "details-static-renderer"
     ],
     "deprecation:columns-element-link": [
       "generated-demo-layout-and-paragraph-signatures"
@@ -1001,6 +1069,21 @@
     ],
     "support:short-spacing-preset-signature": [
       "generated-demo-layout-and-paragraph-signatures"
+    ],
+    "support:layout-content-size": [
+      "group-layout-content-size"
+    ],
+    "deprecation:heading-text-align": [
+      "heading-legacy-text-align"
+    ],
+    "repair:nested-paragraph-style-merge": [
+      "paragraph-inline-color-carryover"
+    ],
+    "deprecation:site-tagline-align": [
+      "site-tagline-legacy-text-align"
+    ],
+    "deprecation:site-tagline-font-family": [
+      "site-tagline-legacy-text-align"
     ]
   },
   "requiredCapabilities": [
@@ -1138,9 +1221,10 @@
       "quote-embed-and-raw-renderers",
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "paragraph-inline-color-carryover"
     ],
     "core/group": [
       "group-html-attribute-repairs",
@@ -1148,8 +1232,8 @@
       "json-comment-boundaries",
       "block-support-pipeline",
       "tbilisi25-footer-fixed-point",
-      "group-layout-content-size",
-      "generated-demo-layout-and-paragraph-signatures"
+      "generated-demo-layout-and-paragraph-signatures",
+      "group-layout-content-size"
     ],
     "core/column": [
       "block-support-pipeline",
@@ -1190,6 +1274,9 @@
     ],
     "core/cover": [
       "cover-renderer-branches"
+    ],
+    "core/details": [
+      "details-static-renderer"
     ],
     "core/media-text": [
       "media-text-type-inference"
@@ -1238,7 +1325,8 @@
       "social-and-dynamic-strategies"
     ],
     "core/site-tagline": [
-      "social-and-dynamic-strategies"
+      "social-and-dynamic-strategies",
+      "site-tagline-legacy-text-align"
     ],
     "core/site-title": [
       "observed-deprecation-adapters",
@@ -1268,10 +1356,11 @@
       "social-and-dynamic-strategies",
       "report-order-status-and-skip",
       "tbilisi25-footer-fixed-point",
-      "heading-legacy-text-align",
+      "details-static-renderer",
+      "generated-demo-layout-and-paragraph-signatures",
       "group-layout-content-size",
-      "paragraph-inline-color-carryover",
-      "generated-demo-layout-and-paragraph-signatures"
+      "heading-legacy-text-align",
+      "paragraph-inline-color-carryover"
     ],
     "RAW_CONTENT": [
       "quote-embed-and-raw-renderers"
@@ -1289,7 +1378,8 @@
       "observed-deprecation-adapters",
       "social-and-dynamic-strategies",
       "report-order-status-and-skip",
-      "tbilisi25-footer-fixed-point"
+      "tbilisi25-footer-fixed-point",
+      "site-tagline-legacy-text-align"
     ]
   },
   "observed": [
@@ -1337,6 +1427,8 @@
       "deprecation:core/paragraph:0",
       "deprecation:core/paragraph:1",
       "deprecation:core/paragraph:6",
+      "deprecation:core/site-tagline:0",
+      "deprecation:core/site-tagline:1",
       "deprecation:core/site-title:0",
       "deprecation:core/site-title:1"
     ],
@@ -1350,8 +1442,28 @@
       "deprecation:core/paragraph:0": "explicit-adapter",
       "deprecation:core/paragraph:1": "explicit-adapter",
       "deprecation:core/paragraph:6": "explicit-adapter",
+      "deprecation:core/site-tagline:0": "explicit-adapter",
+      "deprecation:core/site-tagline:1": "explicit-adapter",
       "deprecation:core/site-title:0": "explicit-adapter",
       "deprecation:core/site-title:1": "explicit-adapter"
+    },
+    "unreviewed": [],
+    "unobservedReviewed": []
+  },
+  "repairCodes": {
+    "observed": [
+      "anchor-recovery",
+      "aria-label-recovery",
+      "custom-class-recovery",
+      "media-type-inference",
+      "nested-paragraph"
+    ],
+    "reviewed": {
+      "anchor-recovery": "pinned-built-in-recovery",
+      "aria-label-recovery": "pinned-built-in-recovery",
+      "custom-class-recovery": "pinned-built-in-recovery",
+      "media-type-inference": "reviewed-compatibility-repair",
+      "nested-paragraph": "reviewed-compatibility-repair"
     },
     "unreviewed": [],
     "unobservedReviewed": []
@@ -1412,6 +1524,6 @@
   "uncoveredSupportedBlocks": [],
   "registeredSnapshot": {
     "count": 106,
-    "sha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716"
+    "sha256": "6f333f89fccd6967a7d1fbc174d3961f675988fa45cd020ce80017ae3a776589"
   }
 }

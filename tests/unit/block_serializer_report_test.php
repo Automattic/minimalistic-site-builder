@@ -17,6 +17,20 @@ test('DroppedContentDetector matches occurrence and ordering semantics', functio
     assert_eq('DROPPED class `gone` (x2) — not mirrored in the block comment JSON attributes', $drops[2]->line());
 });
 
+test('DroppedContentDetector preserves a numeric-string style declaration', function () {
+    $drops = (new DroppedContentDetector())->detect('<p style="0">x</p>', '<p>x</p>');
+
+    assert_eq(1, count($drops));
+    assert_eq('DROPPED style `0` — not mirrored in the block comment JSON attributes', $drops[0]->line());
+});
+
+test('DroppedContentDetector preserves a numeric-string class token', function () {
+    $drops = (new DroppedContentDetector())->detect('<p class="0">x</p>', '<p>x</p>');
+
+    assert_eq(1, count($drops));
+    assert_eq('DROPPED class `0` — not mirrored in the block comment JSON attributes', $drops[0]->line());
+});
+
 test('FixerReport keeps summary first and normalized N M D T contract', function () {
     $drop = (new DroppedContentDetector())->detect('<p class="lost">x</p>', '<p>x</p>');
     $report = new FixerReport([

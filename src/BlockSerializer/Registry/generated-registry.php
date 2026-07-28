@@ -7,7 +7,7 @@ return [
     'metadata' => [
         'schemaVersion' => 1,
         'generatorVersion' => '1.0.0',
-        'packageLockSha256' => 'eb1b8c40981564cf9f1f01e0d4a5d910f20b83c8c73ee338d2b592df8d64150c',
+        'packageLockSha256' => 'a2c1a4bc4047e58dc472751d21ad45194d02a7e9f5d46105b5975f94efe10241',
         'node' => [
             'version' => 'v22.19.0',
             'platform' => 'linux',
@@ -17,9 +17,9 @@ return [
         ],
         'counts' => [
             'registered' => 106,
-            'supported' => 30,
-            'observed' => 31,
-            'observedRegistered' => 30,
+            'supported' => 31,
+            'observed' => 32,
+            'observedRegistered' => 31,
             'observedUnregistered' => 1,
         ],
         'hookTrace' => [
@@ -6959,6 +6959,41 @@ return [
 <p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
 <!-- /wp:paragraph --></details>
 <!-- /wp:details -->',
+                ],
+                'manifest' => [
+                    [
+                        'index' => 0,
+                        'kind' => 'inner-blocks',
+                        'attributes' => [
+                            'showContent' => false,
+                            'summary' => [],
+                        ],
+                        'saveContent' => '<details class="wp-block-details"><summary>Probe summary</summary><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></details>',
+                        'serialized' => '<!-- wp:details -->
+<details class="wp-block-details"><summary>Probe summary</summary><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></details>
+<!-- /wp:details -->',
+                    ],
+                    [
+                        'index' => 1,
+                        'kind' => 'inner-blocks',
+                        'attributes' => [
+                            'showContent' => true,
+                            'summary' => [],
+                            'name' => 'probe-group',
+                        ],
+                        'saveContent' => '<details class="wp-block-details" name="probe-group" open><summary>Probe summary</summary><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></details>',
+                        'serialized' => '<!-- wp:details {"showContent":true} -->
+<details class="wp-block-details" name="probe-group" open><summary>Probe summary</summary><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></details>
+<!-- /wp:details -->',
+                    ],
                 ],
             ],
         ],
