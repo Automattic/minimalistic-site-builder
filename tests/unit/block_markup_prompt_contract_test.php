@@ -108,13 +108,16 @@ test('block-markup output contract pins clean document boundaries and examples',
     [, $afterExampleStart] = explode($exampleStart, $contract, 2);
     [$example] = explode($invalidStart, $afterExampleStart, 2);
     assert_eq(
-        "<!-- wp:group {\"layout\":{\"type\":\"constrained\"}} -->\n"
+        "<!-- wp:group\n"
+        . "layout:\n"
+        . "  type: constrained\n"
+        . "-->\n"
         . "<div class=\"wp-block-group\"><!-- wp:paragraph -->\n"
         . "<p>Example.</p>\n"
         . "<!-- /wp:paragraph --></div>\n"
         . "<!-- /wp:group -->",
         $example,
-        'positive example is only one valid Gutenberg group document',
+        'positive example is one valid group document with TOON attrs',
     );
     assert_true(str_starts_with($example, '<!-- wp:'));
     assert_true(str_ends_with($example, '<!-- /wp:group -->'));
