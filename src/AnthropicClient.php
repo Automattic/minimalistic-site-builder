@@ -623,6 +623,18 @@ final class AnthropicClient implements Llm
             $transient = in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true);
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}"];
         }
+        // Every successful Messages stream ends with a message_delta carrying
+        // stop_reason. A 200 stream without one was severed mid-response (a
+        // dropped connection can cut every multiplexed stream at once with no
+        // cURL error): the partial text must not be mistaken for a completion
+        // and salvaged downstream — retry the member instead.
+        if ($parsed['stop_reason'] === null) {
+            return [
+                'ok' => false,
+                'transient' => true,
+                'error' => 'stream severed before completion (no stop_reason received)',
+            ];
+        }
         // Preserve recognized abnormal terminal responses (including empty
         // refusals and zero-token truncations) for the batch recovery layer.
         // An ordinary successful empty response remains transient.
@@ -800,6 +812,12 @@ final class AnthropicClient implements Llm
                 throw new TransientApiException("stream error: {$parsed['error']}");
             }
             throw new \RuntimeException("stream error: {$parsed['error']}");
+        }
+        // Every successful Messages stream ends with a message_delta carrying
+        // stop_reason; a 200 stream without one was severed mid-response.
+        // Retry rather than return the partial text as a completion.
+        if ($parsed['stop_reason'] === null) {
+            throw new TransientApiException('stream severed before completion (no stop_reason received)');
         }
         // Empty-text handling lives in retrySingleRequest so tolerate_empty
         // (cache-warm probes) can accept a blank one-token reply without a
