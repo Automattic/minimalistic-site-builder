@@ -13,7 +13,7 @@ use Automattic\SiteBuild\BlockSerializer\StagedFileWriter;
 use Automattic\SiteBuild\BlockSerializer\TemplateTransformer;
 
 /** Pure-PHP, fixed-point Gutenberg compatibility fixer. */
-final class PhpBlockFixer implements BlockFixer
+final class PhpBlockFixer implements ReportingBlockFixer
 {
     private const MAX_PASSES = 5;
 
@@ -59,18 +59,21 @@ final class PhpBlockFixer implements BlockFixer
                 continue;
             }
 
+            // Per-file isolation: an unsupported block, an unreviewed
+            // deprecation signature, or non-convergence abandons THIS file's
+            // transformation and delivers its pre-fixer bytes untouched — a
+            // typed 'failed' report row the step turns into a durable warning
+            // — instead of discarding the whole already-paid-for build.
             $current = $original;
             $repairs = [];
             $converged = false;
+            $failure = null;
             for ($pass = 1; $pass <= self::MAX_PASSES; $pass++) {
                 try {
                     $result = $this->transformer->transform($current);
                 } catch (\Throwable $error) {
-                    throw new \RuntimeException(
-                        "Block transformation failed for {$relative} on pass {$pass}: {$error->getMessage()}",
-                        0,
-                        $error,
-                    );
+                    $failure = "block transformation failed on pass {$pass}: {$error->getMessage()}";
+                    break;
                 }
                 foreach ($result->repairs as $repair) {
                     $repairs[$repair->blockPath . "\0" . $repair->code] = $repair;
@@ -81,10 +84,12 @@ final class PhpBlockFixer implements BlockFixer
                 }
                 $current = $result->html;
             }
-            if (!$converged) {
-                throw new \RuntimeException(
-                    "Block transformation did not converge within " . self::MAX_PASSES . " passes for {$relative}"
-                );
+            if ($failure === null && !$converged) {
+                $failure = 'block transformation did not converge within ' . self::MAX_PASSES . ' passes';
+            }
+            if ($failure !== null) {
+                $reports[] = new FileReport($relative, 'failed', error: $failure);
+                continue;
             }
 
             $changed = $current !== $original;
@@ -143,7 +148,7 @@ final class PhpBlockFixer implements BlockFixer
     private function discover(string $themeDir): array
     {
         $files = [];
-        foreach (['templates', 'parts'] as $directory) {
+        foreach (['templates', 'parts', 'pages'] as $directory) {
             $path = $themeDir . DIRECTORY_SEPARATOR . $directory;
             if (!is_dir($path)) {
                 continue;

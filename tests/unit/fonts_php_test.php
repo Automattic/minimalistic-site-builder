@@ -221,6 +221,10 @@ test('run falls back to the deterministic fonts.php when the model output fails'
     assert_contains('family=Oswald:wght@300;400', $php, 'fallback requests the scanned weights');
     assert_contains("add_action('enqueue_block_assets'", $php);
     assert_contains('family Oswald missing scanned weight: 300', $project->readText('logs/fonts-php.log'));
+
+    // The fallback delivery is recorded durably, not just in the step log.
+    $joined = implode(' ', $project->readJson('warnings.json')['fonts-php'] ?? []);
+    assert_contains('deterministic scan-built fallback delivered', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -44,6 +44,31 @@ test('project writes and reads text and json round-trip', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('project readText throws when an existing file cannot be read', function () {
+    $tmp = sys_get_temp_dir() . '/builder_unreadable_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText('artifact.json', '{}');
+    $path = $project->path('artifact.json');
+    chmod($path, 0000);
+    if (is_readable($path)) {
+        chmod($path, 0600);
+        exec('rm -rf ' . escapeshellarg($tmp));
+        skip_test('runtime user can read mode-000 files');
+    }
+
+    $message = '';
+    try {
+        $project->readText('artifact.json');
+    } catch (RuntimeException $e) {
+        $message = $e->getMessage();
+    } finally {
+        chmod($path, 0600);
+    }
+
+    assert_contains('Could not read file:', $message);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('themePath builds under theme/', function () {
     $p = new Project('/base/projects/demo');
     assert_eq('/base/projects/demo/theme', $p->themePath());

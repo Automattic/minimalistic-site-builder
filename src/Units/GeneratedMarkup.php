@@ -16,12 +16,26 @@ final class GeneratedMarkup
      * truncated response back to its last complete block. Every part is
      * untrusted model output headed for templates and stored post content, so
      * this is the one intake it all passes through.
+     *
+     * $notes receives one "part '<key>': …" line per removal or degradation
+     * that changed the delivered content (sanitizer strips, wrapper recovery,
+     * truncation salvage). Callers with a Project route them to warnings.json;
+     * every note is also echoed to STDERR for live visibility.
      */
-    public static function normalize(string $text, string $key): string
+    public static function normalize(string $text, string $key, array &$notes = []): string
     {
+        $record = static function (string $note) use ($key, &$notes): void {
+            fwrite(STDERR, "    (part '{$key}': {$note})\n");
+            $notes[] = "part '{$key}': {$note}";
+        };
+
         // Sanitize the whole response before looking for a document boundary:
         // block-looking comments inside a script body are not payload.
-        $text = MarkupSanitizer::sanitize(self::stripFences(trim($text)));
+        $sanitizerNotes = [];
+        $text = MarkupSanitizer::sanitize(self::stripFences(trim($text)), $sanitizerNotes);
+        foreach ($sanitizerNotes as $note) {
+            $record("sanitized script-capable markup — {$note}");
+        }
         $recoveryNotes = [];
         try {
             $markup = BlockDocumentRecovery::recover($text, $recoveryNotes);
@@ -29,7 +43,7 @@ final class GeneratedMarkup
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
         foreach ($recoveryNotes as $note) {
-            fwrite(STDERR, "    (part '{$key}': {$note})\n");
+            $record($note);
         }
         $markup = self::normalizePresetRefs(rtrim($markup));
 
@@ -44,7 +58,7 @@ final class GeneratedMarkup
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
         foreach ($salvage['notes'] as $note) {
-            fwrite(STDERR, "    (part '{$key}': {$note})\n");
+            $record($note);
         }
 
         try {

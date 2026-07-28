@@ -199,24 +199,69 @@ test('sections throws when a planned section is missing composition fields', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections rejects a missing structural role or semantic type', function () {
+test('sections repairs a missing structural role or semantic type deterministically', function () {
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $pages = $project->readJson('pages.json');
 
+    // The role is a pure function of position, and the type has a safe
+    // generic default — both are corrected in place, not rejected.
     unset($pages['pages'][0]['sections'][0]['role']);
-    $project->writeJson('pages.json', $pages);
-    assert_throws(function () use ($renderer, $project) {
-        (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
-    }, "expected 'hero'");
-
-    $pages['pages'][0]['sections'][0]['role'] = 'hero';
     unset($pages['pages'][0]['sections'][0]['type']);
     $project->writeJson('pages.json', $pages);
-    assert_throws(function () use ($renderer, $project) {
-        (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
-    }, 'missing semantic type');
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
+    $hero = sections_request_text($reqs['page-home--hero']);
+    assert_contains('hero', $hero, 'the positional role reaches the prompt');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections persists the deterministic plan repairs back into pages.json', function () {
+    [$project, $tmp] = sections_fixture();
+    $pages = $project->readJson('pages.json');
+    unset($pages['pages'][0]['sections'][0]['role']);
+    unset($pages['pages'][0]['sections'][0]['type']);
+    $project->writeJson('pages.json', $pages);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    // The plan artifact on disk carries the corrected role/type the parts
+    // were generated from — a warning saying "corrected" must not leave the
+    // defect in the artifact downstream consumers read.
+    $hero = $project->readJson('pages.json')['pages'][0]['sections'][0];
+    assert_eq('hero', $hero['role']);
+    assert_eq('content', $hero['type']);
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("role '' corrected to 'hero'", $joined);
+    assert_contains("missing semantic type; defaulted to 'content'", $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections leaves pages.json untouched when the generation batch fails operationally', function () {
+    [$project, $tmp] = sections_fixture();
+    $pages = $project->readJson('pages.json');
+    unset($pages['pages'][0]['sections'][0]['role']);
+    unset($pages['pages'][0]['sections'][0]['type']);
+    $project->writeJson('pages.json', $pages);
+    $before = $project->readText('pages.json');
+
+    // No queued responses: cache warming degrades, then the actual batch
+    // throws. Repairs used to build the requests must remain in-memory until
+    // generated output has been normalized successfully.
+    $llm = new FakeLlm();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    assert_throws(static fn () => (new SectionsStep($llm, $renderer))->run($project));
+
+    assert_eq($before, $project->readText('pages.json'), 'operational failure leaves the input artifact byte-identical');
+    assert_true(!$project->exists('warnings.json'), 'uncommitted repairs do not produce delivered-output warnings');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -445,7 +490,7 @@ test('sections strips a stray markdown code fence from a part response', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections throws when a part has no block markup', function () {
+test('sections drops a part with no block markup and prunes it from the plan', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
@@ -455,28 +500,61 @@ test('sections throws when a part has no block markup', function () {
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SectionsStep($llm, $renderer))->run($project);
-    });
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    // One unusable section is dropped; every paid-for sibling still ships,
+    // and the plan is pruned so downstream steps agree with the parts on disk.
+    assert_true(!$project->exists('theme/parts/page-home--hero.html'), 'unusable section not written');
+    assert_contains('<h2>About</h2>', $project->readText('theme/parts/page-home--about.html'));
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(['about'], array_column($sections, 'slug'), 'dropped section pruned from the plan');
+    assert_eq('hero', $sections[0]['role'], 'positional roles are recomputed after pruning');
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'page-home--hero': unusable generated markup", $joined);
+    assert_contains("role 'closing' corrected to 'hero'", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections writes nothing when any part is invalid (no partial output)', function () {
+test('sections delivers deterministic chrome and an empty front page when every generated section is unusable', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header — valid
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
     $llm->queueText('just text, no blocks');                               // page-home--hero — invalid
+    $llm->queueText('also just text, no blocks');                          // page-home--about — invalid
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    assert_true($project->exists('theme/parts/header.html'), 'surviving header is delivered');
+    assert_true($project->exists('theme/parts/footer.html'), 'surviving footer is delivered');
+    assert_eq([], $project->readJson('pages.json')['pages'][0]['sections'], 'front page remains with no sections');
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'page-home--hero': unusable generated markup", $joined);
+    assert_contains("part 'page-home--about': unusable generated markup", $joined);
+    assert_contains("empty front page delivered", $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections falls back to deterministic chrome when the header markup is unusable', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('just prose, not a header');                            // header — invalid
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new SectionsStep($llm, $renderer))->run($project);
-    });
-    // The valid header/footer must NOT have been written before the bad part threw.
-    assert_true(!$project->exists('theme/parts/header.html'), 'no part written when a sibling is invalid');
-    assert_true(!$project->exists('theme/parts/footer.html'), 'no part written when a sibling is invalid');
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    $header = $project->readText('theme/parts/header.html');
+    assert_contains('wp:site-title', $header, 'fallback chrome carries the site title');
+    assert_contains('"layout":{"type":"constrained"}', $header);
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'header': unusable generated markup", $joined);
+    assert_contains('deterministic minimal header delivered', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -547,5 +625,29 @@ HTML);
         'every group opener has a closer',
     );
     assert_eq(substr_count($about, '<div'), substr_count($about, '</div>'), 'the div stack is rebalanced');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections persists an exhausted abnormal batch note even when balanced markup needs no salvage', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK'); // cache warm-up probe
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->batchNotes = [
+        'page-home--hero' => [
+            "part 'page-home--hero': model response remained abnormally terminated after 1 regeneration(s) "
+                . '(generation was truncated (stop reason: max_tokens)); best partial response retained',
+        ],
+    ];
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_contains('<h2>Hero</h2>', $project->readText('theme/parts/page-home--hero.html'));
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'page-home--hero': model response remained abnormally terminated", $joined);
+    assert_contains('max_tokens', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
