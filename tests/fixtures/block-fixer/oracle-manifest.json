@@ -51,8 +51,8 @@
   },
   "registry": {
     "generatorVersion": "1.0.0",
-    "generatorSourceSha256": "709667a7c1023759dde1b1636209d608d78ba2d7337fbc098ba4c59b3c822cc6",
-    "runtimeJsonSha256": "193b6f754248e751a0db2403ef8320d3f37717217388a5f6a553d028173c6413",
+    "generatorSourceSha256": "2c7e583270b3720da9c6b51c7fc1816c8ed5b29dd555023f363a63915e4fbc11",
+    "runtimeJsonSha256": "81463e10dbe16182674b8c713afa984a7f13b2963d25052ebb60c5324868f000",
     "generatedPhpSha256": "a7479ab7698d85b95f311048dba3e5f8bb35783f0873c2537e0b2369ba95aa9d",
     "registeredSnapshotSha256": "1ccdc8c9047b772fbe7fc572bd8d504f4b100a5b691cf47bda204ad601b515a0",
     "hookTraceSha256": "718a6d2f635b3eb512a996fe3005e2312cbbadddd5f411fb847469b9c0bae4d4",

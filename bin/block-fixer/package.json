@@ -4,6 +4,8 @@
   "description": "WordPress block markup fixer script",
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.js",
+    "test:gates": "node --test --test-concurrency=1 --test-skip-pattern=\"fixed point\" test/*.test.js",
+    "test:fixed-point": "node --test --test-concurrency=1 --test-name-pattern=\"fixed point\" test/*.test.js",
     "oracle:verify": "node ../../bin/generate-block-fixer-fixtures.js && node ../../bin/generate-block-registry.js",
     "oracle:update": "node ../../bin/generate-block-fixer-fixtures.js --update && node ../../bin/generate-block-registry.js --update && node ../../bin/generate-block-fixer-fixtures.js --update",
     "probe-save": "node probe-save.js"

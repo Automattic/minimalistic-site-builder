@@ -181,6 +181,14 @@ function generate() {
     // the committed manifest so regenerating never silently drops the record
     // (an empty ledger is the healthy state — it means every artifact is
     // oracle-derived again).
+    //
+    // This round-trips through the previous *output* rather than reading a
+    // committed source, unlike the sibling case in
+    // generate-block-fixer-fixtures.js, where a case's provenance notes come
+    // from its definition in fixtureCases.js. That is deliberate but weaker: a
+    // registry-level ledger has no per-case owner to read from, so regenerating
+    // in a tree with no manifest resets it. Give it a committed home the day it
+    // stops being empty.
     amendments: previousManifest.amendments ?? [],
     amendmentPolicy:
       previousManifest.amendmentPolicy ??
