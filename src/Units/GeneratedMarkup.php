@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Units;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
+use Automattic\SiteBuild\ToonBlockAttrs;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
@@ -21,6 +22,10 @@ final class GeneratedMarkup
      * that changed the delivered content (sanitizer strips, wrapper recovery,
      * truncation salvage). Callers with a Project route them to warnings.json;
      * every note is also echoed to STDERR for live visibility.
+     *
+     * Prototype: block openers may carry TOON attributes instead of JSON;
+     * those are expanded to standard Gutenberg comment JSON before recovery
+     * (pure PHP — see Toon / ToonBlockAttrs).
      */
     public static function normalize(string $text, string $key, array &$notes = []): string
     {
@@ -36,6 +41,18 @@ final class GeneratedMarkup
         foreach ($sanitizerNotes as $note) {
             $record("sanitized script-capable markup — {$note}");
         }
+
+        // TOON → JSON on block openers (no-op when attrs are already JSON).
+        $toonNotes = [];
+        try {
+            $text = ToonBlockAttrs::expand($text, $toonNotes);
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
+        }
+        foreach ($toonNotes as $note) {
+            $record($note);
+        }
+
         $recoveryNotes = [];
         try {
             $markup = BlockDocumentRecovery::recover($text, $recoveryNotes);
