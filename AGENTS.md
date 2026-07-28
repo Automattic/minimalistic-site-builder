@@ -14,6 +14,19 @@ Issues for this repo are tracked in the Linear project **[Generated themes: repl
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.
 
+## Generated-content validation: repair, record, and always deliver
+
+`warnings.json` is the central issue list for every generated-content defect or processing failure that the build delivered through. Site generation must not fail solely because generated content is malformed, unsupported, non-converging, or cannot be repaired safely. A future AI fixer may consume this list, so every entry must be structured and actionable.
+
+1. Attempt a bounded, semantics-safe deterministic repair first. Successful repairs must be represented in the step/fixer report and covered by a regression test.
+2. If a safe repair is not available — including for an unknown or unreviewed signature, malformed block structure or CSS, an unsupported registered block or support shape, possible content loss, non-convergence, or a validator exception — restore the smallest affected block or file to its exact bytes from before the step, record the problem, and continue the build. Never ship a partial or unchecked transformation.
+3. Isolate mutating work transactionally. Snapshot a file before any repair or normalization in the step, stage complete replacements, and commit only successful files. If one file cannot be processed, keep its snapshot and still deliver every other file.
+4. Emit a typed repair/report row, call `Project::addWarnings(<step-id>, ...)`, and write detailed evidence to the step log. Each warning must include enough context for an automated fixer: file, block path when known, relevant value or signature, error category and message, and the final disposition such as `repaired`, `kept-as-generated`, or `file-rollback`.
+5. Any step that can add durable warnings must declare `warnings.json` in `StepDeclaration::writes`. Repeated passes must deduplicate the same unresolved issue and must not describe it as fixed.
+6. A programming exception is not automatically build-fatal when the step can prove that it restored the affected content and can still deliver a coherent artifact; record it as an internal processing issue and continue. Fail the build only when safe delivery is impossible, such as an unreadable required input, corrupt project state, failed write/stage/commit, or failed rollback.
+7. Advisory validators that inspect an already usable final artifact without mutating it (for example, `ValidateThemeStep`) should record residual problems in `warnings.json` and deliver the artifact.
+8. Tests for mutating steps must cover repaired and unresolved paths. An unresolved case must retain the affected content exactly, continue the build, avoid partial writes, and add actionable context to `warnings.json`. Representative near misses and unsupported inputs must exercise this rollback-and-warning path rather than crash the site generation.
+
 ## Posting screenshots / images in PR & issue comments
 
 Verification screenshots and other throwaway proof belong in **PR/issue comments, not committed to trunk or the PR branch** — they bloat git history. Only commit lightweight, reproducible fixtures (the HTML/script that regenerates the evidence), never the generated PNGs.
