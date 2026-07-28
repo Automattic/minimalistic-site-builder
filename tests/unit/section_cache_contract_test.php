@@ -98,7 +98,14 @@ test('section prompt freezes build, page, and brief layer boundaries', function 
     [$build, $afterPage] = explode($pageMarker, $afterBuild, 2);
     [$page, $brief] = explode($briefMarker, $afterPage, 2);
 
-    foreach (['{{site_spec}}', '{{language}}', '{{theme_json}}', '{{design_direction}}', '{{image_instructions}}'] as $placeholder) {
+    foreach ([
+        '{{site_spec}}',
+        '{{language}}',
+        '{{theme_json}}',
+        '{{design_direction}}',
+        '{{image_instructions}}',
+        '{{block_markup_output_contract}}',
+    ] as $placeholder) {
         assert_contains($placeholder, $build);
     }
     foreach (['{{page_title}}', '{{outline}}', '{{site_pages}}'] as $placeholder) {

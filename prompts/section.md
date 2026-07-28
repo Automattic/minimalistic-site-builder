@@ -111,7 +111,7 @@ Motion budget (hard rules — a deterministic build step strips violations, so o
 IMAGE INSTRUCTIONS:
 {{image_instructions}}
 
-Output ONLY the block markup, starting with "<!-- wp:" — no JSON, no prose, no markdown code fences.
+{{block_markup_output_contract}}
 
 SITE SPEC (JSON):
 {{site_spec}}

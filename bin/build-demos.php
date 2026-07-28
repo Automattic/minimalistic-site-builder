@@ -6,7 +6,7 @@ use Automattic\SiteBuild\ProjectStore;
 /**
  * Build every demo website listed in eval/theme-prompts.json in one command.
  *
- *   php bin/build-demos.php [--with-images] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
+ *   php bin/build-demos.php [--with-images] [--provider=<name>] [--no-screenshot] [--only=<slug>] [--parallel=<n>] [--serve] [--port=<n>] [--file=<path>]
  *
  * Each entry in the prompts file becomes a project under projects/. If a folder
  * with that entry's slug already exists, a fresh sibling is created by appending
@@ -21,9 +21,9 @@ use Automattic\SiteBuild\ProjectStore;
  * race to the same folder name). Each child's output is streamed here with a
  * [slug] prefix.
  *
- * Note: each build fires up to ~10 concurrent Claude requests, so N parallel
- * builds ≈ N×10 concurrent API requests. If rate limits bite, cap the batch
- * with --parallel=<n>.
+ * Note: each build normally fires up to ~10 concurrent LLM requests (the
+ * OpenRouter transport caps its own fan-out at 4), so outer parallelism still
+ * multiplies API concurrency. If rate limits bite, use --parallel=<n>.
  *
  * After the builds, each home page is captured to a full-page screenshot at
  * projects/<slug>/logs/home.png (headless Playground + Chrome) as visual
@@ -39,7 +39,9 @@ use Automattic\SiteBuild\ProjectStore;
  *                   forwarded verbatim to each child build.
  *   --with-images   also generate the AI_IMAGE placeholders into real assets.
  *   --only=<slug>   build only the entry whose slug matches.
- *   --parallel=<n>  cap on concurrent builds (default: all entries at once).
+ *   --provider=<p>  use one configured model provider for every demo.
+ *   --parallel=<n>  cap on concurrent builds (default: all entries at once;
+ *                   OpenRouter is bounded at 3).
  *   --screenshot    capture the post-build home-page screenshots (the default).
  *   --no-screenshot skip the post-build home-page screenshots.
  *   --serve         after the batch, serve ALL built sites simultaneously in
@@ -59,7 +61,7 @@ $pagesArg = null;
 $only = null;
 $serve = false;
 $screenshot = true;
-$parallel = 0; // 0 = no cap (all entries at once)
+$parallel = 0; // 0 = provider-aware default (all entries; OpenRouter <= 3)
 $port = 9400;
 $provider = null;
 $file = repo_path('eval/theme-prompts.json');
@@ -78,7 +80,7 @@ foreach (array_slice($argv, 1) as $a) {
     elseif ($a === '--screenshot') { $screenshot = true; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+        fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
         exit(1);
     }
 }
@@ -177,7 +179,10 @@ if ($jobs === []) {
     exit(1);
 }
 
-$cap = $parallel > 0 ? $parallel : count($jobs);
+$activeProvider = $provider ?? \Automattic\SiteBuild\StepDefaults::provider();
+$cap = $parallel > 0
+    ? $parallel
+    : ($activeProvider === 'openrouter' ? min(3, count($jobs)) : count($jobs));
 echo "\nBuilding " . count($jobs) . ' demo(s), up to ' . $cap . " in parallel…\n\n";
 
 $results = run_jobs($jobs, $cap);
@@ -222,7 +227,11 @@ if ($screenshot && $built !== []) {
                 . ' --out=' . escapeshellarg($b['path'] . '/logs/home.png'),
         ];
     }
-    $shotResults = run_jobs($shotJobs, $cap);
+    // The provider-aware OpenRouter cap protects LLM generation only. Keep
+    // independent screenshots parallel unless the caller explicitly supplied
+    // --parallel to cap every batch in this command.
+    $shotCap = $parallel > 0 ? $parallel : count($shotJobs);
+    $shotResults = run_jobs($shotJobs, $shotCap);
     foreach ($built as $i => &$b) {
         $shot = $b['path'] . '/logs/home.png';
         if ($shotResults[$i]['exit'] === 0 && is_file($shot)) {

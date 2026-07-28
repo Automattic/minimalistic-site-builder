@@ -15,7 +15,7 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  *
  *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--with-images] [--port=9400] [--no-serve]
  *
- * --provider=<anthropic|openai|xai> picks the model set (config/models.json):
+ * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
  * env overrides still win. Unset falls back to LLM_PROVIDER / the config default.
  *
@@ -80,7 +80,7 @@ foreach ($args as $a) {
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
+    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
     exit(1);
 }
 

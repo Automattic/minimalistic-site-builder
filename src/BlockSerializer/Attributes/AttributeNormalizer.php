@@ -191,13 +191,13 @@ final class AttributeNormalizer
         }
 
         $finalAttributes = JsonNative::objectToArray($typed);
-        $this->deprecations->assertNoUnknownSignature(
+        $repairRows = array_merge($repairRows, $this->deprecations->residualParagraphStyleRepairs(
             $node->name,
             $commentValues,
             $originalContent,
             $render($finalAttributes),
             $blockPath,
-        );
+        ));
 
         return new NormalizedBlock(
             $node->name,

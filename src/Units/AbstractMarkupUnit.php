@@ -9,6 +9,8 @@ use Automattic\SiteBuild\PromptRenderer;
 /** Shared dependency and single-call plumbing for markup units. */
 abstract class AbstractMarkupUnit implements MarkupUnit
 {
+    private const OUTPUT_CONTRACT_TEMPLATE = 'block-markup-output-contract.md';
+
     public function __construct(
         protected Llm $llm,
         protected PromptRenderer $renderer,
@@ -39,6 +41,12 @@ abstract class AbstractMarkupUnit implements MarkupUnit
      */
     final protected function renderedRequest(string $template, array $vars): array
     {
+        // Keep the response contract in one shared fragment while each prompt
+        // controls where it belongs (the section places it in its build layer).
+        $vars['block_markup_output_contract'] = rtrim(
+            $this->renderer->render(self::OUTPUT_CONTRACT_TEMPLATE, []),
+            "\r\n",
+        );
         $request = ['prompt' => $this->renderer->render($template, $vars)];
         if ($this->model !== null) {
             $request['model'] = $this->model;

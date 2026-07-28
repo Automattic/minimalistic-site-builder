@@ -12,15 +12,17 @@ use Automattic\SiteBuild\StepDefaults;
 
 test('ModelConfig reads the packaged provider matrix', function () {
     assert_eq('anthropic', ModelConfig::defaultProvider());
-    foreach (['anthropic', 'openai', 'xai'] as $p) {
+    foreach (['anthropic', 'openai', 'xai', 'openrouter'] as $p) {
         assert_true(ModelConfig::hasProvider($p), "has {$p}");
     }
     assert_true(!ModelConfig::hasProvider('nope'), 'unknown provider is absent');
 
     assert_eq('gpt-5.5', ModelConfig::tierModel('openai', 'large'));
     assert_eq('gpt-5.4-mini', ModelConfig::tierModel('openai', 'small'));
-    assert_eq('claude-opus-4-8', ModelConfig::tierModel('anthropic', 'large'));
+    assert_eq('claude-opus-5', ModelConfig::tierModel('anthropic', 'large'));
     assert_eq('claude-haiku-4-5', ModelConfig::tierModel('anthropic', 'small'));
+    assert_eq('moonshotai/kimi-k3', ModelConfig::tierModel('openrouter', 'large'));
+    assert_eq('moonshotai/kimi-k2.5:nitro', ModelConfig::tierModel('openrouter', 'small'));
 
     $tiers = ModelConfig::stepTiers();
     assert_eq('small', $tiers['site-spec']);
@@ -53,11 +55,11 @@ test('StepDefaults default (anthropic) reproduces the historical model mapping',
     assert_eq('claude-haiku-4-5', $models['site-spec']);
     assert_eq('claude-haiku-4-5', $models['design-direction-seeds']);
     assert_eq('claude-haiku-4-5', $models['page-plan']);
-    assert_eq('claude-opus-4-8', $models['design-direction']);
-    assert_eq('claude-opus-4-8', $models['theme-json']);
-    assert_eq('claude-opus-4-8', $models['sections']);
-    assert_eq('claude-opus-4-8', $models['page-styles']);
-    assert_eq('claude-opus-4-8', $models['fonts-php']);
+    assert_eq('claude-opus-5', $models['design-direction']);
+    assert_eq('claude-opus-5', $models['theme-json']);
+    assert_eq('claude-opus-5', $models['sections']);
+    assert_eq('claude-opus-5', $models['page-styles']);
+    assert_eq('claude-opus-5', $models['fonts-php']);
 });
 
 test('StepDefaults follows the active provider tiers (openai)', function () {
@@ -73,6 +75,25 @@ test('StepDefaults follows the active provider tiers (openai)', function () {
         assert_eq('gpt-5.5', $models['design-direction']);
         assert_eq('gpt-5.5', $models['sections']);
         assert_eq('gpt-5.5', $models['theme-json']);
+    } finally {
+        putenv('LLM_PROVIDER');
+    }
+});
+
+test('StepDefaults uses K3 for OpenRouter quality steps and K2.5 for structural steps', function () {
+    putenv('LLM_PROVIDER=openrouter');
+    try {
+        $models = StepDefaults::models();
+        foreach (ModelConfig::stepTiers() as $step => $tier) {
+            $expected = $tier === 'large'
+                ? 'moonshotai/kimi-k3'
+                : 'moonshotai/kimi-k2.5:nitro';
+            assert_eq(
+                $expected,
+                $models[$step],
+                "{$step} follows its configured {$tier} tier",
+            );
+        }
     } finally {
         putenv('LLM_PROVIDER');
     }

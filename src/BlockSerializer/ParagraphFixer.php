@@ -28,7 +28,9 @@ final class ParagraphFixer
                 do {
                     $before = $content;
                     $content = preg_replace_callback(
-                        '/<p(\s[^>]*)?>(\s*)<p(\s[^>]*)?>([\s\S]*?)<\/p>(\s*)<\/p>/i',
+                        '/<p((?:\s+(?:[^"\'<>]|"[^"]*"|\'[^\']*\')*)?)>(\s*)'
+                            . '<p((?:\s+(?:[^"\'<>]|"[^"]*"|\'[^\']*\')*)?)>'
+                            . '([\s\S]*?)<\/p>(\s*)<\/p>/i',
                         function (array $nested) use (&$total, &$blockFixCount): string {
                             $total++;
                             $blockFixCount++;
