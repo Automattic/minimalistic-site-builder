@@ -338,6 +338,46 @@ test('OpenRouter batch retries wait only until the latest Retry-After deadline',
     assert_eq([2], $slept, 'expired and elapsed portions of server delays are not slept again');
 });
 
+test('a huge Retry-After is clamped so a quota 429 cannot park the build', function () {
+    // A daily/credit 429 answering `Retry-After: 3600` — or an absolute-date
+    // header read against a skewed clock — would otherwise sleep for an hour
+    // per round behind one STDERR line. Past the cap the request takes the
+    // ordinary transient path and fails in seconds.
+    $bodies = ['a' => []];
+    $round = 0;
+    $now = 100;
+    $transport = function (array $subset) use (&$round, &$now): array {
+        $round++;
+        if ($round === 1) {
+            return ['a' => [
+                'ok' => false,
+                'transient' => true,
+                'error' => 'rate limited',
+                'retry_after_at' => $now + 3600,
+            ]];
+        }
+        return ['a' => ['ok' => true, 'text' => 'A', 'input' => 0, 'output' => 0]];
+    };
+    $slept = [];
+
+    $result = OpenAiCompatibleClient::retryOpenRouterBatch(
+        $bodies,
+        $transport,
+        [0],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+        static function () use (&$now): int {
+            return $now;
+        },
+    );
+
+    assert_eq('A', $result['a']['text']);
+    assert_eq(1, count($slept), 'one honored wait');
+    assert_eq(120, $slept[0], 'the hour-long server delay is capped');
+});
+
 test('Retry-After parsing supports seconds and HTTP dates as absolute deadlines', function () {
     $parse = new ReflectionMethod(OpenAiCompatibleClient::class, 'retryAfterDeadline');
     $parse->setAccessible(true);

@@ -20,6 +20,19 @@ final class OpenAiCompatibleClient implements Llm
     private const KIMI_K3_MIN_MAX_TOKENS = 65536;
 
     /**
+     * Ceiling on an honored Retry-After wait, in seconds.
+     *
+     * Every other wait in this transport is bounded (the curl timeout, the
+     * low-speed abort, the fixed retry slots); an unclamped Retry-After is not.
+     * A quota 429 answering `Retry-After: 3600` — or an absolute-date header
+     * read against a skewed clock — would otherwise park a build for hours
+     * behind one STDERR line, and the demo runner never times its children out.
+     * Past the cap the request takes the ordinary transient path and fails in
+     * seconds, which is the actionable outcome for a quota error.
+     */
+    private const MAX_RETRY_AFTER_WAIT = 120;
+
+    /**
      * Appended to the system prompt of every JSON call (single and batch) to
      * steer the model toward raw, fence-free JSON. Kept in sync with the
      * Anthropic client so both provider paths receive the same instruction.
@@ -423,7 +436,10 @@ final class OpenAiCompatibleClient implements Llm
             $retryingDeadlines = array_intersect_key($retryAfterDeadlineByKey, $subset);
             if ($retryingDeadlines !== []) {
                 $deadline = max($retryingDeadlines);
-                $remainingWait = max(0, $deadline - $clock());
+                $remainingWait = min(
+                    self::MAX_RETRY_AFTER_WAIT,
+                    max(0, $deadline - $clock()),
+                );
                 if ($remainingWait > 0) {
                     fwrite(
                         STDERR,
@@ -508,12 +524,15 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
+     * Windows of concurrent requests, delegating to the shared implementation
+     * so the two transports cannot drift apart on the default cap.
+     *
      * @param array<array-key,array<string,mixed>> $bodies
      * @return list<array<array-key,array<string,mixed>>>
      */
-    public static function concurrencyWindows(array $bodies, int $maxConcurrency = 10): array
+    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
     {
-        return array_chunk($bodies, max(1, $maxConcurrency), true);
+        return array_values(AnthropicClient::concurrencyWindows($bodies, $maxConcurrency));
     }
 
     /**
@@ -775,7 +794,7 @@ final class OpenAiCompatibleClient implements Llm
             $retryDelay = static function (int $fallback) use (&$retryAfterDeadline): int {
                 $remaining = $retryAfterDeadline === null
                     ? 0
-                    : max(0, $retryAfterDeadline - time());
+                    : min(self::MAX_RETRY_AFTER_WAIT, max(0, $retryAfterDeadline - time()));
                 return max($fallback, $remaining);
             };
         }
