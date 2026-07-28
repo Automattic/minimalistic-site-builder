@@ -72,19 +72,21 @@ final class ImageTransparency
     }
 
     /**
-     * The "turn the alpha channel off" selector for this Imagick build.
+     * Whether this Imagick build can run the edge-unmatting pass.
      *
-     * ImageMagick 7 spells it ALPHACHANNEL_OFF. The 6.x line — still what most
-     * Linux distributions package, and what CI runs — defines only
-     * ALPHACHANNEL_DEACTIVATE, so naming the 7-only constant raises an Error
-     * on the first line of unmatteEdges(). Resolving it at call time keeps the
-     * unmatting pass working on both.
+     * The pass is written against ImageMagick 7 semantics: it names
+     * ALPHACHANNEL_OFF (7-only; 6.x has ALPHACHANNEL_DEACTIVATE), and its
+     * coverage math relies on 7's DivideDst and levelImage behaviour —
+     * swapping the constant alone makes 6.x turn the *subject* translucent
+     * rather than the fringe. Most Linux distributions still package the 6.x
+     * line, so this is a live limitation, not a theoretical one: on those
+     * hosts a decorative .png keeps the white baked into its anti-aliased
+     * edges (a fringe on dark pages). Detected rather than discovered by
+     * exception, so the skip is deliberate and reported.
      */
-    private static function alphaChannelOff(): int
+    public static function canUnmatteEdges(): bool
     {
-        return defined('Imagick::ALPHACHANNEL_OFF')
-            ? \Imagick::ALPHACHANNEL_OFF
-            : \Imagick::ALPHACHANNEL_DEACTIVATE;
+        return self::available() && defined('Imagick::ALPHACHANNEL_OFF');
     }
 
     /**
@@ -171,10 +173,17 @@ final class ImageTransparency
      */
     private static function unmatteEdges(\Imagick $im): void
     {
+        if (!self::canUnmatteEdges()) {
+            fwrite(
+                STDERR,
+                "    (image: edge unmatting needs ImageMagick 7; keeping hard-keyed edges)\n",
+            );
+            return;
+        }
         try {
             // N = 1 - C: per-channel white contamination.
             $neg = clone $im;
-            $neg->setImageAlphaChannel(self::alphaChannelOff());
+            $neg->setImageAlphaChannel(\Imagick::ALPHACHANNEL_OFF);
             $neg->negateImage(false);
 
             // t = max channel of N, boosted so solid ink saturates to 1.

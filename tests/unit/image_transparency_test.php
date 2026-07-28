@@ -155,6 +155,12 @@ test('keyOutBackground trims the empty margin around a small ornament', function
 });
 
 test('keyOutBackground unmattes anti-aliased edge pixels instead of keeping them opaque', function () {
+    if (!ImageTransparency::canUnmatteEdges()) {
+        // ImageMagick 6 keeps the hard-keyed edges by design (see
+        // ImageTransparency::canUnmatteEdges) — there is no translucency to
+        // assert, and the surrounding keying is covered by the tests above.
+        skip_test('edge unmatting needs ImageMagick 7');
+    }
     // A pixel that blends ink 50/50 with the white background — the
     // anti-aliased edge Imagen renders. The binary key passes leave it fully
     // opaque with the white baked in (a white fringe on dark pages); the
