@@ -29,6 +29,50 @@ final class ThemeJsonStep implements ConcurrentStep
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
     /**
+     * Documented fallback type scale for missing generated presets.
+     *
+     * @var list<array{slug: string, name: string, size: string}>
+     */
+    private const FONT_SIZE_PROFILE = [
+        ['slug' => 'caption', 'name' => 'Caption', 'size' => '0.875rem'],
+        ['slug' => 'body', 'name' => 'Body', 'size' => '1.125rem'],
+        ['slug' => 'lead', 'name' => 'Lead', 'size' => '1.375rem'],
+        ['slug' => 'heading', 'name' => 'Heading', 'size' => '1.75rem'],
+        ['slug' => 'section-title', 'name' => 'Section Title', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
+        ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
+    ];
+    /**
+     * Neutral, WCAG-safe fallback palette used only when generated roles cannot
+     * supply a usable color.
+     *
+     * @var list<array{slug: string, name: string, color: string}>
+     */
+    private const DEFAULT_PALETTE = [
+        ['slug' => 'base', 'name' => 'Base', 'color' => '#FAF8F4'],
+        ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#1F2421'],
+        ['slug' => 'primary', 'name' => 'Primary', 'color' => '#365C4D'],
+        ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#5B514A'],
+        ['slug' => 'accent', 'name' => 'Accent', 'color' => '#9C3D2E'],
+    ];
+    /**
+     * Real Google families with web-safe fallbacks for an unusable generated
+     * font-family profile.
+     *
+     * @var list<array{slug: string, name: string, fontFamily: string}>
+     */
+    private const DEFAULT_FONT_FAMILIES = [
+        [
+            'slug' => 'heading',
+            'name' => 'Heading',
+            'fontFamily' => '"Fraunces", Georgia, "Times New Roman", serif',
+        ],
+        [
+            'slug' => 'body',
+            'name' => 'Body',
+            'fontFamily' => '"Source Sans 3", "Helvetica Neue", Arial, sans-serif',
+        ],
+    ];
+    /**
      * One bounded spacing vocabulary for every generated site.
      *
      * sm/md are component-level gaps. lg/xl/xxl are the compact, standard,
