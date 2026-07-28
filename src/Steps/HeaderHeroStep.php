@@ -28,7 +28,12 @@ use Automattic\SiteBuild\StepDeclaration;
  *  2. Fold budget — in stacked mode an opaque header consumes ~100px of the
  *     first viewport, so a page-opening cover taller than 84vh is lowered to
  *     80vh (header + cover must fit ~100vh; audited covers ran 86-92vh and
- *     pushed the hero H1 and CTA below the fold).
+ *     pushed the hero H1 and CTA below the fold). Only the cover half is
+ *     enforced here: the header's own height is asked for in prompts/header.md
+ *     and never measured, so the cap assumes a compliant header. A header that
+ *     busts its budget still pushes content below the fold, and this step will
+ *     not say so — estimating header height the way estimatedRowWidth()
+ *     estimates width would be the way to close that.
  *  3. Nav collapse — WordPress's hamburger only engages below 600px, while
  *     an over-wide title/nav row wraps into a 2-3 row header across the
  *     whole tablet range. When the estimated single-row width exceeds the
@@ -137,8 +142,7 @@ final class HeaderHeroStep implements Step
         if ($mode === SectionsStep::MODE_STACKED) {
             foreach ($pages as $page) {
                 $pageSlug = trim((string) ($page['slug'] ?? ''));
-                $first = ((array) ($page['sections'] ?? []))[0] ?? null;
-                $slug = is_array($first) ? trim((string) ($first['slug'] ?? '')) : '';
+                $slug = trim((string) (SectionsStep::openingSection($page)['slug'] ?? ''));
                 if ($pageSlug === '' || $slug === '') {
                     continue;
                 }
@@ -165,7 +169,8 @@ final class HeaderHeroStep implements Step
             $report,
         ));
         if ($report === []) {
-            $report[] = "Header mode '{$mode}': header and page-opening sections already satisfy the contract.";
+            $report[] = "Header mode '{$mode}': header and page-opening sections already satisfy the "
+                . 'repairs this step makes. Header height is prompt-enforced only and was not measured.';
         }
         $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
         echo sprintf("  header/hero: mode '%s' (details: logs/%s)\n", $mode, self::REPORT_FILE);
@@ -183,6 +188,20 @@ final class HeaderHeroStep implements Step
     {
         $forced = Env::get(SectionsStep::ARCHETYPE_ENV);
         if ($forced !== null && $forced !== '') {
+            // SectionsStep::headerAssignment() throws on an unrecognized value,
+            // per the policy that a misconfigured environment override is our
+            // bug rather than the model's. Validate identically here: this step
+            // can run in its own process on a resumed build, where nothing else
+            // has looked at the variable yet, and silently reading a typo as
+            // "stacked" would enforce the opposite seam the operator asked for.
+            if (!in_array($forced, SectionsStep::HEADER_ARCHETYPES, true)) {
+                throw new \RuntimeException(sprintf(
+                    'header-hero: %s=%s is not a header archetype (use one of: %s)',
+                    SectionsStep::ARCHETYPE_ENV,
+                    $forced,
+                    implode(', ', SectionsStep::HEADER_ARCHETYPES),
+                ));
+            }
             return $forced === 'minimal-overlay'
                 ? SectionsStep::MODE_OVERLAY
                 : SectionsStep::MODE_STACKED;
@@ -207,13 +226,7 @@ final class HeaderHeroStep implements Step
         $doc = BlockMarkup::parse($markup);
         $notes = [];
 
-        $top = null;
-        foreach ($doc->indices() as $i) {
-            if ($doc->parent($i) === null) {
-                $top = $i;
-                break;
-            }
-        }
+        $top = $doc->topLevel();
         if ($top !== null && $mode === SectionsStep::MODE_OVERLAY) {
             self::wireOverlay($doc, $top, $notes);
         } elseif ($top !== null) {
@@ -373,7 +386,7 @@ final class HeaderHeroStep implements Step
         $labels = [];
         $hasPageList = false;
         $hasTitle = false;
-        $buttons = 0;
+        $hasButton = false;
 
         foreach ($doc->indices() as $i) {
             $name = $doc->name($i);
@@ -400,7 +413,7 @@ final class HeaderHeroStep implements Step
         foreach ($labels as $label) {
             $width += mb_strlen(trim($label)) * self::NAV_CHAR_PX + self::NAV_GAP_PX;
         }
-        if ($buttons > 0) {
+        if ($hasButton) {
             $width += self::CLUSTER_GAP_PX;
         }
         return $width;

@@ -373,11 +373,17 @@ final class SectionsStep implements Step
 
         // The chrome is briefed on the FRONT page: that's what the header sits
         // directly above (or floats on) and what sets the site's opening tone.
-        // The header mode is the shared contract: computed once here, it
-        // steers the header's archetype assignment AND every hero section's
-        // brief, so the two sides of the page-top seam compose deliberately.
+        // The header mode is the shared contract: both sides of the page-top
+        // seam derive it from the same pure headerMode(), so the header's
+        // archetype assignment and every hero section's brief compose
+        // deliberately instead of each guessing. headerAssignment() derives it
+        // again from the canvas rather than taking it as an argument, which
+        // keeps its signature usable from tests.
         $canvas = DesignDirectionStep::canvasFor($project);
         $headerMode = self::headerMode($pages, $canvas);
+        // Fixed for the whole build, so the hero brief is built once, not once
+        // per hero section.
+        $headerContract = self::headerContract($headerMode);
         $frontSections = self::frontPage($pages)['sections'];
         $jobs = [
             'header' => [
@@ -414,7 +420,7 @@ final class SectionsStep implements Step
                     // Only page-opening sections share the viewport with the
                     // header; everything below scrolls in under its own rules.
                     'header_contract' => (string) ($section['role'] ?? '') === SectionRole::HERO
-                        ? self::headerContract($headerMode)
+                        ? $headerContract
                         : '',
                 ];
                 $key = $this->sectionUnit->key($input);
@@ -606,6 +612,19 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $pages
      */
+    /**
+     * The section a page opens on — the only one that shares the viewport with
+     * the header, and so the one both sides of the seam ask about.
+     *
+     * @param array<string,mixed> $page
+     * @return array<string,mixed>|null
+     */
+    public static function openingSection(array $page): ?array
+    {
+        $first = ((array) ($page['sections'] ?? []))[0] ?? null;
+        return is_array($first) ? $first : null;
+    }
+
     public static function headerMode(array $pages, string $canvas = ''): string
     {
         $front = self::frontPage($pages);
@@ -613,7 +632,7 @@ final class SectionsStep implements Step
             return self::MODE_STACKED;
         }
         foreach ($pages as $page) {
-            $first = ((array) ($page['sections'] ?? []))[0] ?? null;
+            $first = self::openingSection($page);
             $background = is_array($first) ? (string) ($first['background'] ?? '') : '';
             if (!in_array($background, ['image', 'contrast'], true)) {
                 return self::MODE_STACKED;
@@ -726,8 +745,9 @@ final class SectionsStep implements Step
         return "HEADER CONTRACT (this is a page-opening section):\n"
             . "An OPAQUE site header (one compact bar, roughly 80-100px tall) is stacked directly above this "
             . "section, inside the same first viewport. Compose for the space that remains:\n"
-            . "- Cap any cover at \"minHeight\":80 with \"minHeightUnit\":\"vh\" or less — header + cover must fit "
-            . "~100vh together (a deterministic pass lowers taller covers to 80vh).\n"
+            . "- Cap any cover at \"minHeight\":" . HeaderHeroStep::STACKED_COVER_VH . " with "
+            . "\"minHeightUnit\":\"vh\" or less — header + cover must fit ~100vh together (a deterministic "
+            . "pass lowers taller covers to " . HeaderHeroStep::STACKED_COVER_VH . "vh).\n"
             . "- The headline and any CTA must land inside the first viewport: on a cover of 70vh or more, avoid a "
             . "bottom-anchored \"contentPosition\" — center or upper placement keeps the masthead above the fold.\n"
             . "- Do not open with a tall band of bare page background above your first visual: the header already "
