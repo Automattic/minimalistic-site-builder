@@ -89,6 +89,123 @@ final class ThemeJsonStep implements ConcurrentStep
         ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
         ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
     ];
+    /**
+     * Mechanical preset-to-role wiring shared by every generated theme.
+     *
+     * @var array<string,mixed>
+     */
+    private const SCAFFOLD = [
+        'styles' => [
+            'color' => [
+                'background' => 'var:preset|color|base',
+                'text' => 'var:preset|color|contrast',
+            ],
+            'typography' => [
+                'fontFamily' => 'var:preset|font-family|body',
+                'fontSize' => 'var:preset|font-size|body',
+                'lineHeight' => '1.6',
+            ],
+            'elements' => [
+                'h1' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|display',
+                    ],
+                    'color' => ['text' => 'var:preset|color|primary'],
+                ],
+                'h2' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|section-title',
+                    ],
+                    'color' => ['text' => 'var:preset|color|primary'],
+                ],
+                'h3' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                    'color' => ['text' => 'var:preset|color|primary'],
+                ],
+                'h4' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'h5' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'h6' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'caption' => [
+                    'typography' => ['fontSize' => 'var:preset|font-size|caption'],
+                    'color' => ['text' => 'var:preset|color|secondary'],
+                ],
+            ],
+            'blocks' => [
+                'core/quote' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|lead',
+                    ],
+                    'color' => ['text' => 'var:preset|color|contrast'],
+                ],
+                'core/pullquote' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                    'color' => ['text' => 'var:preset|color|primary'],
+                ],
+                'core/table' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|body',
+                    ],
+                    'color' => ['text' => 'var:preset|color|contrast'],
+                ],
+                'core/separator' => [
+                    'color' => ['text' => 'var:preset|color|secondary'],
+                ],
+                'core/list' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|body',
+                    ],
+                    'color' => ['text' => 'var:preset|color|contrast'],
+                ],
+                'core/image' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|caption',
+                    ],
+                    'color' => ['text' => 'var:preset|color|secondary'],
+                ],
+                'core/site-title' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                    'color' => ['text' => 'var:preset|color|primary'],
+                ],
+                'core/navigation' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|caption',
+                    ],
+                    'color' => ['text' => 'var:preset|color|contrast'],
+                ],
+            ],
+        ],
+    ];
     private const REQ = 'theme-json';
     private const LOG_FILE = 'theme-json.log';
 
