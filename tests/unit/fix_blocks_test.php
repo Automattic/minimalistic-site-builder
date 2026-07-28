@@ -2,6 +2,9 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockSerializer\DroppedContentDetector;
+use Automattic\SiteBuild\BlockSerializer\FileReport;
+use Automattic\SiteBuild\BlockSerializer\FixerReport;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SectionRhythm;
@@ -611,4 +614,66 @@ HTML;
 
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
+});
+
+test('failedFiles recovers every FAILED row the fixer report wrote', function () {
+    // The real round-trip: FixerReport::format() writes the rows, and this is
+    // the only path that turns them back into durable warnings. The two ends
+    // are coupled by FAILED_TAG / FAILED_DETAIL alone, so exercise them
+    // together rather than asserting a hand-written report string.
+    $drop = (new DroppedContentDetector())->detect('<p class="lost">x</p>', '<p>x</p>');
+    $report = new FixerReport([
+        new FileReport('parts/a.html', 'fixed', $drop),
+        new FileReport('parts/broken.html', 'failed', error: 'did not converge within 5 passes'),
+        new FileReport('templates/plain.html', 'skip'),
+        new FileReport('parts/unsupported.html', 'failed', error: "block transformation failed on pass 1:\nunsupported block"),
+        new FileReport('parts/b.html', 'ok'),
+    ]);
+
+    $recovered = FixBlocksStep::failedFiles($report->format());
+
+    assert_eq(
+        [
+            ['parts/broken.html', 'did not converge within 5 passes'],
+            // format() flattens the newline; the reason survives on one line.
+            ['parts/unsupported.html', 'block transformation failed on pass 1: unsupported block'],
+        ],
+        $recovered,
+        'only the failed rows come back, in report order, with their reasons',
+    );
+});
+
+test('failedFiles ignores rows that merely look like failures', function () {
+    // FIXED shares FAILED's shape, and a dropped-value line shares the "! "
+    // prefix of the failure detail — neither may produce a phantom warning.
+    $drop = (new DroppedContentDetector())->detect('<p class="lost">x</p>', '<p>x</p>');
+    $clean = new FixerReport([
+        new FileReport('parts/a.html', 'fixed', $drop),
+        new FileReport('parts/b.html', 'ok'),
+        new FileReport('templates/plain.html', 'skip'),
+    ]);
+
+    assert_eq([], FixBlocksStep::failedFiles($clean->format()));
+    assert_eq([], FixBlocksStep::failedFiles(''));
+});
+
+test('failedFiles dedupes a repeated failure across concatenated fixer passes', function () {
+    // FixBlocksStep may hand this the concatenation of two fixer runs (theme
+    // + plugin), so the same file can legitimately appear twice.
+    $first = new FixerReport([
+        new FileReport('parts/broken.html', 'failed', error: 'did not converge within 5 passes'),
+    ]);
+    $second = new FixerReport([
+        new FileReport('parts/broken.html', 'failed', error: 'did not converge within 5 passes'),
+        new FileReport('parts/broken.html', 'failed', error: 'block transformation failed on pass 2: bad signature'),
+    ]);
+
+    assert_eq(
+        [
+            ['parts/broken.html', 'did not converge within 5 passes'],
+            ['parts/broken.html', 'block transformation failed on pass 2: bad signature'],
+        ],
+        FixBlocksStep::failedFiles($first->format() . "\n" . $second->format()),
+        'an identical repeat collapses; a genuinely different reason does not',
+    );
 });
