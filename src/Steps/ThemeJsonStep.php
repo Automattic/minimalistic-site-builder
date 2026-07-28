@@ -19,8 +19,8 @@ use Automattic\SiteBuild\StepDeclaration;
  *         there is no separate design document.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
- * Validates the structure the templates depend on (version 3, the five color
- * slugs, the two font slugs) and fails loud if the model drifts from it.
+ * Repairs omissions in the structure templates depend on (version 3, required
+ * color, font-family, and font-size slugs) and records every fallback.
  */
 final class ThemeJsonStep implements ConcurrentStep
 {
@@ -114,7 +114,7 @@ final class ThemeJsonStep implements ConcurrentStep
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
-            writes: ['theme/theme.json'],
+            writes: ['theme/theme.json', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -135,7 +135,11 @@ final class ThemeJsonStep implements ConcurrentStep
     {
         $theme = $results[self::REQ] ?? null;
         if (!is_array($theme)) {
-            throw new \RuntimeException('theme-json: missing model output');
+            $theme = [];
+            $project->addWarnings(self::REQ, [
+                'theme/theme.json: missing or unusable model output at document root; '
+                    . 'substituted an empty theme as repair input; delivered with complete documented defaults',
+            ]);
         }
 
         // Force the schema fields and validate the contract templates rely on.
@@ -158,8 +162,9 @@ final class ThemeJsonStep implements ConcurrentStep
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
 
-        self::assertColors($theme);
-        self::assertFonts($theme);
+        $theme = self::assertColors($theme, $project);
+        $theme = self::assertFonts($theme, $project);
+        $theme = self::assertFontSizes($theme, $project);
 
         $project->writeJson('theme/theme.json', $theme);
     }
@@ -274,33 +279,220 @@ final class ThemeJsonStep implements ConcurrentStep
         return $theme;
     }
 
-    /** @param array<mixed> $theme */
-    private static function assertColors(array $theme): void
+    /**
+     * Fill missing or unusable required color roles without replacing usable
+     * model presets. Model fallbacks are read from the original palette only,
+     * so a repaired role cannot silently become another role's model source.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function assertColors(array $theme, Project $project): array
     {
         $palette = $theme['settings']['color']['palette'] ?? null;
         if (!is_array($palette)) {
-            throw new \RuntimeException('theme.json missing settings.color.palette');
+            $palette = [];
         }
-        $slugs = array_column($palette, 'slug');
-        foreach (self::REQUIRED_COLORS as $needed) {
-            if (!in_array($needed, $slugs, true)) {
-                throw new \RuntimeException("theme.json palette missing slug: {$needed}");
+
+        $originalColors = [];
+        foreach ($palette as $preset) {
+            if (
+                is_array($preset)
+                && is_string($preset['slug'] ?? null)
+                && is_string($preset['color'] ?? null)
+                && trim($preset['color']) !== ''
+                && !isset($originalColors[$preset['slug']])
+            ) {
+                $originalColors[$preset['slug']] = $preset['color'];
             }
         }
+
+        $defaults = [];
+        foreach (self::DEFAULT_PALETTE as $preset) {
+            $defaults[$preset['slug']] = $preset;
+        }
+        $modelFallbackRoles = [
+            'primary' => 'contrast',
+            'secondary' => 'contrast',
+            'accent' => 'primary',
+        ];
+        $warnings = [];
+
+        foreach (self::REQUIRED_COLORS as $needed) {
+            $targetKey = null;
+            $usable = false;
+            foreach ($palette as $key => $preset) {
+                if (!is_array($preset) || ($preset['slug'] ?? null) !== $needed) {
+                    continue;
+                }
+                $targetKey ??= $key;
+                if (is_string($preset['color'] ?? null) && trim($preset['color']) !== '') {
+                    $usable = true;
+                    break;
+                }
+            }
+            if ($usable) {
+                continue;
+            }
+
+            $sourceRole = $modelFallbackRoles[$needed] ?? null;
+            if ($sourceRole !== null && isset($originalColors[$sourceRole])) {
+                $value = $originalColors[$sourceRole];
+                $source = "original model settings.color.palette[slug={$sourceRole}].color";
+            } else {
+                $value = $defaults[$needed]['color'];
+                $source = "DEFAULT_PALETTE[slug={$needed}].color";
+            }
+
+            if ($targetKey !== null) {
+                $palette[$targetKey]['color'] = $value;
+            } else {
+                $replacement = $defaults[$needed];
+                $replacement['color'] = $value;
+                $palette[] = $replacement;
+            }
+            $encoded = json_encode(
+                $value,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+            );
+            $warnings[] = "theme/theme.json: missing or unusable settings.color.palette[slug={$needed}].color; "
+                . "substituted {$encoded} from {$source}; delivered with repaired preset";
+        }
+
+        $theme['settings']['color']['palette'] = $palette;
+        $project->addWarnings(self::REQ, $warnings);
+        return $theme;
     }
 
-    /** @param array<mixed> $theme */
-    private static function assertFonts(array $theme): void
+    /**
+     * Fill missing or unusable required font roles. A model fallback comes
+     * only from the other role in the original generated profile.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function assertFonts(array $theme, Project $project): array
     {
         $families = $theme['settings']['typography']['fontFamilies'] ?? null;
         if (!is_array($families)) {
-            throw new \RuntimeException('theme.json missing settings.typography.fontFamilies');
+            $families = [];
         }
-        $slugs = array_column($families, 'slug');
-        foreach (self::REQUIRED_FONTS as $needed) {
-            if (!in_array($needed, $slugs, true)) {
-                throw new \RuntimeException("theme.json fontFamilies missing slug: {$needed}");
+
+        $originalFamilies = [];
+        foreach ($families as $preset) {
+            if (
+                is_array($preset)
+                && is_string($preset['slug'] ?? null)
+                && is_string($preset['fontFamily'] ?? null)
+                && trim($preset['fontFamily']) !== ''
+                && !isset($originalFamilies[$preset['slug']])
+            ) {
+                $originalFamilies[$preset['slug']] = $preset['fontFamily'];
             }
         }
+
+        $defaults = [];
+        foreach (self::DEFAULT_FONT_FAMILIES as $preset) {
+            $defaults[$preset['slug']] = $preset;
+        }
+        $otherRole = ['heading' => 'body', 'body' => 'heading'];
+        $warnings = [];
+
+        foreach (self::REQUIRED_FONTS as $needed) {
+            $targetKey = null;
+            $usable = false;
+            foreach ($families as $key => $preset) {
+                if (!is_array($preset) || ($preset['slug'] ?? null) !== $needed) {
+                    continue;
+                }
+                $targetKey ??= $key;
+                if (is_string($preset['fontFamily'] ?? null) && trim($preset['fontFamily']) !== '') {
+                    $usable = true;
+                    break;
+                }
+            }
+            if ($usable) {
+                continue;
+            }
+
+            $sourceRole = $otherRole[$needed];
+            if (isset($originalFamilies[$sourceRole])) {
+                $value = $originalFamilies[$sourceRole];
+                $source = "original model settings.typography.fontFamilies[slug={$sourceRole}].fontFamily";
+            } else {
+                $value = $defaults[$needed]['fontFamily'];
+                $source = "DEFAULT_FONT_FAMILIES[slug={$needed}].fontFamily";
+            }
+
+            if ($targetKey !== null) {
+                $families[$targetKey]['fontFamily'] = $value;
+            } else {
+                $replacement = $defaults[$needed];
+                $replacement['fontFamily'] = $value;
+                $families[] = $replacement;
+            }
+            $encoded = json_encode(
+                $value,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+            );
+            $warnings[] = "theme/theme.json: missing or unusable settings.typography.fontFamilies[slug={$needed}].fontFamily; "
+                . "substituted {$encoded} from {$source}; delivered with repaired preset";
+        }
+
+        $theme['settings']['typography']['fontFamilies'] = $families;
+        $project->addWarnings(self::REQ, $warnings);
+        return $theme;
+    }
+
+    /**
+     * Fill each missing or unusable required font-size preset from the frozen
+     * profile while preserving model-authored sizes and unrelated presets.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function assertFontSizes(array $theme, Project $project): array
+    {
+        $fontSizes = $theme['settings']['typography']['fontSizes'] ?? null;
+        if (!is_array($fontSizes)) {
+            $fontSizes = [];
+        }
+
+        $warnings = [];
+        foreach (self::FONT_SIZE_PROFILE as $fallback) {
+            $needed = $fallback['slug'];
+            $targetKey = null;
+            $usable = false;
+            foreach ($fontSizes as $key => $preset) {
+                if (!is_array($preset) || ($preset['slug'] ?? null) !== $needed) {
+                    continue;
+                }
+                $targetKey ??= $key;
+                if (is_string($preset['size'] ?? null) && trim($preset['size']) !== '') {
+                    $usable = true;
+                    break;
+                }
+            }
+            if ($usable) {
+                continue;
+            }
+
+            if ($targetKey !== null) {
+                $fontSizes[$targetKey]['size'] = $fallback['size'];
+            } else {
+                $fontSizes[] = $fallback;
+            }
+            $encoded = json_encode(
+                $fallback['size'],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+            );
+            $warnings[] = "theme/theme.json: missing or unusable settings.typography.fontSizes[slug={$needed}].size; "
+                . "substituted {$encoded} from FONT_SIZE_PROFILE[slug={$needed}].size; "
+                . 'delivered with repaired preset';
+        }
+
+        $theme['settings']['typography']['fontSizes'] = $fontSizes;
+        $project->addWarnings(self::REQ, $warnings);
+        return $theme;
     }
 }
