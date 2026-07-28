@@ -42,6 +42,10 @@ final class CoreBlockRenderer
             'core/list-item' => $this->listItem($attrs, $innerHtml),
             'core/cover' => $this->cover($attrs, $innerHtml),
             'core/details' => $this->details($attrs, $innerHtml),
+            'core/tabs' => $this->tabs($attrs, $innerHtml),
+            'core/tab-list' => $this->tabList($attrs),
+            'core/tab-panels' => $this->tabPanels($attrs, $innerHtml),
+            'core/tab-panel' => $this->tabPanel($attrs, $innerHtml),
             'core/media-text' => $this->mediaText($attrs, $innerHtml),
             'core/quote' => $this->quote($attrs, $innerHtml),
             'core/pullquote' => $this->pullquote($attrs),
@@ -140,6 +144,66 @@ final class CoreBlockRenderer
             new ElementNode('summary', [], [new RawNode(is_string($attrs['summary'] ?? null) ? $attrs['summary'] : '')]),
             new RawNode($inner),
         ]);
+    }
+
+    /** @param array<string,mixed> $attrs */
+    private function tabs(array $attrs, string $inner): ElementNode
+    {
+        // save(): useBlockProps.save() spread onto a plain div — anchor id
+        // first, then the generated class plus support classes/styles.
+        $initial = [];
+        if (array_key_exists('anchor', $attrs)) {
+            $initial['id'] = $attrs['anchor'] === '' ? null : $attrs['anchor'];
+        }
+        $initial['className'] = '';
+        return new ElementNode('div', $this->props('core/tabs', $attrs, $initial), [new RawNode($inner)]);
+    }
+
+    /** @param array<string,mixed> $attrs */
+    private function tabList(array $attrs): ElementNode
+    {
+        // save(): useBlockProps.save({role:'tablist'}) — the role prop lands
+        // before the generated class. Color/border/spacing are skip-serialized
+        // on the wrapper (block.json selectors target the buttons), so each
+        // button carries the classes/styles that getColorClassesAndStyles /
+        // getBorderClassesAndStyles / getSpacingClassesAndStyles produce.
+        [$colorClasses, $colorStyles] = $this->colorProps($attrs);
+        [$borderClasses, $borderStyles] = $this->borderProps($attrs);
+        $spacingStyles = $this->subsetStyles($attrs, ['spacing']);
+        $buttonClass = trim($colorClasses . ' ' . $borderClasses);
+        $buttonStyle = array_replace($colorStyles, $borderStyles, $spacingStyles);
+        $buttons = [];
+        $tabs = is_array($attrs['tabs'] ?? null) ? $attrs['tabs'] : [];
+        foreach ($tabs as $tab) {
+            $label = is_array($tab) ? ($tab['label'] ?? '') : '';
+            $buttons[] = new ElementNode('button', [
+                'className' => $buttonClass !== '' ? $buttonClass : null,
+                'style' => $buttonStyle,
+                'type' => 'button',
+                'role' => 'tab',
+            ], [new RawNode(is_string($label) ? $label : '')]);
+        }
+        return new ElementNode('div', $this->props('core/tab-list', $attrs, ['role' => 'tablist', 'className' => '']), $buttons);
+    }
+
+    /** @param array<string,mixed> $attrs */
+    private function tabPanels(array $attrs, string $inner): ElementNode
+    {
+        return new ElementNode('div', $this->props('core/tab-panels', $attrs, ['className' => '']), [new RawNode($inner)]);
+    }
+
+    /** @param array<string,mixed> $attrs */
+    private function tabPanel(array $attrs, string $inner): ElementNode
+    {
+        // save(): useBlockProps.save({role:'tabpanel', tabIndex:0}) — role and
+        // tabindex precede the anchor id and the generated class. The label
+        // attribute lives in the comment only; it never reaches the HTML.
+        $initial = ['role' => 'tabpanel', 'tabIndex' => 0];
+        if (array_key_exists('anchor', $attrs)) {
+            $initial['id'] = $attrs['anchor'] === '' ? null : $attrs['anchor'];
+        }
+        $initial['className'] = '';
+        return new ElementNode('section', $this->props('core/tab-panel', $attrs, $initial), [new RawNode($inner)]);
     }
 
     /** @param array<string,mixed> $attrs */

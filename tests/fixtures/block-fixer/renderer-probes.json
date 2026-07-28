@@ -88,8 +88,8 @@
         }
     },
     "coverage": {
-        "oracleCases": 102,
-        "staticRendererCases": 91,
+        "oracleCases": 111,
+        "staticRendererCases": 100,
         "supportedStaticBlocks": [
             "core/button",
             "core/buttons",
@@ -111,7 +111,11 @@
             "core/separator",
             "core/social-links",
             "core/spacer",
-            "core/table"
+            "core/tab-list",
+            "core/tab-panel",
+            "core/tab-panels",
+            "core/table",
+            "core/tabs"
         ],
         "probedStaticBlocks": [
             "core/button",
@@ -134,7 +138,11 @@
             "core/separator",
             "core/social-links",
             "core/spacer",
-            "core/table"
+            "core/tab-list",
+            "core/tab-panel",
+            "core/tab-panels",
+            "core/table",
+            "core/tabs"
         ],
         "uncoveredStaticBlocks": []
     },
@@ -3024,6 +3032,102 @@
             "innerSerialized": "<!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /-->",
             "saveKind": "element",
             "expected": "<ul class=\"wp-block-social-links support-probe has-border-color has-accent-border-color has-contrast-color has-vivid-cyan-blue-to-vivid-purple-gradient-background has-text-color has-background has-link-color\" id=\"support-anchor\" style=\"border-color:#123456;border-style:solid;border-width:2px;border-radius:6px;color:#111111;background:linear-gradient(red,blue);background-color:#eeeeee;min-height:10rem;width:80%;margin-top:1rem;margin-bottom:2rem;padding-right:4rem;padding-left:3rem;font-size:22px;font-weight:700;letter-spacing:.1em;line-height:1.4;text-transform:uppercase;writing-mode:vertical-rl;box-shadow:0 1px 3px #000\"><!-- wp:social-link {\"url\":\"https://wordpress.org\",\"service\":\"wordpress\"} /--></ul>"
+        },
+        {
+            "id": "tabs/inner-blocks",
+            "name": "core/tabs",
+            "attributes": {},
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-tabs\"><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "tabs/anchor-color",
+            "name": "core/tabs",
+            "attributes": {
+                "anchor": "my-tabs",
+                "backgroundColor": "base",
+                "textColor": "contrast"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div id=\"my-tabs\" class=\"wp-block-tabs has-contrast-color has-base-background-color has-text-color has-background\"><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "tabs/font",
+            "name": "core/tabs",
+            "attributes": {
+                "fontSize": "small",
+                "fontFamily": "heading"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-tabs has-heading-font-family has-small-font-size\"><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "tab-list/two-tabs",
+            "name": "core/tab-list",
+            "attributes": {
+                "tabs": [
+                    {
+                        "label": "Starters"
+                    },
+                    {
+                        "label": "Mains"
+                    }
+                ]
+            },
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div role=\"tablist\" class=\"wp-block-tab-list\"><button type=\"button\" role=\"tab\">Starters</button><button type=\"button\" role=\"tab\">Mains</button></div>"
+        },
+        {
+            "id": "tab-list/empty",
+            "name": "core/tab-list",
+            "attributes": {},
+            "innerSerialized": "",
+            "saveKind": "element",
+            "expected": "<div role=\"tablist\" class=\"wp-block-tab-list\"></div>"
+        },
+        {
+            "id": "tab-panels/inner-blocks",
+            "name": "core/tab-panels",
+            "attributes": {},
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-tab-panels\"><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "tab-panels/color",
+            "name": "core/tab-panels",
+            "attributes": {
+                "backgroundColor": "base",
+                "textColor": "contrast"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<div class=\"wp-block-tab-panels has-contrast-color has-base-background-color has-text-color has-background\"><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></div>"
+        },
+        {
+            "id": "tab-panel/labeled",
+            "name": "core/tab-panel",
+            "attributes": {
+                "label": "Starters"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<section role=\"tabpanel\" tabindex=\"0\" class=\"wp-block-tab-panel\"><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></section>"
+        },
+        {
+            "id": "tab-panel/anchor",
+            "name": "core/tab-panel",
+            "attributes": {
+                "label": "Mains",
+                "anchor": "mains-panel"
+            },
+            "innerSerialized": "<!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph -->",
+            "saveKind": "element",
+            "expected": "<section role=\"tabpanel\" tabindex=\"0\" id=\"mains-panel\" class=\"wp-block-tab-panel\"><!-- wp:paragraph -->\n<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>\n<!-- /wp:paragraph --></section>"
         }
     ]
 }

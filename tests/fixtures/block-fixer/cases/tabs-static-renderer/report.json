@@ -1,0 +1,21 @@
+{
+    "schemaVersion": 1,
+    "totals": {
+        "N": 1,
+        "M": 2,
+        "D": 0,
+        "T": 1
+    },
+    "files": [
+        {
+            "path": "parts/canonical.html",
+            "status": "ok",
+            "dropped": []
+        },
+        {
+            "path": "parts/repairs.html",
+            "status": "FIXED",
+            "dropped": []
+        }
+    ]
+}

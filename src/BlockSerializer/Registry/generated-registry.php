@@ -16,10 +16,10 @@ return [
             'icu' => '77.1',
         ],
         'counts' => [
-            'registered' => 106,
-            'supported' => 30,
-            'observed' => 31,
-            'observedRegistered' => 30,
+            'registered' => 110,
+            'supported' => 34,
+            'observed' => 35,
+            'observedRegistered' => 34,
             'observedUnregistered' => 1,
         ],
         'hookTrace' => [
@@ -12189,6 +12189,573 @@ https://example.invalid/
                 ],
             ],
         ],
+        'core/tab-list' => [
+            'apiVersion' => 3,
+            'attributeOrder' => [
+                'tabs',
+                'borderColor',
+                'backgroundColor',
+                'textColor',
+                'fontFamily',
+                'fontSize',
+                'lock',
+                'ariaLabel',
+                'className',
+                'style',
+                'layout',
+                'metadata',
+            ],
+            'attributes' => [
+                'tabs' => [
+                    'type' => 'array',
+                    'source' => 'query',
+                    'selector' => 'button',
+                    'query' => [
+                        'label' => [
+                            'type' => 'rich-text',
+                            'source' => 'rich-text',
+                            'role' => 'content',
+                        ],
+                    ],
+                    'default' => [],
+                ],
+                'borderColor' => [
+                    'type' => 'string',
+                ],
+                'backgroundColor' => [
+                    'type' => 'string',
+                ],
+                'textColor' => [
+                    'type' => 'string',
+                ],
+                'fontFamily' => [
+                    'type' => 'string',
+                ],
+                'fontSize' => [
+                    'type' => 'string',
+                ],
+                'lock' => [
+                    'type' => 'object',
+                ],
+                'ariaLabel' => [
+                    'type' => 'string',
+                ],
+                'className' => [
+                    'type' => 'string',
+                ],
+                'style' => [
+                    'type' => 'object',
+                ],
+                'layout' => [
+                    'type' => 'object',
+                ],
+                'metadata' => [
+                    'type' => 'object',
+                ],
+            ],
+            'supports' => [
+                'html' => false,
+                'ariaLabel' => true,
+                'visibility' => false,
+                'lock' => false,
+                'color' => [
+                    'background' => true,
+                    'text' => true,
+                    '__experimentalSkipSerialization' => true,
+                    '__experimentalDefaultControls' => [
+                        'background' => true,
+                        'text' => true,
+                    ],
+                ],
+                'typography' => [
+                    'fontSize' => true,
+                    '__experimentalFontFamily' => true,
+                ],
+                '__experimentalBorder' => [
+                    'color' => true,
+                    'radius' => true,
+                    'style' => true,
+                    'width' => true,
+                    '__experimentalSkipSerialization' => true,
+                ],
+                'layout' => [
+                    'default' => [
+                        'type' => 'flex',
+                        'flexWrap' => 'wrap',
+                    ],
+                    'allowVerticalAlignment' => false,
+                    'allowOrientation' => false,
+                    'allowWrap' => false,
+                ],
+                'spacing' => [
+                    'padding' => true,
+                    'blockGap' => true,
+                    '__experimentalSkipSerialization' => [
+                        'padding',
+                    ],
+                    '__experimentalDefaultControls' => [
+                        'padding' => true,
+                        'blockGap' => true,
+                    ],
+                ],
+            ],
+            'sourceInventory' => [
+                [
+                    'attributePath' => 'tabs',
+                    'source' => 'query',
+                    'selector' => 'button',
+                    'attribute' => null,
+                    'type' => 'array',
+                ],
+                [
+                    'attributePath' => 'tabs[].label',
+                    'source' => 'rich-text',
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'rich-text',
+                ],
+                [
+                    'attributePath' => 'borderColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'backgroundColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'textColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontFamily',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontSize',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'lock',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'ariaLabel',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'className',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'style',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'layout',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'metadata',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+            ],
+            'saveProbes' => [
+                'default' => [
+                    'kind' => 'element',
+                    'attributes' => [
+                        'tabs' => [],
+                    ],
+                    'saveContent' => '<div role="tablist" class="wp-block-tab-list"></div>',
+                    'serialized' => '<!-- wp:tab-list -->
+<div role="tablist" class="wp-block-tab-list"></div>
+<!-- /wp:tab-list -->',
+                ],
+                'innerBlocks' => [
+                    'kind' => 'inner-blocks',
+                    'attributes' => [
+                        'tabs' => [],
+                    ],
+                    'saveContent' => '<div role="tablist" class="wp-block-tab-list"></div>',
+                    'serialized' => '<!-- wp:tab-list -->
+<div role="tablist" class="wp-block-tab-list"></div>
+<!-- /wp:tab-list -->',
+                ],
+            ],
+        ],
+        'core/tab-panel' => [
+            'apiVersion' => 3,
+            'attributeOrder' => [
+                'label',
+                'backgroundColor',
+                'textColor',
+                'fontFamily',
+                'fontSize',
+                'lock',
+                'anchor',
+                'className',
+                'style',
+                'layout',
+                'metadata',
+            ],
+            'attributes' => [
+                'label' => [
+                    'type' => 'string',
+                    'default' => '',
+                ],
+                'backgroundColor' => [
+                    'type' => 'string',
+                ],
+                'textColor' => [
+                    'type' => 'string',
+                ],
+                'fontFamily' => [
+                    'type' => 'string',
+                ],
+                'fontSize' => [
+                    'type' => 'string',
+                ],
+                'lock' => [
+                    'type' => 'object',
+                ],
+                'anchor' => [
+                    'type' => 'string',
+                ],
+                'className' => [
+                    'type' => 'string',
+                ],
+                'style' => [
+                    'type' => 'object',
+                ],
+                'layout' => [
+                    'type' => 'object',
+                ],
+                'metadata' => [
+                    'type' => 'object',
+                ],
+            ],
+            'supports' => [
+                'anchor' => true,
+                'html' => false,
+                'color' => [
+                    'background' => true,
+                    'text' => true,
+                    '__experimentalDefaultControls' => [
+                        'background' => true,
+                        'text' => true,
+                    ],
+                ],
+                'layout' => true,
+                'spacing' => [
+                    'blockGap' => true,
+                    'padding' => true,
+                ],
+                'typography' => [
+                    'fontSize' => true,
+                    '__experimentalFontFamily' => true,
+                    '__experimentalDefaultControls' => [
+                        'fontSize' => true,
+                        '__experimentalFontFamily' => true,
+                    ],
+                ],
+                'visibility' => false,
+            ],
+            'sourceInventory' => [
+                [
+                    'attributePath' => 'label',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'backgroundColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'textColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontFamily',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontSize',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'lock',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'anchor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'className',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'style',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'layout',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'metadata',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+            ],
+            'saveProbes' => [
+                'default' => [
+                    'kind' => 'element',
+                    'attributes' => [
+                        'label' => '',
+                    ],
+                    'saveContent' => '<section role="tabpanel" tabindex="0" class="wp-block-tab-panel"></section>',
+                    'serialized' => '<!-- wp:tab-panel -->
+<section role="tabpanel" tabindex="0" class="wp-block-tab-panel"></section>
+<!-- /wp:tab-panel -->',
+                ],
+                'innerBlocks' => [
+                    'kind' => 'inner-blocks',
+                    'attributes' => [
+                        'label' => '',
+                    ],
+                    'saveContent' => '<section role="tabpanel" tabindex="0" class="wp-block-tab-panel"><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></section>',
+                    'serialized' => '<!-- wp:tab-panel -->
+<section role="tabpanel" tabindex="0" class="wp-block-tab-panel"><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></section>
+<!-- /wp:tab-panel -->',
+                ],
+            ],
+        ],
+        'core/tab-panels' => [
+            'apiVersion' => 3,
+            'attributeOrder' => [
+                'borderColor',
+                'backgroundColor',
+                'textColor',
+                'fontFamily',
+                'fontSize',
+                'lock',
+                'className',
+                'style',
+                'metadata',
+            ],
+            'attributes' => [
+                'borderColor' => [
+                    'type' => 'string',
+                ],
+                'backgroundColor' => [
+                    'type' => 'string',
+                ],
+                'textColor' => [
+                    'type' => 'string',
+                ],
+                'fontFamily' => [
+                    'type' => 'string',
+                ],
+                'fontSize' => [
+                    'type' => 'string',
+                ],
+                'lock' => [
+                    'type' => 'object',
+                ],
+                'className' => [
+                    'type' => 'string',
+                ],
+                'style' => [
+                    'type' => 'object',
+                ],
+                'metadata' => [
+                    'type' => 'object',
+                ],
+            ],
+            'supports' => [
+                'html' => false,
+                'visibility' => false,
+                'lock' => false,
+                'color' => [
+                    'background' => true,
+                    'text' => true,
+                    'heading' => true,
+                    'link' => true,
+                    '__experimentalDefaultControls' => [
+                        'background' => true,
+                        'text' => true,
+                    ],
+                ],
+                'spacing' => [
+                    'padding' => true,
+                ],
+                'typography' => [
+                    'fontSize' => true,
+                    '__experimentalFontFamily' => true,
+                ],
+                '__experimentalBorder' => [
+                    'radius' => true,
+                    'color' => true,
+                    'width' => true,
+                    'style' => true,
+                ],
+            ],
+            'sourceInventory' => [
+                [
+                    'attributePath' => 'borderColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'backgroundColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'textColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontFamily',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontSize',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'lock',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'className',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'style',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'metadata',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+            ],
+            'saveProbes' => [
+                'default' => [
+                    'kind' => 'element',
+                    'attributes' => [],
+                    'saveContent' => '<div class="wp-block-tab-panels"></div>',
+                    'serialized' => '<!-- wp:tab-panels -->
+<div class="wp-block-tab-panels"></div>
+<!-- /wp:tab-panels -->',
+                ],
+                'innerBlocks' => [
+                    'kind' => 'inner-blocks',
+                    'attributes' => [],
+                    'saveContent' => '<div class="wp-block-tab-panels"><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></div>',
+                    'serialized' => '<!-- wp:tab-panels -->
+<div class="wp-block-tab-panels"><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></div>
+<!-- /wp:tab-panels -->',
+                ],
+            ],
+        ],
         'core/table' => [
             'apiVersion' => 3,
             'attributeOrder' => [
@@ -12769,6 +13336,220 @@ https://example.invalid/
 <figure class="wp-block-table"><table class="has-fixed-layout"><tbody><tr><td>Probe</td></tr></tbody></table></figure>
 <!-- /wp:table -->',
                     ],
+                ],
+            ],
+        ],
+        'core/tabs' => [
+            'apiVersion' => 3,
+            'attributeOrder' => [
+                'activeTabIndex',
+                'editorActiveTabIndex',
+                'backgroundColor',
+                'textColor',
+                'fontFamily',
+                'fontSize',
+                'align',
+                'lock',
+                'anchor',
+                'className',
+                'style',
+                'layout',
+                'metadata',
+            ],
+            'attributes' => [
+                'activeTabIndex' => [
+                    'type' => 'number',
+                    'default' => 0,
+                ],
+                'editorActiveTabIndex' => [
+                    'type' => 'number',
+                    'role' => 'local',
+                ],
+                'backgroundColor' => [
+                    'type' => 'string',
+                ],
+                'textColor' => [
+                    'type' => 'string',
+                ],
+                'fontFamily' => [
+                    'type' => 'string',
+                ],
+                'fontSize' => [
+                    'type' => 'string',
+                ],
+                'align' => [
+                    'type' => 'string',
+                    'enum' => [
+                        'left',
+                        'center',
+                        'right',
+                        'wide',
+                        'full',
+                        '',
+                    ],
+                ],
+                'lock' => [
+                    'type' => 'object',
+                ],
+                'anchor' => [
+                    'type' => 'string',
+                ],
+                'className' => [
+                    'type' => 'string',
+                ],
+                'style' => [
+                    'type' => 'object',
+                ],
+                'layout' => [
+                    'type' => 'object',
+                ],
+                'metadata' => [
+                    'type' => 'object',
+                ],
+            ],
+            'supports' => [
+                'align' => true,
+                'anchor' => true,
+                'color' => [
+                    'text' => true,
+                    'background' => true,
+                    '__experimentalDefaultControls' => [
+                        'text' => true,
+                        'background' => true,
+                    ],
+                ],
+                'layout' => [
+                    'allowEditing' => false,
+                ],
+                'html' => false,
+                'interactivity' => true,
+                'spacing' => [
+                    'blockGap' => true,
+                    'margin' => true,
+                    'padding' => true,
+                ],
+                'typography' => [
+                    'fontSize' => true,
+                    '__experimentalFontFamily' => true,
+                ],
+            ],
+            'sourceInventory' => [
+                [
+                    'attributePath' => 'activeTabIndex',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'number',
+                ],
+                [
+                    'attributePath' => 'editorActiveTabIndex',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'number',
+                ],
+                [
+                    'attributePath' => 'backgroundColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'textColor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontFamily',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'fontSize',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'align',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'lock',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'anchor',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'className',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'string',
+                ],
+                [
+                    'attributePath' => 'style',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'layout',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+                [
+                    'attributePath' => 'metadata',
+                    'source' => null,
+                    'selector' => null,
+                    'attribute' => null,
+                    'type' => 'object',
+                ],
+            ],
+            'saveProbes' => [
+                'default' => [
+                    'kind' => 'element',
+                    'attributes' => [
+                        'activeTabIndex' => 0,
+                    ],
+                    'saveContent' => '<div class="wp-block-tabs"></div>',
+                    'serialized' => '<!-- wp:tabs -->
+<div class="wp-block-tabs"></div>
+<!-- /wp:tabs -->',
+                ],
+                'innerBlocks' => [
+                    'kind' => 'inner-blocks',
+                    'attributes' => [
+                        'activeTabIndex' => 0,
+                    ],
+                    'saveContent' => '<div class="wp-block-tabs"><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></div>',
+                    'serialized' => '<!-- wp:tabs -->
+<div class="wp-block-tabs"><!-- wp:paragraph -->
+<p>BLOCK_FIXER_INNER_SENTINEL_7f69d59a</p>
+<!-- /wp:paragraph --></div>
+<!-- /wp:tabs -->',
                 ],
             ],
         ],
@@ -25991,6 +26772,22 @@ https://example.invalid/
             'strategy' => 'STATIC_RENDERER',
         ],
         [
+            'name' => 'core/tabs',
+            'strategy' => 'STATIC_RENDERER',
+        ],
+        [
+            'name' => 'core/tab-list',
+            'strategy' => 'STATIC_RENDERER',
+        ],
+        [
+            'name' => 'core/tab-panels',
+            'strategy' => 'STATIC_RENDERER',
+        ],
+        [
+            'name' => 'core/tab-panel',
+            'strategy' => 'STATIC_RENDERER',
+        ],
+        [
             'name' => 'core/media-text',
             'strategy' => 'STATIC_RENDERER',
         ],
@@ -26090,7 +26887,11 @@ https://example.invalid/
         'core/social-link',
         'core/social-links',
         'core/spacer',
+        'core/tab-list',
+        'core/tab-panel',
+        'core/tab-panels',
         'core/table',
+        'core/tabs',
         'core/template-part',
     ],
 ];

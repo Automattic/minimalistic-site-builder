@@ -129,5 +129,7 @@ test('closed selector grammar compiles every selector in the frozen registered u
         Selector::compile($selector);
     }
 
-    assert_eq(31, count($selectors), 'snapshot selector inventory changed');
+    // 32 = the 31 oracle-frozen selectors plus `button`, introduced by the
+    // core/tab-list `tabs` query source (Tabs-family amendment).
+    assert_eq(32, count($selectors), 'snapshot selector inventory changed');
 });

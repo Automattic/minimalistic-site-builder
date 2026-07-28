@@ -53,14 +53,14 @@
     "generatorVersion": "1.0.0",
     "generatorSourceSha256": "f7618fd0807aab8770ffab44c5fc2405c2ef6caa37721e016c570957862847ee",
     "runtimeJsonSha256": "35dc1ee429d5194f4ba59d1dfbc69c30b66f76291beb52f08709e42566d5e716",
-    "generatedPhpSha256": "ed3710cf608f7575ba138ef1e825bf093f6f535f453dd9ba936a291382d3a3a6",
+    "generatedPhpSha256": "de95f757f6d640acd845364471cdde4e64063992fd05fb224864683c05330d94",
     "registeredSnapshotSha256": "8aff8e7704a773d322624ffe216de635863f7ad93783308aa135d894410e4dc0",
     "hookTraceSha256": "718a6d2f635b3eb512a996fe3005e2312cbbadddd5f411fb847469b9c0bae4d4",
     "counts": {
-      "registered": 106,
-      "supported": 30,
-      "observed": 31,
-      "observedRegistered": 30,
+      "registered": 110,
+      "supported": 34,
+      "observed": 35,
+      "observedRegistered": 34,
       "observedUnregistered": 1
     }
   },
@@ -85,6 +85,10 @@
     {
       "commit": "b580c20",
       "summary": "Handle custom-site block signatures; adds core/details as a STATIC_RENDERER certified by the abcf523 saveProbes plus @wordpress/block-library@9.42.0 details/save.js (see cases/details-static-renderer)."
+    },
+    {
+      "commit": "add/core-tabs-support",
+      "summary": "Add the core Tabs family (core/tabs, core/tab-list, core/tab-panels, core/tab-panel) as STATIC_RENDERERs. Post-oracle domain extension certified against the real Gutenberg 23.6 runtime (@wordpress/blocks@15.24.0 + @wordpress/block-library@10.2.0, where the family first ships stable): registered definitions, attribute order, supports, saveProbes, and the nine tabs/* renderer probes are that runtime's actual output; save.js reviewed at tag v23.6.0. Adds the `button` selector to the closed selector grammar. See cases/tabs-static-renderer."
     }
   ],
   "amendmentPolicy": "registry.generatedPhpSha256 and registry.runtimeJsonSha256 are re-frozen hashes of the committed artifacts, enforced by tests/unit/oracle_manifest_consistency_test.php. Any post-oracle edit to those artifacts must be listed here with its certification evidence and must ship an end-to-end golden case; see docs/block-fixer-oracle.md for regeneration."
