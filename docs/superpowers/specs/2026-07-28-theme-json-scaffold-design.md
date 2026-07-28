@@ -121,14 +121,27 @@ contradict it.
 
 ## Expected outcome
 
-| | model writes | est. step | cut |
-|---|---|---|---|
-| today | 8,811 B | ~90s | — |
-| after (wiring-only scaffold) | ~6,771 B | ~69s | ~23% |
+Projected ~23% from byte counts. **Measured on `lucid-cedar` (2026-07-28), the first
+build on the finished branch:**
 
-Revised down from an earlier ~40% estimate: that figure assumed a decorated scaffold displacing the model's block styling. Wiring-only deliberately gives that up, and since `styles.blocks` stays schema-open the model may still decorate. The saving now comes from `styles.color`, `styles.typography`, the h1/h2/h3 wiring, h4–h6 and caption.
+| | output tokens | step time |
+|---|---|---|
+| baseline, mean of 32 builds | 8,192 | 72.8s |
+| `lucid-cedar` | 3,712 | 57.5s |
+| cut | **55%** | 21% |
 
-These are arithmetic projections from byte counts assuming emission time scales with length. A real build is needed to confirm.
+Token count is the honest measure — emission is the bottleneck, and wall time carries
+network and load noise. The 55% beat the projection because the saving did not come from
+where the estimate assumed. The model still emits `h1`–`h6` entries despite the prompt
+asking it not to; what it stopped emitting is the *contents* — `fontFamily` and `fontSize`
+are gone, and only taste keys (`fontWeight`, `letterSpacing`, `lineHeight`) remain. The
+suppression works per key, not per element, which turns out to be worth more than
+displacing whole elements would have been.
+
+One caveat on the run: `warm-maple`, built minutes earlier, is **not** valid evidence for
+this branch — its theme-json step executed 17 seconds before the review-fix commit, so it
+carries the pre-fix scaffold (h1–h3 colored `primary`). Only `lucid-cedar` exercises the
+shipped code.
 
 ## Risks and integration points
 
