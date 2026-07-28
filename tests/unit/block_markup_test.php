@@ -43,6 +43,8 @@ test('parse flags a closer that crosses a still-open child block', function () {
 
     assert_true($doc->hasMismatchedDelimiters());
     assert_eq([], $doc->unclosedIndices(), 'the tolerant parser consumed both frames');
+    assert_eq(null, $doc->endOffset(0), 'a crossed closer is not a safe endpoint');
+    assert_eq(null, $doc->endOffset(1), 'the crossed child is not complete either');
 });
 
 test('parse flags a nested crossed closer even when an ancestor remains open', function () {
@@ -52,6 +54,91 @@ test('parse flags a nested crossed closer even when an ancestor remains open', f
 
     assert_true($doc->hasMismatchedDelimiters());
     assert_eq([0], $doc->unclosedIndices(), 'the root remains independently unclosed');
+});
+
+test('a crossed child taints an ancestor even when that ancestor later closes', function () {
+    $doc = BlockMarkup::parse(
+        '<!-- wp:group --><!-- wp:columns --><!-- wp:paragraph --><p>cut'
+        . '<!-- /wp:columns --><!-- /wp:group -->'
+    );
+
+    assert_true($doc->hasMismatchedDelimiters());
+    assert_eq([], $doc->unclosedIndices());
+    assert_eq(null, $doc->endOffset(0), 'the later group closer cannot make its subtree safe');
+    assert_eq(null, $doc->endOffset(1), 'the crossed columns frame is unsafe');
+    assert_eq(null, $doc->endOffset(2), 'the crossed paragraph frame is unsafe');
+});
+
+test('a closer with self-closing syntax is malformed and cannot end a block', function () {
+    $closer = '<!-- /wp:paragraph /-->';
+    $source = '<!-- wp:paragraph --><p>Text</p>' . $closer;
+    $doc = BlockMarkup::parse($source);
+
+    assert_true($doc->hasMismatchedDelimiters());
+    assert_true($doc->hasMalformedDelimiters());
+    assert_eq([0], $doc->unclosedIndices());
+    assert_eq(null, $doc->endOffset(0));
+    assert_eq([strlen('<!-- wp:paragraph --><p>Text</p>')], $doc->malformedDelimiterOffsets());
+});
+
+test('attributes require the same suffix whitespace as the pinned parser', function () {
+    $source = '<!-- wp:paragraph {"dropCap":true}-->';
+    $doc = BlockMarkup::parse($source);
+
+    assert_eq([], $doc->indices());
+    assert_true($doc->hasMalformedDelimiters());
+    assert_eq([0], $doc->malformedDelimiterOffsets());
+});
+
+test('a grammar-rejected delimiter makes its containing block unsafe', function () {
+    $open = '<!-- wp:group -->';
+    $malformed = '<!-- wp:paragraph {"broken":1 -->';
+    $source = $open . '<div>' . $malformed . '</div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($source);
+
+    assert_true($doc->hasMalformedDelimiters());
+    assert_eq([strlen($open . '<div>')], $doc->malformedDelimiterOffsets());
+    assert_eq(null, $doc->endOffset(0), 'a malformed descendant invalidates the enclosing span');
+});
+
+test('marker-shaped text inside a consumed attribute delimiter is not malformed', function () {
+    $source = '<!-- wp:paragraph {"metadata":{"name":"Use <!-- wp:group"}} -->'
+        . '<p>Text</p><!-- /wp:paragraph -->';
+    $doc = BlockMarkup::parse($source);
+
+    assert_true(!$doc->hasMalformedDelimiters());
+    assert_eq(strlen($source), $doc->endOffset(0));
+});
+
+test('invalid delimiter JSON cannot create a safe block span', function () {
+    $source = '<!-- wp:group {"tagName":"section","broken": } -->'
+        . '<div></div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($source);
+
+    assert_true($doc->hasMalformedDelimiters());
+    assert_eq([0], $doc->malformedDelimiterOffsets());
+    assert_eq(null, $doc->endOffset(0));
+});
+
+test('JSON.parse-compatible lone surrogates keep delimiter spans structurally safe', function () {
+    $source = '<!-- wp:group --><div>'
+        . '<!-- wp:paragraph {"metadata":{"name":"\\ud800"}} -->'
+        . '<p>Text</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($source);
+
+    assert_true(!$doc->hasMalformedDelimiters());
+    assert_true($doc->endOffset(1) !== null, 'the nested child has a safe endpoint');
+    assert_eq(strlen($source), $doc->endOffset(0));
+
+    $attrs = $doc->attrs(1);
+    assert_true(is_array($attrs), 'valid JS-compatible attrs remain editable');
+    $attrs['dropCap'] = true;
+    $doc->setAttrs(1, $attrs);
+    $rendered = $doc->render();
+    assert_contains('\\ud800', $rendered, 'editing preserves the lone surrogate');
+    assert_contains('"dropCap":true', $rendered);
+    assert_true(!BlockMarkup::parse($rendered)->hasMalformedDelimiters());
 });
 
 test('render is byte-identical without mutations', function () {
@@ -138,4 +225,32 @@ test('serializeComment escapes like WP serialize_block_attributes', function () 
     assert_eq($expected, BlockMarkup::serializeComment('paragraph', ['content' => 'a -- b < i >'], false));
     assert_eq('<!-- wp:spacer {"height":"40px"} /-->', BlockMarkup::serializeComment('spacer', ['height' => '40px'], true));
     assert_eq('<!-- wp:paragraph -->', BlockMarkup::serializeComment('paragraph', [], false));
+});
+
+test('endOffset exposes exact spans: past the closer, past a void delimiter, null when unclosed', function () {
+    $group = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:spacer {"height":"40px"} /-->'
+        . '</div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($group . "\ntrailing prose");
+    // Closed block: end lands just past its closing comment.
+    assert_eq(strlen($group), $doc->endOffset(0));
+    assert_eq($group, substr($group . "\ntrailing prose", $doc->openingOffset(0), $doc->endOffset(0)));
+    // Void block: end lands just past its self-closing delimiter.
+    $void = '<!-- wp:spacer {"height":"40px"} /-->';
+    assert_eq($doc->openingOffset(1) + strlen($void), $doc->endOffset(1));
+
+    // Unclosed block: no exact end.
+    $open = BlockMarkup::parse('<!-- wp:group --><div class="wp-block-group">');
+    assert_eq(null, $open->endOffset(0));
+});
+
+test('endOffset matches each closer for nested blocks with the same name', function () {
+    $outerOpen = '<!-- wp:group -->';
+    $inner = '<!-- wp:group --><div></div><!-- /wp:group -->';
+    $outerClose = '<!-- /wp:group -->';
+    $source = $outerOpen . $inner . $outerClose;
+    $doc = BlockMarkup::parse($source);
+
+    assert_eq(strlen($outerOpen . $inner), $doc->endOffset(1));
+    assert_eq(strlen($source), $doc->endOffset(0));
 });

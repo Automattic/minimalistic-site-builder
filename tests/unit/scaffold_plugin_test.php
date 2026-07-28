@@ -2,9 +2,56 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
+
+require_once __DIR__ . '/../wp-html-api.php';
+
+/**
+ * Assert that an HTML string carries nothing a browser would execute.
+ *
+ * Uses the HTML API as the oracle rather than a regex: `<script` and
+ * `href="javascript:..."` both appear harmlessly as prose in this corpus, and
+ * a string match calls those a leak.
+ */
+function assert_inert(string $html, string $context): void
+{
+    $processor = WP_HTML_Processor::create_fragment($html);
+    assert_true($processor !== null, "{$context}: output is parseable");
+    if ($processor === null) {
+        return;
+    }
+    $urls = array_merge(wp_kses_uri_attributes(), ['xlink:href']);
+    while ($processor->next_tag()) {
+        if ($processor->get_tag() === 'SCRIPT') {
+            assert_eq('text/plain', $processor->get_attribute('type'), "{$context}: script is inert");
+            assert_eq('', $processor->get_modifiable_text(), "{$context}: script body is empty");
+        }
+        foreach ((array) $processor->get_attribute_names_with_prefix('on') as $name) {
+            assert_true(false, "{$context}: event handler {$name} survived");
+        }
+        foreach ($urls as $name) {
+            $value = $processor->get_attribute($name);
+            assert_true(
+                !is_string($value) || !preg_match('/\\A\\s*(?:javascript|vbscript|data)\\s*:/i', $value),
+                "{$context}: executable URL survived in {$name}",
+            );
+        }
+        // SVG SMIL animation sets a sibling attribute's live value from
+        // `values`/`to`/`from`/`by`, so an animation element that still
+        // targets an attribute is live code the URL sweep above never sees.
+        if (in_array($processor->get_tag(), ['ANIMATE', 'ANIMATETRANSFORM', 'ANIMATEMOTION', 'SET'], true)) {
+            foreach (['attributeName', 'values', 'to', 'from', 'by'] as $name) {
+                assert_true(
+                    $processor->get_attribute($name) === null,
+                    "{$context}: SVG animation attribute {$name} survived",
+                );
+            }
+        }
+    }
+}
 
 /**
  * Unit tests for the content-seeder plugin: the deterministic scaffold, the
@@ -254,7 +301,104 @@ test('two generated sites define disjoint symbols and can coexist on one host', 
     exec('rm -rf ' . escapeshellarg($b[1]));
 });
 
+test('generated seeder neutralizes the same threats as the intake sanitizer', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'sanitizer-parity';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $corpus = [
+        '<img src=x onerror="E()">',
+        '<svg/onload=E()>',
+        '<svg id="x"/onload=\'E()\'>',
+        '<div class="x"onclick=E()>',
+        '<div id=a onload="x"class=y>t</div>',
+        '<div id=a onload="x"onclick="y"class=z>t</div>',
+        '<svg =" /onload=E()>',
+        '<a href=javascript:alert(1)>x</a>',
+        '<a/href=javascript:alert(1)>x</a>',
+        '<a href="java&#x73;cript:alert(1)">x</a>',
+        '<a href=jav&#97;script:alert(1)>x</a>',
+        '<a href=javascript&colon;alert(1)>x</a>',
+        "<a href=\"java\tscript:alert(1)\">x</a>",
+        '<a href="java&#9;script:alert(1)">x</a>',
+        '<img src=data:text/html,x>',
+        '<form action=vbscript:x></form>',
+        '<svg><a xlink:href=data:text/html,x>x</a></svg>',
+        '<a =" /href=javascript:E()>x</a>',
+        '<img src=x/onerror=not-an-attr>',
+        '<a href="https://example.com">safe</a>',
+        '<a href="&amp;#106;avascript:x">one decode only</a>',
+        '<!-- href="javascript:x" --> prose href="javascript:x"',
+        '<script><!--<script></script><!-- wp:paragraph --><p>Fake</p><!-- /wp:paragraph --></script><p>After</p>',
+        // Tokenizer boundaries. Each of these is inert in a browser only if
+        // both copies agree on where the tag, the bogus comment, the CDATA,
+        // and the raw-text body start and end.
+        '<p>a < b <script>E()</script></p>',
+        '<p>x < y <base href="https://evil.example/">z</p>',
+        '<div><![CDATA[><script>E()</script>]]></div>',
+        '<div><![CDATA[x> <img src=x onerror=E()></div>',
+        '<div><![CDATA[ never closed <img src=x onerror=E()>',
+        '<div><! " ><img src=x onerror=E()> " ></div>',
+        '<div><!bogus <img src=x onerror=E()>',
+        '<svg><title><img src=x onerror=E()></title></svg>',
+        '<svg><style><img src=x onerror=E()></style></svg>',
+        '<svg><foreignObject><iframe srcdoc="&lt;script&gt;E()&lt;/script&gt;"></iframe></foreignObject></svg>',
+        '<svg/><title>a <b> b</title><img src=x onerror=E()>',
+        '<svg><![CDATA[<img src=x onerror=E()>]]></svg>',
+        '<math><mtext><img src=x onerror=E()></mtext></math>',
+        '<title>a <b> b</title><img src=x onerror=E()>',
+        '</ b ><script>E()</script>',
+        '<p>a</ b <script>E()</script></p>',
+        '<div><svg><script>E()</script></svg></div>',
+        '<xmp><img src=x onerror=E()></xmp>',
+        // A comment ends at -->, at --!>, and immediately for <!--> / <!--->.
+        '<div><!--><script>E()</script></div>',
+        '<div><!---><script>E()</script></div>',
+        '<div><!----><script>E()</script></div>',
+        '<div><!-- c --!><script>E()</script></div>',
+        '<div><!-- c --><script>E()</script></div>',
+        '<div><!-- never closed <script>E()</script>',
+        '<p>a<!-->b</p><a href=javascript:E()>x</a>',
+        '<!-- wp:paragraph --><p>a</p><!-- /wp:paragraph --><!--><img src=x onerror=E()>',
+        // Foreign-content breakout, and raw-text bodies vs tag removal.
+        '<div><svg><p><![CDATA[x><img src=q onerror=E()>]]></svg></div>',
+        '<div><svg><![CDATA[x><img src=q onerror=E()>]]></svg></div>',
+        '<div><svg><![CDATA[x> <img src=q onerror=E()></div>',
+        '<div><svg><div><![CDATA[x><base href="//evil/">]]></svg></div>',
+        '<svg><img src=x onerror=E()><title><b>t</b></title></svg>',
+        '<div><style>a{c:"<!--"}</style><base href="//evil/"></div>',
+        '<div><title><!--</title><embed src=x></div>',
+        '<div><textarea><!--</textarea><base href="//evil/"></div>',
+        '<style>a{c:"<base>"}</style>',
+        // SVG SMIL animation of a sibling attribute to a javascript: value.
+        '<svg><a href="#"><animate attributeName="href" values="javascript:E()"/><text>x</text></a></svg>',
+        '<svg><a href="#"><set attributeName="href" to="javascript:E()"/><text>x</text></a></svg>',
+        '<svg><rect><animatetransform attributeName="href" from="javascript:E()"/></rect></svg>',
+    ];
+    foreach ($corpus as $html) {
+        // The two no longer agree byte-for-byte and are not meant to: the
+        // build has no WordPress and scans the markup itself, while the seeder
+        // drives WP_HTML_Processor. What has to hold on both is that nothing
+        // executable survives, so that is what is asserted.
+        foreach ([
+            'intake' => MarkupSanitizer::sanitize($html),
+            'seeder' => $sanitize($html),
+        ] as $which => $out) {
+            assert_inert($out, "{$which}: {$html}");
+        }
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('the seeder plugin creates, fronts, and removes the site pages', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
     $slug = 'seeder-pages';
     [$project, $tmp] = scaffold_plugin_fixture($slug);
 
@@ -274,7 +418,13 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     // build-check gap) could carry; seeding must strip them, not store them.
     $project->writeText('plugin/pages/menu.html', '<!-- wp:heading --><h2 onclick="alert(1)">Menu</h2><!-- /wp:heading -->' . "\n"
         . '<!-- wp:html --><script>alert(2)</script><!-- /wp:html -->' . "\n"
-        . '<!-- wp:paragraph --><p><a href="javascript:alert(3)">Specials</a> and <a href="/breads/">breads</a>, come on in=side</p><!-- /wp:paragraph -->');
+        . '<!-- wp:paragraph --><p><a href="javascript:alert(3)">Specials</a> and <a href="/breads/">breads</a>, come on in=side</p><!-- /wp:paragraph -->'
+        . "\n<object><object>inner</object>nested_object_body()</object>"
+        . "\n<script data-x=\"</script>\">quoted_script_body()</script>"
+        . "\n<noscript>noscript_body()</noscript>"
+        . "\n<img src=x\" onerror=malformed_handler()>"
+        . "\n<script data-x=foo\"><span x=\">malformed_attribute_body()</script>"
+        . "\n<script>unterminated_script_body()");
     $project->writeText('plugin/pages/breads.html', '<!-- wp:heading --><h2>Breads</h2><!-- /wp:heading -->');
     // The content-image bundle: hero.jpg shipped; never-generated.jpg listed
     // but absent (a build without --with-images), so it must fall back to the
@@ -336,9 +486,18 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
 
     // Script-capable markup was stripped before storage; content is intact.
     $menuContent = $byName['menu']['post_content'];
-    assert_true(!str_contains($menuContent, '<script'), 'script element removed');
+    // Neutralized in place, not deleted: deleting a tag joins its
+    // neighbours, and that seam can spell a tag the browser never parsed.
+    assert_inert($menuContent, 'seeded menu page');
+    assert_true(!str_contains($menuContent, 'alert(2)'), 'script body removed');
     assert_true(!str_contains($menuContent, 'onclick'), 'event handler removed');
     assert_true(!str_contains($menuContent, 'javascript:'), 'executable URL neutralized');
+    assert_true(!str_contains($menuContent, 'unterminated_script_body'), 'unclosed script body removed');
+    assert_true(!str_contains($menuContent, 'nested_object_body'), 'nested object body removed');
+    assert_true(!str_contains($menuContent, 'quoted_script_body'), 'a quoted fake closer cannot expose a script body');
+    assert_true(!str_contains($menuContent, 'noscript_body'), 'noscript fallback body removed');
+    assert_true(!str_contains($menuContent, 'malformed_handler'), 'malformed unquoted attribute cannot hide an event handler');
+    assert_true(!str_contains($menuContent, 'malformed_attribute_body'), 'malformed attribute quote state cannot expose a script body');
     assert_contains('come on in=side', $menuContent, 'prose is untouched');
     assert_contains('href="/breads/"', $menuContent, 'legitimate links survive');
     assert_contains('<!-- wp:html -->', $menuContent, 'block comments survive');
@@ -380,3 +539,54 @@ test('the seeder plugin creates, fronts, and removes the site pages', function (
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('the seeder reports when it degrades or refuses to store markup', function () {
+    if (!load_wp_html_api()) {
+        skip_test('no WordPress copy found for the HTML API; set SITEBUILD_WP_PATH');
+    }
+    $slug = 'seeder-logging';
+    [$project, $tmp] = scaffold_plugin_fixture($slug);
+    require_once $project->pluginPath('site-content.php');
+    $sanitize = content_fn($slug, 'sanitize');
+
+    $log = $tmp . '/php-error.log';
+    $previous = ini_get('error_log');
+    ini_set('error_log', $log);
+    $read = static function () use ($log): string {
+        return is_file($log) ? (string) file_get_contents($log) : '';
+    };
+
+    // A clean page says nothing: the log is for problems only.
+    $sanitize('<!-- wp:paragraph --><p>Fine.</p><!-- /wp:paragraph -->', "page 'clean'");
+    assert_eq('', $read(), 'a clean page logs nothing');
+
+    // Which pathological input trips which internal limit is a WordPress
+    // implementation detail — <plaintext> is unsupported, and the tree
+    // processor's bookmark ceiling moved between 6.9 and 7.0. So assert the
+    // contract rather than the trigger: nothing executable is ever stored,
+    // refusing to store says so, and every note names the page.
+    $pathological = [
+        '<plaintext><img src=x onerror="E()">',
+        str_repeat('<div>', 200) . '<img src=x onerror="E()">',
+        str_repeat('<a', 12),
+        '<svg><title><img src=x onerror="E()"></title></svg>',
+    ];
+    foreach ($pathological as $i => $html) {
+        file_put_contents($log, '');
+        $out = $sanitize($html, "page 'p{$i}'");
+
+        assert_true(!str_contains($out, 'onerror='), "case {$i}: no handler stored");
+        if ($out === '') {
+            assert_contains(
+                'stored empty rather than unreviewed markup',
+                $read(),
+                "case {$i}: refusing to store is reported",
+            );
+        }
+        if ($read() !== '') {
+            assert_contains("page 'p{$i}'", $read(), "case {$i}: the note names the page");
+        }
+    }
+
+    ini_set('error_log', (string) $previous);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

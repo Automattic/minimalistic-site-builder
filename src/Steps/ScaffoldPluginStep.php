@@ -64,7 +64,7 @@ final class ScaffoldPluginStep implements Step
          * Plugin Name: {{THEME_NAME}} Content
          * Description: Seeds the generated content for {{THEME_NAME}}: creates the site pages on activation and removes them on deactivation.
          * Version: 0.1.0
-         * Requires at least: 6.5
+         * Requires at least: 6.7
          * Requires PHP: 7.4
          * License: GNU General Public License v2 or later
          * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -153,7 +153,7 @@ final class ScaffoldPluginStep implements Step
                     trailingslashit(get_stylesheet_directory_uri()) . 'assets/',
                     $content
                 );
-                $content = {{FN_PREFIX}}_content_sanitize($content);
+                $content = {{FN_PREFIX}}_content_sanitize($content, "page '{$slug}'");
 
                 $parent_slug = isset($page['parent']) ? (string) $page['parent'] : '';
                 $id = wp_insert_post(array(
@@ -315,25 +315,232 @@ final class ScaffoldPluginStep implements Step
         }
 
         /**
-         * Deterministic strip of script-capable markup: script/embed elements,
-         * inline event handlers, and executable URL schemes. The build applies
-         * the same rules (MarkupSanitizer) to every generated part; repeating
-         * them here keeps seeding safe if a page file was edited between build
-         * and activation. wp_kses() is not usable for this — it mangles the
-         * block comments the content is made of.
+         * Deterministic strip of script-capable markup from generated content.
+         *
+         * The build applies the same rules to every part at intake
+         * (MarkupSanitizer); repeating them here keeps seeding safe if a page
+         * file was edited between build and activation. wp_kses() is not
+         * usable for this — it mangles the block comments the content is made
+         * of — but WordPress's HTML API is, and it is the same tokenizer the
+         * block editor trusts. The build cannot reach for it (that pipeline
+         * runs standalone, with no WordPress loaded); here it is already in
+         * memory, so the two are deliberately different implementations of one
+         * contract: nothing executable survives.
+         *
+         * Nothing below deletes a tag. Deleting one joins whatever sits on
+         * either side of it, and that seam can spell a tag the browser never
+         * parsed from the input; editing attributes in place cannot.
          */
-        function {{FN_PREFIX}}_content_sanitize($content) {
-            $content = (string) preg_replace('#<script\b[^>]*>.*?</script\s*>#is', '', $content);
-            $content = (string) preg_replace('#</?(script|iframe|object|embed|applet|base)\b[^>]*>#i', '', $content);
-            // Event handlers are matched only inside tags so prose is never touched.
-            $content = (string) preg_replace_callback('#<[a-z][^>]*>#i', function ($m) {
-                return (string) preg_replace('#\s+on[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', $m[0]);
-            }, $content);
-            return (string) preg_replace(
-                '#\b(href|src|xlink:href|formaction|action)\s*=\s*(["\'])\s*(?:javascript|vbscript|data)\s*:[^"\']*\2#i',
-                '$1=$2#$2',
-                $content
+        function {{FN_PREFIX}}_content_sanitize($content, $context = 'page') {
+            if (!class_exists('WP_HTML_Tag_Processor')) {
+                {{FN_PREFIX}}_content_log(
+                    "{$context}: WordPress has no HTML API (requires 6.7); stored empty"
+                    . ' rather than markup nothing reviewed'
+                );
+                return '';
+            }
+
+            // Each round drops at most one unfinished trailing token, so this
+            // terminates well inside the bound.
+            for ($round = 0; $round < 8; $round++) {
+                $incomplete = false;
+                $sanitized = {{FN_PREFIX}}_content_sanitize_document($content, $incomplete, $context);
+                if ($sanitized !== null) {
+                    return $sanitized;
+                }
+                if (!$incomplete) {
+                    break;
+                }
+
+                // The document ends inside an unfinished tag or raw-text body.
+                // Everything from there on was never inspected, and a browser
+                // still runs an unterminated <script>. Cut the fragment and
+                // rescan: truncation rejoins nothing, so unlike deletion it
+                // cannot produce a tag at the seam.
+                $cut = strrpos($content, '<');
+                if ($cut === false) {
+                    break;
+                }
+                $content = substr($content, 0, $cut);
+            }
+
+            // Publishing nothing is the safe answer, but an empty page that
+            // nobody was told about is its own failure — say so loudly enough
+            // that it is findable after the fact.
+            {{FN_PREFIX}}_content_log(
+                "{$context}: no HTML pass could read this markup through to the end;"
+                . ' stored empty rather than unreviewed markup'
             );
+            return '';
+        }
+
+        /** Report a seeding problem where a site owner can still find it. */
+        function {{FN_PREFIX}}_content_log($message) {
+            error_log('{{THEME_NAME}} Content: ' . $message);
+        }
+
+        /** Sanitize with the tree processor, falling back to the tag processor. */
+        function {{FN_PREFIX}}_content_sanitize_document($content, &$incomplete, $context = 'page') {
+            // Preferred: the tree processor tracks SVG/MathML namespaces, so
+            // HTML raw-text rules are not applied inside foreign content and
+            // `<svg><title><img onerror=...>` is still reached. It also knows
+            // each token's ancestors, which is how inert fallback content is
+            // found.
+            if (class_exists('WP_HTML_Processor')) {
+                $sanitized = {{FN_PREFIX}}_content_sanitize_pass(
+                    WP_HTML_Processor::create_fragment($content),
+                    $incomplete
+                );
+                if ($sanitized !== null || $incomplete) {
+                    return $sanitized;
+                }
+            }
+
+            // It gives up on markup it does not model (<plaintext>) and throws
+            // past roughly 98 nested elements. The tag processor has neither
+            // limit, so it is the fallback — but it does NOT track SVG/MathML
+            // namespaces, so it applies HTML raw-text rules inside foreign
+            // content and would miss `<svg><title><img onerror=...>`. That is
+            // a weaker guarantee, and degrading to it quietly is how a gap
+            // goes unnoticed.
+            {{FN_PREFIX}}_content_log(
+                "{$context}: " . (class_exists('WP_HTML_Processor')
+                    ? 'HTML tree processor could not finish'
+                    : 'WordPress has no HTML tree processor')
+                . '; fell back to the tag processor, which does not track'
+                . ' SVG/MathML namespaces'
+            );
+            return {{FN_PREFIX}}_content_sanitize_pass(
+                new WP_HTML_Tag_Processor($content),
+                $incomplete
+            );
+        }
+
+        /** One sanitizing walk; null when the processor could not finish. */
+        function {{FN_PREFIX}}_content_sanitize_pass($processor, &$incomplete) {
+            if (!$processor instanceof WP_HTML_Tag_Processor) {
+                return null;
+            }
+
+            // Elements that load or run code.
+            $inert = array(
+                'SCRIPT' => true, 'IFRAME' => true, 'OBJECT' => true,
+                'APPLET' => true, 'EMBED' => true, 'NOEMBED' => true,
+                'NOFRAMES' => true, 'NOSCRIPT' => true,
+            );
+            $loaders = array(
+                'src', 'data', 'srcdoc', 'code', 'codebase', 'archive',
+                'classid', 'href',
+            );
+            // SVG SMIL animation elements: neutralized by stripping their
+            // targeting attributes below (they animate a sibling's attribute
+            // to a javascript: value that no URL sink inspects).
+            $animation = array(
+                'ANIMATE' => true, 'ANIMATETRANSFORM' => true,
+                'ANIMATEMOTION' => true, 'SET' => true,
+            );
+            // Core's canonical URI-attribute list (18 entries, including
+            // poster/cite/background/longdesc) plus the SVG spelling it omits.
+            $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
+            $allowed = wp_allowed_protocols();
+            $tree = $processor instanceof WP_HTML_Processor;
+
+            try {
+                while ($processor->next_token()) {
+                    $type = $processor->get_token_type();
+
+                    if ($type === '#text') {
+                        // <object>/<applet> fallback content and, to a parser
+                        // with scripting disabled, <noscript> children are real
+                        // nodes rather than raw text — so emptying the
+                        // container's own text leaves this behind as page copy.
+                        if ($tree && {{FN_PREFIX}}_content_inside_inert($processor, $inert)) {
+                            $processor->set_modifiable_text('');
+                        }
+                        continue;
+                    }
+                    if ($type !== '#tag' || $processor->is_tag_closer()) {
+                        continue;
+                    }
+                    $tag = $processor->get_tag();
+
+                    $handlers = $processor->get_attribute_names_with_prefix('on');
+                    if (is_array($handlers)) {
+                        foreach ($handlers as $name) {
+                            $processor->remove_attribute($name);
+                        }
+                    }
+
+                    // No branch below returns early: every tag still falls
+                    // through to the URL sweep, so a stray href on a <meta>
+                    // cannot slip past on its way out.
+                    if (isset($inert[$tag])) {
+                        foreach ($loaders as $name) {
+                            $processor->remove_attribute($name);
+                        }
+                        if ($tag === 'SCRIPT') {
+                            $processor->set_attribute('type', 'text/plain');
+                        }
+                        // Raw-text bodies (script, iframe, noembed, noframes)
+                        // are this tag's own modifiable text and go with it.
+                        $processor->set_modifiable_text('');
+                    }
+                    if ($tag === 'BASE') {
+                        $processor->remove_attribute('href');
+                        $processor->remove_attribute('target');
+                    }
+                    if ($tag === 'META') {
+                        // http-equiv="refresh" redirects every visitor to a
+                        // URL the model chose.
+                        $processor->remove_attribute('http-equiv');
+                        $processor->remove_attribute('content');
+                    }
+                    if (isset($animation[$tag])) {
+                        // SVG SMIL animation sets the live value of a sibling's
+                        // attribute (e.g. a link's href) to whatever rides
+                        // `values`/`to`/`from`/`by` — a javascript: URL that no
+                        // URL sink below inspects. The Tag Processor cannot drop
+                        // a node, so strip the targeting attributes and leave an
+                        // inert element that animates nothing.
+                        foreach (array('attributeName', 'values', 'to', 'from', 'by') as $name) {
+                            $processor->remove_attribute($name);
+                        }
+                    }
+
+                    foreach ($urls as $name) {
+                        // get_attribute() returns the value already decoded, so
+                        // `&#106;avascript:` is compared in its resolved form
+                        // and needs no entity handling here.
+                        $value = $processor->get_attribute($name);
+                        if (is_string($value)
+                            && wp_kses_bad_protocol($value, $allowed) !== $value
+                        ) {
+                            $processor->set_attribute($name, '#');
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                return null;
+            }
+
+            if ($processor->paused_at_incomplete_token()) {
+                $incomplete = true;
+                return null;
+            }
+            if ($tree && $processor->get_last_error() !== null) {
+                return null;
+            }
+            return $processor->get_updated_html();
+        }
+
+        /** Whether the current token sits inside a code-bearing element. */
+        function {{FN_PREFIX}}_content_inside_inert($processor, $inert) {
+            foreach ($processor->get_breadcrumbs() as $crumb) {
+                if (isset($inert[strtoupper($crumb)])) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /**

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 
@@ -18,11 +19,19 @@ final class GeneratedMarkup
      */
     public static function normalize(string $text, string $key): string
     {
-        $markup = self::stripFences(trim($text));
-        if ($markup === '' || !str_contains($markup, 'wp:')) {
-            throw new \RuntimeException("part '{$key}' is not block markup");
+        // Sanitize the whole response before looking for a document boundary:
+        // block-looking comments inside a script body are not payload.
+        $text = MarkupSanitizer::sanitize(self::stripFences(trim($text)));
+        $recoveryNotes = [];
+        try {
+            $markup = BlockDocumentRecovery::recover($text, $recoveryNotes);
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
-        $markup = MarkupSanitizer::sanitize(self::normalizePresetRefs(rtrim($markup)));
+        foreach ($recoveryNotes as $note) {
+            fwrite(STDERR, "    (part '{$key}': {$note})\n");
+        }
+        $markup = self::normalizePresetRefs(rtrim($markup));
 
         // A response cut off by the output-token ceiling (or otherwise left
         // structurally unclosed) is trimmed to its last complete block rather
@@ -36,6 +45,12 @@ final class GeneratedMarkup
         }
         foreach ($salvage['notes'] as $note) {
             fwrite(STDERR, "    (part '{$key}': {$note})\n");
+        }
+
+        try {
+            BlockDocumentRecovery::assertComplete($salvage['markup']);
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
         return $salvage['markup'];
     }
@@ -88,9 +103,10 @@ final class GeneratedMarkup
 
     private static function stripFences(string $text): string
     {
+        $text = (string) preg_replace('/^\xEF\xBB\xBF/', '', $text);
         if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
+            $text = preg_replace('/^```[a-zA-Z]*\r?\n/', '', $text);
+            $text = preg_replace('/\r?\n```$/', '', (string) $text);
         }
         return trim((string) $text);
     }

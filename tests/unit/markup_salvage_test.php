@@ -94,6 +94,21 @@ HTML;
     assert_eq(substr_count($out['markup'], '<div'), substr_count($out['markup'], '</div>'));
 });
 
+test('MarkupSalvage closes wrapper elements opened between retained children', function () {
+    $markup = "<!-- wp:group -->\n<div>\n"
+        . '<!-- wp:heading --><h2>Heading</h2><!-- /wp:heading -->'
+        . "\n<span>\n"
+        . '<!-- wp:paragraph --><p>Paragraph</p><!-- /wp:paragraph -->';
+
+    $out = MarkupSalvage::repair($markup)['markup'];
+
+    assert_contains('<p>Paragraph</p>', $out);
+    assert_eq(1, substr_count($out, '<span>'));
+    assert_eq(1, substr_count($out, '</span>'));
+    assert_eq(1, substr_count($out, '<div>'));
+    assert_eq(1, substr_count($out, '</div>'));
+});
+
 test('MarkupSalvage rebuilds the multi-tag stack a cover block leaves open', function () {
     $markup = <<<HTML
 <!-- wp:group {"layout":{"type":"constrained"}} -->
@@ -144,4 +159,100 @@ test('MarkupSalvage rejects a columns closer that crosses an unclosed paragraph 
         . '<!-- /wp:columns -->';
 
     assert_throws(fn () => MarkupSalvage::repair($markup));
+});
+
+test('MarkupSalvage rejects a closer that also uses self-closing syntax', function () {
+    $markup = '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph /-->';
+    assert_throws(fn () => MarkupSalvage::repair($markup));
+});
+
+test('MarkupSalvage ignores tags mentioned in comments and raw-text element bodies', function () {
+    $html = '<div class="wp-block-group">'
+        . '<!-- future <span> wrapper -->'
+        . '<style>.x::before { content: "<aside>"; }</style>';
+
+    assert_eq(['div'], MarkupSalvage::openElements($html));
+    assert_true(MarkupSalvage::isContainerPrefix($html));
+});
+
+test('MarkupSalvage HTML stacks follow ancestor-close and non-void slash semantics', function () {
+    assert_eq(
+        [],
+        MarkupSalvage::openElements('<div><span></div>'),
+        'closing an ancestor implicitly closes its descendants',
+    );
+    assert_eq(
+        ['div', 'span'],
+        MarkupSalvage::openElements('<div><span/>'),
+        'a slash does not self-close a non-void HTML element',
+    );
+});
+
+test('strict wrapper stacks reject replacement roots crossed tags and stray closers', function () {
+    assert_eq(
+        null,
+        MarkupSalvage::advanceStrictWrapperStack('<div></div><section>', [], false),
+    );
+    assert_eq(
+        null,
+        MarkupSalvage::advanceStrictWrapperStack('<div><span></div>', [], false),
+    );
+    assert_eq(
+        null,
+        MarkupSalvage::advanceStrictWrapperStack('<div></aside>', [], false),
+    );
+});
+
+test('MarkupSalvage never synthesizes closers for tags mentioned in comments or styles', function () {
+    $markup = "<!-- wp:group -->\n"
+        . "<div class=\"wp-block-group\">\n"
+        . "<!-- future <span> wrapper -->\n"
+        . "<style>.x::before { content: \"<aside>\"; }</style>\n"
+        . "<!-- wp:heading --><h2>Kept</h2><!-- /wp:heading -->\n"
+        . "<!-- wp:paragraph --><p>cut";
+
+    $out = MarkupSalvage::repair($markup)['markup'];
+
+    assert_contains('<h2>Kept</h2>', $out);
+    assert_true(!str_contains($out, '</span>'), 'comment example did not enter the tag stack');
+    assert_true(!str_contains($out, '</aside>'), 'style text did not enter the tag stack');
+    assert_true(str_ends_with($out, "</div>\n<!-- /wp:group -->"));
+});
+
+test('MarkupSalvage does not treat attribute text as comments or raw elements', function () {
+    foreach (['<style>', '<!--'] as $attributeText) {
+        $markup = '<!-- wp:group --><div data-x="' . $attributeText . '">'
+            . '<!-- wp:paragraph --><p>Kept</p><!-- /wp:paragraph -->';
+        $out = MarkupSalvage::repair($markup)['markup'];
+
+        assert_contains('<p>Kept</p>', $out);
+        assert_true(str_ends_with($out, "</div>\n<!-- /wp:group -->"));
+    }
+});
+
+test('MarkupSalvage rejects children swallowed by an unclosed raw-text or comment region', function () {
+    $style = "<!-- wp:group -->\n<div class=\"wp-block-group\">\n"
+        . "<style>.x { color: red; }\n"
+        . "<!-- wp:heading --><h2>Hidden</h2><!-- /wp:heading -->";
+    $comment = "<!-- wp:group -->\n<div class=\"wp-block-group\">\n"
+        . "<!-- unfinished\n"
+        . "<!-- wp:heading --><h2>Hidden</h2><!-- /wp:heading -->";
+
+    assert_throws(fn () => MarkupSalvage::repair($style));
+    assert_throws(fn () => MarkupSalvage::repair($comment));
+    assert_throws(fn () => MarkupSalvage::openElements('<div><style>unfinished'));
+});
+
+test('MarkupSalvage trims an unclosed raw-text tail after the last visible child', function () {
+    $markup = "<!-- wp:group -->\n<div class=\"wp-block-group\">\n"
+        . "<!-- wp:heading --><h2>Kept</h2><!-- /wp:heading -->\n"
+        . "<style>.x { color: red; }\n"
+        . "<!-- wp:paragraph --><p>Hidden</p><!-- /wp:paragraph -->";
+
+    $out = MarkupSalvage::repair($markup)['markup'];
+
+    assert_contains('<h2>Kept</h2>', $out);
+    assert_true(!str_contains($out, '<style>'));
+    assert_true(!str_contains($out, 'Hidden'));
+    assert_true(str_ends_with($out, "</div>\n<!-- /wp:group -->"));
 });
