@@ -200,15 +200,11 @@ $report->setRequestCount($llm->usageTotals()['requests']);
 
 // Surface the defects the build delivered through (warnings.json) so a
 // warned build never looks identical to a clean one on the console. A corrupt
-// warnings.json must not crash the summary of an otherwise finished build —
-// that would break the very promise it records.
-try {
-    $report->setWarnings(
-        $project->exists('warnings.json') ? $project->readJson('warnings.json') : []
-    );
-} catch (\RuntimeException $e) {
-    fwrite(STDERR, "warnings.json could not be read for the summary: {$e->getMessage()}\n");
-}
+// warnings.json is a corrupt required build artifact, so its read failure stays
+// fatal instead of rendering a falsely clean successful summary.
+$report->setWarnings(
+    $project->exists('warnings.json') ? $project->readJson('warnings.json') : []
+);
 
 echo $report->totalLine(), "\n";
 if (($imagesLine = $report->imagesLine()) !== null) {

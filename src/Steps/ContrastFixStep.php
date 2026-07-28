@@ -104,8 +104,17 @@ final class ContrastFixStep implements Step
                     $project->writeText('theme/' . $rel, $result['markup']);
                 }
                 foreach ($result['findings'] as $f) {
-                    $report[] = sprintf('[%s] %s %s', $rel, $f['detail'], $f['repaired'] ? '(repaired)' : '(warning)');
-                    $f['repaired'] ? $repaired++ : $warnings++;
+                    $warning = !$f['repaired'] || ($f['residual'] ?? false);
+                    $disposition = $f['repaired']
+                        ? ($warning ? '(repaired) (warning)' : '(repaired)')
+                        : '(warning)';
+                    $report[] = sprintf('[%s] %s %s', $rel, $f['detail'], $disposition);
+                    if ($f['repaired']) {
+                        $repaired++;
+                    }
+                    if ($warning) {
+                        $warnings++;
+                    }
                 }
             }
         }
@@ -114,7 +123,8 @@ final class ContrastFixStep implements Step
 
         // Every unrepairable pair is a defect the build delivers through:
         // record it durably for the later repair pass, not just in the log.
-        // Repaired rows stay out — nothing was lost.
+        // Fully repaired rows stay out; best-effort repairs that remain below
+        // threshold end in `(warning)` and stay in the durable queue.
         $project->addWarnings($this->id(), array_values(array_filter(
             $report,
             static fn (string $row): bool => str_ends_with($row, '(warning)'),
@@ -349,10 +359,11 @@ final class ContrastFixStep implements Step
                     // the improvement but keep the failure on the record.
                     $themeJson['styles']['elements']['button']['color']['text'] = "var(--wp--preset--color--{$slug})";
                     $report[] = sprintf(
-                        '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) — best available, still below threshold (repaired)',
+                        '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) — best available, still below threshold (repaired) (warning)',
                         $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
                     );
                     $repaired++;
+                    $warnings++;
                     $changed = true;
                 } else {
                     $report[] = sprintf(

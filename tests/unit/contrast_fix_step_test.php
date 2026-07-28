@@ -60,6 +60,9 @@ test('button repair on a mid-tone background keeps the failure on the record', f
 
     $report = $project->readText('logs/contrast-report.txt');
     assert_contains('still below threshold', $report);
+    assert_contains('(repaired) (warning)', $report);
+    $joined = implode(' ', $project->readJson('warnings.json')['contrast-fix'] ?? []);
+    assert_contains('still below threshold', $joined, 'the residual failure is durable, not log-only');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
