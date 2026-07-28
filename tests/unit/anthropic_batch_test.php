@@ -387,6 +387,12 @@ test('supportsSampling is false for the Claude 5 family and Opus 4.7/4.8, true o
     assert_eq(false, AnthropicClient::supportsSampling('claude-fable-5[1m]'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-sonnet-5'));
     assert_eq(false, AnthropicClient::supportsSampling('claude-mythos-5'));
+    // The packaged large-tier default. Bare and in the dated/vendor spellings
+    // a host may resolve it to, so narrowing the pattern cannot silently start
+    // sending sampling parameters the model rejects.
+    assert_eq(false, AnthropicClient::supportsSampling('claude-opus-5'));
+    assert_eq(false, AnthropicClient::supportsSampling('claude-opus-5-20260101'));
+    assert_eq(false, AnthropicClient::supportsSampling('us.anthropic.claude-opus-5-v1:0'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-haiku-4-5'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-sonnet-4-6'));
     assert_eq(true, AnthropicClient::supportsSampling('claude-opus-4-6'));
@@ -443,6 +449,18 @@ test('rejectedParam detects a cache_control rejection', function () {
     $apiError = 'HTTP 400: {"type":"error","error":{"type":"invalid_request_error",'
         . '"message":"messages.0.content.0.cache_control: Extra inputs are not permitted"}}';
     assert_eq('cache_control', AnthropicClient::rejectedParam($apiError));
+});
+
+test('rejectedParam detects a thinking rejection so the build degrades instead of aborting', function () {
+    // `thinking: {type: "disabled"}` is only valid at effort <= high. Raising
+    // effort later would 400 every large-tier call; stripping the control runs
+    // the model with adaptive thinking rather than failing the build.
+    $apiError = 'HTTP 400: {"type":"error","error":{"type":"invalid_request_error",'
+        . '"message":"thinking.type: `disabled` is not supported at this effort level"}}';
+    assert_eq('thinking', AnthropicClient::rejectedParam($apiError));
+    assert_eq('thinking', AnthropicClient::rejectedParamForHttpError(400, $apiError));
+    // Unrelated errors still fall through untouched.
+    assert_eq(null, AnthropicClient::rejectedParam('HTTP 400: messages must alternate'));
 });
 
 test('rejectedParamForHttpError classifies the full body only for HTTP 400', function () {
