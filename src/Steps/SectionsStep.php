@@ -147,6 +147,7 @@ final class SectionsStep implements Step
     public function run(Project $project): void
     {
         $warnings = [];
+        self::persistPlanRepairs($project, $warnings);
         $jobs = $this->jobs($project, $warnings);
         $requests = self::requestsFor($jobs);
         $this->warmSectionCache($requests);
@@ -294,19 +295,77 @@ final class SectionsStep implements Step
     }
 
     /**
-     * Read Project state once and adapt it into self-contained unit inputs.
+     * Persist the deterministic plan repairs (role from position, defaulted
+     * semantic type) back into pages.json before generating from them: a
+     * warning that says "corrected" must not leave the defect in the artifact
+     * every downstream consumer — including the later repair pass — reads.
      *
-     * Plan drift that is deterministically repairable is repaired here, not
-     * rejected: a section role is a pure function of its position, and a
-     * missing semantic type has a safe generic default. Each repair is noted
-     * in $warnings for warnings.json.
+     * @param list<string> $warnings appended to in place
+     */
+    private static function persistPlanRepairs(Project $project, array &$warnings): void
+    {
+        $repairs = [];
+        $pages = self::repairedPages(self::pages($project), $repairs);
+        if ($repairs === []) {
+            return;
+        }
+        $plan = $project->readJson('pages.json');
+        $plan['pages'] = $pages;
+        $project->writeJson('pages.json', $plan);
+        array_push($warnings, ...$repairs);
+    }
+
+    /**
+     * Deterministically repair plan drift in every page's section list: a
+     * section role is a pure function of its position, and a missing semantic
+     * type has a safe generic default. Each repair is noted in $warnings for
+     * warnings.json. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    public static function repairedPages(array $pages, array &$warnings = []): array
+    {
+        foreach ($pages as $p => $page) {
+            $sections = (array) ($page['sections'] ?? []);
+            foreach ($sections as $i => $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $role = trim((string) ($section['role'] ?? ''));
+                $expectedRole = SectionRole::forPosition($i, count($sections));
+                if ($role !== $expectedRole) {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
+                        . "role '{$role}' corrected to '{$expectedRole}' (derived from its position in the plan)";
+                    $sections[$i]['role'] = $expectedRole;
+                }
+                $type = trim((string) ($section['type'] ?? ''));
+                if ($type === '') {
+                    $slug = (string) ($section['slug'] ?? "section-{$i}");
+                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
+                        . "missing semantic type; defaulted to 'content'";
+                    $sections[$i]['type'] = 'content';
+                }
+            }
+            $pages[$p]['sections'] = $sections;
+        }
+        return $pages;
+    }
+
+    /**
+     * Read Project state once and adapt it into self-contained unit inputs.
+     * Plan drift is repaired via repairedPages() so the prompts always see a
+     * consistent plan; run() persists those repairs to pages.json first, so
+     * on the build path this pass finds nothing left to repair.
      *
      * @param list<string> $warnings appended to in place
      * @return array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}>
      */
     private function jobs(Project $project, array &$warnings = []): array
     {
-        $pages = self::pages($project);
+        $pages = self::repairedPages(self::pages($project), $warnings);
 
         $common = [
             'site_spec'        => $project->readText('siteSpec.json'),
@@ -342,21 +401,6 @@ final class SectionsStep implements Step
             // A compact outline of THIS page, so each section knows its place.
             $outline = self::outline($sections);
             foreach ($sections as $i => $section) {
-                $role = trim((string) ($section['role'] ?? ''));
-                $expectedRole = SectionRole::forPosition($i, count($sections));
-                if ($role !== $expectedRole) {
-                    $slug = (string) ($section['slug'] ?? "section-{$i}");
-                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
-                        . "role '{$role}' corrected to '{$expectedRole}' (derived from its position in the plan)";
-                    $section['role'] = $expectedRole;
-                }
-                $type = trim((string) ($section['type'] ?? ''));
-                if ($type === '') {
-                    $slug = (string) ($section['slug'] ?? "section-{$i}");
-                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
-                        . "missing semantic type; defaulted to 'content'";
-                    $section['type'] = 'content';
-                }
                 $input = $common + [
                     'outline'   => $outline,
                     'page'      => [

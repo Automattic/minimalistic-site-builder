@@ -216,6 +216,35 @@ test('sections repairs a missing structural role or semantic type deterministica
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections persists the deterministic plan repairs back into pages.json', function () {
+    [$project, $tmp] = sections_fixture();
+    $pages = $project->readJson('pages.json');
+    unset($pages['pages'][0]['sections'][0]['role']);
+    unset($pages['pages'][0]['sections'][0]['type']);
+    $project->writeJson('pages.json', $pages);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    // The plan artifact on disk carries the corrected role/type the parts
+    // were generated from — a warning saying "corrected" must not leave the
+    // defect in the artifact downstream consumers read.
+    $hero = $project->readJson('pages.json')['pages'][0]['sections'][0];
+    assert_eq('hero', $hero['role']);
+    assert_eq('content', $hero['type']);
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("role '' corrected to 'hero'", $joined);
+    assert_contains("missing semantic type; defaulted to 'content'", $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('heroBrief selects only the structural hero role, not the semantic type', function () {
     $brief = SectionsStep::heroBrief([
         ['slug' => 'decoy', 'title' => 'Not the Hero', 'role' => 'content', 'type' => 'hero'],
