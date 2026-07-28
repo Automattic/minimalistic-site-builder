@@ -220,7 +220,7 @@ test('SupportDomainGuard rejects style families outside the reviewed PHP pipelin
     ));
     assert_throws(static fn () => $guard->assertSupported(
         'core/group',
-        ['layout' => ['type' => 'grid']],
+        ['layout' => ['type' => 'masonry']],
         '0',
     ));
     assert_throws(static fn () => $guard->assertSupported(

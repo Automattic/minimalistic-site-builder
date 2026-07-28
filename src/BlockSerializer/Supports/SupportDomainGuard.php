@@ -207,7 +207,12 @@ final class SupportDomainGuard
 
     /** @var array<string,list<string>> */
     private const LAYOUT_VALUES = [
-        'type' => ['constrained', 'flex', 'default'],
+        // `grid` has been a core/group layout since WordPress 6.3. The pinned
+        // registry keeps the layout object verbatim in the delimiter and the
+        // save path does not consume it, so admitting it costs nothing in
+        // emitted bytes — while excluding it silently flattened a three-column
+        // grid section into a vertical stack.
+        'type' => ['constrained', 'flex', 'default', 'grid'],
         'orientation' => ['horizontal', 'vertical'],
         'justifyContent' => ['left', 'center', 'right', 'space-between'],
         'verticalAlignment' => ['top', 'center', 'bottom', 'stretch'],
@@ -227,6 +232,20 @@ final class SupportDomainGuard
     private const LAYOUT_STRING_KEYS = [
         'contentSize' => true,
         'wideSize' => true,
+        // Grid track sizing, e.g. "12rem".
+        'minimumColumnWidth' => true,
+    ];
+
+    /**
+     * Layout keys whose value is a number rather than a keyword or a length
+     * string. Dropping one of these used to empty the layout object and take
+     * the whole container with it.
+     *
+     * @var array<string,true>
+     */
+    private const LAYOUT_NUMERIC_KEYS = [
+        'columnCount' => true,
+        'rowCount' => true,
     ];
 
     /** @param array<string,mixed> $attributes */
@@ -247,6 +266,15 @@ final class SupportDomainGuard
                 throw new \RuntimeException("Unsupported non-object layout for {$name} at {$blockPath}");
             }
             foreach ($layout as $key => $value) {
+                if (is_string($key) && isset(self::LAYOUT_NUMERIC_KEYS[$key])) {
+                    if (!is_int($value) && !is_float($value)) {
+                        $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
+                        throw new \RuntimeException(
+                            "Unsupported block-support layout value '{$encoded}' for {$name} at {$blockPath} layout.{$key}"
+                        );
+                    }
+                    continue;
+                }
                 if (is_string($key) && isset(self::LAYOUT_STRING_KEYS[$key])) {
                     if (!is_string($value) || $value === '') {
                         $encoded = is_scalar($value) ? (string) $value : get_debug_type($value);
@@ -310,6 +338,14 @@ final class SupportDomainGuard
         foreach ($layout->entries() as $entry) {
             $key = (string) $entry['key'];
             $value = JsonNative::value($entry['value']);
+
+            if (isset(self::LAYOUT_NUMERIC_KEYS[$key])) {
+                if (!is_int($value) && !is_float($value)) {
+                    $layout->remove($key);
+                    $rows[] = ['action' => 'dropped', 'key' => $key, 'from' => self::describe($value), 'to' => ''];
+                }
+                continue;
+            }
 
             if (isset(self::LAYOUT_STRING_KEYS[$key])) {
                 if (!is_string($value) || $value === '') {
@@ -506,9 +542,15 @@ final class SupportDomainGuard
         if (is_string($value)) {
             return $value;
         }
-        return is_scalar($value) || $value === null
-            ? var_export($value, true)
-            : get_debug_type($value);
+        if ($value === null) {
+            return 'null';
+        }
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+        // json_encode keeps an authored 3 as "3"; var_export would report the
+        // decoded float "3.0", which nobody grepping warnings.json would find.
+        return is_scalar($value) ? (string) json_encode($value) : get_debug_type($value);
     }
 
     /**

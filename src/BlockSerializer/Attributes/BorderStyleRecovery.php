@@ -101,8 +101,16 @@ final class BorderStyleRecovery
      */
     private static function rootBorderStyles(string $html): array
     {
-        $root = HtmlFragment::parse($html)->root()->elementChildren()[0] ?? null;
-        $style = $root?->attribute('style');
+        // Only read the block's own wrapper. Generated markup is structurally
+        // sloppy — a stray element can precede it — and taking "the first
+        // element" would lift a border off something the block's save() then
+        // discards, writing a border nobody asked for. More than one element
+        // child means the wrapper cannot be identified, so nothing is read.
+        $children = HtmlFragment::parse($html)->root()->elementChildren();
+        if (count($children) !== 1) {
+            return [];
+        }
+        $style = $children[0]->attribute('style');
         if (!is_string($style) || $style === '') {
             return [];
         }

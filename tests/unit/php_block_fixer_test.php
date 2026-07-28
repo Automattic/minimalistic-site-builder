@@ -506,11 +506,11 @@ test('PhpBlockFixer rejects an unsupported block-support family before staging',
 });
 
 test('PhpBlockFixer drops an unreviewed layout variant and still delivers the file', function () {
-    // `grid` is not a layout type the pinned runtime consumes. Losing it costs
-    // this section its layout mode; failing the run costs the user every
-    // section. The drop is reported, and a layout emptied by it is removed
-    // rather than left as a bare object in the delimiter.
-    $original = '<!-- wp:group {"layout":{"type":"grid"}} -->'
+    // `masonry` is not a layout type the pinned runtime consumes (`grid` is,
+    // since WordPress 6.3). Losing it costs this section its layout mode;
+    // failing the run costs the user every section. The drop is reported, and a
+    // layout emptied by it is removed rather than left bare in the delimiter.
+    $original = '<!-- wp:group {"layout":{"type":"masonry"}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
 
@@ -519,7 +519,7 @@ test('PhpBlockFixer drops an unreviewed layout variant and still delivers the fi
 
         assert_contains('REPAIR invalid-layout-dropped:{"block":"core/group","key":"type"', $report);
         $written = (string) file_get_contents($theme . '/parts/unsupported.html');
-        assert_true(!str_contains($written, 'grid'), 'the unusable value is gone');
+        assert_true(!str_contains($written, 'masonry'), 'the unusable value is gone');
         assert_true(!str_contains($written, '"layout"'), 'an emptied layout is removed, not left bare');
         assert_contains('<div class="wp-block-group">', $written, 'the block still renders');
     } finally {

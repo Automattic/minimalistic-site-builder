@@ -218,3 +218,40 @@ test('a border side the delimiter never described is not invented from a stray d
 
     assert_throws(static fn () => (new Serializer())->transform($markup));
 });
+
+test('a border is only read from the block own wrapper', function () {
+    // Generated markup is structurally sloppy, so a stray element can precede
+    // the wrapper. Taking "the first element" would lift a border off something
+    // the block save() then discards, writing a border nobody asked for.
+    $markup = '<!-- wp:group {"style":{"border":{"left":{"color":"#f00","width":"4px"}}}} -->' . "\n"
+        . '<p style="border-left-style:dotted">stray</p>' . "\n"
+        . '<div class="wp-block-group" style="border-left-color:#f00;border-left-width:4px"></div>' . "\n"
+        . '<!-- /wp:group -->';
+
+    $result = (new Serializer())->transform($markup);
+    assert_true(!str_contains($result->html, 'dotted'), 'no border is lifted off a stray element');
+});
+
+test('a dropped number is reported as the author wrote it', function () {
+    // columnCount is numeric and valid on a grid; a string there is not, and
+    // the report must echo what the author actually wrote.
+    [, $codes] = layout_guard_transform('{"layout":{"type":"grid","columnCount":"three"}}');
+    assert_contains('"value":"three"', $codes[0]);
+
+    [, $codes] = layout_guard_transform('{"layout":{"type":"flex","flexWrap":3}}');
+    assert_contains('"value":"3"', $codes[0], 'not the decoded float 3.0');
+});
+
+test('a grid layout survives intact', function () {
+    // WordPress has supported grid on core/group since 6.3. Excluding it from
+    // the reviewed domain silently flattened a three-column section into a
+    // vertical stack: `type` was dropped as unrecognised, `columnCount` as an
+    // unknown key, and the emptied layout object removed wholesale.
+    [$html, $codes] = layout_guard_transform(
+        '{"layout":{"type":"grid","columnCount":3,"minimumColumnWidth":"12rem"}}'
+    );
+    assert_contains('"type":"grid"', $html);
+    assert_contains('"columnCount":3', $html);
+    assert_contains('"minimumColumnWidth":"12rem"', $html);
+    assert_eq([], $codes, 'a valid grid produces no repairs');
+});
