@@ -602,6 +602,63 @@ test('page-plan repairs only the invalid page with one follow-up call', function
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('page-plan repairs every invalid page in ONE batched round', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ppb_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+        ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'What we bake', 'children' => []],
+        ['title' => 'About', 'slug' => 'about', 'purpose' => 'Who we are', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    // home is valid; menu and about each break the adjacency rule, so two of
+    // the three pages need a repair.
+    $llm->queueJson(['sections' => [plan_section()]]);
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'm1', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'm2', 'layout_archetype' => 'centered-stack', 'background' => 'contrast']),
+    ]]);
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'a1', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
+        plan_section(['slug' => 'a2', 'layout_archetype' => 'offset-grid', 'background' => 'contrast']),
+    ]]);
+    // Both repairs come back fixed, in page order.
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'm1', 'layout_archetype' => 'centered-stack', 'background' => 'base']),
+        plan_section(['slug' => 'm2', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']),
+    ]]);
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'a1', 'layout_archetype' => 'offset-grid', 'background' => 'base']),
+        plan_section(['slug' => 'a2', 'layout_archetype' => 'mixed-width-editorial', 'background' => 'contrast']),
+    ]]);
+
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $pages = $project->readJson('pages.json')['pages'];
+    assert_eq('asymmetric-split', $pages[1]['sections'][1]['layout_archetype']);
+    assert_eq('mixed-width-editorial', $pages[2]['sections'][1]['layout_archetype']);
+
+    // The whole point: two failing pages cost ONE extra round-trip, not two.
+    assert_eq(2, $llm->completeJsonBatchCalls, 'the initial fan-out plus ONE batched repair round');
+    assert_eq(0, $llm->completeJsonCalls, 'repairs never go out one page at a time');
+
+    // Each repair keeps its own per-page label and schema inside the batch.
+    assert_eq(5, count($llm->calls));
+    assert_eq('page-plan-menu-repair', $llm->calls[3]['opts']['log_label'] ?? null);
+    assert_eq('page-plan-about-repair', $llm->calls[4]['opts']['log_label'] ?? null);
+    assert_contains('IT WAS REJECTED', $llm->calls[3]['prompt']);
+    assert_contains('IT WAS REJECTED', $llm->calls[4]['prompt']);
+    assert_eq(
+        ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()],
+        $llm->calls[4]['opts']['json_schema'] ?? null,
+        'every batched repair stays schema-constrained',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('page-plan falls back to a mechanical fix when the repair still breaks a variety rule', function () {
     $tmp = sys_get_temp_dir() . '/builder_ppv_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
