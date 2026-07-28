@@ -9,6 +9,18 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
 // balanced block document — never guess between two, never promote a nested
 // child of a truncated wrapper to document root.
 
+// Model-form TOON attrs (mandatory). After normalize(), openers are JSON.
+const GM_ROOT_TOON = "<!-- wp:group\n"
+    . "tagName: section\n"
+    . "anchor: hero\n"
+    . "layout:\n"
+    . "  type: constrained\n"
+    . "-->"
+    . '<section class="wp-block-group" id="hero">'
+    . '<!-- wp:heading --><h2 class="wp-block-heading">Hello</h2><!-- /wp:heading -->'
+    . '</section>'
+    . '<!-- /wp:group -->';
+
 const GM_ROOT = '<!-- wp:group {"tagName":"section","anchor":"hero","layout":{"type":"constrained"}} -->'
     . '<section class="wp-block-group" id="hero">'
     . '<!-- wp:heading --><h2 class="wp-block-heading">Hello</h2><!-- /wp:heading -->'
@@ -16,17 +28,17 @@ const GM_ROOT = '<!-- wp:group {"tagName":"section","anchor":"hero","layout":{"t
     . '<!-- /wp:group -->';
 
 test('recovery strips leading reasoning prose', function () {
-    $text = "Looking at the notes, this is the contrast band. Let me build it.\n\n" . GM_ROOT;
+    $text = "Looking at the notes, this is the contrast band. Let me build it.\n\n" . GM_ROOT_TOON;
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
 });
 
 test('recovery strips a trailing code fence and prose after the document', function () {
-    $text = GM_ROOT . "\n```\nDone — the section uses the asymmetric split.";
+    $text = GM_ROOT_TOON . "\n```\nDone — the section uses the asymmetric split.";
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
 });
 
 test('recovery survives a preamble ahead of an opening fence', function () {
-    $text = "Here is the section:\n\n```html\n" . GM_ROOT . "\n```";
+    $text = "Here is the section:\n\n```html\n" . GM_ROOT_TOON . "\n```";
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
 });
 
@@ -34,14 +46,14 @@ test('recovery ignores a delimiter quoted in the leading prose', function () {
     // The quoted opener is lexically valid but builds no container — it must
     // not become the document root (which would nest the real section and
     // retain the narrative text).
-    $text = "I'll use `<!-- wp:group -->` as the root.\n\n" . GM_ROOT;
+    $text = "I'll use `<!-- wp:group -->` as the root.\n\n" . GM_ROOT_TOON;
     $out = GeneratedMarkup::normalize($text, 'p');
     assert_eq(GM_ROOT, $out);
     assert_true(!str_contains($out, 'as the root'), 'must drop the narrative');
 });
 
 test('recovery ignores a complete self-closing delimiter quoted inline', function () {
-    $text = "I may use `<!-- wp:spacer /-->` later.\n\n" . GM_ROOT;
+    $text = "I may use `<!-- wp:spacer /-->` later.\n\n" . GM_ROOT_TOON;
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
 });
 
@@ -60,11 +72,21 @@ test('recovery rejects a complete inline example envelope', function () {
 test('recovery drops an ordinary trailing HTML comment outside the document', function () {
     // `<!-- End generated section -->` is not a block delimiter; it must fall
     // outside the recovered span instead of being kept by a last-"-->" scan.
-    $text = GM_ROOT . "\n<!-- End generated section -->\nDone.";
+    $text = GM_ROOT_TOON . "\n<!-- End generated section -->\nDone.";
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
 });
 
 test('recovery keeps nested same-name groups intact under the outer root', function () {
+    $nested_toon = "<!-- wp:group\n"
+        . "layout:\n"
+        . "  type: constrained\n"
+        . "-->"
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div>'
+        . '<!-- /wp:group -->';
     $nested = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group">'
         . '<!-- wp:group --><div class="wp-block-group">'
@@ -72,12 +94,13 @@ test('recovery keeps nested same-name groups intact under the outer root', funct
         . '</div><!-- /wp:group -->'
         . '</div>'
         . '<!-- /wp:group -->';
-    assert_eq($nested, GeneratedMarkup::normalize("Intro.\n" . $nested, 'p'));
+    assert_eq($nested, GeneratedMarkup::normalize("Intro.\n" . $nested_toon, 'p'));
 });
 
 test('recovery handles a self-closing root and a non-group root generically', function () {
+    $voidToon = "<!-- wp:pattern\nslug: demo/x\n/-->";
     $void = '<!-- wp:pattern {"slug":"demo/x"} /-->';
-    assert_eq($void, GeneratedMarkup::normalize("Use this pattern:\n" . $void . "\nDone.", 'p'));
+    assert_eq($void, GeneratedMarkup::normalize("Use this pattern:\n" . $voidToon . "\nDone.", 'p'));
 
     $heading = '<!-- wp:heading --><h2 class="wp-block-heading">Solo</h2><!-- /wp:heading -->';
     assert_eq($heading, GeneratedMarkup::normalize("A heading:\n" . $heading, 'p'));
@@ -85,21 +108,23 @@ test('recovery handles a self-closing root and a non-group root generically', fu
 
 test('recovery keeps adjacent top-level blocks as one document', function () {
     $heading = '<!-- wp:heading --><h2>Welcome</h2><!-- /wp:heading -->';
+    $spacerToon = "<!-- wp:spacer\nheight: 40px\n/-->";
     $spacer = '<!-- wp:spacer {"height":"40px"} /-->';
+    $documentToon = $heading . "\n" . $spacerToon;
     $document = $heading . "\n" . $spacer;
 
-    assert_eq($document, GeneratedMarkup::normalize("Before\n{$document}\nAfter", 'p'));
+    assert_eq($document, GeneratedMarkup::normalize("Before\n{$documentToon}\nAfter", 'p'));
 });
 
 test('recovery fails loud on two plausible documents instead of guessing', function () {
     $docA = '<!-- wp:paragraph --><p>first version</p><!-- /wp:paragraph -->';
-    $text = $docA . "\nOr, alternatively:\n" . GM_ROOT;
+    $text = $docA . "\nOr, alternatively:\n" . GM_ROOT_TOON;
     assert_throws(fn () => GeneratedMarkup::normalize($text, 'p'));
 });
 
 test('recovery treats a later inline block after prose as ambiguous', function () {
     $example = '<!-- wp:paragraph --><p>Example</p><!-- /wp:paragraph -->';
-    $text = "Example:\n{$example}\nActual: " . GM_ROOT;
+    $text = "Example:\n{$example}\nActual: " . GM_ROOT_TOON;
 
     assert_throws(
         fn () => GeneratedMarkup::normalize($text, 'p'),
@@ -112,7 +137,7 @@ test('recovery rejects an unmatched illustrative wrapper before the answer', fun
         . "<!-- wp:group -->\n"
         . "<div class=\"wp-block-group\">This is only an example.</div>\n\n"
         . "Actual answer:\n"
-        . GM_ROOT;
+        . GM_ROOT_TOON;
 
     assert_throws(
         fn () => GeneratedMarkup::normalize($text, 'p'),
@@ -134,7 +159,7 @@ test('recovery rejects a fenced incomplete wrapper before the answer', function 
     $text = "Example only:\n```html\n"
         . "<!-- wp:group -->\n<div class=\"wp-block-group\">\n```\n\n"
         . "Actual answer:\n```html\n"
-        . GM_ROOT
+        . GM_ROOT_TOON
         . "\n```";
 
     assert_throws(
@@ -146,7 +171,7 @@ test('recovery rejects a fenced incomplete wrapper before the answer', function 
 test('recovery rejects a malformed intended root instead of promoting its child', function () {
     $text = "<!-- wp:group {\"tagName\":\"section\"\n"
         . "<section>Lost\n"
-        . GM_ROOT
+        . GM_ROOT_TOON
         . "\nLost</section>";
 
     assert_throws(
@@ -158,7 +183,7 @@ test('recovery rejects a malformed intended root instead of promoting its child'
 test('recovery rejects an inline malformed intended root instead of promoting its child', function () {
     $text = "Actual: <!-- wp:group {\"tagName\":\"section\"\n"
         . "<section>Lost\n"
-        . GM_ROOT
+        . GM_ROOT_TOON
         . "\nLost</section>";
 
     assert_throws(fn () => GeneratedMarkup::normalize($text, 'p'));
@@ -206,7 +231,11 @@ test('recovery preserves truncated-wrapper salvage without promoting the child',
     // salvage must close it — the complete heading child must NOT become the
     // document root.
     $truncated = "Building the hero.\n\n"
-        . '<!-- wp:group {"tagName":"section","layout":{"type":"constrained"}} -->'
+        . "<!-- wp:group\n"
+        . "tagName: section\n"
+        . "layout:\n"
+        . "  type: constrained\n"
+        . "-->"
         . '<section class="wp-block-group">'
         . '<!-- wp:heading --><h2 class="wp-block-heading">Kept</h2><!-- /wp:heading -->';
     $out = GeneratedMarkup::normalize($truncated, 'p');
@@ -220,7 +249,11 @@ test('recovery anchors salvage past a quoted opener when the payload is truncate
     // truncated real root. The quoted opener cannot anchor the document; the
     // real root is salvaged.
     $text = "I'll use `<!-- wp:group -->` as the root.\n\n"
-        . '<!-- wp:group {"tagName":"section","layout":{"type":"constrained"}} -->'
+        . "<!-- wp:group\n"
+        . "tagName: section\n"
+        . "layout:\n"
+        . "  type: constrained\n"
+        . "-->"
         . '<section class="wp-block-group">'
         . '<!-- wp:heading --><h2 class="wp-block-heading">Kept</h2><!-- /wp:heading -->';
     $out = GeneratedMarkup::normalize($text, 'p');
@@ -249,11 +282,11 @@ test('recovery sanitizes script bodies before looking for block candidates', fun
     assert_throws(fn () => GeneratedMarkup::normalize($doubleEscaped, 'p'));
     assert_eq(
         GM_ROOT,
-        GeneratedMarkup::normalize("<script>{$fake}</script>\n" . GM_ROOT, 'p'),
+        GeneratedMarkup::normalize("<script>{$fake}</script>\n" . GM_ROOT_TOON, 'p'),
     );
     assert_eq(
         GM_ROOT,
-        GeneratedMarkup::normalize($doubleEscaped . "\n" . GM_ROOT, 'p'),
+        GeneratedMarkup::normalize($doubleEscaped . "\n" . GM_ROOT_TOON, 'p'),
     );
 });
 
@@ -269,7 +302,7 @@ test('recovery ignores block-looking text in opaque HTML contexts', function () 
         );
         assert_eq(
             GM_ROOT,
-            GeneratedMarkup::normalize("<{$tag}>{$fake}</{$tag}>\n" . GM_ROOT, 'p'),
+            GeneratedMarkup::normalize("<{$tag}>{$fake}</{$tag}>\n" . GM_ROOT_TOON, 'p'),
             "{$tag} example is ignored before the real document",
         );
     }
@@ -280,7 +313,7 @@ test('recovery ignores nested opaque examples through their outer closer', funct
     foreach (['template', 'code', 'pre', 'object', 'applet'] as $tag) {
         $wrapper = "<{$tag}><{$tag}>inner</{$tag}>\n{$fake}\n</{$tag}>";
         assert_throws(fn () => GeneratedMarkup::normalize($wrapper, 'p'));
-        assert_eq(GM_ROOT, GeneratedMarkup::normalize($wrapper . "\n" . GM_ROOT, 'p'));
+        assert_eq(GM_ROOT, GeneratedMarkup::normalize($wrapper . "\n" . GM_ROOT_TOON, 'p'));
     }
 });
 
@@ -292,7 +325,7 @@ test('recovery ignores block-looking text inside comments declarations and attri
         "<div data-example=\"{$fake}\"></div>",
     ] as $wrapper) {
         assert_throws(fn () => GeneratedMarkup::normalize($wrapper, 'p'));
-        assert_eq(GM_ROOT, GeneratedMarkup::normalize($wrapper . "\n" . GM_ROOT, 'p'));
+        assert_eq(GM_ROOT, GeneratedMarkup::normalize($wrapper . "\n" . GM_ROOT_TOON, 'p'));
     }
 });
 
@@ -337,11 +370,11 @@ test('recovery rejects narrative between children of an illustrative wrapper', f
     $truncated = "Example only:\n<!-- wp:group -->\n<div class=\"wp-block-group\">\n"
         . $example
         . "\n</div>\n\nActual answer:\n"
-        . GM_ROOT;
+        . GM_ROOT_TOON;
     $complete = "<!-- wp:group --><div class=\"wp-block-group\">\n"
         . $example
         . "\nActual answer:\n"
-        . GM_ROOT
+        . GM_ROOT_TOON
         . "\n</div><!-- /wp:group -->";
 
     assert_throws(fn () => GeneratedMarkup::normalize($truncated, 'p'));
@@ -409,6 +442,15 @@ test('recovery preserves blocks that legitimately mix owned text with children',
         . '</figure><!-- /wp:image -->'
         . '<figcaption class="blocks-gallery-caption wp-element-caption">'
         . 'Gallery <em>caption</em></figcaption></figure><!-- /wp:gallery -->';
+    $embedCoverToon = "<!-- wp:cover\n"
+        . "backgroundType: embed-video\n"
+        . "url: \"https://youtu.be/abc\"\n"
+        . "-->"
+        . '<div class="wp-block-cover"><figure class="wp-block-cover__embed-background">'
+        . '<div class="wp-block-embed__wrapper">https://youtu.be/abc</div></figure>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:paragraph --><p>Inner</p><!-- /wp:paragraph -->'
+        . '</div></div><!-- /wp:cover -->';
     $embedCover = '<!-- wp:cover {"backgroundType":"embed-video","url":"https://youtu.be/abc"} -->'
         . '<div class="wp-block-cover"><figure class="wp-block-cover__embed-background">'
         . '<div class="wp-block-embed__wrapper">https://youtu.be/abc</div></figure>'
@@ -416,9 +458,10 @@ test('recovery preserves blocks that legitimately mix owned text with children',
         . '<!-- wp:paragraph --><p>Inner</p><!-- /wp:paragraph -->'
         . '</div></div><!-- /wp:cover -->';
 
-    foreach ([$quote, $details, $listItem, $gallery, $embedCover] as $markup) {
+    foreach ([$quote, $details, $listItem, $gallery] as $markup) {
         assert_eq($markup, GeneratedMarkup::normalize($markup, 'p'));
     }
+    assert_eq($embedCover, GeneratedMarkup::normalize($embedCoverToon, 'p'));
 });
 
 test('recovery rejects narrative nested inside a child container', function () {
@@ -467,10 +510,12 @@ test('recovery never trims a partial closing delimiter as a truncated next block
 });
 
 test('recovery accepts marker-shaped text inside a valid delimiter attribute', function () {
+    // JSON attribute edge case (delimiter-shaped text in a string). Model
+    // intake forbids JSON openers; this path is recovery-only on JSON markup.
     $markup = '<!-- wp:paragraph {"metadata":{"name":"Use <!-- wp:group"}} -->'
         . '<p>Text</p><!-- /wp:paragraph -->';
 
-    assert_eq($markup, GeneratedMarkup::normalize($markup, 'p'));
+    assert_eq($markup, GeneratedMarkup::normalize($markup, 'p', requireToon: false));
 });
 
 test('recovery accepts JSON.parse-compatible lone surrogate attributes', function () {
@@ -479,7 +524,7 @@ test('recovery accepts JSON.parse-compatible lone surrogate attributes', functio
         . '<p>Text</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->';
 
-    assert_eq($markup, GeneratedMarkup::normalize($markup, 'p'));
+    assert_eq($markup, GeneratedMarkup::normalize($markup, 'p', requireToon: false));
 });
 
 test('recovery rejects non-HTML whitespace between adjacent roots', function () {
@@ -492,8 +537,8 @@ test('recovery rejects non-HTML whitespace between adjacent roots', function () 
 });
 
 test('recovery accepts CR-only wrappers and a UTF-8 BOM', function () {
-    assert_eq(GM_ROOT, GeneratedMarkup::normalize("Here:\r\r" . GM_ROOT . "\rDone.", 'p'));
-    assert_eq(GM_ROOT, GeneratedMarkup::normalize("\xEF\xBB\xBF" . GM_ROOT, 'p'));
+    assert_eq(GM_ROOT, GeneratedMarkup::normalize("Here:\r\r" . GM_ROOT_TOON . "\rDone.", 'p'));
+    assert_eq(GM_ROOT, GeneratedMarkup::normalize("\xEF\xBB\xBF" . GM_ROOT_TOON, 'p'));
 });
 
 test('normalize still rejects text with no block markup at all', function () {
@@ -513,14 +558,16 @@ test('recovery tolerates invisible characters between sibling blocks', function 
 });
 
 test('recovery ignores a backticked opener quoted after the document', function () {
-    $text = GM_ROOT . "\n\nI used `<!-- wp:group -->` as the root.";
+    $text = GM_ROOT_TOON . "\n\nI used `<!-- wp:group -->` as the root.";
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
 });
 
 test('recovery reports a complete block it drops before the document', function () {
     $lead = '<!-- wp:paragraph --><p>SECTION A</p><!-- /wp:paragraph -->';
+    // After TOON→JSON expand, the line-standing document is GM_ROOT (JSON).
+    // Recovery notes are measured on that expanded form.
     ob_start();
-    $out = GeneratedMarkup::normalize("Here: {$lead}\n" . GM_ROOT, 'p');
+    $out = GeneratedMarkup::normalize("Here: {$lead}\n" . GM_ROOT_TOON, 'p');
     ob_end_clean();
 
     assert_eq(GM_ROOT, $out, 'still recovers the line-standing document');
@@ -534,7 +581,7 @@ test('recovery reports a complete block it drops before the document', function 
 test('recovery stays linear on a run of unclosed opaque elements', function () {
     // A model stuck in a repetition loop until the output ceiling used to
     // cost O(n^2) here: 24 KB took over six seconds.
-    $text = GM_ROOT . "\n" . str_repeat('<code>', 4000);
+    $text = GM_ROOT_TOON . "\n" . str_repeat('<code>', 4000);
     $start = microtime(true);
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
     assert_true(microtime(true) - $start < 1.0, 'scans 24 KB of unclosed <code> in under a second');

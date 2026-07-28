@@ -20,14 +20,18 @@ final class GeneratedMarkup
      *
      * $notes receives one "part '<key>': …" line per removal or degradation
      * that changed the delivered content (sanitizer strips, wrapper recovery,
-     * truncation salvage). Callers with a Project route them to warnings.json;
-     * every note is also echoed to STDERR for live visibility.
+     * truncation salvage, TOON expand). Callers with a Project route them to
+     * warnings.json; every note is also echoed to STDERR for live visibility.
      *
-     * Prototype: block openers may carry TOON attributes instead of JSON;
-     * those are expanded to standard Gutenberg comment JSON before recovery
-     * (pure PHP — see Toon / ToonBlockAttrs).
+     * Block openers with attributes MUST use TOON (mandatory by default).
+     * JSON attrs on `<!-- wp:… -->` openers are rejected when $requireToon is
+     * true. TOON is expanded to standard Gutenberg comment JSON before recovery
+     * (pure PHP — Toon / ToonBlockAttrs). Attr-less openers remain valid.
+     *
+     * Pass $requireToon = false only for internal/test fixtures that feed
+     * already-JSON Gutenberg markup through this intake (never for model output).
      */
-    public static function normalize(string $text, string $key, array &$notes = []): string
+    public static function normalize(string $text, string $key, array &$notes = [], bool $requireToon = true): string
     {
         $record = static function (string $note) use ($key, &$notes): void {
             fwrite(STDERR, "    (part '{$key}': {$note})\n");
@@ -42,10 +46,10 @@ final class GeneratedMarkup
             $record("sanitized script-capable markup — {$note}");
         }
 
-        // TOON → JSON on block openers (no-op when attrs are already JSON).
+        // TOON → JSON on attributed block openers (JSON forbidden when mandatory).
         $toonNotes = [];
         try {
-            $text = ToonBlockAttrs::expand($text, $toonNotes);
+            $text = ToonBlockAttrs::expand($text, $toonNotes, $requireToon);
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }

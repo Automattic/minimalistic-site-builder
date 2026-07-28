@@ -405,10 +405,10 @@ test('sections writes header AND footer with a constrained layout when the model
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
-    $llm->queueText('<!-- wp:group {"className":"header-overlay"} --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText("<!-- wp:group\nclassName: header-overlay\n--><!-- wp:site-title /--><!-- /wp:group -->");
     // The naturaleza6 failure: footer group with align:full but no layout —
     // flow, not constrained, so its text ran edge-to-edge at the viewport.
-    $llm->queueText('<!-- wp:group {"tagName":"footer","align":"full"} --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText("<!-- wp:group\ntagName: footer\nalign: full\n--><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->");
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -604,13 +604,22 @@ test('sections salvages a truncated section part instead of failing the build', 
     // The BIGR-716 portfolio2 shape: the about section's stream was cut off
     // inside a paragraph's comment JSON, leaving two groups unclosed.
     $llm->queueText(<<<HTML
-<!-- wp:group {"layout":{"type":"constrained"}} -->
+<!-- wp:group
+layout:
+  type: constrained
+-->
 <div class="wp-block-group">
 <!-- wp:heading --><h2 class="wp-block-heading">About</h2><!-- /wp:heading -->
-<!-- wp:group {"layout":{"type":"flex"}} -->
+<!-- wp:group
+layout:
+  type: flex
+-->
 <div class="wp-block-group">
 <!-- wp:paragraph --><p>Complete.</p><!-- /wp:paragraph -->
-<!-- wp:paragraph {"style":{"typography":{"textTransform":"
+<!-- wp:paragraph
+style:
+  typography:
+    textTransform: "
 HTML);
     $renderer = new PromptRenderer(repo_path('prompts'));
 

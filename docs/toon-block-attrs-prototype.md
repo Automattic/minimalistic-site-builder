@@ -104,3 +104,11 @@ php tests/run.php tests/unit/toon_test.php
 - Spec: https://github.com/toon-format/spec  
 - Online converter (design reference only): https://www.mywebutils.com/json-to-toon  
 - Official TS package (not used at runtime): https://github.com/toon-format/toon  
+
+
+## Mandatory enforcement
+
+- **Prompts:** `block-markup-output-contract.md` + section/header/footer Rules state TOON only.
+- **Code:** `ToonBlockAttrs::expand(..., requireToon: true)` (default) throws if an opener has JSON `{…}` attrs.
+- **Intake:** `GeneratedMarkup::normalize()` always expands with `requireToon: true`.
+- Attr-less openers remain allowed. Downstream steps still use standard Gutenberg JSON after expansion.

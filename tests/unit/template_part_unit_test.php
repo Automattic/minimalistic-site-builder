@@ -40,7 +40,7 @@ test('HeaderUnit generates a constrained header from self-contained input', func
 
 test('FooterUnit generates a constrained footer from self-contained input', function () {
     $llm = new FakeLlm();
-    $llm->queueText('<!-- wp:group {"tagName":"footer"} --><div class="wp-block-group"></div><!-- /wp:group -->');
+    $llm->queueText("<!-- wp:group\ntagName: footer\n--><div class=\"wp-block-group\"></div><!-- /wp:group -->");
     $unit = new FooterUnit($llm, new PromptRenderer(repo_path('prompts')));
 
     $markup = $unit->generate(template_part_unit_input());

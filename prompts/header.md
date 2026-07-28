@@ -31,6 +31,7 @@ Header archetype catalog (how to build each):
 7. **split-nav** — the wordmark sits centered between two halves of the navigation: a single flex row with space-between holding a left wp:navigation, the centered wp:site-title ("fontFamily":"heading"), and a right wp:navigation. This is the one archetype where you hand-author wp:navigation-link entries (split the PAGE OUTLINE's likely pages across the two navs) instead of using page-list. Suits fashion, restaurant, hotel, and classical/symmetric directions.
 
 Rules:
+- **BLOCK ATTRIBUTES ARE TOON ONLY (mandatory):** every `<!-- wp:… -->` opener that needs attributes MUST use multi-line TOON (`key: value` inside the comment). Never emit JSON on openers (`<!-- wp:name {"…"} -->`) — that fails the build. Attr-less openers (`<!-- wp:paragraph -->`) are fine. See the BLOCK-MARKUP RESPONSE CONTRACT for the exact form.
 - The top-level wp:group MUST declare `"layout":{"type":"constrained"}` (add `"wideSize"` when the direction wants a wider bar) and the title/nav row goes in an inner group with `"align":"wide"`. A top-level group with no "layout" attribute renders its content edge-to-edge at the viewport — broken on wide screens.
 - Give the top-level group vertical breathing room: `"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}}` or more — for minimal-overlay a small base padding already ships in `.header-overlay`, but the other archetypes bring none of their own.
 {{nav_rule}}

@@ -99,15 +99,36 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     $llm->queueText($hdr);
     $llm->queueText($ftr);
     $llm->queueText(
-        '<!-- wp:group {"className":"ken-burns","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->'
+        '<!-- wp:group
+className: ken-burns
+style:
+  spacing:
+    margin:
+      top: "0"
+layout:
+  type: constrained
+-->'
         . '<div class="wp-block-group ken-burns" style="margin-top:0">'
-        . '<!-- wp:cover {"dimRatio":50,"minHeight":500,"align":"full","backgroundColor":"contrast"} -->'
+        . "<!-- wp:cover\n"
+        . "dimRatio: 50\n"
+        . "minHeight: 500\n"
+        . "align: full\n"
+        . "backgroundColor: contrast\n"
+        . "-->"
         . '<div class="wp-block-cover alignfull has-contrast-background-color has-background" style="min-height:500px">'
         . '<span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
         . '<div class="wp-block-cover__inner-container">'
-        . '<!-- wp:group {"className":"hero-entrance","layout":{"type":"constrained"}} -->'
+        . '<!-- wp:group
+className: hero-entrance
+layout:
+  type: constrained
+-->'
         . '<div class="wp-block-group hero-entrance">'
-        . '<!-- wp:heading {"level":1,"textColor":"base"} --><h1 class="wp-block-heading has-base-color has-text-color">Hero</h1><!-- /wp:heading -->'
+        . "<!-- wp:heading\n"
+        . "level: 1\n"
+        . "textColor: base\n"
+        . "-->"
+        . '<h1 class="wp-block-heading has-base-color has-text-color">Hero</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
         . '</div></div><!-- /wp:cover -->'
         . '</div><!-- /wp:group -->'
@@ -124,10 +145,24 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // vertical-only repair. Both classes must still be visible after the
     // markup moves into the content plugin.
     $llm->queueText(
-        '<!-- wp:group {"className":"overlap-up hover-lift","style":{"spacing":{"padding":{"top":"12rem","bottom":"12rem"},"margin":{"top":"0","bottom":"0"}}},"layout":{"type":"constrained"}} -->'
+        '<!-- wp:group
+className: "overlap-up hover-lift"
+style:
+  spacing:
+    padding:
+      top: 12rem
+      bottom: 12rem
+    margin:
+      top: "0"
+      bottom: "0"
+layout:
+  type: constrained
+-->'
         . '<div class="wp-block-group overlap-up hover-lift" style="padding:12rem 2rem;margin:0 auto">'
         . '<!-- wp:heading --><h2>Specials</h2><!-- /wp:heading -->'
-        . '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up">'
+        . '<!-- wp:group
+className: overlap-up
+--><div class="wp-block-group overlap-up">'
         . '<!-- wp:paragraph --><p>Featured today</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->'
@@ -138,7 +173,12 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         . '<!-- wp:heading --><h2>Breads</h2><!-- /wp:heading -->'
         // Exact BIGR-728 reproduction: contradictory legacy/current paragraph
         // alignment must degrade with a warning, not abort this full pipeline.
-        . '<!-- wp:paragraph {"align":"center","style":{"typography":{"textAlign":"justify"}}} -->'
+        . "<!-- wp:paragraph\n"
+        . "align: center\n"
+        . "style:\n"
+        . "  typography:\n"
+        . "    textAlign: justify\n"
+        . "-->"
         . '<p class="has-text-align-center" style="text-align:justify">'
         . 'See you at <a href="/">home</a>.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->'

@@ -47,7 +47,12 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     $llm = new FakeLlm();
     $llm->queueText(
         "```html\n"
-        . '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset--spacing--xl"}}}} -->'
+        . "<!-- wp:group\n"
+        . "style:\n"
+        . "  spacing:\n"
+        . "    padding:\n"
+        . "      top: \"var:preset--spacing--xl\"\n"
+        . "-->"
         . '<div class="wp-block-group"></div><!-- /wp:group -->'
         . "\n```"
     );

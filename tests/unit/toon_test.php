@@ -141,11 +141,11 @@ HTML;
     assert_true(str_contains($out, 'Or visit our contact page.'), $out);
 });
 
-test('ToonBlockAttrs leaves JSON openers untouched', function () {
+test('ToonBlockAttrs leaves JSON openers untouched only when requireToon is false', function () {
     $html = '<!-- wp:group {"align":"full","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $notes = [];
-    assert_eq($html, ToonBlockAttrs::expand($html, $notes));
+    assert_eq($html, ToonBlockAttrs::expand($html, $notes, false));
     assert_eq([], $notes);
 });
 
@@ -215,4 +215,26 @@ HTML;
     // The deep elements.link.:hover path must be valid JSON now (the failure mode).
     assert_true(str_contains($out, '":hover"'), $out);
     assert_true(str_contains($out, '<!-- /wp:group -->'), $out);
+});
+
+test('ToonBlockAttrs rejects JSON openers when TOON is mandatory', function () {
+    $json = '<!-- wp:group {"align":"full"} --><div class="wp-block-group"></div><!-- /wp:group -->';
+    assert_throws(
+        fn () => ToonBlockAttrs::expand($json, $notes, true),
+        'JSON attrs must fail under requireToon',
+    );
+});
+
+test('GeneratedMarkup rejects JSON openers as non-TOON model output', function () {
+    $json = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group"></div><!-- /wp:group -->';
+    assert_throws(
+        fn () => GeneratedMarkup::normalize($json, 'p'),
+        'normalize enforces mandatory TOON',
+    );
+});
+
+test('ToonBlockAttrs can still pass through JSON when requireToon is false', function () {
+    $json = '<!-- wp:group {"align":"full"} --><div class="wp-block-group"></div><!-- /wp:group -->';
+    $notes = [];
+    assert_eq($json, ToonBlockAttrs::expand($json, $notes, false));
 });
