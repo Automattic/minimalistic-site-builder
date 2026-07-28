@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "paragraph-conflicting-text-align",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/paragraph",
+    "deprecation:paragraph-align",
+    "drop:conflicting-text-align",
+    "report:fixed"
+  ],
+  "provenance": {
+    "kind": "post-oracle-authored",
+    "notes": [
+      "Input is the exact center-versus-justify core/paragraph signature recorded in BIGR-728 after it aborted a generated portfolio build.",
+      "This is a reviewed post-oracle policy fixture, not a claim that the Node oracle selected the fallback: the frozen core/paragraph contract exposes both authored alignment sources but no rule for choosing between contradictory center and justify values.",
+      "The repair row records the file, block path, authored property/value, and delivered disposition for warnings.json; the second invocation pins the fixed point."
+    ]
+  },
+  "reviewedRepairCount": 1
+}

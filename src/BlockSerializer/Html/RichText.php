@@ -39,10 +39,11 @@ final class RichText
      */
     public static function fromHtmlString(string $value): string
     {
+        $fragment = HtmlFragment::parse($value);
         return str_replace(
             '&nbsp;',
             "\u{00A0}",
-            HtmlFragment::parse($value)->innerHtml(),
+            self::wordpressSafeInnerHtml($fragment->root()),
         );
     }
 
@@ -55,5 +56,51 @@ final class RichText
             return $value->textContent();
         }
         return HtmlFragment::parse($value)->textContent();
+    }
+
+    /**
+     * Serialize RichText recreation for WordPress' runtime HTML processor.
+     *
+     * A browser's fragment serializer leaves angle brackets literal inside a
+     * quoted attribute. WordPress' tag processor can treat that literal `>` as
+     * the tag boundary, corrupting otherwise valid saved markup. RichText
+     * recreated by a deprecation is headed back into block save output, so use
+     * the stricter React-style attribute spelling at this boundary.
+     */
+    private static function wordpressSafeInnerHtml(HtmlNode $node): string
+    {
+        $html = '';
+        foreach ($node->children() as $child) {
+            $html .= self::wordpressSafeOuterHtml($child);
+        }
+        return $html;
+    }
+
+    private static function wordpressSafeOuterHtml(HtmlNode $node): string
+    {
+        if (!$node->isElement()) {
+            return $node->outerHtml();
+        }
+
+        $tag = (string) $node->tagName();
+        $html = '<' . $tag;
+        foreach ($node->attributes() as $attribute) {
+            $html .= ' ' . $attribute['name'] . '="'
+                . self::wordpressSafeAttribute($attribute['value']) . '"';
+        }
+        $html .= '>';
+        if (HtmlNode::isVoidTag($tag)) {
+            return $html;
+        }
+        return $html . self::wordpressSafeInnerHtml($node) . '</' . $tag . '>';
+    }
+
+    private static function wordpressSafeAttribute(string $value): string
+    {
+        return str_replace(
+            ['&', "\u{00A0}", '"', '<', '>'],
+            ['&amp;', '&nbsp;', '&quot;', '&lt;', '&gt;'],
+            $value,
+        );
     }
 }

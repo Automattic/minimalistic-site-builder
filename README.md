@@ -85,6 +85,28 @@ in parallel and bound each site's internal request fan-out at four; pass
 Output lands in `projects/<slug>/`. Each build also writes a run overview —
 per-step times and token spend, totals, and the image tally — to
 `projects/<slug>/logs/project.log` (the same summary printed to the terminal).
+A successful build can also contain `projects/<slug>/warnings.json`. This
+machine-readable artifact groups non-fatal defects by step id for output the
+build still delivered:
+
+```json
+{
+  "fix-blocks": [
+    "parts/example.html block 0: core/paragraph style \"opacity\" could not be preserved"
+  ],
+  "validate-theme": [
+    "plugin/pages/home.html: a button link has no href"
+  ]
+}
+```
+
+Warnings do not make the build fail; inspect the corresponding file under
+`logs/` for full evidence. Mutating repair/serialization steps only warn through
+an exact reviewed, deterministic safe degradation; malformed or unsupported
+input, unreviewed content loss, and non-convergence remain fatal there. An
+advisory final validator may warn about residual problems without rewriting the
+already usable artifact. Operational failures such as unreadable inputs or
+failed writes remain fatal everywhere.
 Run the unit tests with `php tests/run.php`.
 
 ## Build the demo set

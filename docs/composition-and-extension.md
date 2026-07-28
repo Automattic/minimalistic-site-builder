@@ -27,6 +27,16 @@ The property that makes all of this possible is already in the core, and it is t
 
 Because the boundary between steps is **files, not in-memory objects**, anything — another codebase, another language, an agent — can drive a build and do its own work between steps without linking into the PHP. **Do not trade this for in-memory state to look cleaner; it is what makes extension work across processes, languages, and agents.**
 
+`warnings.json` is part of that portable disk-state contract. It is the
+project-root, machine-readable record of non-fatal defects in output a step
+still delivered. Warning-producing steps must use `Project::addWarnings()` and
+declare `warnings.json` in `writes[]`, so hosts and later repair steps can
+discover the artifact without parsing console output or human-oriented logs.
+Mutating repair steps may deliver through only an explicitly reviewed,
+deterministic safe degradation; advisory final validators may report residual
+problems without rewriting the artifact. Warnings are not a substitute for
+failing closed on malformed, unsupported, or unreviewed transformations.
+
 ## Two building-block decisions (resolved)
 
 1. **Declarative steps.** Each step declares `id` + `reads[]` + `writes[]` + concurrency. The ordered array becomes *derived* data. Any host's composition is then **validated** — a step whose inputs aren't yet produced is a construction-time error, not a runtime one. The graph is data, not hand-assembled code.

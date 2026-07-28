@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "paragraph-opacity-reviewed-drop",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/paragraph",
+    "deprecation:paragraph-align",
+    "deprecation:paragraph-selectorless",
+    "repair:nested-paragraph",
+    "drop:unbacked-inline-style",
+    "report:fixed"
+  ],
+  "provenance": {
+    "kind": "post-oracle-authored",
+    "notes": [
+      "Minimal reproduction of the generated aligned core/paragraph signature that previously failed fix-blocks when its authored root carried opacity.",
+      "The second input pins the selector-less deprecation path: even an otherwise attrless opacity:0 paragraph is migrated to readable current-schema output instead of carrying hidden content through.",
+      "Certified against the frozen core/paragraph registry supports: typography.textAlign is implemented, while opacity is absent, so the pinned current save retains alignment and deterministically drops the inert opacity declaration."
+    ]
+  },
+  "reviewedRepairCount": 3
+}
