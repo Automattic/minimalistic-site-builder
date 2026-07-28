@@ -232,7 +232,14 @@ final class PagePlanStep implements ConcurrentStep
 
         $out = [];
         foreach ($pages as $page) {
-            $page['sections'] = $sectionsBySlug[(string) $page['slug']];
+            $slug = (string) $page['slug'];
+            // A repair batch that answers fewer pages than it was asked about
+            // must fail loud: assembling the page without sections would write
+            // a null into pages.json and break far downstream instead.
+            if (!isset($sectionsBySlug[$slug])) {
+                throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
+            }
+            $page['sections'] = $sectionsBySlug[$slug];
             $out[] = $page;
         }
 
@@ -257,6 +264,12 @@ final class PagePlanStep implements ConcurrentStep
         $prompts = $this->requests($project);
         $requests = [];
         foreach ($rejected as $slug => $rejection) {
+            // Same flattenPages tree feeds both, so a miss means the page tree
+            // shifted underneath us. Name the page instead of repairing against
+            // a suffix with no page context.
+            if (!isset($prompts[$slug]['prompt'])) {
+                throw new \RuntimeException("page-plan: no prompt to repair page '{$slug}' with");
+            }
             $requests[$slug] = $this->withOptions([
                 'prompt'      => (string) $prompts[$slug]['prompt']
                     . self::repairSuffix($rejection['plan'], $rejection['errors']),
