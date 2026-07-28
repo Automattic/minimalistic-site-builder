@@ -96,18 +96,18 @@ final class CoverContrastStep implements Step
         // not trustworthy, so the verification pass is skipped — a durable
         // warning, not a fatal: this step only polishes readability, and the
         // theme it would inspect is already fully built.
+        $exists = $project->exists(GenerateImagesStep::COMPLETION_ARTIFACT);
         $completion = null;
-        if ($project->exists(GenerateImagesStep::COMPLETION_ARTIFACT)) {
-            try {
-                $completion = $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT);
-            } catch (\RuntimeException) {
-                $completion = null;
-            }
+        if ($exists) {
+            // readText throws on an unreadable file — an I/O failure stays
+            // fatal per the policy; only invalid JSON degrades to the skip.
+            $decoded = json_decode($project->readText(GenerateImagesStep::COMPLETION_ARTIFACT), true);
+            $completion = is_array($decoded) ? $decoded : null;
         }
         if (($completion['status'] ?? null) !== 'completed') {
-            $skip = $completion === null
-                ? 'image generation has not completed (missing or unreadable completion artifact)'
-                : 'image generation completion artifact is invalid';
+            $skip = $exists
+                ? 'image generation completion artifact is invalid'
+                : 'image generation has not completed (missing completion artifact)';
             $project->addWarnings($this->id(), [
                 "{$skip}; cover text not verified against the real images",
             ]);
