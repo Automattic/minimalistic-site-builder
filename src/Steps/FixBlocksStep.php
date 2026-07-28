@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockFixerOutcome;
+use Automattic\SiteBuild\BlockSerializer\FileReport;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
@@ -137,16 +138,7 @@ final class FixBlocksStep implements Step
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
                 . 'see logs/' . self::LOG_FILE;
         }
-        // An alignment class is not the incidental HTML-only styling the fixer
-        // may discard: WordPress generates these tokens from block supports, so
-        // a heading that was centred renders left-aligned and the visitor sees
-        // it. Skip files whose loss is already recorded by the reviewed
-        // paragraph path — there the alignment was resolved, not lost, and a
-        // second row for one defect is noise rather than signal.
-        $alignmentDrops = array_values(array_filter(
-            self::droppedAlignmentClasses($deliveredSummary),
-            static fn (array $drop): bool => !in_array($drop[0], self::warnedFiles($paragraphStyleWarnings), true),
-        ));
+        $alignmentDrops = self::droppedAlignmentClasses(self::deliveredFiles($outcomes, $failedPaths));
         foreach ($alignmentDrops as [$file, $class]) {
             $warnings[] = "block re-serialization dropped alignment class `{$class}` in {$file}; "
                 . 'the block renders with the default alignment — see logs/' . self::LOG_FILE;
@@ -295,55 +287,86 @@ final class FixBlocksStep implements Step
     }
 
     /**
-     * Extract DROPPED class rows for support-generated alignment classes.
+     * Alignment classes lost during re-serialization, as `[file, class]` pairs.
      *
      * The sibling rhythm helper above exists because losing spacing changes the
      * page's authored rhythm. Alignment is the same kind of loss and not the
      * "incidental HTML-only styling" the fixer is allowed to discard: a heading
      * that was centred renders left-aligned, which the visitor sees. WordPress
      * generates these tokens from block supports, so their visual meaning is
-     * fixed and does not depend on whether the theme happens to style them.
+     * fixed and does not depend on whether the theme happens to style them —
+     * unlike a preset or theme class, which is why those stay unwarned.
      *
-     * @return list<string>
+     * A file whose paragraph styles already degraded through the reviewed path
+     * is skipped: there the alignment was resolved between two contradictory
+     * authored signals rather than lost, and a second row in a second
+     * vocabulary for one defect is noise rather than signal.
+     *
+     * @param list<FileReport> $files
+     * @return list<array{0:string,1:string}>
      */
-    public static function droppedAlignmentClasses(string $report): array
+    public static function droppedAlignmentClasses(array $files): array
     {
+        $alignmentClasses = [
+            'has-text-align-left',
+            'has-text-align-center',
+            'has-text-align-right',
+            'alignfull',
+            'alignwide',
+            'alignleft',
+            'alignright',
+            'aligncenter',
+            'alignnone',
+        ];
+
         $dropped = [];
-        $file = 'unknown file';
-        foreach (preg_split('/\r?\n/', $report) ?: [] as $line) {
-            if (preg_match('/^\s+(?:FIXED|ok|skip)\s+(.+?)\s*$/', $line, $match) === 1) {
-                $file = trim($match[1]);
+        foreach ($files as $file) {
+            if (self::degradedReviewedParagraphStyle($file)) {
                 continue;
             }
-            if (preg_match('/\bDROPPED\s+class\s+`([^`\r\n]+)`/i', $line, $match) !== 1) {
-                continue;
-            }
-            $token = trim($match[1]);
-            if (preg_match('/^(?:has-text-align-(?:left|center|right)|align(?:full|wide|left|right|center|none))$/', $token) !== 1) {
-                continue;
-            }
-            $entry = [$file, $token];
-            if (!in_array($entry, $dropped, true)) {
-                $dropped[] = $entry;
+            foreach ($file->dropped as $drop) {
+                if ($drop->kind !== 'class' || !in_array($drop->value, $alignmentClasses, true)) {
+                    continue;
+                }
+                $entry = [$file->path, $drop->value];
+                if (!in_array($entry, $dropped, true)) {
+                    $dropped[] = $entry;
+                }
             }
         }
         return $dropped;
     }
 
-    /**
-     * Files already named by another warning, so one defect is not recorded
-     * twice in two vocabularies.
-     *
-     * @param list<string> $warnings
-     * @return list<string>
-     */
-    private static function warnedFiles(array $warnings): array
+    private static function degradedReviewedParagraphStyle(FileReport $file): bool
     {
+        foreach ($file->repairs as $repair) {
+            if (str_starts_with($repair->code, 'paragraph-style-degraded:')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Per-file results the step delivered, minus the files whose transformation
+     * was abandoned and whose pre-fixer bytes went out instead.
+     *
+     * A fixer that does not implement ReportingBlockFixer exposes no typed
+     * results, exactly as `BlockFixerOutcome::failures()` already treats it.
+     *
+     * @param list<BlockFixerOutcome> $outcomes
+     * @param list<string> $failedPaths
+     * @return list<FileReport>
+     */
+    private static function deliveredFiles(array $outcomes, array $failedPaths): array
+    {
+        $failed = array_fill_keys($failedPaths, true);
         $files = [];
-        foreach ($warnings as $warning) {
-            if (preg_match('/(\S+\.html)\b/', $warning, $match) === 1
-                && !in_array($match[1], $files, true)) {
-                $files[] = $match[1];
+        foreach ($outcomes as $outcome) {
+            foreach ($outcome->typed->files ?? [] as $file) {
+                if (!isset($failed[$file->path])) {
+                    $files[] = $file;
+                }
             }
         }
         return $files;
