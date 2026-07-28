@@ -31,7 +31,7 @@ Design intelligence to encode as tokens:
     `base` on `accent` (or `primary` if buttons use it) ≥ 4.5:1 (button labels)
   Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
-- **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies, dramatic shadows and decorative borders over flat solids. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
+- **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool — lines belong only to a direction whose signature device explicitly commits to them. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
 
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 
