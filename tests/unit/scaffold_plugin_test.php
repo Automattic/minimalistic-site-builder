@@ -39,6 +39,17 @@ function assert_inert(string $html, string $context): void
                 "{$context}: executable URL survived in {$name}",
             );
         }
+        // SVG SMIL animation sets a sibling attribute's live value from
+        // `values`/`to`/`from`/`by`, so an animation element that still
+        // targets an attribute is live code the URL sweep above never sees.
+        if (in_array($processor->get_tag(), ['ANIMATE', 'ANIMATETRANSFORM', 'ANIMATEMOTION', 'SET'], true)) {
+            foreach (['attributeName', 'values', 'to', 'from', 'by'] as $name) {
+                assert_true(
+                    $processor->get_attribute($name) === null,
+                    "{$context}: SVG animation attribute {$name} survived",
+                );
+            }
+        }
     }
 }
 
@@ -363,6 +374,10 @@ test('generated seeder neutralizes the same threats as the intake sanitizer', fu
         '<div><title><!--</title><embed src=x></div>',
         '<div><textarea><!--</textarea><base href="//evil/"></div>',
         '<style>a{c:"<base>"}</style>',
+        // SVG SMIL animation of a sibling attribute to a javascript: value.
+        '<svg><a href="#"><animate attributeName="href" values="javascript:E()"/><text>x</text></a></svg>',
+        '<svg><a href="#"><set attributeName="href" to="javascript:E()"/><text>x</text></a></svg>',
+        '<svg><rect><animatetransform attributeName="href" from="javascript:E()"/></rect></svg>',
     ];
     foreach ($corpus as $html) {
         // The two no longer agree byte-for-byte and are not meant to: the

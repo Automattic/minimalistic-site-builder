@@ -14,6 +14,29 @@ test('sanitize removes script elements with their bodies', function () {
     assert_contains('<p>Kept.</p>', $out);
 });
 
+test('sanitize removes SVG SMIL animation elements that can animate an href to javascript:', function () {
+    // <animate>/<set> set the live value of a sibling's attribute, so a link
+    // whose own href is inert still executes on click.
+    foreach ([
+        '<svg><a href="#x"><animate attributeName="href" values="javascript:alert(1)"/><text>Click</text></a></svg>',
+        '<svg><a href="#x"><set attributeName="href" to="javascript:alert(1)"/><text>Click</text></a></svg>',
+        '<svg><rect><animateTransform attributeName="href" from="javascript:alert(1)"/></rect></svg>',
+        '<svg><a href="#x"><animate attributeName="href" values="javascript:alert(1)"></animate>t</a></svg>',
+    ] as $payload) {
+        $out = MarkupSanitizer::sanitize($payload);
+        assert_true(!str_contains($out, 'javascript:'), "animation neutralized: {$payload}");
+        assert_true(
+            !preg_match('/<(?:animate|animatetransform|animatemotion|set)\b/i', $out),
+            "animation element removed: {$payload}",
+        );
+    }
+});
+
+test('sanitize keeps a legitimate SVG that carries no animation', function () {
+    $svg = '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
+    assert_eq($svg, MarkupSanitizer::sanitize($svg));
+});
+
 test('sanitize removes an unclosed script and its remaining body', function () {
     $out = MarkupSanitizer::sanitize(
         '<!-- wp:paragraph --><p>Kept.</p><!-- /wp:paragraph -->'

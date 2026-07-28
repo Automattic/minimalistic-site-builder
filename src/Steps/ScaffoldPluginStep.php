@@ -432,6 +432,13 @@ final class ScaffoldPluginStep implements Step
                 'src', 'data', 'srcdoc', 'code', 'codebase', 'archive',
                 'classid', 'href',
             );
+            // SVG SMIL animation elements: neutralized by stripping their
+            // targeting attributes below (they animate a sibling's attribute
+            // to a javascript: value that no URL sink inspects).
+            $animation = array(
+                'ANIMATE' => true, 'ANIMATETRANSFORM' => true,
+                'ANIMATEMOTION' => true, 'SET' => true,
+            );
             // Core's canonical URI-attribute list (18 entries, including
             // poster/cite/background/longdesc) plus the SVG spelling it omits.
             $urls = array_merge(wp_kses_uri_attributes(), array('xlink:href'));
@@ -487,6 +494,17 @@ final class ScaffoldPluginStep implements Step
                         // URL the model chose.
                         $processor->remove_attribute('http-equiv');
                         $processor->remove_attribute('content');
+                    }
+                    if (isset($animation[$tag])) {
+                        // SVG SMIL animation sets the live value of a sibling's
+                        // attribute (e.g. a link's href) to whatever rides
+                        // `values`/`to`/`from`/`by` — a javascript: URL that no
+                        // URL sink below inspects. The Tag Processor cannot drop
+                        // a node, so strip the targeting attributes and leave an
+                        // inert element that animates nothing.
+                        foreach (array('attributeName', 'values', 'to', 'from', 'by') as $name) {
+                            $processor->remove_attribute($name);
+                        }
                     }
 
                     foreach ($urls as $name) {

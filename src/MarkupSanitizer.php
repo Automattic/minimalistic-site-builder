@@ -36,9 +36,18 @@ final class MarkupSanitizer
             'script', 'iframe', 'object', 'applet',
             'noembed', 'noframes', 'noscript',
         ];
+        // SVG SMIL animation elements set the LIVE value of a sibling's
+        // attribute: `<a href="#"><animate attributeName="href"
+        // values="javascript:..."/>` makes the link execute on click even
+        // though its own href is inert. The dangerous string rides `values`/
+        // `to`/`from`/`by` — neither an on* handler nor a URL sink — so the
+        // attribute passes below untouched. These elements have no role in
+        // generated static markup, so drop them whole (DOMPurify forbids them
+        // for the same reason).
+        $animation = ['animate', 'animatetransform', 'animatemotion', 'set'];
         // `meta` carries no content but http-equiv="refresh" redirects every
         // visitor to a model-chosen URL, which no later pass would catch.
-        $tags = array_merge($containers, ['embed', 'base', 'meta']);
+        $tags = array_merge($containers, $animation, ['embed', 'base', 'meta']);
 
         // Removal splices the bytes on either side of a deleted tag together,
         // and that seam can spell a new tag: `<<base>script>` becomes a live
