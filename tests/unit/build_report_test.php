@@ -49,3 +49,20 @@ test('build-report renders a full document with header, table, totals and images
     assert_contains('LLM requests : 4', $out);
     assert_contains('Images: 2 generated, 0 failed (2 total)', $out);
 });
+
+test('build-report surfaces warnings.json so a warned build never looks clean', function () {
+    $r = new BuildReport('p', 'slug', '/tmp/slug', '2026-06-30T00:00:00+00:00');
+    $r->addStep('site-spec', 1.0, 100, 50);
+    assert_eq(null, $r->warningsLine(), 'no line when the build delivered clean');
+
+    $r->setWarnings([
+        'fix-blocks' => ['a dropped declaration', 'a failed file'],
+        'sections'   => ['a dropped section'],
+        'empty-step' => [],
+    ]);
+    assert_eq(
+        'Warnings: 3 defect(s) delivered through — see warnings.json (fix-blocks: 2, sections: 1)',
+        $r->warningsLine(),
+    );
+    assert_contains('Warnings: 3 defect(s) delivered through', $r->render());
+});

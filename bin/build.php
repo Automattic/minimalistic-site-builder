@@ -198,9 +198,18 @@ if ($withImages && $until === null) {
 
 $report->setRequestCount($llm->usageTotals()['requests']);
 
+// Surface the defects the build delivered through (warnings.json) so a
+// warned build never looks identical to a clean one on the console.
+$report->setWarnings(
+    $project->exists('warnings.json') ? $project->readJson('warnings.json') : []
+);
+
 echo $report->totalLine(), "\n";
 if (($imagesLine = $report->imagesLine()) !== null) {
     echo $imagesLine, "\n";
+}
+if (($warningsLine = $report->warningsLine()) !== null) {
+    echo $warningsLine, "\n";
 }
 
 // Persist the full run overview alongside the per-call LLM transcripts, so a
