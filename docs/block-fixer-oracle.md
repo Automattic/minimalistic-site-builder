@@ -133,7 +133,29 @@ change to the serializer, the support manifest or the case definitions cannot
 land unless the real Gutenberg runtime agrees with it.
 
 The oracle's own suite runs too, but **advisory rather than blocking**: its
-fixed-point test reports one committed golden the oracle disagrees with
-(`carried-elements-signatures`, where the PHP port drops a legacy heading
-alignment that the real runtime migrates into `className`). That divergence is a
-separate fix; when it lands, the step becomes a gate like the one above.
+fixed-point test reports one committed golden the oracle disagrees with. That
+divergence is a separate fix; when it lands, the step becomes a gate like the
+one above.
+
+### The one divergence, precisely
+
+In `carried-elements-signatures`, a `core/heading` with a legacy top-level
+`textAlign` loses its centering in the port and keeps it in the real runtime.
+A/B against the runtime, holding the comment attributes fixed (legacy
+`textAlign` plus a `style` object) and varying only the authored `<h2>`:
+
+| authored `<h2>` | runtime | port |
+| --- | --- | --- |
+| matches the deprecated save exactly | deprecation matches and migrates to `style.typography.textAlign`; the shallow raw-comment overlay then restores the authored `style`, so the alignment is **dropped** | agrees |
+| carries an inline `color:` no attribute backs | the deprecated save mismatches too, so **no** deprecation runs and the recovered class stays in `className` — **kept** | **drops it** |
+| carries an unrelated unbacked class | deprecation still matches, unknown classes being absorbed first — **dropped** | agrees |
+
+`DeprecationAdapters::heading()` matches on the weaker predicate *"a
+`has-text-align-*` class was recovered"* and consumes it, where the runtime
+first requires the deprecated save to validate against the authored HTML.
+
+Two things this is **not**, both of which looked plausible and were disproved by
+the A/B above: it is not about carried style families — `style.spacing`, fully
+reviewed and not carried, behaves identically — and it is not a missing
+`fixCustomClassname`. `CompatibilityRepairs::apply()` is a faithful port of that
+rescue and does run; the adapter then consumes what it rescued.

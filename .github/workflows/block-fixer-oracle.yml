@@ -65,10 +65,10 @@ jobs:
         run: npm run oracle:verify --workspace=bin/block-fixer
 
       # Not blocking yet. The oracle's fixed-point suite reports one committed
-      # golden it disagrees with — carried-elements-signatures, where the PHP
-      # port drops a legacy heading alignment the real runtime migrates. That
-      # divergence is a separate fix; once it lands this becomes a gate like the
-      # one above.
+      # golden it disagrees with — carried-elements-signatures, where a heading
+      # keeps its alignment class in the real runtime and loses it here. See
+      # docs/block-fixer-oracle.md, "The one divergence, precisely". That fix is
+      # separate; once it lands this becomes a gate like the one above.
       - name: Run the oracle's own test suite (advisory)
         run: npm test --workspace=bin/block-fixer
         continue-on-error: true
