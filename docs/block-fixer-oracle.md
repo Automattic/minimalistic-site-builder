@@ -52,18 +52,35 @@ per-package versions (`@wordpress/blocks@15.15.0`,
 ## What the generators derive
 
 - `bin/generate-block-registry.js` → `generated-registry.php`,
-  `registered-runtime.json`, `renderer-probes.json`, `coverage.json`, and the
-  `fingerprint` in `oracle-manifest.json`. Its inputs are
-  `bin/block-fixer/lib/supportManifest.js` (the reviewed support decisions) and
-  the runtime itself.
+  `registered-runtime.json`, and the `fingerprint` plus `registry` hashes in
+  `oracle-manifest.json`. Its inputs are `bin/block-fixer/lib/supportManifest.js`
+  (the reviewed support decisions) and the runtime itself.
 - `bin/generate-block-fixer-fixtures.js` → the golden cases under
   `tests/fixtures/block-fixer/cases/`, from the definitions in
-  `bin/block-fixer/lib/fixtureCases.js`.
+  `bin/block-fixer/lib/fixtureCases.js`, plus `coverage.json`.
 
 Both refuse to write when a case exercises a deprecation that is not listed in
 `REVIEWED_DEPRECATIONS`, or a block that is not in the reviewed support
 manifest. Those gates are the point: adding to the compatibility domain is a
 review step, not a regeneration side effect.
+
+### What is *not* re-derived: `renderer-probes.json`
+
+`renderer-probes.json` is a frozen snapshot of the runtime's `save()` output per
+block, captured before the oracle was removed and never rewritten since. No
+generator in the tree regenerates it: the fixture generator only reads it, checks
+its schema and coverage, and records its SHA-256 in `coverage.json`.
+
+It is still enforced — `tests/unit/block_serializer_renderer_snapshot_test.php`
+replays every probe against the PHP renderers as a blocking gate, and that is the
+test that caught `core/button`'s attribute order. But it is pinned rather than
+re-derived, so if Gutenberg's save output moved, nothing here would notice.
+Closing that would mean adding a probe generator alongside the other two;
+`bin/block-fixer/probe-save.js` prints one block's save output ad hoc and is the
+starting point, not a snapshot writer.
+
+So "every committed artifact is oracle-derived" is true of the registry, the
+fixtures and the goldens — and not yet of the probe snapshot.
 
 To certify against a *newer* Gutenberg, bump the pins in
 `bin/block-fixer/package.json`, regenerate, and re-freeze the fingerprint.
@@ -132,10 +149,26 @@ dependencies, and re-derives every frozen artifact — failing on drift. So a
 change to the serializer, the support manifest or the case definitions cannot
 land unless the real Gutenberg runtime agrees with it.
 
-The oracle's own suite runs too, but **advisory rather than blocking**: its
-fixed-point test reports one committed golden the oracle disagrees with. That
-divergence is a separate fix; when it lands, the step becomes a gate like the
-one above.
+The oracle's own suite runs too, split in two: `test:gates` is blocking, and
+`test:fixed-point` — the replay of every committed case — is **advisory**,
+because it reports one golden the oracle disagrees with.
+
+### What the oracle gate does and does not cover
+
+`oracle:verify` only regenerates the cases listed in `fixtureCases.js`. Three
+committed case directories are deliberately not in that list:
+
+| case | why it is held back | what still gates it |
+| --- | --- | --- |
+| `carried-elements-signatures` | the oracle disagrees with the committed golden — see below | PHP golden test |
+| `paragraph-conflicting-text-align` | asserts our reviewed *degradation* policy, which the oracle cannot express — Gutenberg validates, it does not degrade | PHP golden test |
+| `paragraph-opacity-reviewed-drop` | same (BIGR-728) | PHP golden test |
+
+This is narrower than it looks. All three are replayed byte-for-byte by
+`php_block_fixer_golden_test.php`, which runs in the blocking `Tests` workflow,
+so a **port** regression in them cannot land green. What is only advisory is
+whether their committed goldens still match the **runtime** — and for two of the
+three that comparison is meaningless by construction.
 
 ### The one divergence, precisely
 
