@@ -16,6 +16,8 @@ use Automattic\SiteBuild\SectionRole;
  *   layout_archetype/background/vertical_density/handoff. Role is required
  *   and must be one of hero/content/closing.
  * - neighbors: the preceding/following composition summary
+ * - header_contract: the header-mode contract for hero-role sections (how the
+ *   site header shares the first viewport with this section); '' otherwise
  *
  * Static authoring rules come from the package's prompt templates; no Project
  * or project artifact is read or written here.
@@ -62,7 +64,8 @@ final class SectionUnit extends AbstractMarkupUnit
      *     slug:string,role:string,title?:string,type?:string,purpose?:string,content_notes?:string,
      *     layout_archetype:string,background:string,vertical_density:string,handoff:string
      *   },
-     *   neighbors:string
+     *   neighbors:string,
+     *   header_contract:string
      * } $input
      */
     public function request(array $input): array
@@ -98,6 +101,7 @@ final class SectionUnit extends AbstractMarkupUnit
             'section_purpose'   => $this->sectionString($section, 'purpose'),
             'content_notes'     => $this->sectionString($section, 'content_notes'),
             'composition'       => $composition,
+            'header_contract'   => $this->inputString($input, 'header_contract'),
             'image_instructions' => $this->renderer->render('image-generation.md', []),
         ]);
 

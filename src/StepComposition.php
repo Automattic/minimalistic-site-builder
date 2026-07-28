@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
+use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
@@ -107,6 +108,12 @@ final class StepComposition
             // declarations), and those must exist when the policies run or
             // repaired markup would bypass them unchecked.
             new NormalizeLayoutStep(),
+            // Deterministic backstop for the header/hero composition contract
+            // the sections step injected into both prompts (BIGR-735). BEFORE
+            // contrast-fix, so its overlay-header lint judges the header's
+            // final overlay/stacked wiring; and BEFORE fix-blocks like every
+            // attribute-editing pass, so the re-serialization syncs the HTML.
+            new HeaderHeroStep(),
             // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
             // repairs rewrite only the block-comment JSON attributes, and the
             // fix-blocks re-serialization below regenerates the saved HTML
