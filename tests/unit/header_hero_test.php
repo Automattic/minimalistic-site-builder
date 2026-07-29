@@ -25,7 +25,9 @@ function hh_cover(string $height): string
     return '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
         . '<div class="wp-block-group">'
         . '<!-- wp:cover {"url":"x.jpg","dimRatio":50,"minHeight":' . $height . ',"minHeightUnit":"vh","align":"full"} -->'
-        . '<div class="wp-block-cover alignfull" style="min-height:' . $height . 'vh"></div>'
+        . '<div class="wp-block-cover alignfull" style="min-height:' . $height . 'vh">'
+        . '<!-- wp:heading {"level":1,"fontSize":"display"} --><h1 class="wp-block-heading has-display-font-size">Masthead</h1><!-- /wp:heading -->'
+        . '</div>'
         . '<!-- /wp:cover --></div>' . "\n"
         . '<!-- /wp:group -->';
 }
@@ -175,4 +177,41 @@ test('the step repairs the header and hero parts on disk and records warnings', 
     assert_contains('header/hero contract', $warnings);
     assert_true($project->exists('logs/header-hero.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('capHeadlessCovers shortens an opening cover whose masthead sits below it', function () {
+    // portfolio7's shipped shape (BIGR-738 follow-up): a 78vh opening cover
+    // holding only a caption, with the H1 in a following group — an image-only
+    // first viewport.
+    $markup = '<!-- wp:group {"align":"full","anchor":"hero","layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group alignfull" id="hero">'
+        . '<!-- wp:cover {"url":"x.jpg","dimRatio":40,"minHeight":78,"minHeightUnit":"vh","align":"full"} -->'
+        . '<div class="wp-block-cover alignfull" style="min-height:78vh">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Plaza de Mayo</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:cover -->'
+        . '<!-- wp:heading {"level":1,"fontSize":"display"} --><h1 class="wp-block-heading has-display-font-size">Twenty years, one street.</h1><!-- /wp:heading -->'
+        . '</div>' . "\n" . '<!-- /wp:group -->';
+
+    $result = HeaderHeroStep::capHeadlessCovers($markup);
+    assert_contains('"minHeight":55', $result['markup']);
+    assert_eq(1, count($result['notes']));
+    assert_contains('contains no heading', $result['notes'][0]);
+});
+
+test('capHeadlessCovers leaves covers with an inner masthead and short image bands alone', function () {
+    // A 92vh cover WITH its H1 inside is the composed full-bleed hero — untouched.
+    $withHeading = hh_cover('92');
+    assert_eq($withHeading, HeaderHeroStep::capHeadlessCovers($withHeading)['markup']);
+    assert_eq([], HeaderHeroStep::capHeadlessCovers($withHeading)['notes']);
+
+    // A headline-less image band already at/below the cap is a legitimate choice.
+    $short = '<!-- wp:cover {"url":"x.jpg","minHeight":50,"minHeightUnit":"vh"} -->'
+        . '<div class="wp-block-cover" style="min-height:50vh"></div><!-- /wp:cover -->';
+    assert_eq($short, HeaderHeroStep::capHeadlessCovers($short)['markup']);
+
+    // Only the FIRST cover owns the fold: a deeper decorative cover is not judged.
+    $second = hh_cover('92')
+        . '<!-- wp:cover {"url":"y.jpg","minHeight":90,"minHeightUnit":"vh"} -->'
+        . '<div class="wp-block-cover" style="min-height:90vh"></div><!-- /wp:cover -->';
+    assert_contains('"minHeight":90', HeaderHeroStep::capHeadlessCovers($second)['markup']);
 });

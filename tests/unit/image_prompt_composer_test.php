@@ -46,14 +46,18 @@ test('compose frames a site context without page context as its own sentence', f
     assert_true(!str_contains($out, 'used as'), 'no page-context clause without a page context');
 });
 
-test('compose with no page or site context is just the subject + style', function () {
+test('compose with no page or site context is the subject + style + no-text rule', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', '', 'photorealistic', '');
-    assert_eq('A sourdough loaf. Style: photorealistic', $out);
+    // The no-text rule ships with EVERY prompt (BIGR-738 follow-up): the
+    // generator otherwise typesets the brand name into poster-like frames.
+    assert_eq("A sourdough loaf. Style: photorealistic\n\n"
+        . 'The image must contain no text of any kind: no words, letters, numerals, wordmarks, logos, or typography — in any language or script — and no surface treated as a sign or label.', $out);
 });
 
 test('compose omits the style clause when no style is given', function () {
     $out = ImagePromptComposer::compose('A sourdough loaf', '', '', '');
-    assert_eq('A sourdough loaf', $out);
+    assert_eq("A sourdough loaf\n\n"
+        . 'The image must contain no text of any kind: no words, letters, numerals, wordmarks, logos, or typography — in any language or script — and no surface treated as a sign or label.', $out);
 });
 
 test('compose keeps the subject in full when the site context is huge', function () {
@@ -178,4 +182,21 @@ test('screen-subject lint flags legible app screens and passes defused ones (BIG
 
     // No device vocabulary at all — never flagged.
     assert_eq(null, ImagePromptComposer::screenSubjectWarning('A misty valley at dawn showing distant peaks'));
+});
+
+test('text-prop lint flags focal banners and passes distant/defocused ones (BIGR-738)', function () {
+    // portfolio7's actual hero subject: banners as the focal element produced
+    // large mirrored pseudo-writing across the photo.
+    $bad = 'A dense crowd fills a wide avenue at dusk, seen from a low vantage between raised arms, '
+        . 'hand-painted banners catching hard light while the buildings behind fall into deep shadow';
+    assert_true(ImagePromptComposer::textPropSubjectWarning($bad) !== null, 'focal banners flagged');
+
+    // The sanctioned form: the prop pushed away and said so.
+    $defused = 'A dense crowd on a wide avenue at dusk, banners soft and unreadable in the background';
+    assert_eq(null, ImagePromptComposer::textPropSubjectWarning($defused));
+
+    // No text-bearing prop vocabulary at all.
+    assert_eq(null, ImagePromptComposer::textPropSubjectWarning(
+        'A tall grilled provoleta on dark slate lit by a single hard raking key light'
+    ));
 });

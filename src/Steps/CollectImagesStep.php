@@ -102,14 +102,20 @@ final class CollectImagesStep implements Step
 
         $project->writeJson('images.json', array_values($byFilename));
 
-        // Subject lint: a spec asking the generator to draw a legible app or
-        // device screen ships gibberish pseudo-text. The prompt bans it; this
-        // records any request that slipped through.
+        // Subject lints: a spec asking the generator to draw a legible app/
+        // device screen, or a text-bearing prop as a focal element, ships
+        // gibberish pseudo-text. The prompt bans both; this records any
+        // request that slipped through.
         $warnings = [];
         foreach ($byFilename as $img) {
-            $warning = ImagePromptComposer::screenSubjectWarning((string) ($img['subject'] ?? ''));
-            if ($warning !== null) {
-                $warnings[] = "{$img['filename']}: {$warning}";
+            $subject = (string) ($img['subject'] ?? '');
+            foreach ([
+                ImagePromptComposer::screenSubjectWarning($subject),
+                ImagePromptComposer::textPropSubjectWarning($subject),
+            ] as $warning) {
+                if ($warning !== null) {
+                    $warnings[] = "{$img['filename']}: {$warning}";
+                }
             }
         }
         $project->addWarnings($this->id(), $warnings);

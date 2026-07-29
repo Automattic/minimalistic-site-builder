@@ -159,4 +159,28 @@ final class ImagePromptComposer
             . 'use a real HTML card, an oblique/defocused screen, or drop the device '
             . '(see prompts/image-generation.md)';
     }
+
+    /**
+     * Lint a subject for a text-bearing prop as a focal element (BIGR-738
+     * follow-up): "hand-painted banners catching hard light" makes the
+     * generator fill the frame with large garbled pseudo-writing. A prop the
+     * subject itself pushes away (distant, defocused, unreadable) passes.
+     * Returns null when the subject is fine.
+     */
+    public static function textPropSubjectWarning(string $subject): ?string
+    {
+        $s = strtolower($subject);
+        $props = 'banners?|placards?|protest signs?|posters?|signage|menu boards?|'
+            . 'chalkboards?|newspapers?|book covers?|record sleeves?|album covers?|product labels?';
+        if (!preg_match("/\b(?:{$props})\b/", $s)) {
+            return null;
+        }
+        if (preg_match('/\b(?:distant|background|out of focus|defocused|blurred|blurry|unreadable|illegible|soft|angled away|facing away|from behind)\b/', $s)) {
+            return null;
+        }
+        return 'image subject features a text-bearing prop ("'
+            . trim($subject) . '") — the generator fills banners/signs/posters with garbled '
+            . 'pseudo-writing; keep the prop distant/defocused and say so, or drop it '
+            . '(see prompts/image-generation.md)';
+    }
 }

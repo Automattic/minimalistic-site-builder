@@ -158,6 +158,26 @@ if ($exit === 0 && is_file($out)) {
     fwrite(STDERR, "Screenshot failed (exit {$exit}).\n");
 }
 
+// A second, wide capture while the same server is up (BIGR-738 follow-up):
+// hero compositions that look composed at 1366 can leave a fixed-width panel
+// stranded on a full-bleed cover at desktop-monitor widths, and no oracle or
+// review can see what was never captured. Best-effort: its failure doesn't
+// fail the run — the primary evidence is the default-width shot.
+if ($exit === 0 && is_file($out) && str_ends_with($out, '.png')) {
+    $wideOut = substr($out, 0, -4) . '-1920.png';
+    echo "Capturing {$baseUrl} at 1920px → {$wideOut}\n";
+    $wideShot = 'node ' . escapeshellarg(repo_path('bin/screenshot/screenshot.js'))
+        . ' ' . escapeshellarg($baseUrl) . ' ' . escapeshellarg($wideOut)
+        . ' ' . escapeshellarg('--chrome=' . $chrome)
+        . ' --width=1920';
+    passthru($wideShot, $wideExit);
+    if ($wideExit === 0 && is_file($wideOut)) {
+        echo "Saved wide screenshot: {$wideOut}\n";
+    } else {
+        fwrite(STDERR, "Wide screenshot failed (exit {$wideExit}); default-width evidence kept.\n");
+    }
+}
+
 // --keep-alive: hold the (already-running) Playground server open in the
 // foreground so the freshly built site can be inspected in a browser, instead
 // of tearing it down the instant the screenshot lands. The server keeps serving

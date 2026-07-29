@@ -62,6 +62,16 @@ final class HeaderHeroStep implements Step
     public const STACKED_COVER_VH = 80;
 
     /**
+     * A page-opening cover with NO heading inside it is capped to this height
+     * (BIGR-738 follow-up): the composition put the masthead below the image,
+     * and a taller image-only band ships a content-free first viewport
+     * (portfolio shipped a 78vh caption-only cover with the H1 out of sight).
+     * 55vh leaves the image a strong presence while the headline still lands
+     * above the fold.
+     */
+    public const HEADLESS_COVER_VH = 55;
+
+    /**
      * The single-row width the header must fit (a ~1024px viewport minus
      * gutters). Above it the nav collapses to a menu instead of wrapping.
      */
@@ -139,25 +149,33 @@ final class HeaderHeroStep implements Step
             $report[] = "[{$headerRel}] {$note}";
         }
 
-        if ($mode === SectionsStep::MODE_STACKED) {
-            foreach ($pages as $page) {
-                $pageSlug = trim((string) ($page['slug'] ?? ''));
-                $slug = trim((string) (SectionsStep::openingSection($page)['slug'] ?? ''));
-                if ($pageSlug === '' || $slug === '') {
-                    continue;
-                }
-                $rel = 'parts/' . SectionsStep::partSlug($pageSlug, $slug) . '.html';
-                if (!$project->exists('theme/' . $rel)) {
-                    continue;
-                }
-                $markup = $project->readText('theme/' . $rel);
+        foreach ($pages as $page) {
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            $slug = trim((string) (SectionsStep::openingSection($page)['slug'] ?? ''));
+            if ($pageSlug === '' || $slug === '') {
+                continue;
+            }
+            $rel = 'parts/' . SectionsStep::partSlug($pageSlug, $slug) . '.html';
+            if (!$project->exists('theme/' . $rel)) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $notes = [];
+            if ($mode === SectionsStep::MODE_STACKED) {
                 $result = self::capCovers($markup);
-                if ($result['markup'] !== $markup) {
-                    $project->writeText('theme/' . $rel, $result['markup']);
-                }
-                foreach ($result['notes'] as $note) {
-                    $report[] = "[{$rel}] {$note}";
-                }
+                $markup = $result['markup'];
+                $notes = $result['notes'];
+            }
+            // In every mode: a headline-less opening cover must not own the
+            // whole first viewport.
+            $result = self::capHeadlessCovers($markup);
+            $markup = $result['markup'];
+            $notes = array_merge($notes, $result['notes']);
+            if ($markup !== $project->readText('theme/' . $rel)) {
+                $project->writeText('theme/' . $rel, $markup);
+            }
+            foreach ($notes as $note) {
+                $report[] = "[{$rel}] {$note}";
             }
         }
 
@@ -369,6 +387,54 @@ final class HeaderHeroStep implements Step
                 . '(an opaque header stacks above this page-opening section; together they must fit one viewport)';
         }
         return ['markup' => $doc->render(), 'notes' => $notes];
+    }
+
+    /**
+     * Cap a page-opening section's FIRST cover when it contains no heading
+     * (BIGR-738 follow-up): the first viewport must show the masthead. A
+     * composition that stacks the headline below its opening image is legal
+     * markup, but at 78-96vh it ships an image-only fold with the H1 and CTA
+     * out of sight. Only the first cover is judged — it owns the fold; deeper
+     * covers are ordinary section imagery. Pure — unit-testable.
+     *
+     * @return array{markup:string, notes:string[]}
+     */
+    public static function capHeadlessCovers(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $notes = [];
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'cover') {
+                continue;
+            }
+            $attrs = $doc->attrs($i) ?? [];
+            $height = $attrs['minHeight'] ?? null;
+            if (is_numeric($height)
+                && (string) ($attrs['minHeightUnit'] ?? '') === 'vh'
+                && (float) $height > self::HEADLESS_COVER_VH
+                && !self::subtreeHasHeading($doc, $i)
+            ) {
+                // Attribute-only edit: the stale inline min-height style
+                // survives until fix-blocks re-serializes from these attrs.
+                $attrs['minHeight'] = self::HEADLESS_COVER_VH;
+                $doc->setAttrs($i, $attrs);
+                $notes[] = "opening cover minHeight {$height}vh lowered to " . self::HEADLESS_COVER_VH . 'vh '
+                    . '(it contains no heading, so the masthead sits below it — a taller image-only band '
+                    . 'ships a content-free first viewport)';
+            }
+            break; // only the first cover owns the fold
+        }
+        return ['markup' => $doc->render(), 'notes' => $notes];
+    }
+
+    private static function subtreeHasHeading(BlockMarkup $doc, int $i): bool
+    {
+        foreach ($doc->children($i) as $child) {
+            if ($doc->name($child) === 'heading' || self::subtreeHasHeading($doc, $child)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
