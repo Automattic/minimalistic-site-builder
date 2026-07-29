@@ -34,6 +34,7 @@ function section_unit_input(): array
 
         ],
         'neighbors' => 'UNIT-NEIGHBORS-SENTINEL',
+        'header_contract' => 'UNIT-HEADER-CONTRACT-SENTINEL',
     ];
 }
 
@@ -145,6 +146,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'section_purpose'   => $input['section']['purpose'],
         'content_notes'     => $input['section']['content_notes'],
         'composition'       => $composition,
+        'header_contract'   => $input['header_contract'],
         'image_instructions' => $renderer->render('image-generation.md', []),
         'block_markup_output_contract' => rtrim(
             $renderer->render('block-markup-output-contract.md', []),
