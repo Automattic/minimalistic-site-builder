@@ -132,4 +132,31 @@ final class ImagePromptComposer
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
         return Imagen::fitToTokens($prompt, Imagen::MAX_PROMPT_TOKENS);
     }
+
+    /**
+     * Lint a subject for a legible app/device screen as the dominant subject
+     * (BIGR-738): "a scheduling app day view with stacked job cards, times and
+     * crew assignments, screen filling most of the frame" renders as gibberish
+     * pseudo-text. prompts/image-generation.md bans the shape; this is the
+     * deterministic backstop that makes a slipped-through request visible in
+     * warnings.json. Subjects that already defuse the screen (oblique, out of
+     * focus, abstract, unreadable) pass. Returns null when the subject is fine.
+     */
+    public static function screenSubjectWarning(string $subject): ?string
+    {
+        $s = strtolower($subject);
+        if (!preg_match('/\b(?:screen|phone|tablet|laptop|monitor|device|app|dashboard|interface|ui)\b/', $s)) {
+            return null;
+        }
+        if (!preg_match('/\b(?:showing|shows|displaying|displays|filled?\s+with\s+(?:the\s+)?(?:app|ui|interface|dashboard))\b/', $s)) {
+            return null;
+        }
+        if (preg_match('/\b(?:out of focus|blurred|blurry|oblique|unreadable|illegible|abstract|glowing)\b/', $s)) {
+            return null;
+        }
+        return 'image subject requests a legible app/device screen ("'
+            . trim($subject) . '") — generated UI text renders as gibberish; '
+            . 'use a real HTML card, an oblique/defocused screen, or drop the device '
+            . '(see prompts/image-generation.md)';
+    }
 }

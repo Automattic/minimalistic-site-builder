@@ -159,3 +159,23 @@ test('compose sheds the site context under token pressure but keeps the grade', 
     assert_contains("{$subject}. Style: photorealistic", $out);
     assert_contains("Art direction for all site imagery: {$grade}.", $out);
 });
+
+test('screen-subject lint flags legible app screens and passes defused ones (BIGR-738)', function () {
+    // atlas1's actual failing subject (plugin/pages/home.html:38) — flagged.
+    $bad = 'A smartphone held upright showing a construction crew scheduling app day view '
+        . 'with stacked job cards, times and crew assignments, screen filling most of the frame';
+    assert_true(ImagePromptComposer::screenSubjectWarning($bad) !== null, 'legible app screen flagged');
+
+    // atlas3's foreman-with-phone subject — the phone is a prop, not a UI render.
+    $prop = 'A foreman in a hi-vis vest and hard hat standing beside a rebar mat, '
+        . 'thumbing a phone held at chest height, framed tall from a slightly low vantage';
+    assert_eq(null, ImagePromptComposer::screenSubjectWarning($prop));
+
+    // The sanctioned oblique/defocused alternative passes.
+    $defused = 'A tablet on a workbench at an oblique angle, screen content abstract and out of focus, '
+        . 'showing only a soft glow over the workshop';
+    assert_eq(null, ImagePromptComposer::screenSubjectWarning($defused));
+
+    // No device vocabulary at all — never flagged.
+    assert_eq(null, ImagePromptComposer::screenSubjectWarning('A misty valley at dawn showing distant peaks'));
+});

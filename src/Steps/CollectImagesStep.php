@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\Imagen;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -38,6 +39,15 @@ use Automattic\SiteBuild\StepDeclaration;
  * that before fix-blocks gives every downstream step the same canonical path:
  * block serialization cannot change the later rewrite key, assemble-pages sees
  * a content asset to import, and raw prompt text never reaches final markup.
+ *
+ * The inverse failure also ships (BIGR-738): a wp:cover whose "url" carries a
+ * proper theme asset path while its inner img is missing the src (sometimes
+ * with a complete AI_IMAGE alt, sometimes with nothing). The alt-led parser
+ * would silently discard those specs, and the hero renders as an empty color
+ * panel. Two recoveries close that path: an img with an AI_IMAGE alt but no
+ * src adopts its enclosing cover's url, and any cover url naming a theme
+ * asset that no collected spec covers gets a placeholder synthesized from the
+ * filename slug so the image is still generated.
  */
 final class CollectImagesStep implements Step
 {
@@ -60,6 +70,7 @@ final class CollectImagesStep implements Step
             writes: [
                 'images.json',
                 'theme/parts/*',
+                'warnings.json',
             ],
             concurrent: false,
         );
@@ -72,7 +83,7 @@ final class CollectImagesStep implements Step
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
-            $parsed = self::parseAndNormalize($content);
+            $parsed = self::parseAndNormalize($content, self::sectionContextFor($rel));
             if ($parsed['content'] !== $content) {
                 $project->writeText('theme/' . $rel, $parsed['content']);
             }
@@ -90,6 +101,18 @@ final class CollectImagesStep implements Step
         }
 
         $project->writeJson('images.json', array_values($byFilename));
+
+        // Subject lint: a spec asking the generator to draw a legible app or
+        // device screen ships gibberish pseudo-text. The prompt bans it; this
+        // records any request that slipped through.
+        $warnings = [];
+        foreach ($byFilename as $img) {
+            $warning = ImagePromptComposer::screenSubjectWarning((string) ($img['subject'] ?? ''));
+            if ($warning !== null) {
+                $warnings[] = "{$img['filename']}: {$warning}";
+            }
+        }
+        $project->addWarnings($this->id(), $warnings);
     }
 
     /** Theme-relative paths of every markup file that may hold image placeholders. */
@@ -118,40 +141,181 @@ final class CollectImagesStep implements Step
     /**
      * Parse canonical placeholders and recover malformed URL/source forms,
      * returning the normalized markup alongside their shared image specs.
+     * $context names where this markup renders (e.g. "the 'hero' section of
+     * the 'home' page") — it seeds the page-context of specs synthesized from
+     * a cover url alone.
      *
      * @return array{content:string,images:array<int,array<string,mixed>>}
      */
-    private static function parseAndNormalize(string $content): array
+    private static function parseAndNormalize(string $content, string $context = ''): array
     {
-        if (!str_contains($content, 'AI_IMAGE:')) {
-            return ['content' => $content, 'images' => []];
-        }
+        $images = [];
+        if (str_contains($content, 'AI_IMAGE:')) {
+            // An img whose alt documents a full AI_IMAGE spec but whose src the
+            // model dropped adopts its enclosing cover's url, so the canonical
+            // parser below sees the documented form instead of skipping it.
+            $content = self::adoptCoverUrls($content);
 
-        // Canonical placeholders in the original markup double as recovery
-        // targets: a malformed cover "url" whose subject matches its inner
-        // img's documented AI_IMAGE alt must adopt that img's asset path, not
-        // synthesize a second image for the same background.
-        $canonicalSrcBySubject = [];
-        foreach (self::parseCanonicalPlaceholders($content) as $image) {
-            $canonicalSrcBySubject[self::normalizeSubject($image['subject'])] = $image['src'];
-        }
+            // Canonical placeholders in the original markup double as recovery
+            // targets: a malformed cover "url" whose subject matches its inner
+            // img's documented AI_IMAGE alt must adopt that img's asset path, not
+            // synthesize a second image for the same background.
+            $canonicalSrcBySubject = [];
+            foreach (self::parseCanonicalPlaceholders($content) as $image) {
+                $canonicalSrcBySubject[self::normalizeSubject($image['subject'])] = $image['src'];
+            }
 
-        $recovered = self::recoverPlaceholders($content, $canonicalSrcBySubject);
-        $images = self::parseCanonicalPlaceholders($recovered['content']);
+            $recovered = self::recoverPlaceholders($content, $canonicalSrcBySubject);
+            $content = $recovered['content'];
+            $images = self::parseCanonicalPlaceholders($content);
 
-        // A malformed src can coexist with a valid AI_IMAGE alt. Once recovery
-        // gives that tag a canonical theme path, the canonical parser above
-        // produces the richer four-field spec under the same filename. Keep it
-        // and discard the recovery fallback rather than generating twice.
-        $seen = array_fill_keys(array_column($images, 'filename'), true);
-        foreach ($recovered['images'] as $image) {
-            if (!isset($seen[$image['filename']])) {
-                $images[] = $image;
-                $seen[$image['filename']] = true;
+            // A malformed src can coexist with a valid AI_IMAGE alt. Once recovery
+            // gives that tag a canonical theme path, the canonical parser above
+            // produces the richer four-field spec under the same filename. Keep it
+            // and discard the recovery fallback rather than generating twice.
+            $seen = array_fill_keys(array_column($images, 'filename'), true);
+            foreach ($recovered['images'] as $image) {
+                if (!isset($seen[$image['filename']])) {
+                    $images[] = $image;
+                    $seen[$image['filename']] = true;
+                }
             }
         }
 
-        return ['content' => $recovered['content'], 'images' => $images];
+        // A cover url naming a theme asset that no spec covers would never be
+        // generated and ships as an empty color panel — even when the markup
+        // carries no AI_IMAGE marker at all (the model emitted a bare cover
+        // img with neither alt nor src). Synthesize a placeholder from the
+        // filename slug so the background still gets generated.
+        $seen = array_fill_keys(array_column($images, 'filename'), true);
+        foreach (self::coverThemeUrls($content) as $src) {
+            $filename = substr($src, strlen('theme:./assets/'));
+            if (isset($seen[$filename])) {
+                continue;
+            }
+            $images[] = self::synthesizeFromCoverUrl($src, $filename, $context);
+            $seen[$filename] = true;
+        }
+
+        return ['content' => $content, 'images' => $images];
+    }
+
+    /**
+     * Give every AI_IMAGE-alt img that lacks a src the theme asset path of its
+     * enclosing wp:cover's "url", mirroring the path onto the rendered tag.
+     * Observed shipping (BIGR-738/naturaleza3): the model wrote the asset path
+     * only on the cover block and a full spec only in the img alt; the alt-led
+     * parser then skipped the spec and the 96vh hero shipped with no image.
+     */
+    private static function adoptCoverUrls(string $content): string
+    {
+        // Openings/closings of wp:cover blocks with a usable theme asset url,
+        // walked as a stack so an img adopts its NEAREST enclosing cover.
+        $events = [];
+        $coverPattern = '/<!--\s*wp:cover\s+(\{.*?\})\s*-->/s';
+        if (preg_match_all($coverPattern, $content, $m, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
+            foreach ($m as $match) {
+                $attrs = json_decode($match[1][0], true);
+                $url = is_array($attrs) && is_string($attrs['url'] ?? null) ? trim($attrs['url']) : '';
+                $events[] = [
+                    'offset' => $match[0][1],
+                    'type'   => 'open',
+                    'url'    => preg_match('~^theme:\./assets/[a-z0-9-]+\.(?:jpe?g|png)$~i', $url) ? $url : null,
+                ];
+            }
+        }
+        if (preg_match_all('/<!--\s*\/wp:cover\s*-->/', $content, $m, PREG_OFFSET_CAPTURE)) {
+            foreach ($m[0] as $match) {
+                $events[] = ['offset' => $match[1], 'type' => 'close', 'url' => null];
+            }
+        }
+        if ($events === []) {
+            return $content;
+        }
+        usort($events, static fn (array $a, array $b): int => $a['offset'] <=> $b['offset']);
+
+        $imgPattern = '/<img(?![^>]*\bsrc\s*=)[^>]*\balt=(["\'])AI_IMAGE:.*?\1[^>]*>/is';
+        if (!preg_match_all($imgPattern, $content, $imgs, PREG_OFFSET_CAPTURE)) {
+            return $content;
+        }
+
+        // Replace back-to-front so recorded offsets stay valid.
+        foreach (array_reverse($imgs[0]) as [$tag, $offset]) {
+            $stack = [];
+            foreach ($events as $event) {
+                if ($event['offset'] > $offset) {
+                    break;
+                }
+                if ($event['type'] === 'open') {
+                    $stack[] = $event['url'];
+                } elseif ($stack !== []) {
+                    array_pop($stack);
+                }
+            }
+            $url = $stack === [] ? null : end($stack);
+            if ($url === null) {
+                continue;
+            }
+            $withSrc = substr_replace($tag, '<img src="' . $url . '"', 0, strlen('<img'));
+            $content = substr_replace($content, $withSrc, $offset, strlen($tag));
+        }
+        return $content;
+    }
+
+    /**
+     * Every theme asset path referenced by a wp:cover "url" attribute.
+     *
+     * @return list<string> unique "theme:./assets/<file>" paths, in order
+     */
+    private static function coverThemeUrls(string $content): array
+    {
+        if (!preg_match_all('/<!--\s*wp:cover\s+(\{.*?\})\s*-->/s', $content, $m)) {
+            return [];
+        }
+        $urls = [];
+        foreach ($m[1] as $json) {
+            $attrs = json_decode($json, true);
+            $url = is_array($attrs) && is_string($attrs['url'] ?? null) ? trim($attrs['url']) : '';
+            if (preg_match('~^theme:\./assets/[a-z0-9-]+\.(?:jpe?g|png)$~i', $url) && !in_array($url, $urls, true)) {
+                $urls[] = $url;
+            }
+        }
+        return $urls;
+    }
+
+    /**
+     * A best-effort spec for a cover background whose only trace is the asset
+     * path: the de-slugged filename becomes the subject and the section
+     * context becomes the page-context. Covers are photographic backgrounds,
+     * and a cover background must be landscape.
+     *
+     * @return array<string,mixed>
+     */
+    private static function synthesizeFromCoverUrl(string $src, string $filename, string $context): array
+    {
+        $slug = (string) preg_replace('/\.[a-z0-9]+$/i', '', $filename);
+        $subject = trim((string) preg_replace('/\s+/', ' ', str_replace('-', ' ', $slug)));
+        return [
+            'filename'    => $filename,
+            'src'         => $src,
+            'subject'     => $subject !== '' ? $subject : 'atmospheric background scene',
+            'pageContext' => trim('full-bleed cover background' . ($context !== '' ? " in {$context}" : '')),
+            'style'       => 'photorealistic',
+            'aspectRatio' => 'landscape',
+        ];
+    }
+
+    /**
+     * A human-readable name for where a theme part's markup renders, from its
+     * transient part filename (SectionsStep::partSlug convention).
+     */
+    private static function sectionContextFor(string $rel): string
+    {
+        $name = (string) preg_replace('/\.html$/', '', basename($rel));
+        if (preg_match('/^page-(.+)--(.+)$/', $name, $m)) {
+            return "the '{$m[2]}' section of the '{$m[1]}' page";
+        }
+        return "the '{$name}' part";
     }
 
     /**
