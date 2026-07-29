@@ -144,6 +144,8 @@ test('image source validator flags unresolved AI_IMAGE values in JSON and HTML s
 
 test('image source validator ignores the documented AI_IMAGE alt after generation', function () {
     [$project, $tmp] = validator_project();
+    // A real generated project always carries the collect-images record.
+    $project->writeJson('images.json', [['filename' => 'coffee.jpg', 'src' => 'theme:./assets/coffee.jpg']]);
     $project->writeText('plugin/pages/home.html',
         '<!-- wp:image --><figure class="wp-block-image">'
         . '<img src="/wp-content/themes/demo/assets/coffee.jpg" '
@@ -245,6 +247,8 @@ test('validator judges block-JSON url destinations (navigation links)', function
 
 test('validator ignores rewritten theme asset urls from generate-images', function () {
     [$project, $tmp] = validator_linked_project();
+    // A real generated project always carries the collect-images record.
+    $project->writeJson('images.json', [['filename' => 'hero-barista.jpg', 'src' => 'theme:./assets/hero-barista.jpg']]);
     // Cover "url" after GenerateImagesStep rewrite — root-relative but not a page.
     $project->writeText(
         'plugin/pages/home.html',
@@ -434,5 +438,52 @@ test('degraded image spacing survives FixBlocks before the final validator', fun
     $project->writeText('plugin/pages/home.html', $fixed);
     assert_eq([], ThemeValidator::spacingWarnings($project));
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('asset coverage flags a markup-referenced image absent from images.json and disk', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('images.json', [
+        ['filename' => 'covered.jpg', 'src' => 'theme:./assets/covered.jpg'],
+    ]);
+    $project->writeText('theme/parts/footer.html',
+        '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/covered.jpg" alt=""/>'
+        . '<img src="theme:./assets/hero-buenos-aires-crowd.jpg" alt=""/>'
+        . '</figure><!-- /wp:image -->'
+    );
+
+    $problems = ThemeValidator::assetCoverageProblems($project);
+    assert_eq(1, count($problems));
+    assert_contains("references image asset 'hero-buenos-aires-crowd.jpg'", $problems[0]);
+    assert_contains('ERROR', $problems[0]);
+    // And the check ships in the default validate() pass.
+    assert_contains($problems[0], implode("\n", ThemeValidator::validate($project)));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('asset coverage flags theme: URLs surviving after image generation completed', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('images.json', [
+        ['filename' => 'hero.jpg', 'src' => 'theme:./assets/hero.jpg'],
+    ]);
+    $project->writeText('theme/parts/footer.html',
+        '<!-- wp:cover {"url":"theme:./assets/hero.jpg"} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src="theme:./assets/hero.jpg" alt=""/>'
+        . '</div><!-- /wp:cover -->'
+    );
+
+    // Before generation the theme: scheme is the expected canonical form.
+    assert_eq([], ThemeValidator::assetCoverageProblems($project));
+
+    // After a completed generation every reference must have been rewritten.
+    $project->writeJson('images.generated.json', ['status' => 'completed']);
+    // The asset exists on disk, so only the unrewritten-URL problem fires.
+    $dir = $project->themePath('assets');
+    if (!is_dir($dir)) { mkdir($dir, 0775, true); }
+    file_put_contents($project->themePath('assets/hero.jpg'), 'x');
+    $problems = ThemeValidator::assetCoverageProblems($project);
+    assert_eq(1, count($problems));
+    assert_contains('unrewritten theme: asset URL survives', $problems[0]);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

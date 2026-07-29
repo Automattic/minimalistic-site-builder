@@ -64,6 +64,8 @@ final class ValidateThemeStep implements Step
             ThemeValidator::layoutWarnings($project),
             ThemeValidator::spacingWarnings($project),
             ThemeValidator::typographyWarnings($project),
+            ThemeValidator::emptyContainerWarnings($project),
+            ThemeValidator::compositionOracleWarnings($project),
             ThemeValidator::planWarnings($project),
             PresetReferences::problems($project),
         );

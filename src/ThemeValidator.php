@@ -84,8 +84,75 @@ final class ThemeValidator
         return array_merge(
             $problems,
             self::unresolvedImageSourceProblems($project),
+            self::assetCoverageProblems($project),
             self::linkProblems($project),
         );
+    }
+
+    /**
+     * Hard asset-coverage checks (BIGR-738): the silent hero-image loss class.
+     *
+     * Every image asset the final markup references must be accounted for —
+     * either collected into images.json (so generation will produce it) or
+     * already on disk under theme/assets. A reference to neither is an ERROR:
+     * the block renders a broken image or an empty cover panel, and nothing
+     * else in the pipeline will ever notice.
+     *
+     * Additionally, once GenerateImagesStep has completed (images.generated.json
+     * status "completed"), no `theme:` URL may survive in delivered markup: the
+     * browser cannot resolve the internal scheme, so a surviving one means an
+     * asset was skipped by the rewrite and ships as a gray rectangle.
+     *
+     * @return string[]
+     */
+    public static function assetCoverageProblems(Project $project): array
+    {
+        $specs = [];
+        if ($project->exists('images.json')) {
+            foreach ((array) $project->readJson('images.json') as $spec) {
+                if (is_array($spec) && is_string($spec['filename'] ?? null)) {
+                    $specs[strtolower($spec['filename'])] = true;
+                }
+            }
+        }
+        $generated = $project->exists('images.generated.json')
+            && (((array) $project->readJson('images.generated.json'))['status'] ?? null) === 'completed';
+
+        $problems = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            $rel = str_replace(
+                DIRECTORY_SEPARATOR,
+                '/',
+                str_starts_with($file, $root) ? substr($file, strlen($root)) : $file,
+            );
+
+            $referenced = [];
+            foreach (preg_match_all('~theme:\./assets/([a-z0-9._-]+)~i', $markup, $m) ? $m[1] : [] as $name) {
+                $referenced[$name] = true;
+            }
+            if ($generated && $referenced !== []) {
+                $problems[] = "{$rel}: ERROR: unrewritten theme: asset URL survives in final markup ("
+                    . implode(', ', array_keys($referenced))
+                    . ') — the browser cannot resolve the internal scheme, so it renders as a missing image';
+            }
+            foreach (preg_match_all('~/wp-content/themes/[^/"\'\\\\]+/assets/([a-z0-9._-]+)~i', $markup, $m) ? $m[1] : [] as $name) {
+                $referenced[$name] = true;
+            }
+
+            foreach (array_keys($referenced) as $name) {
+                if (!preg_match('/\.(?:jpe?g|png|gif|webp)$/i', $name)) {
+                    continue; // fonts/css under assets are not generated images
+                }
+                if (isset($specs[strtolower($name)]) || is_file($project->themePath('assets/' . $name))) {
+                    continue;
+                }
+                $problems[] = "{$rel}: ERROR: references image asset '{$name}' that is neither in images.json "
+                    . 'nor on disk — it will never be generated and ships as a broken image';
+            }
+        }
+        return $problems;
     }
 
     /**
@@ -305,6 +372,210 @@ final class ThemeValidator
     {
         $trimmed = trim($path, '/');
         return $trimmed === '' ? '/' : "/{$trimmed}/";
+    }
+
+    /**
+     * Empty-container oracle (BIGR-738): a wp:list, wp:group, or wp:columns
+     * that renders zero content. The block re-serializer rebuilds container
+     * bodies from inner blocks, so children authored as raw HTML (e.g. bare
+     * <li> items without wp:list-item comments) used to vanish into an empty
+     * shell that nothing reported. The list case is now mechanically repaired
+     * upstream (ListItemFixer); this oracle is the backstop that makes any
+     * remaining hollowed-out container visible, naming the file and block
+     * path so the loss can be traced.
+     *
+     * @return string[] list of warnings (empty means every container renders content)
+     */
+    public static function emptyContainerWarnings(Project $project): array
+    {
+        $warnings = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        foreach ($project->markupFiles() as $file) {
+            $rel = str_replace(
+                DIRECTORY_SEPARATOR,
+                '/',
+                str_starts_with($file, $root) ? substr($file, strlen($root)) : $file,
+            );
+            foreach (self::emptyContainers((string) file_get_contents($file)) as [$path, $name]) {
+                $warnings[] = "{$rel} block {$path} (wp:{$name}): container renders zero content — "
+                    . 'likely emptied by re-serialization (children authored without block comments are dropped)';
+            }
+        }
+        return $warnings;
+    }
+
+    /**
+     * Container blocks in one markup document that render no content: no
+     * child blocks, no text, no media element. Pure — unit-testable.
+     *
+     * @return list<array{0:string,1:string}> [block path, block name]
+     */
+    public static function emptyContainers(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $empty = [];
+        foreach ($doc->indices() as $i) {
+            $name = $doc->name($i);
+            if (!in_array($name, ['list', 'group', 'columns'], true) || $doc->children($i) !== []) {
+                continue;
+            }
+            $inner = $doc->innerHtml($i);
+            if (trim(strip_tags($inner)) !== ''
+                || preg_match('/<(?:img|video|svg|iframe|audio|embed|hr)\b/i', $inner) === 1
+            ) {
+                continue;
+            }
+            $empty[] = [self::blockPathOf($doc, $i), $name];
+        }
+        return $empty;
+    }
+
+    /**
+     * Cheap markup-level composition oracles (BIGR-738): defects that need no
+     * screenshot to detect. Two checks per file:
+     *  - a negative-margin block (the `overlap-up` utility, or an authored
+     *    negative margin-top) whose previous sibling ends in CTA buttons or a
+     *    heading — the pulled-up block covers them (atlas3's schedule card
+     *    swallowed both hero CTAs);
+     *  - a <br>-segmented heading whose final line ends in punctuation — when
+     *    the last word exactly fills the column the punctuation wraps alone,
+     *    and display-scale geometric fonts draw it as a floating square
+     *    (atlas1's orphaned period).
+     *
+     * @return string[] list of warnings
+     */
+    public static function compositionOracleWarnings(Project $project): array
+    {
+        $warnings = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        foreach ($project->markupFiles() as $file) {
+            $rel = str_replace(
+                DIRECTORY_SEPARATOR,
+                '/',
+                str_starts_with($file, $root) ? substr($file, strlen($root)) : $file,
+            );
+            $markup = (string) file_get_contents($file);
+            foreach (array_merge(self::overlapRisks($markup), self::headingOrphanRisks($markup)) as $risk) {
+                $warnings[] = "{$rel}: {$risk}";
+            }
+        }
+        return $warnings;
+    }
+
+    /**
+     * Negative-margin blocks that will overlap the CTA buttons or heading
+     * ending the sibling above them. Pure — unit-testable.
+     *
+     * @return string[]
+     */
+    public static function overlapRisks(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $risks = [];
+        foreach ($doc->indices() as $i) {
+            $attrs = $doc->attrs($i) ?? [];
+            $classes = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $marginTop = (string) ($attrs['style']['spacing']['margin']['top'] ?? '');
+            $negative = in_array('overlap-up', $classes, true) ? "the 'overlap-up' utility class"
+                : (str_starts_with(trim($marginTop), '-') ? "margin-top {$marginTop}" : null);
+            if ($negative === null) {
+                continue;
+            }
+            $previous = self::previousSibling($doc, $i);
+            if ($previous === null) {
+                continue;
+            }
+            // What renders at the bottom edge of the sibling above — the
+            // content the negative margin will actually pull this block over.
+            $trailing = array_slice(self::subtreeNames($doc, $previous), -4);
+            $covered = array_values(array_intersect($trailing, ['buttons', 'button', 'heading']));
+            if ($covered === []) {
+                continue;
+            }
+            // Report the covered block nearest the seam the margin pulls over.
+            $risks[] = "negative-margin block (wp:{$doc->name($i)} with {$negative}) directly follows "
+                . 'content ending in wp:' . $covered[count($covered) - 1] . ' — the pulled-up block will overlap it '
+                . '(overlap belongs over imagery, never over CTAs or headings)';
+        }
+        return $risks;
+    }
+
+    /**
+     * <br>-segmented headings whose pinned final line ends in punctuation —
+     * the orphaned-punctuation wrap risk. Pure — unit-testable.
+     *
+     * @return string[]
+     */
+    public static function headingOrphanRisks(string $markup): array
+    {
+        if (!preg_match_all(
+            '/<!--\s*wp:heading\b[^>]*-->\s*(<h[1-6]\b[\s\S]*?<\/h[1-6]>)/i',
+            $markup,
+            $matches,
+        )) {
+            return [];
+        }
+        $risks = [];
+        foreach ($matches[1] as $html) {
+            if (!preg_match('/<br\s*\/?>/i', $html)) {
+                continue;
+            }
+            $segments = preg_split('/<br\s*\/?>/i', $html) ?: [];
+            $last = trim(strip_tags((string) end($segments)));
+            if ($last === '' || !preg_match('/[.!?…]$/u', $last)) {
+                continue;
+            }
+            $text = trim(strip_tags($html));
+            $risks[] = "heading \"{$text}\" pins its lines with <br> and ends \"{$last}\" with punctuation — "
+                . 'if the last word fills the column the punctuation wraps into a one-character orphan line; '
+                . 'drop the trailing punctuation or the <br> segmentation';
+        }
+        return $risks;
+    }
+
+    /** The sibling block rendered directly above $i, or null when $i opens its scope. */
+    private static function previousSibling(BlockMarkup $doc, int $i): ?int
+    {
+        $parent = $doc->parent($i);
+        $siblings = $parent === null
+            ? array_values(array_filter(
+                $doc->indices(),
+                static fn (int $idx): bool => $doc->parent($idx) === null,
+            ))
+            : $doc->children($parent);
+        $at = array_search($i, $siblings, true);
+        return $at === false || $at === 0 ? null : $siblings[$at - 1];
+    }
+
+    /**
+     * Every block name in $i's subtree, in document order ($i first).
+     *
+     * @return list<string>
+     */
+    private static function subtreeNames(BlockMarkup $doc, int $i): array
+    {
+        $names = [$doc->name($i)];
+        foreach ($doc->children($i) as $child) {
+            $names = array_merge($names, self::subtreeNames($doc, $child));
+        }
+        return $names;
+    }
+
+    /** A node's slash-separated child-index path (the block fixer's path shape). */
+    private static function blockPathOf(BlockMarkup $doc, int $i): string
+    {
+        $segments = [];
+        for ($node = $i; $node !== null; $node = $doc->parent($node)) {
+            $parent = $doc->parent($node);
+            $siblings = $parent === null
+                ? array_values(array_filter(
+                    $doc->indices(),
+                    static fn (int $idx): bool => $doc->parent($idx) === null,
+                ))
+                : $doc->children($parent);
+            $segments[] = (string) (int) array_search($node, $siblings, true);
+        }
+        return implode('/', array_reverse($segments));
     }
 
     /**
