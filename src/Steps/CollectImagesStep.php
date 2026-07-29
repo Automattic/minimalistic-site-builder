@@ -17,7 +17,24 @@ use Automattic\SiteBuild\StepDeclaration;
  * Output: images.json — an array of image specs, one per unique asset filename:
  *           { filename, src, subject, pageContext, style, aspectRatio, status, sources[] }
  *         plus in-place normalization of malformed AI_IMAGE url/src values to
- *         canonical theme asset paths.
+ *         canonical theme asset paths, and enforcement of the opaque-asset
+ *         policy below (warnings.json records what it changed).
+ *
+ * OPAQUE-ASSET POLICY (BIGR-739): generated imagery is content imagery only —
+ * the prompts no longer allow decorative ornaments or transparent `.png`
+ * assets, because the image model cannot match the theme's palette hexes or
+ * draw crisp small-scale geometry, so ornaments ship as off-palette, wobbly
+ * marks that undermine the design. Prompt rules alone have leaked before, so
+ * this step enforces the policy deterministically on whatever the sections
+ * step emitted:
+ *   - a `.png` placeholder that reads as DECORATIVE (its AI_IMAGE alt names an
+ *     ornament/motif/icon, or its wp:image block declares a tiny display
+ *     width) is removed — the whole wp:image block — since a decorative mark
+ *     is by definition safe to drop (AGENTS.md rung 3), and the removal is
+ *     recorded in warnings.json (rung 4);
+ *   - any other `.png` reference (a content image mis-extensioned, or a cover
+ *     background) is rewritten to `.jpg` so it generates as a normal opaque
+ *     image (rung 1) — also recorded, since the delivered format changed.
  *
  * Placeholders follow the telex convention: an <img> whose src is a theme-relative
  * "theme:./assets/<name>.jpg" path (".png" for transparent-background assets)
@@ -41,6 +58,24 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class CollectImagesStep implements Step
 {
+    /**
+     * Words in an AI_IMAGE alt that mark a `.png` placeholder as decorative
+     * (an ornament to remove, not a content image to convert). Matched with
+     * word boundaries so content subjects like "iconic skyline" don't trip
+     * the bare forms.
+     */
+    private const DECORATIVE_ALT_PATTERN = '/\b(ornament\w*|decorat\w*|flourish\w*|motif\w*'
+        . '|divider\w*|glyph\w*|crest\w*|emblem\w*|sprig\w*|rosette\w*|logo\w*'
+        . '|icons?|marks?|ticks?|stamps?|badges?)\b/i';
+
+    /**
+     * A wp:image block whose declared width is at or below this is a tiny
+     * inline mark, not a content image — decorative even when its alt names
+     * no ornament word. Audited ornaments displayed at 14-104px; content
+     * images either carry no fixed pixel width or a much larger one.
+     */
+    private const SMALL_ORNAMENT_MAX_WIDTH_PX = 160;
+
     public function id(): string
     {
         return 'collect-images';
@@ -60,6 +95,7 @@ final class CollectImagesStep implements Step
             writes: [
                 'images.json',
                 'theme/parts/*',
+                'warnings.json',
             ],
             concurrent: false,
         );
@@ -69,12 +105,22 @@ final class CollectImagesStep implements Step
     {
         /** @var array<string,array<string,mixed>> $byFilename keyed by filename, deduped */
         $byFilename = [];
+        $warnings = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
             $parsed = self::parseAndNormalize($content);
+            $parsed = self::enforceOpaquePolicy($parsed['content'], $parsed['images']);
             if ($parsed['content'] !== $content) {
                 $project->writeText('theme/' . $rel, $parsed['content']);
+            }
+            foreach ($parsed['removed'] as $removed) {
+                $warnings[] = "{$rel}: removed decorative transparent image block for {$removed['filename']}"
+                    . " (\"{$removed['context']}\") — decorative generated ornaments are not shipped (BIGR-739)";
+            }
+            foreach ($parsed['converted'] as $from => $to) {
+                $warnings[] = "{$rel}: converted transparent asset {$from} to opaque {$to}"
+                    . " — transparent generated assets are not shipped (BIGR-739)";
             }
             foreach ($parsed['images'] as $img) {
                 $filename = $img['filename'];
@@ -89,6 +135,9 @@ final class CollectImagesStep implements Step
             }
         }
 
+        if ($warnings !== []) {
+            $project->addWarnings($this->id(), $warnings);
+        }
         $project->writeJson('images.json', array_values($byFilename));
     }
 
@@ -152,6 +201,128 @@ final class CollectImagesStep implements Step
         }
 
         return ['content' => $recovered['content'], 'images' => $images];
+    }
+
+    /**
+     * Enforce the opaque-asset policy (see the class docblock) on normalized
+     * markup and its parsed specs: remove the wp:image block of every
+     * decorative `.png` placeholder, rewrite every surviving `.png` asset
+     * reference (src and cover url alike) to `.jpg`, and reconcile the spec
+     * list with both edits. Pure (no I/O) so it is unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $images parsed specs for $content
+     * @return array{
+     *     content:string,
+     *     images:array<int,array<string,mixed>>,
+     *     removed:array<int,array{filename:string,context:string}>,
+     *     converted:array<string,string>
+     * }
+     */
+    public static function enforceOpaquePolicy(string $content, array $images): array
+    {
+        $removed = [];
+
+        // Pass 1: drop the whole wp:image block of every decorative `.png`
+        // placeholder. wp:image blocks never nest, so the non-greedy body
+        // match cannot swallow a sibling block.
+        $blockPattern = '/<!--\s*wp:image\b(?<attrs>.*?)-->(?<body>.*?)<!--\s*\/wp:image\s*-->/is';
+        $content = (string) preg_replace_callback(
+            $blockPattern,
+            static function (array $match) use (&$removed): string {
+                $spec = self::pngPlaceholderIn($match['body']);
+                if ($spec === null || !self::isDecorative($spec['alt'], $match['attrs'])) {
+                    return $match[0];
+                }
+                $removed[] = ['filename' => $spec['filename'], 'context' => $spec['context']];
+                return '';
+            },
+            $content
+        );
+        // Collapse the blank runs the removed blocks leave behind.
+        if ($removed !== []) {
+            $content = (string) preg_replace("/\n{3,}/", "\n\n", $content);
+        }
+
+        // Pass 2: any `.png` placeholder still referenced is a content image
+        // in the wrong format (or a cover background) — rewrite every
+        // reference to the asset, src and JSON url alike, to `.jpg`.
+        $converted = [];
+        foreach (self::pngPlaceholderFilenames($content) as $filename) {
+            $jpg = substr($filename, 0, -4) . '.jpg';
+            $converted[$filename] = $jpg;
+            $content = str_replace("theme:./assets/{$filename}", "theme:./assets/{$jpg}", $content);
+        }
+
+        // Reconcile the spec list: removed assets no longer exist, converted
+        // ones generate under their opaque name.
+        $removedFilenames = array_fill_keys(array_column($removed, 'filename'), true);
+        $kept = [];
+        foreach ($images as $img) {
+            $filename = $img['filename'];
+            if (isset($removedFilenames[$filename]) && !isset($converted[$filename])) {
+                continue;
+            }
+            if (isset($converted[$filename])) {
+                $img['filename'] = $converted[$filename];
+                $img['src']      = 'theme:./assets/' . $converted[$filename];
+            }
+            $kept[] = $img;
+        }
+
+        return ['content' => $content, 'images' => $kept, 'removed' => $removed, 'converted' => $converted];
+    }
+
+    /**
+     * The first canonical `.png` AI_IMAGE placeholder inside one wp:image
+     * block body, or null. Returns the filename plus the alt text (for the
+     * decorative test) and its page-context field (for the warning row).
+     *
+     * @return array{filename:string,alt:string,context:string}|null
+     */
+    private static function pngPlaceholderIn(string $body): ?array
+    {
+        if (!preg_match('/<img[^>]+alt=(["\'])AI_IMAGE:\s*(.*?)\1[^>]*>/is', $body, $imgMatch)) {
+            return null;
+        }
+        if (!preg_match('/src=(["\'])theme:\.\/assets\/([a-z0-9-]+\.png)\1/i', $imgMatch[0], $srcMatch)) {
+            return null;
+        }
+        $alt = html_entity_decode($imgMatch[2], ENT_QUOTES | ENT_HTML5);
+        // subject | page-context | style | aspect-ratio — the context is the
+        // second-to-last-but-one field; tolerate malformed alts by falling
+        // back to the whole alt.
+        $parts = explode('|', $alt);
+        $context = count($parts) >= 4 ? trim($parts[count($parts) - 3]) : trim($alt);
+        return ['filename' => $srcMatch[2], 'alt' => $alt, 'context' => $context];
+    }
+
+    /** Whether a `.png` placeholder reads as a decorative ornament. */
+    private static function isDecorative(string $alt, string $blockAttrs): bool
+    {
+        if (preg_match(self::DECORATIVE_ALT_PATTERN, $alt)) {
+            return true;
+        }
+        return preg_match('/"width"\s*:\s*"?(\d+)/', $blockAttrs, $m)
+            && (int) $m[1] <= self::SMALL_ORNAMENT_MAX_WIDTH_PX;
+    }
+
+    /**
+     * Filenames of every canonical `.png` AI_IMAGE placeholder remaining in
+     * the markup, deduped.
+     *
+     * @return array<int,string>
+     */
+    private static function pngPlaceholderFilenames(string $content): array
+    {
+        $filenames = [];
+        $pattern = '/<img[^>]+alt=(["\'])AI_IMAGE:.*?\1[^>]*>/is';
+        preg_match_all($pattern, $content, $matches);
+        foreach ($matches[0] as $imgTag) {
+            if (preg_match('/src=(["\'])theme:\.\/assets\/([a-z0-9-]+\.png)\1/i', $imgTag, $m)) {
+                $filenames[$m[2]] = true;
+            }
+        }
+        return array_keys($filenames);
     }
 
     /**
