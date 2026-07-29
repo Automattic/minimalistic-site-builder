@@ -441,10 +441,7 @@ final class OpenAiCompatibleClient implements Llm
                     max(0, $deadline - $clock()),
                 );
                 if ($remainingWait > 0) {
-                    fwrite(
-                        STDERR,
-                        "    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n",
-                    );
+                    Narrator::write("    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n");
                     if ($sleeper !== null) {
                         $sleeper($remainingWait);
                     } else {
@@ -856,10 +853,7 @@ final class OpenAiCompatibleClient implements Llm
                     if ($probeReachedOutputLimit && !$retriedTruncation) {
                         $newBudget = self::prepareSingleTruncationRetry($body);
                         $retriedTruncation = true;
-                        fwrite(
-                            STDERR,
-                            "    (OpenRouter response was truncated; regenerating once with {$newBudget} max tokens)\n",
-                        );
+                        Narrator::write("    (OpenRouter response was truncated; regenerating once with {$newBudget} max tokens)\n");
                         continue;
                     }
                     throw new \RuntimeException("stream error: {$terminationError}");
@@ -880,7 +874,7 @@ final class OpenAiCompatibleClient implements Llm
                     ? $fallback
                     : max($fallback, (int) $retryDelay($fallback));
                 $attempt++;
-                fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
+                Narrator::write("    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 if ($sleeper !== null) {
                     $sleeper($wait);
                 } else {
@@ -892,7 +886,7 @@ final class OpenAiCompatibleClient implements Llm
                     throw $e;
                 }
                 unset($body[$param]);
-                fwrite(STDERR, "    (model rejected '{$param}'; retrying without it)\n");
+                Narrator::write("    (model rejected '{$param}'; retrying without it)\n");
             }
         }
     }

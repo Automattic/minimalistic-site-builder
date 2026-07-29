@@ -1,0 +1,510 @@
+{
+  "schemaVersion": 1,
+  "name": "anchor-attribute-order",
+  "milestone": "M4",
+  "capabilities": [
+    "block:core/group",
+    "block:core/heading",
+    "block:core/details",
+    "block:core/button",
+    "block:core/buttons",
+    "block:core/table",
+    "support:anchor",
+    "support:align",
+    "support:aria-label",
+    "report:fixed"
+  ],
+  "oracle": {
+    "generatorVersion": "1.0.0",
+    "maxPasses": 5,
+    "observedCodes": [],
+    "files": [
+      {
+        "path": "parts/button-anchor-and-style.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "236e59af8c7360788e18ea7098cc6255c29681b50ce34ffb3722ec4d6941226b",
+        "outputSha256": "925264716dab2e1fa95ec6af1853357d7260fb2a97327204e89043f5f3e5d318",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/button",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/buttons",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/button",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                },
+                {
+                  "blockName": "core/buttons",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/details-anchor-with-align.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "f39300c926cbb5b83d0b42acecfff291659880786612cfd0cc678be3d2fb2a02",
+        "outputSha256": "c82d101d10f45e021ac08ba75a67e7ab9571e075dec59f4740d67c55365d550e",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/details",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/details",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/details-anchor-without-align.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "f066887d3633fddeb39eb426bcd6a876c48cd2fe3fe679ccd2af24059a3bf890",
+        "outputSha256": "f0c33723c29623036363dc28eece8e0a5917e25e2dcb22cbaeee5267ce860e73",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/details",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/details",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/group-anchor-align-and-style.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "d2d35c2509c253fc27126a3a8e6fbdac60fe077c8f61039e2ddbb40e24e0f46b",
+        "outputSha256": "cfba6643c9221fff74679ea7b0db79ee42cce8b1a2f776e3e43ca807f9db3c7c",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/group-anchor-aria-label-align.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "832c3493aef856f3eebd73ee8b78292141e8942fa393dd8b754bfe713c352d0b",
+        "outputSha256": "be3a7f0d63731821dda0845ca6e305b0f711c7d9bdbabdef01d0fee1f9f59710",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/group-anchor-with-align.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "fe53b0800a8cd12306fbe67a6b37caa558eba5580bad3d30c6d6a1fe038005fe",
+        "outputSha256": "0e01cb35fb348eae3f789daa9b09de5cc99efcedde2c0b0341f32783d1e07f86",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/group-anchor-without-align.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "a50a21ea317145c7de340e472ea92ba0006708c9bd13bf44909940751b2b1d98",
+        "outputSha256": "3e778cd6e07f0816a5e4cc05016185be81978bb020a9d353cf3900c9eed55d29",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/group",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/heading-anchor-with-align.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "a14dac68126d7425123a8789aa5a78e757a7ae2ef81d64df3e2d246ca536189b",
+        "outputSha256": "4cff29856af7aafce0838ab493e00ea196699194eb8f102b4fdc640c6842cc93",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/heading-anchor-without-align.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "584d8d48f5c92def982203cbfdaf633f9b88a1d29d21fa1c80a6e85c64669b89",
+        "outputSha256": "34dfb3f2b444e4e7ca11bc2d0a9053156c31f6f1769d8b72fdf958df0b78ec81",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/heading",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      },
+      {
+        "path": "parts/table-anchor-and-style.html",
+        "passes": 2,
+        "secondInvocationPasses": 1,
+        "inputSha256": "effb2666a253b0d78e0087d2f81d900f8adf7d1bad13a15ef2a562d3f49cd7de",
+        "outputSha256": "01014f8ec03d0f995b57b0c58fc5389e6b123675b9ac6044017c954df06c4655",
+        "iterations": [
+          {
+            "pass": 1,
+            "changed": true,
+            "byteChanged": true,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/table",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          },
+          {
+            "pass": 2,
+            "changed": false,
+            "byteChanged": false,
+            "fixedIssues": [],
+            "compatibilityRepairs": [],
+            "instrumentation": {
+              "validations": [
+                {
+                  "blockName": "core/table",
+                  "deprecationIndex": null,
+                  "valid": true,
+                  "issueCount": 0
+                }
+              ],
+              "builtInRepairs": [],
+              "deprecations": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "reviewedRepairCount": 0,
+  "provenance": {
+    "kind": "committed-dirty-seed"
+  }
+}

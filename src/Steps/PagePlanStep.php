@@ -213,8 +213,12 @@ final class PagePlanStep implements ConcurrentStep
 
         // The art-direction rules are creative constraints the model
         // occasionally violates. Re-ask ONCE per rejected page, all of them in
-        // ONE batch; if a repair still breaks the variety rules, reassign the
-        // offending archetypes mechanically instead of aborting the build.
+        // ONE batch; if a repair still breaks a rule, fix it mechanically
+        // instead of aborting the build. recoverSections() is the backstop:
+        // field + variety coercion for every known normalize rejection, and a
+        // single fallback section if a future rule slips past both passes.
+        // Only an empty section list still ends the page (nothing to coerce).
+        $warnings = [];
         $frontBySlug = array_column($pages, 'front', 'slug');
         foreach ($this->repairAll($project, $rejected) as $slug => $repaired) {
             $slug = (string) $slug;
@@ -222,13 +226,22 @@ final class PagePlanStep implements ConcurrentStep
             try {
                 $sections = self::normalize($repaired['sections'] ?? null, $front);
             } catch (\RuntimeException $stillInvalid) {
-                $sections = self::normalize(self::repairVariety($repaired['sections'] ?? null, $front), $front);
+                $sections = self::recoverSections(
+                    $repaired['sections'] ?? null,
+                    $front,
+                    $warnings,
+                    $slug
+                );
             }
             if ($sections === []) {
                 throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
             }
             $sectionsBySlug[$slug] = $sections;
         }
+
+        // Every coercion changed delivered output, so it belongs in the durable
+        // record rather than only in the narration, which is best-effort.
+        $project->addWarnings($this->id(), $warnings);
 
         $out = [];
         foreach ($pages as $page) {
@@ -505,6 +518,187 @@ final class PagePlanStep implements ConcurrentStep
     }
 
     /**
+     * Mechanical backstop after the LLM repair round still fails normalize().
+     *
+     * Runs repairFields() then repairVariety(), then normalize(). Those two
+     * passes cover every rejection normalize() can raise today bar an empty
+     * section list. If a future normalize rule slips past both, the residual
+     * failure is recorded as a warning and the page gets a single known-good
+     * section instead of aborting the build — one thin page is better than no
+     * site after the rest of the pipeline has already been paid for.
+     *
+     * Empty input still returns [] so the caller can fail that page loud;
+     * inventing sections from nothing is not this method's job.
+     *
+     * Pure — unit-testable.
+     *
+     * @param mixed $raw
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    public static function recoverSections($raw, bool $front, array &$warnings = [], string $pageSlug = ''): array
+    {
+        $mechanically = self::repairVariety(self::repairFields($raw, $warnings), $front);
+        if ($mechanically === []) {
+            return [];
+        }
+        return self::acceptRepairedSections($mechanically, $front, $warnings, $pageSlug);
+    }
+
+    /**
+     * Accept a field+variety-repaired section list, or degrade to one section.
+     *
+     * Separated from recoverSections() so the residual path is unit-testable
+     * without inventing a normalize rule the two passes cannot answer: pass an
+     * unrepaired invalid list and this method warns + falls back instead of
+     * throwing.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    public static function acceptRepairedSections(
+        array $sections,
+        bool $front,
+        array &$warnings = [],
+        string $pageSlug = ''
+    ): array {
+        try {
+            return self::normalize($sections, $front);
+        } catch (\RuntimeException $residual) {
+            $where = $pageSlug !== '' ? "page '{$pageSlug}'" : 'page';
+            $warnings[] = "page-plan: {$where}: mechanical repair left residual validation errors; "
+                . 'delivered a single fallback section — ' . $residual->getMessage();
+            return self::fallbackSections($front);
+        }
+    }
+
+    /**
+     * Smallest valid page plan: one section that always survives normalize().
+     *
+     * Used only when recoverSections() cannot coerce the model's list into a
+     * legal plan. Front pages keep a full-bleed cover so the homepage still
+     * looks like a homepage; interior pages open compact.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function fallbackSections(bool $front = true): array
+    {
+        return self::normalize([
+            [
+                'slug'             => 'content',
+                'title'            => 'Content',
+                'type'             => 'content',
+                'purpose'          => '',
+                'content_notes'    => '',
+                'layout_archetype' => $front ? 'full-bleed-cover' : 'centered-stack',
+                'background'       => 'base',
+                'vertical_density' => 'standard',
+                'handoff'          => 'Sits below the site header and above the site footer.',
+            ],
+        ], $front);
+    }
+
+    /**
+     * Mechanical fix for the field-level rules on a raw section list: unknown
+     * enum values and missing required fields.
+     *
+     * These are not creative-constraint violations like the variety rules — they
+     * are the model mis-filling a slot, and the commonest shape is cross-wiring
+     * two adjacent enum fields ('contrast' is a valid `background`, so it turns
+     * up as a `layout_archetype`). One such slip on one section otherwise ends a
+     * multi-minute build, because the repair round is the only thing that can
+     * fix it and a repair that reproduces the mistake has nowhere left to go.
+     *
+     * Coerced archetypes avoid both neighbours, and never become a full-bleed
+     * cover or a card grid — the two that carry their own rules — so this pass
+     * hands repairVariety() a list it has no new work to do on. Prose
+     * (content_notes, handoff) may then lag the coerced assignment, the same
+     * accepted trade repairVariety() makes.
+     *
+     * Together with repairVariety(), covers every rejection normalize() can
+     * raise except an empty section list, which no amount of mechanical repair
+     * can invent. Interior-page rules (leading full-bleed cover) belong to
+     * repairVariety(), which still receives the page's $front flag. Residual
+     * failures after both passes are handled by recoverSections(). Pure —
+     * unit-testable.
+     *
+     * @param mixed $raw
+     * @param list<string> $warnings appended to in place, one per coercion
+     * @return array<int,array<string,mixed>>
+     */
+    public static function repairFields($raw, array &$warnings = []): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $sections = array_values(array_filter($raw, 'is_array'));
+
+        // Neither of these is a safe landing spot for a value we are guessing:
+        // a cover has its own interior-page rule and a grid has a cap.
+        $candidates = array_values(array_diff(self::ARCHETYPES, ['full-bleed-cover', 'equal-card-grid']));
+
+        $archetypes = array_map(
+            fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
+            $sections
+        );
+
+        foreach ($sections as $i => $section) {
+            $slug = trim((string) ($section['slug'] ?? '')) ?: "section-{$i}";
+
+            if (!in_array($archetypes[$i], self::ARCHETYPES, true)) {
+                $was = $archetypes[$i];
+                $replacement = $candidates[0];
+                foreach ($candidates as $candidate) {
+                    if ($candidate !== ($archetypes[$i - 1] ?? null)
+                        && $candidate !== ($archetypes[$i + 1] ?? null)
+                    ) {
+                        $replacement = $candidate;
+                        break;
+                    }
+                }
+                $archetypes[$i] = $replacement;
+                $sections[$i]['layout_archetype'] = $replacement;
+                $warnings[] = "page-plan: section '{$slug}': unknown layout_archetype '{$was}' "
+                    . "replaced with '{$replacement}'";
+            }
+
+            $background = trim((string) ($section['background'] ?? ''));
+            if (!in_array($background, self::BACKGROUNDS, true)) {
+                $sections[$i]['background'] = 'base';
+                $warnings[] = "page-plan: section '{$slug}': unknown background '{$background}' "
+                    . "replaced with 'base'";
+            }
+
+            $density = trim((string) ($section['vertical_density'] ?? ''));
+            if (!in_array($density, self::VERTICAL_DENSITIES, true)) {
+                $sections[$i]['vertical_density'] = 'standard';
+                $warnings[] = "page-plan: section '{$slug}': unknown vertical_density '{$density}' "
+                    . "replaced with 'standard'";
+            }
+
+            if (trim((string) ($section['type'] ?? '')) === '') {
+                $sections[$i]['type'] = 'content';
+                $warnings[] = "page-plan: section '{$slug}': missing type; defaulted to 'content'";
+            }
+
+            if (trim((string) ($section['handoff'] ?? '')) === '') {
+                $above = $i === 0
+                    ? 'the site header'
+                    : '"' . trim((string) ($sections[$i - 1]['title'] ?? 'the previous section')) . '"';
+                $below = $i === count($sections) - 1
+                    ? 'the site footer'
+                    : '"' . trim((string) ($sections[$i + 1]['title'] ?? 'the next section')) . '"';
+                $sections[$i]['handoff'] = "Sits below {$above} and above {$below}.";
+                $warnings[] = "page-plan: section '{$slug}': missing handoff; "
+                    . 'described from its neighbours in the plan';
+            }
+        }
+
+        return $sections;
+    }
+
+    /**
      * Last-resort mechanical fix for the variety rules on a raw section list:
      * an interior page's leading full-bleed cover, excess equal-card-grids,
      * and the later section of each adjacent duplicate pair are reassigned to
@@ -514,7 +708,8 @@ final class PagePlanStep implements ConcurrentStep
      * are demoted to 'standard'. The reassigned section's prose
      * (content_notes, handoff) may then lag its assignment slightly — an
      * accepted trade against aborting the whole build. Only touches VALID
-     * values; enum and handoff errors still reject the plan in normalize().
+     * values: run repairFields() first, which is the companion pass that makes
+     * them valid, or enum and missing-field errors still reject in normalize().
      * Pure — unit-testable.
      *
      * @param mixed $raw

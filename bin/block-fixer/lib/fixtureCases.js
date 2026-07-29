@@ -717,6 +717,95 @@ After`,
     },
     repairs: [],
   },
+  {
+    // The rule this pins: a support that *prepends* a class (align, textAlign)
+    // opens the class slot before the anchor writes its id; with no such support
+    // the id lands first. core/button and core/table are the two blocks whose
+    // slot opens after the support styles instead — a property of their save(),
+    // not something the engine can derive, so both are pinned here too.
+    name: "anchor-attribute-order",
+    milestone: "M4",
+    capabilities: [
+      "block:core/group",
+      "block:core/heading",
+      "block:core/details",
+      "block:core/button",
+      "block:core/buttons",
+      "block:core/table",
+      "support:anchor",
+      "support:align",
+      "support:aria-label",
+      "report:fixed",
+    ],
+    files: {
+      "parts/group-anchor-with-align.html": String.raw`<!-- wp:group {"anchor":"a1","align":"full","layout":{"type":"constrained"}} -->
+<div id="a1" class="wp-block-group alignfull"></div>
+<!-- /wp:group -->`,
+      "parts/group-anchor-without-align.html": String.raw`<!-- wp:group {"anchor":"a1","layout":{"type":"constrained"}} -->
+<div class="wp-block-group" id="a1"></div>
+<!-- /wp:group -->`,
+      "parts/group-anchor-aria-label-align.html": String.raw`<!-- wp:group {"anchor":"a1","ariaLabel":"Landmark","align":"full","layout":{"type":"constrained"}} -->
+<div id="a1" aria-label="Landmark" class="wp-block-group alignfull"></div>
+<!-- /wp:group -->`,
+      "parts/group-anchor-align-and-style.html": String.raw`<!-- wp:group {"anchor":"a1","align":"full","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->
+<div id="a1" class="wp-block-group alignfull" style="margin-top:0"></div>
+<!-- /wp:group -->`,
+      "parts/heading-anchor-without-align.html": String.raw`<!-- wp:heading {"anchor":"h1"} -->
+<h2 class="wp-block-heading" id="h1">Anchored</h2>
+<!-- /wp:heading -->`,
+      "parts/heading-anchor-with-align.html": String.raw`<!-- wp:heading {"anchor":"h1","align":"full"} -->
+<h2 id="h1" class="wp-block-heading alignfull">Anchored</h2>
+<!-- /wp:heading -->`,
+      "parts/details-anchor-without-align.html": String.raw`<!-- wp:details {"anchor":"d1","summary":"More"} -->
+<details class="wp-block-details" id="d1"><summary>More</summary></details>
+<!-- /wp:details -->`,
+      "parts/details-anchor-with-align.html": String.raw`<!-- wp:details {"anchor":"d1","align":"full","summary":"More"} -->
+<details id="d1" class="wp-block-details alignfull"><summary>More</summary></details>
+<!-- /wp:details -->`,
+      "parts/table-anchor-and-style.html": String.raw`<!-- wp:table {"anchor":"t1","style":{"spacing":{"padding":{"top":"1rem"}}}} -->
+<figure id="t1" class="wp-block-table" style="padding-top:1rem"><table class="has-fixed-layout"><tbody><tr><td>Cell</td></tr></tbody></table></figure>
+<!-- /wp:table -->`,
+      "parts/button-anchor-and-style.html": String.raw`<!-- wp:buttons -->
+<div class="wp-block-buttons"><!-- wp:button {"anchor":"b1","style":{"typography":{"writingMode":"vertical-rl"}}} -->
+<div id="b1" class="wp-block-button" style="writing-mode:vertical-rl"><a class="wp-block-button__link wp-element-button" href="#">Go</a></div>
+<!-- /wp:button --></div>
+<!-- /wp:buttons -->`,
+    },
+    repairs: [],
+  },
+  {
+    name: "tbilisi60-traditional-offerings-fixed-point",
+    milestone: "M4",
+    capabilities: [
+      "block:core/group",
+      "block:core/columns",
+      "block:core/column",
+      "block:core/heading",
+      "block:core/paragraph",
+      "block:core/separator",
+      "block:core/image",
+      "guard:carried-unreviewed-layout",
+      "deprecation:paragraph-legacy-font-style-key",
+      "repair:nested-paragraph",
+      "drop:legacy-text-align",
+      "report:fixed",
+    ],
+    // Same structured provenance as the sibling tbilisi25 case: the input is a
+    // real generated page, recorded and hash-checked rather than described. The
+    // file is already committed, so nothing is copied — this only makes the
+    // recorded provenance say corpus import instead of hand-authored seed.
+    advisorySource: 'projects/tbilisi60/theme/parts/page-home--traditional-offerings.html',
+    advisoryTarget: 'parts/traditional-offerings.html',
+    provenanceNotes: [
+      "Pins the carried pinned-unimplemented style families policy: the invented style.layout.contentSize on the inner core/group stays verbatim in the delimiter instead of failing the theme. Byte-safe at the pinned runtime: no save-path consumer (StyleEngine, SupportEngine, renderers) reads style.layout, so per block-editor@15.15.0 save hooks it is retained comment state with no saved-markup effect; core/group save() reads only the top-level layout attribute, which this block already carries.",
+      "Pins the reviewed-legacy disposition for the AI-authored core/paragraph fontStyle comment key ({\"fontStyle\":\"italic\"} alias for style.typography.fontStyle, six occurrences): the pinned createBlock path drops the unregistered delimiter key while the authored font-style:italic root declaration survives via the selector-less deprecation's root carryover, the same certified path as paragraph-inline-color-carryover.",
+      "The first paragraph's legacy align and the heading's legacy textAlign migrate through the existing reviewed adapters; the unmirrored has-text-align-center class re-renders into the one DROPPED row per the documented unmatched-legacy-signature policy.",
+      "Adopted into the oracle once the group attribute-order divergence was fixed; before that the committed golden emitted the anchor id ahead of the class, which the real runtime does not.",
+    ],
+    repairs: [
+      { file: "parts/traditional-offerings.html", blockPath: "document", code: "nested-paragraph" },
+    ],
+  },
 ];
 
 /*
@@ -747,13 +836,6 @@ const REVIEWED_CASE_EXCLUSIONS = Object.freeze({
     runtimeMismatches: Object.freeze({
       'parts/hidden-opacity.html': 'ded3f0c36000d308c5d1bab6bc39842b3974cf07f033d131ba0f2dae4cdd37ee',
       'parts/opacity.html': '5f83240312c6663174efcabf1c59fb5e752ea06f4ddc045dac3ce38c2b24603b',
-    }),
-  }),
-  'tbilisi60-traditional-offerings-fixed-point': Object.freeze({
-    kind: 'runtime-divergence',
-    reason: 'Gutenberg serializes the outer group class before its id; the reviewed PHP canonical output writes the id before the class.',
-    runtimeMismatches: Object.freeze({
-      'parts/traditional-offerings.html': '1a2374a64c2ebf0d6630ab6713529819d29ba4469d1788dd08a83f58d47e3d07',
     }),
   }),
 });
@@ -909,25 +991,9 @@ const REVIEWED_DEPRECATIONS = Object.freeze({
   'deprecation:core/site-tagline:1': 'explicit-adapter',
 });
 
-// Every repair code observed by the pinned instrumentation — built-in
-// recoveries and compatibility repairs alike — must have a reviewed
-// disposition. The fixture generator rejects either an unreviewed hit or a
-// stale disposition which is no longer exercised, exactly as it does for
-// REVIEWED_DEPRECATIONS. Per-case counted repairs live in each definition's
-// `repairs`; this ledger is the gate that keeps a *new* code from landing in
-// generated evidence without review.
-const REVIEWED_REPAIR_CODES = Object.freeze({
-  'anchor-recovery': 'pinned-built-in-recovery',
-  'aria-label-recovery': 'pinned-built-in-recovery',
-  'custom-class-recovery': 'pinned-built-in-recovery',
-  'media-type-inference': 'reviewed-compatibility-repair',
-  'nested-paragraph': 'reviewed-compatibility-repair',
-});
-
 module.exports = {
   CASES,
   REQUIRED_CAPABILITIES,
   REVIEWED_CASE_EXCLUSIONS,
   REVIEWED_DEPRECATIONS,
-  REVIEWED_REPAIR_CODES,
 };

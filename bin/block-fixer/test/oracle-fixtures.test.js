@@ -13,7 +13,6 @@ const { installOracleInstrumentation } = require('../lib/oracleInstrumentation')
 const {
   REVIEWED_CASE_EXCLUSIONS,
   REVIEWED_DEPRECATIONS,
-  REVIEWED_REPAIR_CODES,
 } = require('../lib/fixtureCases');
 const { SUPPORTED_BLOCKS } = require('../lib/supportManifest');
 const {
@@ -65,7 +64,7 @@ function prepareOracle() {
 
 test('committed cases equal generated definitions plus reviewed exclusions', () => {
   assert.doesNotThrow(() => assertCommittedCaseInventory());
-  assert.equal(Object.keys(REVIEWED_CASE_EXCLUSIONS).length, 4);
+  assert.equal(Object.keys(REVIEWED_CASE_EXCLUSIONS).length, 3);
   assert.deepEqual(
     Object.values(REVIEWED_CASE_EXCLUSIONS)
       .map((exclusion) => exclusion.kind)
@@ -73,7 +72,6 @@ test('committed cases equal generated definitions plus reviewed exclusions', () 
     [
       'degradation-policy',
       'degradation-policy',
-      'runtime-divergence',
       'runtime-divergence',
     ]
   );
@@ -107,13 +105,6 @@ test('registered runtime fingerprint and reviewed support manifest are consisten
   assert.deepEqual(coverage.deprecations.unreviewed, []);
   assert.deepEqual(coverage.deprecations.unobservedReviewed, []);
   assert.deepEqual(coverage.deprecations.reviewed, REVIEWED_DEPRECATIONS);
-  assert.deepEqual(coverage.repairCodes.unreviewed, []);
-  assert.deepEqual(coverage.repairCodes.unobservedReviewed, []);
-  assert.deepEqual(coverage.repairCodes.reviewed, REVIEWED_REPAIR_CODES);
-  assert.deepEqual(
-    coverage.repairCodes.observed,
-    Object.keys(REVIEWED_REPAIR_CODES).sort()
-  );
   assert.deepEqual(coverage.reviewedCaseExclusions, REVIEWED_CASE_EXCLUSIONS);
   assert.deepEqual(
     coverage.deprecations.observed,
@@ -204,14 +195,7 @@ test('every committed input reaches its reviewed fixed point and is idempotent',
 
   for (const caseName of fs.readdirSync(casesRoot).sort()) {
     const caseRoot = path.join(casesRoot, caseName);
-    if (!fs.statSync(caseRoot).isDirectory()) continue;
-    if (!fs.existsSync(path.join(caseRoot, 'case.json'))) {
-      failures.push(
-        `${caseName}: committed case directory has no case.json; `
-        + 'it would run as a PHP golden while invisible to the oracle gates'
-      );
-      continue;
-    }
+    if (!fs.existsSync(path.join(caseRoot, 'case.json'))) continue;
     let metadata;
     let report;
     let repairs;

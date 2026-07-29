@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Units;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
+use Automattic\SiteBuild\Narrator;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
@@ -20,12 +21,12 @@ final class GeneratedMarkup
      * $notes receives one "part '<key>': …" line per removal or degradation
      * that changed the delivered content (sanitizer strips, wrapper recovery,
      * truncation salvage). Callers with a Project route them to warnings.json;
-     * every note is also echoed to STDERR for live visibility.
+     * every note is also narrated for live visibility.
      */
     public static function normalize(string $text, string $key, array &$notes = []): string
     {
         $record = static function (string $note) use ($key, &$notes): void {
-            fwrite(STDERR, "    (part '{$key}': {$note})\n");
+            Narrator::write("    (part '{$key}': {$note})\n");
             $notes[] = "part '{$key}': {$note}";
         };
 

@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\SectionRole;
@@ -100,6 +101,18 @@ final class SectionsStep implements Step
     /** Splits the site's pages across two navs, so it needs pages to split. */
     private const SPLIT_NAV_ARCHETYPE = 'split-nav';
 
+    /** Display-scale wordmark — competes head-on with a display-scale hero H1. */
+    private const OVERSIZED_ARCHETYPE = 'oversized-wordmark';
+
+    /** Multi-row centered masthead — too tall to stack above a viewport-scale cover. */
+    private const MASTHEAD_ARCHETYPE = 'centered-masthead';
+
+    /** Header mode: the header floats transparently over the hero cover. */
+    public const MODE_OVERLAY = 'overlay';
+
+    /** Header mode: the header is an opaque bar stacked above the hero. */
+    public const MODE_STACKED = 'stacked';
+
     public function __construct(
         private Llm $llm,
         PromptRenderer $renderer,
@@ -183,7 +196,7 @@ final class SectionsStep implements Step
                     $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
                         . 'section dropped from the page plan';
                 }
-                fwrite(STDERR, "    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
+                Narrator::write("    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
             }
         }
 
@@ -223,12 +236,17 @@ final class SectionsStep implements Step
      * whole — an empty page in the nav is worse than an absent one — except
      * the front page, which templates and the seeder rely on.
      *
+     * Public for the same reason repairedPages() is: the wpcom fan-out path
+     * replaces this step and must apply the identical drop-and-prune
+     * degradation when a part is unusable, or one lost section discards a
+     * whole build the CLI would have shipped. Pure — unit-testable.
+     *
      * @param array<int,array<string,mixed>> $sourcePages
      * @param array<string,true> $dropped part keys (partSlug) of dropped sections
      * @param list<string>       $warnings appended to in place
      * @return array<int,array<string,mixed>>
      */
-    private static function pruneDroppedSections(array $sourcePages, array $dropped, array &$warnings): array
+    public static function pruneDroppedSections(array $sourcePages, array $dropped, array &$warnings): array
     {
         $pages = [];
         foreach ($sourcePages as $page) {
@@ -292,7 +310,7 @@ final class SectionsStep implements Step
             try {
                 $this->llm->complete(self::CACHE_WARM_PROMPT, $opts);
             } catch (\Throwable $e) {
-                fwrite(STDERR, "    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
+                Narrator::write("    section cache warm-up failed ({$e->getMessage()}); continuing uncached\n");
             }
             return;
         }
@@ -361,6 +379,17 @@ final class SectionsStep implements Step
 
         // The chrome is briefed on the FRONT page: that's what the header sits
         // directly above (or floats on) and what sets the site's opening tone.
+        // The header mode is the shared contract: both sides of the page-top
+        // seam derive it from the same pure headerMode(), so the header's
+        // archetype assignment and every hero section's brief compose
+        // deliberately instead of each guessing. headerAssignment() derives it
+        // again from the canvas rather than taking it as an argument, which
+        // keeps its signature usable from tests.
+        $canvas = DesignDirectionStep::canvasFor($project);
+        $headerMode = self::headerMode($pages, $canvas);
+        // Fixed for the whole build, so the hero brief is built once, not once
+        // per hero section.
+        $headerContract = self::headerContract($headerMode);
         $frontSections = self::frontPage($pages)['sections'];
         $jobs = [
             'header' => [
@@ -369,7 +398,7 @@ final class SectionsStep implements Step
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
                     'nav_rule'   => self::navRuleFor(count($pages)),
-                    'archetype_assignment' => self::headerAssignment($frontSections, DesignDirectionStep::canvasFor($project), count($pages)),
+                    'archetype_assignment' => self::headerAssignment($pages, $canvas),
                 ],
                 'file'  => 'parts/header.html',
             ],
@@ -394,6 +423,11 @@ final class SectionsStep implements Step
                     ],
                     'section'   => $section,
                     'neighbors' => self::neighbors($sections, $i),
+                    // Only page-opening sections share the viewport with the
+                    // header; everything below scrolls in under its own rules.
+                    'header_contract' => (string) ($section['role'] ?? '') === SectionRole::HERO
+                        ? $headerContract
+                        : '',
                 ];
                 $key = $this->sectionUnit->key($input);
                 $jobs[$key] = [
@@ -554,45 +588,115 @@ final class SectionsStep implements Step
     }
 
     /**
-     * The header archetypes compatible with the planned hero, the direction's
-     * canvas, and the site's shape: minimal-overlay floats transparently over
-     * the first section, so it is only offered when the hero is an image-led
-     * cover it can read against — and never on a "framed" canvas, whose mat of
-     * page background would sit under the overlay instead of the image.
-     * split-nav splits the site's pages across two navs, so a one-page site
-     * (where the nav rule prescribes section anchors instead) drops it.
-     * Pure — unit-testable.
+     * Whether the planned hero is an image-led cover (the composition an
+     * overlay header can float on and read against).
      *
      * @param array<int,array<string,mixed>> $sections
-     * @return string[]
      */
-    public static function headerArchetypePool(array $sections, string $canvas = '', int $pageCount = 2): array
+    private static function imageLedHero(array $sections): bool
     {
         $hero = self::heroSection($sections);
-        $imageLed = is_array($hero) && (
+        return is_array($hero) && (
             (string) ($hero['layout_archetype'] ?? '') === 'full-bleed-cover'
             || (string) ($hero['background'] ?? '') === 'image'
         );
-        $excluded = [];
-        if (!$imageLed || $canvas === 'framed') {
-            $excluded[] = self::OVERLAY_ARCHETYPE;
+    }
+
+    /**
+     * The deterministic top-of-page contract (BIGR-735): decided once from the
+     * plan, then injected into BOTH the header prompt and every hero-section
+     * prompt, so the two parts compose instead of colliding blind.
+     *
+     * `overlay` — the header floats transparently over the hero — requires an
+     * image-led, full-bleed front hero (never a "framed" canvas, whose mat
+     * would sit under the overlay instead of the image), and because the
+     * header renders on EVERY page, every page's opening section must read as
+     * a dark band (an `image` background is dimmed to 40%+ by the cover rules;
+     * a `contrast` band is dark by definition) so the one light text color the
+     * overlay commits to reads everywhere. Anything else is `stacked`.
+     * Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     */
+    /**
+     * The section a page opens on — the only one that shares the viewport with
+     * the header, and so the one both sides of the seam ask about.
+     *
+     * @param array<string,mixed> $page
+     * @return array<string,mixed>|null
+     */
+    public static function openingSection(array $page): ?array
+    {
+        $first = ((array) ($page['sections'] ?? []))[0] ?? null;
+        return is_array($first) ? $first : null;
+    }
+
+    public static function headerMode(array $pages, string $canvas = ''): string
+    {
+        $front = self::frontPage($pages);
+        if (!self::imageLedHero((array) ($front['sections'] ?? [])) || $canvas === 'framed') {
+            return self::MODE_STACKED;
         }
-        if ($pageCount <= 1) {
+        foreach ($pages as $page) {
+            $first = self::openingSection($page);
+            $background = is_array($first) ? (string) ($first['background'] ?? '') : '';
+            if (!in_array($background, ['image', 'contrast'], true)) {
+                return self::MODE_STACKED;
+            }
+        }
+        return self::MODE_OVERLAY;
+    }
+
+    /**
+     * The header archetypes compatible with the header mode and the site's
+     * shape. In overlay mode the pool IS minimal-overlay: the mode exists so
+     * that an image-led full-bleed hero reliably gets the floating header the
+     * theme's `.header-overlay` CSS was written for, instead of losing a
+     * random draw to an opaque bar (the audited projects shipped that dead CSS
+     * 6 times out of 6). In stacked mode:
+     *  - minimal-overlay is out (nothing image-led to float on),
+     *  - split-nav needs pages to split, so a one-page site drops it,
+     *  - oversized-wordmark is out when the plan has a hero: every planned
+     *    hero opens with a display-scale H1, and a display-scale wordmark
+     *    ~100px above it is two competing mastheads,
+     *  - centered-masthead (2-3 stacked centered rows, the tallest archetype)
+     *    is out when the hero is image-led: stacking it above a viewport-scale
+     *    cover pushes the hero's content below the fold.
+     * Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @return string[]
+     */
+    public static function headerArchetypePool(array $pages, string $canvas = ''): array
+    {
+        if (self::headerMode($pages, $canvas) === self::MODE_OVERLAY) {
+            return [self::OVERLAY_ARCHETYPE];
+        }
+        $frontSections = (array) (self::frontPage($pages)['sections'] ?? []);
+        $excluded = [self::OVERLAY_ARCHETYPE];
+        if (count($pages) <= 1) {
             $excluded[] = self::SPLIT_NAV_ARCHETYPE;
+        }
+        if (self::heroSection($frontSections) !== null) {
+            $excluded[] = self::OVERSIZED_ARCHETYPE;
+        }
+        if (self::imageLedHero($frontSections)) {
+            $excluded[] = self::MASTHEAD_ARCHETYPE;
         }
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
 
     /**
      * The archetype assignment injected into header.md: the forced archetype
-     * (HEADER_ARCHETYPE env var) or two random picks from the compatible pool
-     * for the model to choose between. Randomizing the shortlist in code is
-     * what actually spreads header variety across builds — offered the full
-     * menu, the model gravitates to the same one or two archetypes every time.
+     * (HEADER_ARCHETYPE env var), the contract-mandated minimal-overlay in
+     * overlay mode, or two random picks from the compatible pool for the model
+     * to choose between. Randomizing the shortlist in code is what actually
+     * spreads header variety across builds — offered the full menu, the model
+     * gravitates to the same one or two archetypes every time.
      *
-     * @param array<int,array<string,mixed>> $sections
+     * @param array<int,array<string,mixed>> $pages
      */
-    public static function headerAssignment(array $sections, string $canvas = '', int $pageCount = 2): string
+    public static function headerAssignment(array $pages, string $canvas = ''): string
     {
         $forced = Env::get(self::ARCHETYPE_ENV);
         if ($forced !== null && $forced !== '') {
@@ -607,11 +711,53 @@ final class SectionsStep implements Step
             return "ASSIGNED HEADER ARCHETYPE for this build: **{$forced}**. Build exactly this one.";
         }
 
-        $pool = self::headerArchetypePool($sections, $canvas, $pageCount);
+        $pool = self::headerArchetypePool($pages, $canvas);
+        if ($pool === [self::OVERLAY_ARCHETYPE]) {
+            return 'ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**. '
+                . 'The planned hero is an image-led, full-bleed cover and every page opens on a dark band, '
+                . 'so the header floats over the imagery instead of stacking above it. Build exactly this one; '
+                . 'its top-level wp:group MUST carry "className":"header-overlay" (a deterministic pass verifies it). '
+                . 'Every other catalog entry below is reference only and is OFF the table for this build.';
+        }
         $first = array_splice($pool, random_int(0, count($pool) - 1), 1)[0];
         $second = $pool[random_int(0, count($pool) - 1)];
         return "ASSIGNED HEADER ARCHETYPES for this build: **{$first}** or **{$second}**. "
             . 'Build EXACTLY ONE of these two — whichever serves the DESIGN DIRECTION and the planned hero better. '
-            . 'Every other catalog entry below is reference only and is OFF the table for this build.';
+            . 'Every other catalog entry below is reference only and is OFF the table for this build. '
+            . 'This header STACKS as an opaque bar directly above the hero, inside the same first viewport '
+            . '(the hero is told the same thing and caps its cover height for you) — keep the bar to ONE compact row.';
+    }
+
+    /**
+     * The header-side contract rendered into every hero-role section brief
+     * ({{header_contract}} in section.md), so the section composes with the
+     * header that will render above — or float on — it. The header renders on
+     * every page, so every page's opening section gets the same contract.
+     * Pure — unit-testable.
+     */
+    public static function headerContract(string $mode): string
+    {
+        if ($mode === self::MODE_OVERLAY) {
+            return "HEADER CONTRACT (this is a page-opening section):\n"
+                . "The site header floats TRANSPARENTLY over the very top of this section — a slim overlay bar "
+                . "(~60px) with no background of its own. Compose for it:\n"
+                . "- The cover's dim/gradient protection MUST reach the very top edge of the image: the header's "
+                . "text sits on your top ~80px, not only behind your headline.\n"
+                . "- A full-viewport cover (\"minHeight\":90-100 with \"minHeightUnit\":\"vh\") is welcome — nothing "
+                . "opaque stacks above it.\n"
+                . "- Do NOT reserve blank space for the header and do NOT stack a padded page-background band above "
+                . "the cover: the image meets the top of the viewport.";
+        }
+        return "HEADER CONTRACT (this is a page-opening section):\n"
+            . "An OPAQUE site header (one compact bar, roughly 80-100px tall) is stacked directly above this "
+            . "section, inside the same first viewport. Compose for the space that remains:\n"
+            . "- Cap any cover at \"minHeight\":" . HeaderHeroStep::STACKED_COVER_VH . " with "
+            . "\"minHeightUnit\":\"vh\" or less — header + cover must fit ~100vh together (a deterministic "
+            . "pass lowers taller covers to " . HeaderHeroStep::STACKED_COVER_VH . "vh).\n"
+            . "- The headline and any CTA must land inside the first viewport: on a cover of 70vh or more, avoid a "
+            . "bottom-anchored \"contentPosition\" — center or upper placement keeps the masthead above the fold.\n"
+            . "- Do not open with a tall band of bare page background above your first visual: the header already "
+            . "spent ~100px of the viewport, so keep the section's own top spacing at or below the md step when the "
+            . "band above it shares its background.";
     }
 }

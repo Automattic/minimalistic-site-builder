@@ -338,6 +338,22 @@ final class BlockMarkup
         return $this->nodes[$i]['name'];
     }
 
+    /**
+     * The part's first root node, or null when it has none.
+     *
+     * Parts are single-rooted in practice, so callers that need "the block this
+     * file is about" want this rather than a hand-written scan over indices().
+     */
+    public function topLevel(): ?int
+    {
+        foreach ($this->indices() as $i) {
+            if ($this->parent($i) === null) {
+                return $i;
+            }
+        }
+        return null;
+    }
+
     /** @return array<mixed>|null */
     public function attrs(int $i): ?array
     {
