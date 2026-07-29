@@ -162,7 +162,7 @@ final class ContrastFixStep implements Step
             return;
         }
         $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
-        $top = self::topLevelIndex($header);
+        $top = $header->topLevel();
         if ($top === null) {
             return;
         }
@@ -205,7 +205,7 @@ final class ContrastFixStep implements Step
                 continue;
             }
             $section = BlockMarkup::parse($project->readText('theme/' . $rel));
-            $secTop = self::topLevelIndex($section);
+            $secTop = $section->topLevel();
             if ($secTop === null) {
                 continue;
             }
@@ -243,16 +243,6 @@ final class ContrastFixStep implements Step
         }
     }
 
-    /** The first root node of a parsed part (its top-level block). */
-    private static function topLevelIndex(BlockMarkup $doc): ?int
-    {
-        foreach ($doc->indices() as $i) {
-            if ($doc->parent($i) === null) {
-                return $i;
-            }
-        }
-        return null;
-    }
 
     /**
      * Check and repair the theme.json global pairs: base↔contrast (report

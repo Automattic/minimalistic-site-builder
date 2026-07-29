@@ -35,6 +35,7 @@ function section_cache_input(string $slug = 'hero', string $title = 'Hero'): arr
             'handoff'          => 'Between the header and the next section.',
         ],
         'neighbors' => 'Above: the site header. Below: the next section.',
+        'header_contract' => 'HEADER CONTRACT (this is a page-opening section): test contract.',
     ];
 }
 

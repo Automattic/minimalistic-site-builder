@@ -284,40 +284,111 @@ test('heroBrief selects only the structural hero role, not the semantic type', f
     assert_eq('(No hero section planned.)', SectionsStep::heroBrief([]));
 });
 
-test('header archetype pool offers minimal-overlay only for image-led heroes', function () {
-    $imageHero = [['slug' => 'hero', 'role' => 'hero', 'type' => 'cinematic-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image']];
-    assert_eq(SectionsStep::HEADER_ARCHETYPES, SectionsStep::headerArchetypePool($imageHero));
+/** A one-page pages.json fixture whose front hero has the given plan fields. */
+function sections_pages_with_hero(array $hero, array $more = []): array
+{
+    return array_merge([sections_page('home', [array_merge([
+        'slug' => 'hero', 'role' => 'hero', 'type' => 'welcome',
+    ], $hero)])], $more);
+}
 
-    $imageBand = [['slug' => 'hero', 'role' => 'hero', 'type' => 'cinematic-welcome', 'layout_archetype' => 'centered-stack', 'background' => 'image']];
-    assert_true(in_array('minimal-overlay', SectionsStep::headerArchetypePool($imageBand), true), 'image band hero allows overlay');
+test('header mode is overlay only for image-led full-bleed heroes over dark openings', function () {
+    $imageHero = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
+    assert_eq(SectionsStep::MODE_OVERLAY, SectionsStep::headerMode($imageHero));
 
-    $plainHero = [['slug' => 'hero', 'role' => 'hero', 'type' => 'quiet-welcome', 'layout_archetype' => 'centered-stack', 'background' => 'base']];
-    $pool = SectionsStep::headerArchetypePool($plainHero);
-    assert_true(!in_array('minimal-overlay', $pool, true), 'plain hero excludes overlay');
-    assert_eq(count(SectionsStep::HEADER_ARCHETYPES) - 1, count($pool));
+    $imageBand = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'image']);
+    assert_eq(SectionsStep::MODE_OVERLAY, SectionsStep::headerMode($imageBand), 'image band hero floats the header');
 
-    // A framed canvas keeps a mat around the hero, so the overlay is out even
-    // over an image-led cover.
-    $framed = SectionsStep::headerArchetypePool($imageHero, 'framed');
-    assert_true(!in_array('minimal-overlay', $framed, true), 'framed canvas excludes overlay');
+    $plainHero = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'base']);
+    assert_eq(SectionsStep::MODE_STACKED, SectionsStep::headerMode($plainHero));
 
-    // A one-page site has no pages to split across split-nav's two navs.
-    $single = SectionsStep::headerArchetypePool($imageHero, '', 1);
-    assert_true(!in_array('split-nav', $single, true), 'single-page site excludes split-nav');
-    assert_true(in_array('minimal-overlay', $single, true), 'overlay gating is independent of page count');
+    // A framed canvas keeps a mat around the hero — nothing to float over.
+    assert_eq(SectionsStep::MODE_STACKED, SectionsStep::headerMode($imageHero, 'framed'));
+
+    // The header renders on EVERY page: one page opening on a light band
+    // breaks the one-text-color guarantee, so the site falls back to stacked.
+    $lightInnerPage = sections_pages_with_hero(
+        ['layout_archetype' => 'full-bleed-cover', 'background' => 'image'],
+        [sections_page('menu', [['slug' => 'menu-hero', 'role' => 'hero', 'type' => 'menu', 'background' => 'base']])],
+    );
+    assert_eq(SectionsStep::MODE_STACKED, SectionsStep::headerMode($lightInnerPage));
+
+    $darkInnerPage = sections_pages_with_hero(
+        ['layout_archetype' => 'full-bleed-cover', 'background' => 'image'],
+        [sections_page('menu', [['slug' => 'menu-hero', 'role' => 'hero', 'type' => 'menu', 'background' => 'contrast']])],
+    );
+    assert_eq(SectionsStep::MODE_OVERLAY, SectionsStep::headerMode($darkInnerPage), 'contrast bands read as dark openings');
 });
 
-test('header assignment offers two distinct archetypes from the pool', function () {
+test('header archetype pool follows the header mode', function () {
+    // Overlay mode: the pool IS minimal-overlay — the audited failure was the
+    // overlay CSS shipping unused because the archetype lost a random draw.
+    $imageHero = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
+    assert_eq(['minimal-overlay'], SectionsStep::headerArchetypePool($imageHero));
+
+    // Stacked, one-page, plan has a hero: overlay, split-nav and the
+    // display-scale oversized-wordmark are all out.
+    $plainHero = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'base']);
+    $pool = SectionsStep::headerArchetypePool($plainHero);
+    foreach (['minimal-overlay', 'split-nav', 'oversized-wordmark'] as $out) {
+        assert_true(!in_array($out, $pool, true), "'{$out}' excluded for a one-page headline-led site");
+    }
+    assert_true(in_array('centered-masthead', $pool, true), 'masthead allowed over a non-image hero');
+
+    // Stacked because framed, but still image-led: the tall centered-masthead
+    // would push a viewport-scale cover below the fold.
+    $framed = SectionsStep::headerArchetypePool($imageHero, 'framed');
+    assert_true(!in_array('centered-masthead', $framed, true), 'masthead excluded over an image-led hero');
+    assert_true(!in_array('minimal-overlay', $framed, true), 'framed canvas never floats the header');
+
+    // A two-page site keeps split-nav in stacked mode.
+    $twoPages = sections_pages_with_hero(
+        ['layout_archetype' => 'centered-stack', 'background' => 'base'],
+        [sections_page('menu', [['slug' => 'menu-hero', 'role' => 'hero', 'type' => 'menu', 'background' => 'base']])],
+    );
+    assert_true(in_array('split-nav', SectionsStep::headerArchetypePool($twoPages), true));
+});
+
+test('header assignment offers two distinct stacked archetypes from the pool', function () {
     putenv(SectionsStep::ARCHETYPE_ENV); // a forced archetype in the caller's env would skip the two-pick branch
-    $sections = [['slug' => 'hero', 'role' => 'hero', 'type' => 'quiet-welcome', 'layout_archetype' => 'centered-stack', 'background' => 'base']];
+    $pages = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'base']);
     for ($i = 0; $i < 10; $i++) {
-        $assignment = SectionsStep::headerAssignment($sections);
+        $assignment = SectionsStep::headerAssignment($pages);
         assert_true((bool) preg_match('/\*\*([a-z-]+)\*\* or \*\*([a-z-]+)\*\*/', $assignment, $m), 'two archetypes offered');
         assert_true($m[1] !== $m[2], 'the two picks are distinct');
         foreach ([$m[1], $m[2]] as $pick) {
-            assert_true(in_array($pick, SectionsStep::headerArchetypePool($sections), true), "'{$pick}' is in the compatible pool");
+            assert_true(in_array($pick, SectionsStep::headerArchetypePool($pages), true), "'{$pick}' is in the compatible pool");
         }
+        assert_contains('STACKS as an opaque bar', $assignment, 'stacked assignments carry the contract');
     }
+});
+
+test('header assignment mandates minimal-overlay with its class hook in overlay mode', function () {
+    putenv(SectionsStep::ARCHETYPE_ENV);
+    $pages = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
+    $assignment = SectionsStep::headerAssignment($pages);
+    assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $assignment);
+    assert_contains('"className":"header-overlay"', $assignment);
+});
+
+test('header contract text matches the mode and reaches only hero-role sections', function () {
+    assert_contains('floats TRANSPARENTLY', SectionsStep::headerContract(SectionsStep::MODE_OVERLAY));
+    assert_contains('reach the very top edge', SectionsStep::headerContract(SectionsStep::MODE_OVERLAY));
+    assert_contains('OPAQUE site header', SectionsStep::headerContract(SectionsStep::MODE_STACKED));
+    assert_contains('"minHeight":80', SectionsStep::headerContract(SectionsStep::MODE_STACKED));
+
+    [$project, $tmp] = sections_fixture(); // front hero is image-led → overlay mode
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+    $hero = sections_request_text($reqs['page-home--hero']);
+    $about = sections_request_text($reqs['page-home--about']);
+    assert_contains('HEADER CONTRACT (this is a page-opening section)', $hero, 'the page-opening section gets the contract');
+    assert_contains('floats TRANSPARENTLY', $hero, 'the contract carries the computed mode');
+    assert_true(
+        !str_contains($about, 'HEADER CONTRACT (this is a page-opening section)'),
+        'non-opening sections share no viewport with the header'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('HEADER_ARCHETYPE env forces the header archetype in the header prompt', function () {
@@ -337,7 +408,7 @@ test('an unknown HEADER_ARCHETYPE aborts instead of silently generating', functi
     putenv(SectionsStep::ARCHETYPE_ENV . '=mega-header');
     try {
         assert_throws(function () {
-            SectionsStep::headerAssignment([['slug' => 'hero', 'role' => 'hero', 'type' => 'quiet-welcome']]);
+            SectionsStep::headerAssignment(sections_pages_with_hero(['type' => 'quiet-welcome']));
         }, 'not a header archetype');
     } finally {
         putenv(SectionsStep::ARCHETYPE_ENV);
@@ -350,7 +421,9 @@ test('the header prompt carries an archetype assignment and the full catalog', f
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
-    assert_contains('ASSIGNED HEADER ARCHETYPES for this build:', $reqs['header']['prompt']);
+    // The fixture's front hero is an image-led cover over a dark opening, so
+    // the computed overlay mode mandates the single minimal-overlay archetype.
+    assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $reqs['header']['prompt']);
     assert_contains('branded-lockup', $reqs['header']['prompt']); // new catalog entries render
     assert_contains('wp:site-logo', $reqs['header']['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));

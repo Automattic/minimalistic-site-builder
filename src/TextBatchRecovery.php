@@ -93,8 +93,7 @@ final class TextBatchRecovery
                             $termination,
                             $message !== '' ? "regeneration failed: {$message}" : 'regeneration failed',
                         );
-                        fwrite(
-                            STDERR,
+                        Narrator::write(
                             "    (regeneration failed for batch request '{$key}'"
                                 . ($message !== '' ? ": {$message}" : '')
                                 . '; keeping the best prior partial response for salvage)' . "\n"
@@ -131,7 +130,7 @@ final class TextBatchRecovery
                 // The markup intake (GeneratedMarkup via MarkupSalvage) trims
                 // an incomplete response to its last complete block, so a
                 // persistent truncation degrades one part, not the build.
-                fwrite(STDERR, "    (batch request '{$key}' still incomplete after {$attempt} regeneration(s) — "
+                Narrator::write("    (batch request '{$key}' still incomplete after {$attempt} regeneration(s) — "
                     . "{$error}; keeping the best partial response for salvage)\n");
                 $texts[$key] = (string) $candidates[$key]['text'];
                 $notes[$key][] = self::retainedNote($key, $attempt, $error);
@@ -142,8 +141,7 @@ final class TextBatchRecovery
             }
 
             $attempt++;
-            fwrite(
-                STDERR,
+            Narrator::write(
                 '    (incomplete response in ' . count($retry) . ' batch request(s); regenerating independently: '
                     . self::keys(array_keys($retry)) . ")\n"
             );

@@ -30,6 +30,14 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('margin-block: 0;', $css);
     assert_contains('padding-block: var(--wp--preset--spacing--lg);', $css);
 
+    // The raised hamburger breakpoint (BIGR-735): core swaps to the inline nav
+    // at 600px, but a tracked title/nav row that fits at 768px can still wrap
+    // or overflow in the 600-719px band — the shipped override keeps the nav
+    // collapsed there. Both halves of core's swap must be countered.
+    assert_contains('@media (min-width: 600px) and (max-width: 719.98px)', $css);
+    assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown)', $css);
+    assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open)', $css);
+
     $readme = $project->readText('theme/readme.txt');
     assert_contains('=== {{THEME_NAME}} ===', $readme);
 

@@ -4,24 +4,26 @@ Current-state reference for how the pure-PHP block fixer relates to Gutenberg.
 The design in one sentence: **nothing touches Gutenberg at runtime — every fact
 about block behaviour was extracted once from the real `@wordpress` packages by
 a pinned Node generator, frozen into committed artifacts, and PHP consumes only
-those artifacts.** For where the (now removed) extraction tooling lives and how
-to regenerate the artifacts, see `docs/block-fixer-oracle.md`. For the original
-design rationale and milestones, see `plan/php-block-fixer-plan.md`.
+those artifacts.** The extraction tooling is development-only and lives under
+`bin/block-fixer/`; for how to verify or regenerate the artifacts, see
+`docs/block-fixer-oracle.md`. For the original design rationale and milestones,
+see `plan/php-block-fixer-plan.md`.
 
 ## The frozen artifacts
 
-All produced by `bin/generate-block-registry.js` /
-`bin/generate-block-fixer-fixtures.js` (in git history at `abcf523`) running
-the real Gutenberg runtime — JSDOM plus `@wordpress/block-library@9.42.0`,
-which registers all core blocks exactly as the editor would — inside the
-container pinned by digest in `oracle-manifest.json`:
+The registry, runtime snapshot, coverage metadata, and generated goldens are
+produced by the in-tree `bin/generate-block-registry.js` /
+`bin/generate-block-fixer-fixtures.js` running the real Gutenberg runtime —
+JSDOM plus `@wordpress/block-library@9.42.0`, which registers all core blocks
+exactly as the editor would — in the environment pinned by
+`oracle-manifest.json`. The renderer-probe exception is called out below:
 
 | Artifact | Contents |
 | --- | --- |
 | `src/BlockSerializer/Registry/generated-registry.php` | One opcache-immutable `require`. Per registered block: `apiVersion`, `attributes` schema, `attributeOrder` (schema insertion order — drives comment-JSON key order), `supports`, `sourceInventory` (which attributes are sourced from HTML vs stored in the comment, with selectors), and `saveProbes` — the exact bytes returned by the real `getSaveContent()`/`serialize()` for default attributes, an inner-blocks sentinel, and per-block probe attribute sets. Plus a `hookTrace` of every registered `blocks.*` filter. |
 | `src/BlockSerializer/Registry/supported-blocks.php` | The hand-reviewed manifest mapping each admitted block to a `SaveStrategy`. The generator asserted it equal to the JS-side manifest at generation time. |
 | `tests/fixtures/block-fixer/registered-runtime.json` | JSON twin of the registry snapshot, consumed by tests. |
-| `tests/fixtures/block-fixer/renderer-probes.json` | Save probes replayed byte-for-byte against the PHP renderers by `block_serializer_renderer_snapshot_test.php`. |
+| `tests/fixtures/block-fixer/renderer-probes.json` | Older pinned save probes replayed byte-for-byte against the PHP renderers by `block_serializer_renderer_snapshot_test.php`; no in-tree bulk generator currently rewrites this snapshot. |
 | `tests/fixtures/block-fixer/coverage.json` | Inventory/coverage bookkeeping from generation time. |
 | `tests/fixtures/block-fixer/oracle-manifest.json` | Provenance: environment fingerprint (container digest, package pins, lockfile SHA), re-frozen hashes of the registry artifacts (enforced by `oracle_manifest_consistency_test.php`), and the post-oracle `amendments` record. |
 | `tests/fixtures/block-fixer/cases/*/` | End-to-end golden cases (see below). |
@@ -37,11 +39,12 @@ Three block sets structure the compatibility domain:
 ## The PHP processing pipeline
 
 `PhpBlockFixer::fixReport()` (`src/PhpBlockFixer.php`) is the transaction
-shell: it discovers `parts/*.html` and `templates/*.html`, runs each file
-through `Serializer::transform()` to a **fixed point** (at most 5 passes;
-non-convergence throws), and only then writes — every changed file is staged
-beside its target by `NativeStagedFileWriter` and committed as a sequence of
-atomic renames. Any failure before commit leaves every input untouched.
+shell: it discovers `pages/*.html`, `parts/*.html`, and `templates/*.html`,
+runs each file through `Serializer::transform()` to a **fixed point** (at most
+5 passes; non-convergence throws), and only then writes — every changed file is
+staged beside its target by `NativeStagedFileWriter` and committed as a
+sequence of atomic renames. Any failure before commit leaves every input
+untouched.
 
 ### Reviewed degradation boundary
 
@@ -148,10 +151,12 @@ end-to-end contract, executed by `php_block_fixer_golden_test.php`:
     instrumentation (per-pass validation/deprecation traces, input/output
     hashes).
   - `advisory-corpus-import` — oracle-era case imported from a real project.
-  - `post-oracle-authored` — authored after the oracle's removal; no
-    instrumentation, and `provenance.notes` must cite the certification
-    evidence (registry `saveProbes` and/or upstream Gutenberg source at the
-    pinned tag). `cases/details-static-renderer` is the template.
+  - `post-oracle-authored` — an explicitly reviewed case kept outside the
+    generator because it asserts a PHP-only degradation policy or a documented
+    runtime divergence. It has no oracle instrumentation, and
+    `provenance.notes` must cite its certification evidence. The exact reviewed
+    exclusions are enforced by `fixtureCases.js` and documented in
+    `docs/block-fixer-oracle.md`.
 
 Post-oracle changes to the frozen registry artifacts are governed by the
 amendment rule in `docs/block-fixer-oracle.md`: manifest amendment + re-frozen

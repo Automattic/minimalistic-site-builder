@@ -58,6 +58,7 @@ test('markup generation units share one output-only contract', function () {
                 'handoff' => 'Between the header and the next section.',
             ],
             'neighbors' => 'Above: header. Below: content.',
+            'header_contract' => '',
         ]),
     ];
 

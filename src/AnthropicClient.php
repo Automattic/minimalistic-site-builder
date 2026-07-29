@@ -462,7 +462,7 @@ final class AnthropicClient implements Llm
                         ];
                     } elseif ($dropParam !== null && self::stripRejectedParam($bodies[$key], $dropParam)) {
                         $stripRetry[] = $key;
-                        fwrite(STDERR, "    (model rejected '{$dropParam}' on request '{$key}'; retrying without it)\n");
+                        Narrator::write("    (model rejected '{$dropParam}' on request '{$key}'; retrying without it)\n");
                     } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
                         $transientRetry[] = $key;
                     } else {
@@ -480,7 +480,7 @@ final class AnthropicClient implements Llm
             if ($pending !== []) {
                 $wait = $delays[$attempt];
                 $attempt++;
-                fwrite(STDERR, '    (transient API error on ' . count($pending)
+                Narrator::write('    (transient API error on ' . count($pending)
                     . " request(s); retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
             }
@@ -729,14 +729,14 @@ final class AnthropicClient implements Llm
                 if (!self::stripRejectedParam($body, $param)) {
                     throw $e;
                 }
-                fwrite(STDERR, "    (model rejected '{$param}'; retrying without it)\n");
+                Narrator::write("    (model rejected '{$param}'; retrying without it)\n");
             } catch (TransientApiException $e) {
                 if ($attempt >= count($delays)) {
                     throw new \RuntimeException('Anthropic API failed after retries: ' . $e->getMessage(), 0, $e);
                 }
                 $wait = $delays[$attempt];
                 $attempt++;
-                fwrite(STDERR, "    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
+                Narrator::write("    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
             }
         }
