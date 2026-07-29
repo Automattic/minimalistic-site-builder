@@ -4,7 +4,6 @@ declare(strict_types=1);
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockSerializer\DroppedValue;
 use Automattic\SiteBuild\BlockSerializer\FileReport;
-use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\FixerReport;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
@@ -43,62 +42,93 @@ test('FixBlocksStep declares its durable warnings artifact', function () {
     assert_true(in_array('warnings.json', $writes, true));
 });
 
-test('FixBlocksStep records dropped alignment classes with the file that lost them', function () {
-    $files = [
-        new FileReport('parts/home.html', 'fixed', [
-            new DroppedValue('class', 'has-text-align-center'),
-            new DroppedValue('class', 'alignfull'),
-            // Not alignment: theme and preset classes carry no fixed visual
-            // meaning of their own, so losing one is the incidental styling
-            // re-serialization is allowed to discard.
-            new DroppedValue('class', 'has-base-color'),
-            new DroppedValue('class', 'wp-block-heading'),
-            new DroppedValue('class', 'masonry-3'),
-            // Near-miss tokens must not be swept in.
-            new DroppedValue('class', 'has-text-align-justify'),
-            new DroppedValue('class', 'alignment-helper'),
-            // A style drop is the rhythm helper's business, not this one's.
-            new DroppedValue('style', 'text-align:center'),
-        ]),
-        new FileReport('parts/footer.html', 'fixed', [new DroppedValue('class', 'alignwide')]),
-    ];
+test('FixBlocksStep classifies only dropped styles that affect vertical rhythm', function () {
+    $report = implode("\n", [
+        '         ! DROPPED style `padding:4rem 2rem` — not mirrored',
+        '         ! DROPPED style `padding-top:4rem` — not mirrored',
+        '         ! DROPPED style `padding-block-end:3rem` — not mirrored',
+        '         ! DROPPED style `margin:0 auto` — not mirrored',
+        '         ! DROPPED style `margin-bottom:2rem` — not mirrored',
+        '         ! DROPPED style `margin-block-start:1rem` — not mirrored',
+        '         ! DROPPED style `gap:2rem` — not mirrored',
+        '         ! DROPPED style `row-gap:1rem` — not mirrored',
+        '         ! DROPPED style `column-gap:3rem` — not mirrored',
+        '         ! DROPPED style `height:200px` — not mirrored',
+        '         ! DROPPED style `object-fit:cover` — not mirrored',
+        '         ! DROPPED style `width:100%` — not mirrored',
+        '         ! DROPPED style `padding-left:2rem` — not mirrored',
+        '         ! DROPPED style `margin-right:auto` — not mirrored',
+    ]);
 
     assert_eq([
-        ['parts/home.html', 'has-text-align-center'],
-        ['parts/home.html', 'alignfull'],
-        ['parts/footer.html', 'alignwide'],
-    ], FixBlocksStep::droppedAlignmentClasses($files));
+        'padding:4rem 2rem',
+        'padding-top:4rem',
+        'padding-block-end:3rem',
+        'margin:0 auto',
+        'margin-bottom:2rem',
+        'margin-block-start:1rem',
+        'gap:2rem',
+        'row-gap:1rem',
+        'column-gap:3rem',
+    ], FixBlocksStep::droppedVerticalRhythmStyles($report));
 });
 
-test('FixBlocksStep reports each dropped alignment class once per file', function () {
-    $files = [
-        new FileReport('parts/home.html', 'fixed', [
-            new DroppedValue('class', 'has-text-align-center'),
-            new DroppedValue('class', 'has-text-align-center', 2),
-        ]),
-    ];
-
-    assert_eq([['parts/home.html', 'has-text-align-center']], FixBlocksStep::droppedAlignmentClasses($files));
+test('the rhythm gate ignores dropped declarations whose value was never valid CSS', function () {
+    // A bare preset slug (`margin-top:sm`) renders as nothing in a browser, so
+    // dropping it loses no rendered rhythm. CSS-wide keywords and real lengths
+    // still count.
+    $report = implode("\n", [
+        '         ! DROPPED style `margin-top:sm` — not mirrored',
+        '         ! DROPPED style `padding-bottom:md` — not mirrored',
+        '         ! DROPPED style `margin-bottom:auto` — not mirrored',
+        '         ! DROPPED style `padding-top:2rem` — not mirrored',
+    ]);
+    assert_eq([
+        'margin-bottom:auto',
+        'padding-top:2rem',
+    ], FixBlocksStep::droppedVerticalRhythmStyles($report));
 });
 
-test('FixBlocksStep leaves an alignment the reviewed paragraph path already recorded', function () {
-    // The alignment was resolved between two contradictory authored signals,
-    // not lost, and that file already gets a warning in its own vocabulary.
-    $files = [
-        new FileReport(
-            'parts/conflicting.html',
-            'fixed',
-            [new DroppedValue('class', 'has-text-align-center')],
-            [new Repair('paragraph-style-degraded:{"style":"text-align"}', 'document')],
-        ),
-    ];
+test('FixBlocksStep warns but does not fail when block repair drops vertical rhythm CSS', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            return "  FIXED  parts/section.html\n"
+                . "         ! DROPPED style `padding-top:8rem` — not mirrored in the block comment JSON attributes\n"
+                . '[fix-templates] 1/1 file(s) re-serialized, 1 style/class value(s) dropped';
+        }
+    };
 
-    assert_eq([], FixBlocksStep::droppedAlignmentClasses($files));
-});
+    $tmp = sys_get_temp_dir() . '/builder_fix_rhythm_' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group"></div><!-- /wp:group -->'
+    );
 
-test('FixBlocksStep finds no alignment drops without any', function () {
-    assert_eq([], FixBlocksStep::droppedAlignmentClasses([]));
-    assert_eq([], FixBlocksStep::droppedAlignmentClasses([new FileReport('parts/home.html', 'ok')]));
+    try {
+        $thrown = null;
+        try {
+            (new FixBlocksStep($fake))->run($project);
+        } catch (RuntimeException $e) {
+            $thrown = $e;
+        }
+
+        // A cosmetic spacing regression in one theme must not cost the user the
+        // whole build — the loss is flagged, the build continues.
+        assert_eq(null, $thrown, 'vertical rhythm loss is a warning, not a build failure');
+        $log = $project->readText('logs/fix-blocks.log');
+        assert_contains('DROPPED style `padding-top:8rem`', $log);
+        assert_contains('[rhythm] WARNING', $log, 'the loss is recorded as a prominent warning');
+        $warnings = $project->readJson('warnings.json');
+        assert_contains(
+            'dropped vertical rhythm CSS `padding-top:8rem`',
+            implode("\n", $warnings['fix-blocks'] ?? []),
+            'the non-fatal defect is durable, not only present in the human log',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('FixBlocksStep records a heading that lost its centering', function () {
@@ -129,7 +159,151 @@ test('FixBlocksStep records a heading that lost its centering', function () {
         $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
         $joined = implode("\n", $warnings);
         assert_contains('has-text-align-center', $joined, 'the lost alignment reaches warnings.json');
-        assert_contains('parts/signature.html', $joined, 'the row names the file that lost it');
+        assert_contains(
+            'parts/signature.html block 0 (core/heading)',
+            $joined,
+            'the row locates the block that lost it',
+        );
+        assert_contains('authored "has-text-align-center"', $joined);
+        assert_contains('delivered removed', $joined);
+        assert_contains('disposition: authored class removed', $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('a paragraph opacity repair does not hide a heading alignment loss in the same file', function () {
+    $tmp = sys_get_temp_dir() . '/fix-blocks-mixed-alignment-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/mixed.html',
+        '<!-- wp:paragraph --><p style="opacity:0.4">Readable</p><!-- /wp:paragraph -->'
+            . '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
+            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
+            . 'style="color:var(--wp--preset--color--base)">Still centred</h2>'
+            . '<!-- /wp:heading -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        assert_eq(2, count($warnings), 'the opacity and heading losses each keep one warning');
+        $joined = implode("\n", $warnings);
+        assert_contains('parts/mixed.html block 0: core/paragraph style "opacity"', $joined);
+        assert_contains('parts/mixed.html block 1 (core/heading)', $joined);
+        assert_contains('alignment class "has-text-align-center"', $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep reports vertical alignment losses with their nested block paths', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            file_put_contents(
+                $themeDir . '/parts/columns.html',
+                '<!-- wp:columns {"verticalAlignment":"center"} -->'
+                    . '<div class="wp-block-columns">'
+                    . '<!-- wp:column {"verticalAlignment":"bottom"} -->'
+                    . '<div class="wp-block-column"></div><!-- /wp:column -->'
+                    . '</div><!-- /wp:columns -->',
+            );
+            return '[fix-templates] simulated vertical alignment loss';
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/fix-blocks-vertical-alignment-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/columns.html',
+        '<!-- wp:columns {"verticalAlignment":"center"} -->'
+            . '<div class="wp-block-columns are-vertically-aligned-center">'
+            . '<!-- wp:column {"verticalAlignment":"bottom"} -->'
+            . '<div class="wp-block-column is-vertically-aligned-bottom"></div>'
+            . '<!-- /wp:column -->'
+            . '</div><!-- /wp:columns -->',
+    );
+
+    try {
+        (new FixBlocksStep($fake))->run($project);
+
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        assert_eq(2, count($warnings));
+        $joined = implode("\n", $warnings);
+        assert_contains(
+            'parts/columns.html block 0 (core/columns): alignment class '
+                . '"are-vertically-aligned-center"',
+            $joined,
+        );
+        assert_contains(
+            'parts/columns.html block 0/0 (core/column): alignment class '
+                . '"is-vertically-aligned-bottom"',
+            $joined,
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep does not warn when a later fixer pass restores an alignment class', function () {
+    $fixer = new class implements ReportingBlockFixer {
+        public int $calls = 0;
+
+        public function fix(string $themeDir): string
+        {
+            throw new LogicException('FixBlocksStep must consume the typed fixer contract');
+        }
+
+        public function fixReport(string $themeDir): FixerReport
+        {
+            $this->calls++;
+            $path = $themeDir . '/parts/section.html';
+            if ($this->calls === 1) {
+                file_put_contents(
+                    $path,
+                    '<!-- wp:group {"align":"wide"} -->'
+                        . '<div class="wp-block-group"></div><!-- /wp:group -->',
+                );
+                return new FixerReport([
+                    new FileReport(
+                        'parts/section.html',
+                        'fixed',
+                        [new DroppedValue('class', 'alignwide')],
+                    ),
+                ]);
+            }
+
+            file_put_contents(
+                $path,
+                '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} -->'
+                    . '<div class="wp-block-group alignwide"></div><!-- /wp:group -->',
+            );
+            return new FixerReport([new FileReport('parts/section.html', 'fixed')]);
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/fix-blocks-restored-alignment-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"align":"wide"} --><div class="wp-block-group alignwide">',
+    );
+
+    try {
+        (new FixBlocksStep($fixer))->run($project);
+
+        assert_eq(2, $fixer->calls, 'post-repair layout normalization triggers the final pass');
+        assert_contains('alignwide', $project->readText('theme/parts/section.html'));
+        $warnings = $project->exists('warnings.json')
+            ? ($project->readJson('warnings.json')['fix-blocks'] ?? [])
+            : [];
+        assert_true(
+            !str_contains(implode("\n", $warnings), 'alignment class'),
+            'an intermediate report cannot describe a class present in final output',
+        );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
@@ -705,4 +879,3 @@ HTML;
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
 });
-
