@@ -52,11 +52,11 @@ final class AnthropicClient implements Llm
         . 'No prose, no markdown fences.';
 
     /**
-     * Most concurrent in-flight requests per batch. A landing page can fan out
-     * to ~10 parts (header, footer, and every section); this cap lets a typical
-     * fan-out run as one fully overlapped window while still bounding in-flight
-     * transfers so a very wide batch cannot trip the API's concurrent-request /
-     * rate limits.
+     * Most concurrent in-flight requests per batch. The rolling pool keeps up
+     * to this many transfers running and refills a slot the moment its
+     * transfer completes, so a wide batch is bounded (no tripping the API's
+     * concurrent-request / rate limits) without ever stalling behind a
+     * window barrier.
      */
     private const MAX_CONCURRENCY = 10;
 
@@ -490,50 +490,29 @@ final class AnthropicClient implements Llm
     }
 
     /**
-     * Run a set of streaming Messages requests, at most MAX_CONCURRENCY in
-     * flight at once, and classify each transfer. Pure transport — no retry, no
-     * request counting, no throwing on a single failure (the orchestrator
-     * decides). Bounding concurrency keeps a wide fan-out (every landing-page
-     * part at once) from tripping the API's rate limits.
+     * Run a set of streaming Messages requests through the rolling pool — at
+     * most MAX_CONCURRENCY in flight, the freed slot refilled the moment any
+     * transfer completes — and classify each transfer. Pure transport — no
+     * retry, no request counting, no throwing on a single failure (the
+     * orchestrator decides). Bounding in-flight transfers keeps a wide fan-out
+     * (every planned section at once) from tripping the API's rate limits.
      *
      * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
      * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}>
      */
     private function streamMulti(array $bodies): array
     {
-        $out = [];
-        foreach (self::concurrencyWindows($bodies) as $chunk) {
-            $out += $this->streamChunk($chunk);
+        if ($bodies === []) {
+            return [];
         }
-        return $out;
-    }
-
-    /**
-     * Split a batch into ordered windows of at most MAX_CONCURRENCY requests,
-     * preserving keys, so the transport runs each window concurrently and no
-     * more than MAX_CONCURRENCY transfers are ever in flight. Pure — unit-testable.
-     *
-     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
-     * @return array<int,array<array-key,array<string,mixed>>>
-     */
-    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
-    {
-        return array_chunk($bodies, max(1, $maxConcurrency ?? self::MAX_CONCURRENCY), true);
-    }
-
-    /**
-     * Run one window of streaming requests concurrently with curl_multi and
-     * assemble each SSE body per handle. Mirrors WpcomImageClient::multiRequest.
-     *
-     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}>
-     */
-    private function streamChunk(array $bodies): array
-    {
         $multi = curl_multi_init();
+        /** @var array<array-key,\CurlHandle> $handles */
         $handles = [];
+        /** @var array<int,string|int> $keysById spl_object_id(handle) => request key */
+        $keysById = [];
         $raw = [];
-        foreach ($bodies as $key => $body) {
+
+        $start = function (string|int $key, array $body) use ($multi, &$handles, &$keysById, &$raw): void {
             $raw[$key] = '';
             $ch = curl_init(self::ENDPOINT);
             curl_setopt_array($ch, [
@@ -554,36 +533,127 @@ final class AnthropicClient implements Llm
                 },
             ]);
             $handles[$key] = $ch;
+            $keysById[spl_object_id($ch)] = $key;
             curl_multi_add_handle($multi, $ch);
-        }
+        };
 
-        // Drive all transfers to completion (see WpcomImageClient::multiRequest
-        // for why the -1 guard against a busy-spin during DNS is needed).
-        do {
-            $status = curl_multi_exec($multi, $running);
-            if ($running && curl_multi_select($multi, 1.0) === -1) {
-                usleep(1000);
-            }
-        } while ($running && $status === CURLM_OK);
-
-        $out = [];
-        foreach ($handles as $key => $ch) {
-            $errno  = curl_errno($ch);
-            $error  = curl_error($ch);
-            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
+        // Classify one finished transfer and release its handle (and slot).
+        $finish = function (string|int $key, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$raw): array {
+            $outcome = self::interpretStream(
+                $raw[$key],
+                curl_errno($ch),
+                curl_error($ch),
+                (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+                (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
+            );
+            unset($handles[$key], $keysById[spl_object_id($ch)], $raw[$key]);
             curl_multi_remove_handle($multi, $ch);
             curl_close($ch);
-            $out[$key] = self::interpretStream(
-                $raw[$key],
-                $errno,
-                $error,
-                $httpStatus,
-                $time,
-            );
+            return $outcome;
+        };
+
+        $await = function () use ($multi, &$handles, &$keysById, $finish): array {
+            // Drive the stack until at least one transfer finishes (see
+            // WpcomImageClient::multiRequest for the -1 busy-spin guard).
+            do {
+                $status = curl_multi_exec($multi, $running);
+                $done = [];
+                while (($msg = curl_multi_info_read($multi)) !== false) {
+                    if ($msg['msg'] !== CURLMSG_DONE) {
+                        continue;
+                    }
+                    $key = $keysById[spl_object_id($msg['handle'])];
+                    $done[$key] = $finish($key, $msg['handle']);
+                }
+                if ($done !== []) {
+                    return $done;
+                }
+                if ($running && $status === CURLM_OK && curl_multi_select($multi, 1.0) === -1) {
+                    usleep(1000);
+                }
+            } while ($running && $status === CURLM_OK);
+
+            // The multi stack stopped without reporting a completion (a CURLM
+            // failure). Classify what every remaining transfer holds so far —
+            // interpretStream marks severed streams transient — rather than
+            // hanging the pool or discarding sibling responses.
+            $done = [];
+            foreach ($handles as $key => $ch) {
+                $done[$key] = $finish($key, $ch);
+            }
+            return $done;
+        };
+
+        try {
+            return self::rollingPool($bodies, $start, $await);
+        } finally {
+            curl_multi_close($multi);
+        }
+    }
+
+    /**
+     * Split a batch into ordered windows of at most MAX_CONCURRENCY requests,
+     * preserving keys. The Anthropic transport itself now rolls a single pool
+     * (rollingPool above); this remains the shared chunking helper for the
+     * OpenAI-compatible client's windowed transport. Pure — unit-testable.
+     *
+     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
+     * @return array<int,array<array-key,array<string,mixed>>>
+     */
+    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
+    {
+        return array_chunk($bodies, max(1, $maxConcurrency ?? self::MAX_CONCURRENCY), true);
+    }
+
+    /**
+     * Drive a batch through a bounded rolling pool: at most $cap transfers in
+     * flight, and the moment one completes the next pending request starts. A
+     * slow member holds only its own slot — unlike windowing, it never blocks
+     * unrelated requests behind a batch-wide barrier. Pure orchestration
+     * ($start begins one transfer; $await blocks until at least one in-flight
+     * transfer completes and returns those results keyed by request id), so it
+     * is unit-testable with fakes; streamMulti supplies the curl_multi glue.
+     *
+     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
+     * @param callable(string|int,array<string,mixed>):void $start
+     * @param callable():array<array-key,mixed> $await
+     * @return array<array-key,mixed> results keyed and ordered as $bodies
+     */
+    public static function rollingPool(array $bodies, callable $start, callable $await, ?int $cap = null): array
+    {
+        $cap = max(1, $cap ?? self::MAX_CONCURRENCY);
+        $pending = array_keys($bodies);
+        $inFlight = [];
+        $results = [];
+
+        $launch = function () use (&$pending, &$inFlight, $bodies, $start, $cap): void {
+            while ($pending !== [] && count($inFlight) < $cap) {
+                $key = array_shift($pending);
+                $inFlight[$key] = true;
+                $start($key, $bodies[$key]);
+            }
+        };
+
+        $launch();
+        while ($inFlight !== []) {
+            $completed = $await();
+            if ($completed === []) {
+                throw new \RuntimeException('rolling pool await returned no transfer completions');
+            }
+            foreach ($completed as $key => $result) {
+                if (!isset($inFlight[$key])) {
+                    throw new \RuntimeException("rolling pool got a completion for request '{$key}', which is not in flight");
+                }
+                unset($inFlight[$key]);
+                $results[$key] = $result;
+            }
+            $launch();
         }
 
-        curl_multi_close($multi);
+        $out = [];
+        foreach ($bodies as $key => $_body) {
+            $out[$key] = $results[$key];
+        }
         return $out;
     }
 
