@@ -538,6 +538,50 @@ final class ThemeValidator
         return $risks;
     }
 
+    /** The hero text budget prompts commit to: paragraphs in the whole opening section. */
+    public const HERO_MAX_PARAGRAPHS = 3;
+
+    /**
+     * Opening sections that overrun the hero text budget (BIGR-738 follow-up):
+     * models attach caption clusters to the hero image (a dish label, a second
+     * date line) that the prompt-side budget doesn't stop, and every extra
+     * paragraph dilutes the masthead. Counts wp:paragraph blocks in each
+     * page's FIRST top-level block — the opening section after assembly.
+     *
+     * @return string[]
+     */
+    public static function heroTextBudgetWarnings(Project $project): array
+    {
+        $warnings = [];
+        foreach (glob($project->pluginPath('pages') . '/*.html') ?: [] as $abs) {
+            $doc = BlockMarkup::parse((string) file_get_contents($abs));
+            $roots = array_values(array_filter(
+                $doc->indices(),
+                static fn (int $i): bool => $doc->parent($i) === null,
+            ));
+            if ($roots === []) {
+                continue;
+            }
+            $paragraphs = 0;
+            $walk = function (int $i) use (&$walk, &$paragraphs, $doc): void {
+                if ($doc->name($i) === 'paragraph') {
+                    $paragraphs++;
+                }
+                foreach ($doc->children($i) as $child) {
+                    $walk($child);
+                }
+            };
+            $walk($roots[0]);
+            if ($paragraphs > self::HERO_MAX_PARAGRAPHS) {
+                $warnings[] = 'plugin/pages/' . basename($abs) . ": opening section carries {$paragraphs} "
+                    . 'paragraph blocks (budget: ' . self::HERO_MAX_PARAGRAPHS . ') — hero text beyond '
+                    . 'H1 + lead + one caption line dilutes the masthead; image captions and duplicate '
+                    . 'facts belong to later sections';
+            }
+        }
+        return $warnings;
+    }
+
     /**
      * Display-scale headings squeezed into narrow columns (BIGR-738 follow-up):
      * a masthead-size H1 in a ≤25% column wraps to one word per line, and in a
@@ -558,11 +602,22 @@ final class ThemeValidator
                 continue;
             }
             $width = null;
+            $panel = false;
             for ($p = $doc->parent($i); $p !== null; $p = $doc->parent($p)) {
+                $ancestorAttrs = $doc->attrs($p) ?? [];
+                // A background-colored group between the heading and its
+                // column is a boxed panel: pixel-capped while the display
+                // size scales with the viewport.
+                if ($doc->name($p) === 'group'
+                    && (isset($ancestorAttrs['backgroundColor'])
+                        || isset($ancestorAttrs['style']['color']['background']))
+                ) {
+                    $panel = true;
+                }
                 if ($doc->name($p) !== 'column') {
                     continue;
                 }
-                $raw = trim((string) (($doc->attrs($p) ?? [])['width'] ?? ''));
+                $raw = trim((string) ($ancestorAttrs['width'] ?? ''));
                 if (preg_match('/^([0-9.]+)%$/', $raw, $m)) {
                     $width = (float) $m[1];
                 }
@@ -581,6 +636,17 @@ final class ThemeValidator
                 $risks[] = sprintf(
                     'display heading "%s" sits in a %.0f%% column — at masthead scale it wraps to one word '
                         . 'per line; widen the column or use "fontSize":"section-title" instead',
+                    $text,
+                    $width,
+                );
+            } elseif ($width <= 50.0 && $panel) {
+                // The atlas8/atlas10 shape: the panel is pixel-capped by the
+                // wide row while the display clamp() grows with the viewport,
+                // so on wide screens the H1 wraps one word per line.
+                $risks[] = sprintf(
+                    'display heading "%s" sits in a boxed panel inside a %.0f%% column — the panel is '
+                        . 'pixel-capped while the display size scales with the viewport, so on wide screens '
+                        . 'it wraps one word per line; use "fontSize":"section-title" in panels',
                     $text,
                     $width,
                 );

@@ -72,6 +72,14 @@ final class HeaderHeroStep implements Step
     public const HEADLESS_COVER_VH = 55;
 
     /**
+     * The crop stamped on an uncropped portrait foreground image in a
+     * page-opening section (BIGR-738 follow-up): a raw 9:16 asset in a wide
+     * column runs ~1400px tall and pushes the hero text a full viewport down.
+     * 3:4 keeps the tall read while the composition stays inside the fold.
+     */
+    public const PORTRAIT_IMAGE_RATIO = '3/4';
+
+    /**
      * The single-row width the header must fit (a ~1024px viewport minus
      * gutters). Above it the nav collapses to a menu instead of wrapping.
      */
@@ -132,6 +140,20 @@ final class HeaderHeroStep implements Step
             : '';
         $pageTitles = array_map(static fn (array $p): string => (string) ($p['title'] ?? ''), $pages);
 
+        // Filenames of collected image specs that will generate as portrait —
+        // the assets whose uncropped height blows the hero fold.
+        $portraitAssets = [];
+        if ($project->exists('images.json')) {
+            foreach ((array) $project->readJson('images.json') as $spec) {
+                if (is_array($spec)
+                    && (string) ($spec['aspectRatio'] ?? '') === 'portrait'
+                    && is_string($spec['filename'] ?? null)
+                ) {
+                    $portraitAssets[] = $spec['filename'];
+                }
+            }
+        }
+
         $report = [];
         $headerRel = 'parts/header.html';
         $header = $project->readText('theme/' . $headerRel);
@@ -169,6 +191,10 @@ final class HeaderHeroStep implements Step
             // In every mode: a headline-less opening cover must not own the
             // whole first viewport.
             $result = self::capHeadlessCovers($markup);
+            $markup = $result['markup'];
+            $notes = array_merge($notes, $result['notes']);
+            // …and an uncropped portrait foreground image must not either.
+            $result = self::capPortraitHeroImages($markup, $portraitAssets);
             $markup = $result['markup'];
             $notes = array_merge($notes, $result['notes']);
             if ($markup !== $project->readText('theme/' . $rel)) {
@@ -423,6 +449,52 @@ final class HeaderHeroStep implements Step
                     . 'ships a content-free first viewport)';
             }
             break; // only the first cover owns the fold
+        }
+        return ['markup' => $doc->render(), 'notes' => $notes];
+    }
+
+    /**
+     * Stamp the 3:4 crop on uncropped wp:image blocks in a page-opening
+     * section that reference a portrait-generated asset. An authored
+     * aspectRatio is respected — the composition chose its own crop.
+     * Pure — unit-testable.
+     *
+     * @param list<string> $portraitAssets filenames whose specs generate portrait
+     * @return array{markup:string, notes:string[]}
+     */
+    public static function capPortraitHeroImages(string $markup, array $portraitAssets): array
+    {
+        if ($portraitAssets === []) {
+            return ['markup' => $markup, 'notes' => []];
+        }
+        $doc = BlockMarkup::parse($markup);
+        $notes = [];
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'image') {
+                continue;
+            }
+            $attrs = $doc->attrs($i) ?? [];
+            if (isset($attrs['aspectRatio'])) {
+                continue;
+            }
+            $referenced = null;
+            foreach ($portraitAssets as $filename) {
+                if (str_contains($doc->innerHtml($i), '/' . $filename)) {
+                    $referenced = $filename;
+                    break;
+                }
+            }
+            if ($referenced === null) {
+                continue;
+            }
+            // Attribute-only edit: fix-blocks re-serializes the saved HTML
+            // (style="aspect-ratio:3/4;object-fit:cover") from these attrs.
+            $attrs['aspectRatio'] = self::PORTRAIT_IMAGE_RATIO;
+            $attrs['scale'] = 'cover';
+            $doc->setAttrs($i, $attrs);
+            $notes[] = "portrait hero image {$referenced} capped to aspect ratio "
+                . self::PORTRAIT_IMAGE_RATIO . ' (an uncropped 9:16 asset pushes the '
+                . 'hero text below the first viewport)';
         }
         return ['markup' => $doc->render(), 'notes' => $notes];
     }

@@ -215,3 +215,28 @@ test('capHeadlessCovers leaves covers with an inner masthead and short image ban
         . '<div class="wp-block-cover" style="min-height:90vh"></div><!-- /wp:cover -->';
     assert_contains('"minHeight":90', HeaderHeroStep::capHeadlessCovers($second)['markup']);
 });
+
+test('capPortraitHeroImages stamps the 3:4 crop on uncropped portrait hero images', function () {
+    // lumen9's shape (BIGR-738 follow-up): an uncropped portrait asset in a
+    // 64% column runs ~1400px tall and pushes the hero text below the fold.
+    $markup = '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column {"width":"36%"} --><div class="wp-block-column"><p>text</p></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"64%"} --><div class="wp-block-column">'
+        . '<!-- wp:image {"sizeSlug":"large","className":"reveal-fade"} -->'
+        . '<figure class="wp-block-image size-large reveal-fade"><img src="theme:./assets/hero-lamp-window.jpg" alt=""/></figure>'
+        . '<!-- /wp:image --></div><!-- /wp:column --></div><!-- /wp:columns -->';
+
+    $result = HeaderHeroStep::capPortraitHeroImages($markup, ['hero-lamp-window.jpg']);
+    assert_contains('"aspectRatio":"3/4"', $result['markup']);
+    assert_contains('"scale":"cover"', $result['markup']);
+    assert_eq(1, count($result['notes']));
+    assert_contains('hero-lamp-window.jpg', $result['notes'][0]);
+
+    // An authored crop is the composition's own choice — respected.
+    $authored = str_replace('{"sizeSlug":"large","className":"reveal-fade"}', '{"sizeSlug":"large","aspectRatio":"4/5"}', $markup);
+    assert_eq($authored, HeaderHeroStep::capPortraitHeroImages($authored, ['hero-lamp-window.jpg'])['markup']);
+
+    // Non-portrait assets and empty spec lists are untouched.
+    assert_eq($markup, HeaderHeroStep::capPortraitHeroImages($markup, ['other.jpg'])['markup']);
+    assert_eq($markup, HeaderHeroStep::capPortraitHeroImages($markup, [])['markup']);
+});

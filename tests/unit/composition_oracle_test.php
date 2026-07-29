@@ -134,3 +134,67 @@ test('narrow-heading oracle passes wide columns, short words, and non-display he
         '<!-- wp:heading {"level":1,"fontSize":"display"} --><h1 class="wp-block-heading">Extraordinarily long words everywhere</h1><!-- /wp:heading -->'
     ));
 });
+
+test('hero text budget flags an opening section with a caption pileup', function () {
+    // naturaleza10's shape (BIGR-738 follow-up): H1 + lead + a dish-caption
+    // cluster (eyebrow, caption) + CTA + hours microcopy — 4+ paragraphs.
+    $tmp = sys_get_temp_dir() . '/builder_htb_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $pileup = '<!-- wp:group {"anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" id="hero">'
+        . '<!-- wp:heading {"level":1,"fontSize":"display"} --><h1 class="wp-block-heading has-display-font-size">Smoke remembers the garden</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"fontSize":"lead"} --><p class="has-lead-font-size">Argentine table without meat.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">ASADO</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>Coal-blistered chard and cauliflower</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="#visit">Reserve a table</a></div><!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Dinner from 8 pm, Tuesday to Sunday</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:group {"anchor":"story","layout":{"type":"constrained"}} --><div class="wp-block-group" id="story">'
+        . '<!-- wp:paragraph --><p>a</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>b</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>c</p><!-- /wp:paragraph --><!-- wp:paragraph --><p>d</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeText('plugin/pages/home.html', $pileup);
+
+    $warnings = ThemeValidator::heroTextBudgetWarnings($project);
+    // Only the OPENING section is judged; later sections may be text-heavy.
+    assert_eq(1, count($warnings));
+    assert_contains('4 paragraph blocks', $warnings[0]);
+    assert_contains('plugin/pages/home.html', $warnings[0]);
+
+    // A budget-compliant hero passes.
+    $lean = '<!-- wp:group {"anchor":"hero","layout":{"type":"constrained"}} --><div class="wp-block-group" id="hero">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">H</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>lead</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>eyebrow</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>microcopy</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeText('plugin/pages/home.html', $lean);
+    assert_eq([], ThemeValidator::heroTextBudgetWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('narrow-heading oracle flags a display H1 boxed in a panel at half width', function () {
+    // atlas10's shape: cover > alignwide columns > 46% column > background
+    // panel group > display H1 with SHORT words — the old thresholds missed
+    // it, but the pixel-capped panel wraps one word per line at 1920.
+    $panel = '<!-- wp:cover {"url":"x.jpg","minHeight":94,"minHeightUnit":"vh"} --><div class="wp-block-cover">'
+        . '<!-- wp:columns {"align":"wide"} --><div class="wp-block-columns alignwide">'
+        . '<!-- wp:column {"width":"46%"} --><div class="wp-block-column" style="flex-basis:46%">'
+        . '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}} --><div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:heading {"level":1,"fontSize":"display"} --><h1 class="wp-block-heading has-display-font-size">Run the job from the truck.</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"54%"} --><div class="wp-block-column"><p>x</p></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns --></div><!-- /wp:cover -->';
+    $risks = ThemeValidator::narrowHeadingRisks($panel);
+    assert_eq(1, count($risks));
+    assert_contains('boxed panel inside a 46% column', $risks[0]);
+    assert_contains('section-title', $risks[0]);
+
+    // The same column WITHOUT a panel keeps the old (word-length) judgment.
+    $noPanel = str_replace(
+        ['<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}} --><div class="wp-block-group has-contrast-background-color has-background">', '</div><!-- /wp:group --></div><!-- /wp:column -->'],
+        ['', '</div><!-- /wp:column -->'],
+        $panel,
+    );
+    assert_eq([], ThemeValidator::narrowHeadingRisks($noPanel));
+});

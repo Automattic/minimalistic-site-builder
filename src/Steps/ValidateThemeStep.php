@@ -66,6 +66,7 @@ final class ValidateThemeStep implements Step
             ThemeValidator::typographyWarnings($project),
             ThemeValidator::emptyContainerWarnings($project),
             ThemeValidator::compositionOracleWarnings($project),
+            ThemeValidator::heroTextBudgetWarnings($project),
             ThemeValidator::planWarnings($project),
             PresetReferences::problems($project),
         );
