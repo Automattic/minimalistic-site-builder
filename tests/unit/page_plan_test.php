@@ -777,6 +777,55 @@ test('page-plan repairs an empty page plan and throws when the repair is empty t
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('PagePlanStep::recoverSections coerces a mis-filled field through the mechanical backstop', function () {
+    $warnings = [];
+    $out = PagePlanStep::recoverSections([
+        plan_section(['slug' => 'hero', 'background' => 'plaid']),
+    ], true, $warnings, 'home');
+
+    assert_eq('base', $out[0]['background']);
+    assert_contains('plaid', $warnings[0]);
+    // Survives the validator that rejected the repair round.
+    PagePlanStep::normalize($out, true);
+});
+
+test('PagePlanStep::recoverSections returns empty for an empty plan', function () {
+    $warnings = [];
+    assert_eq([], PagePlanStep::recoverSections([], true, $warnings));
+    assert_eq([], PagePlanStep::recoverSections(null, true, $warnings));
+    assert_eq([], $warnings, 'empty input is not a coercion');
+});
+
+test('PagePlanStep::acceptRepairedSections degrades residual validation instead of throwing', function () {
+    // Simulate a future normalize rule the field/variety passes missed: hand
+    // an unrepaired invalid list straight to the accept step. The build must
+    // keep a page, not abort.
+    $warnings = [];
+    $out = PagePlanStep::acceptRepairedSections([
+        plan_section(['slug' => 'broken', 'layout_archetype' => 'not-a-real-archetype']),
+    ], true, $warnings, 'home');
+
+    assert_eq(1, count($out));
+    assert_eq('content', $out[0]['slug']);
+    assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
+    assert_contains('residual validation', $warnings[0]);
+    assert_contains("page 'home'", $warnings[0]);
+    assert_contains('not-a-real-archetype', $warnings[0]);
+    PagePlanStep::normalize($out, true);
+});
+
+test('PagePlanStep::fallbackSections is a minimal plan normalize accepts', function () {
+    $front = PagePlanStep::fallbackSections(true);
+    assert_eq(1, count($front));
+    assert_eq('full-bleed-cover', $front[0]['layout_archetype']);
+    PagePlanStep::normalize($front, true);
+
+    $interior = PagePlanStep::fallbackSections(false);
+    assert_eq(1, count($interior));
+    assert_eq('centered-stack', $interior[0]['layout_archetype']);
+    PagePlanStep::normalize($interior, false);
+});
+
 test('PagePlanStep::repairFields coerces a cross-wired enum instead of rejecting', function () {
     // 'contrast' is a valid background, so the model emitting it as a
     // layout_archetype is the commonest field slip — and the one that used to

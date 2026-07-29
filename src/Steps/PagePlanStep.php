@@ -214,10 +214,10 @@ final class PagePlanStep implements ConcurrentStep
         // The art-direction rules are creative constraints the model
         // occasionally violates. Re-ask ONCE per rejected page, all of them in
         // ONE batch; if a repair still breaks a rule, fix it mechanically
-        // instead of aborting the build. The two deterministic passes together
-        // answer every rejection normalize() raises bar an empty section list,
-        // so a repair that reproduces the model's mistake — or invents a fresh
-        // one — can no longer end the build.
+        // instead of aborting the build. recoverSections() is the backstop:
+        // field + variety coercion for every known normalize rejection, and a
+        // single fallback section if a future rule slips past both passes.
+        // Only an empty section list still ends the page (nothing to coerce).
         $warnings = [];
         $frontBySlug = array_column($pages, 'front', 'slug');
         foreach ($this->repairAll($project, $rejected) as $slug => $repaired) {
@@ -226,12 +226,11 @@ final class PagePlanStep implements ConcurrentStep
             try {
                 $sections = self::normalize($repaired['sections'] ?? null, $front);
             } catch (\RuntimeException $stillInvalid) {
-                $sections = self::normalize(
-                    self::repairVariety(
-                        self::repairFields($repaired['sections'] ?? null, $warnings),
-                        $front
-                    ),
-                    $front
+                $sections = self::recoverSections(
+                    $repaired['sections'] ?? null,
+                    $front,
+                    $warnings,
+                    $slug
                 );
             }
             if ($sections === []) {
@@ -519,6 +518,88 @@ final class PagePlanStep implements ConcurrentStep
     }
 
     /**
+     * Mechanical backstop after the LLM repair round still fails normalize().
+     *
+     * Runs repairFields() then repairVariety(), then normalize(). Those two
+     * passes cover every rejection normalize() can raise today bar an empty
+     * section list. If a future normalize rule slips past both, the residual
+     * failure is recorded as a warning and the page gets a single known-good
+     * section instead of aborting the build — one thin page is better than no
+     * site after the rest of the pipeline has already been paid for.
+     *
+     * Empty input still returns [] so the caller can fail that page loud;
+     * inventing sections from nothing is not this method's job.
+     *
+     * Pure — unit-testable.
+     *
+     * @param mixed $raw
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    public static function recoverSections($raw, bool $front, array &$warnings = [], string $pageSlug = ''): array
+    {
+        $mechanically = self::repairVariety(self::repairFields($raw, $warnings), $front);
+        if ($mechanically === []) {
+            return [];
+        }
+        return self::acceptRepairedSections($mechanically, $front, $warnings, $pageSlug);
+    }
+
+    /**
+     * Accept a field+variety-repaired section list, or degrade to one section.
+     *
+     * Separated from recoverSections() so the residual path is unit-testable
+     * without inventing a normalize rule the two passes cannot answer: pass an
+     * unrepaired invalid list and this method warns + falls back instead of
+     * throwing.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    public static function acceptRepairedSections(
+        array $sections,
+        bool $front,
+        array &$warnings = [],
+        string $pageSlug = ''
+    ): array {
+        try {
+            return self::normalize($sections, $front);
+        } catch (\RuntimeException $residual) {
+            $where = $pageSlug !== '' ? "page '{$pageSlug}'" : 'page';
+            $warnings[] = "page-plan: {$where}: mechanical repair left residual validation errors; "
+                . 'delivered a single fallback section — ' . $residual->getMessage();
+            return self::fallbackSections($front);
+        }
+    }
+
+    /**
+     * Smallest valid page plan: one section that always survives normalize().
+     *
+     * Used only when recoverSections() cannot coerce the model's list into a
+     * legal plan. Front pages keep a full-bleed cover so the homepage still
+     * looks like a homepage; interior pages open compact.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function fallbackSections(bool $front = true): array
+    {
+        return self::normalize([
+            [
+                'slug'             => 'content',
+                'title'            => 'Content',
+                'type'             => 'content',
+                'purpose'          => '',
+                'content_notes'    => '',
+                'layout_archetype' => $front ? 'full-bleed-cover' : 'centered-stack',
+                'background'       => 'base',
+                'vertical_density' => 'standard',
+                'handoff'          => 'Sits below the site header and above the site footer.',
+            ],
+        ], $front);
+    }
+
+    /**
      * Mechanical fix for the field-level rules on a raw section list: unknown
      * enum values and missing required fields.
      *
@@ -535,10 +616,12 @@ final class PagePlanStep implements ConcurrentStep
      * (content_notes, handoff) may then lag the coerced assignment, the same
      * accepted trade repairVariety() makes.
      *
-     * Together the two passes cover every rejection normalize() can raise except
-     * an empty section list, which no amount of mechanical repair can invent.
-     * Interior-page rules (leading full-bleed cover) belong to repairVariety(),
-     * which still receives the page's $front flag. Pure — unit-testable.
+     * Together with repairVariety(), covers every rejection normalize() can
+     * raise except an empty section list, which no amount of mechanical repair
+     * can invent. Interior-page rules (leading full-bleed cover) belong to
+     * repairVariety(), which still receives the page's $front flag. Residual
+     * failures after both passes are handled by recoverSections(). Pure —
+     * unit-testable.
      *
      * @param mixed $raw
      * @param list<string> $warnings appended to in place, one per coercion
