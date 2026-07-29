@@ -112,6 +112,21 @@ test('a page-list nav is measured by the site page titles', function () {
     assert_eq($markup, $fits['markup']);
 });
 
+test('estimatedRowWidth charges a button its width plus the cluster gap', function () {
+    $nav = '<!-- wp:navigation-link {"label":"Home"} /-->';
+    $button = '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link">Go</a></div><!-- /wp:button -->';
+
+    $without = HeaderHeroStep::estimatedRowWidth(BlockMarkup::parse(hh_header('{"layout":{"type":"constrained"}}', $nav)), 'Demo');
+    $with    = HeaderHeroStep::estimatedRowWidth(BlockMarkup::parse(hh_header('{"layout":{"type":"constrained"}}', $nav . $button)), 'Demo');
+
+    // BUTTON_PAD_PX (56) + 2 label chars * BUTTON_CHAR_PX (9) + CLUSTER_GAP_PX (32).
+    // The gap term is the regression this pins: the button branch set a
+    // variable the gap check never read, so every header with a button was
+    // underestimated by the cluster gap.
+    assert_eq(56 + 2 * 9 + 32, $with - $without);
+});
+
 test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone', function () {
     $result = HeaderHeroStep::capCovers(hh_cover('92'));
     assert_contains('"minHeight":80', $result['markup']);
