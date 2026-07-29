@@ -528,3 +528,20 @@ test('motionProfileFor fails closed to none', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('normalize and format carry the headline register commitment (BIGR-738)', function () {
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A direction.',
+        'headline_register' => ' deadpan spec-sheet: headlines state capability as fact ',
+    ]);
+    assert_eq('deadpan spec-sheet: headlines state capability as fact', $direction['headline_register']);
+
+    $brief = DesignDirectionStep::format($direction);
+    assert_contains('Headline register (all display copy)', $brief);
+    assert_contains('deadpan spec-sheet', $brief);
+
+    // Directions persisted before the field existed render no register line.
+    $legacy = DesignDirectionStep::normalize(['description' => 'Old direction.']);
+    assert_eq('', $legacy['headline_register']);
+    assert_true(!str_contains(DesignDirectionStep::format($legacy), 'Headline register'));
+});

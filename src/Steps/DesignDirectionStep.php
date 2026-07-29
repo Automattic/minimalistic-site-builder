@@ -151,7 +151,7 @@ final class DesignDirectionStep implements Step
      * or type commitments (downstream steps then decide inline), full-bleed
      * canvas, default motion profile. Pure — unit-testable.
      *
-     * @return array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string}
+     * @return array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string,headline_register:string}
      */
     public static function fallbackDirection(string $seed = ''): array
     {
@@ -172,6 +172,7 @@ final class DesignDirectionStep implements Step
             'motion_note'      => '',
             'signature_device' => '',
             'hero_composition' => '',
+            'headline_register' => '',
         ];
     }
 
@@ -267,7 +268,7 @@ final class DesignDirectionStep implements Step
      * what is present. Pure — unit-testable.
      *
      * @param mixed $raw
-     * @return ?array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string}
+     * @return ?array{title:string,description:string,palette:array<string,string>,type:array{heading:string,body:string},image_grade:string,canvas:string,motion:string,motion_note:string,signature_device:string,hero_composition:string,headline_register:string}
      */
     public static function normalize($raw): ?array
     {
@@ -309,6 +310,7 @@ final class DesignDirectionStep implements Step
             'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
             'signature_device' => trim((string) ($raw['signature_device'] ?? '')),
             'hero_composition' => trim((string) ($raw['hero_composition'] ?? '')),
+            'headline_register' => trim((string) ($raw['headline_register'] ?? '')),
         ];
     }
 
@@ -379,6 +381,7 @@ final class DesignDirectionStep implements Step
         foreach ([
             'signature_device' => 'Signature device',
             'hero_composition' => 'Hero composition',
+            'headline_register' => 'Headline register (all display copy)',
             'image_grade'      => 'Image grade (all imagery)',
         ] as $key => $label) {
             $value = trim((string) ($direction[$key] ?? ''));
