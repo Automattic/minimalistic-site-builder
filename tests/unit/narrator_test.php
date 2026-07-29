@@ -112,3 +112,32 @@ test('an empty message is a no-op', function () {
         fclose($sink);
     }
 });
+
+test('no library code writes to the STDERR constant directly', function () {
+    // The first migration to Narrator converted the single-line
+    // `fwrite(STDERR, "…")` calls and missed every multi-line one, where
+    // STDERR sits on its own line. Those survivors are unreachable by eye and
+    // only fail on a host whose standard streams are closed — a long-lived
+    // job worker — so the miss shipped looking clean. Assert on the tree
+    // instead of trusting the next migration to be thorough.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(repo_path('src')));
+    foreach ($dir as $file) {
+        if ($file->getExtension() !== 'php' || $file->getFilename() === 'Narrator.php') {
+            continue;
+        }
+        $code = (string) file_get_contents($file->getPathname());
+        // Strip comments so prose about STDERR does not trip the check.
+        $stripped = '';
+        foreach (token_get_all($code) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+            $stripped .= is_array($token) ? $token[1] : $token;
+        }
+        if (preg_match('/\bSTDERR\b/', $stripped)) {
+            $offenders[] = $file->getFilename();
+        }
+    }
+    assert_eq([], $offenders);
+});

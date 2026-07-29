@@ -93,8 +93,7 @@ final class TextBatchRecovery
                             $termination,
                             $message !== '' ? "regeneration failed: {$message}" : 'regeneration failed',
                         );
-                        fwrite(
-                            STDERR,
+                        Narrator::write(
                             "    (regeneration failed for batch request '{$key}'"
                                 . ($message !== '' ? ": {$message}" : '')
                                 . '; keeping the best prior partial response for salvage)' . "\n"
@@ -142,8 +141,7 @@ final class TextBatchRecovery
             }
 
             $attempt++;
-            fwrite(
-                STDERR,
+            Narrator::write(
                 '    (incomplete response in ' . count($retry) . ' batch request(s); regenerating independently: '
                     . self::keys(array_keys($retry)) . ")\n"
             );

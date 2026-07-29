@@ -441,10 +441,7 @@ final class OpenAiCompatibleClient implements Llm
                     max(0, $deadline - $clock()),
                 );
                 if ($remainingWait > 0) {
-                    fwrite(
-                        STDERR,
-                        "    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n",
-                    );
+                    Narrator::write("    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n");
                     if ($sleeper !== null) {
                         $sleeper($remainingWait);
                     } else {
@@ -856,10 +853,7 @@ final class OpenAiCompatibleClient implements Llm
                     if ($probeReachedOutputLimit && !$retriedTruncation) {
                         $newBudget = self::prepareSingleTruncationRetry($body);
                         $retriedTruncation = true;
-                        fwrite(
-                            STDERR,
-                            "    (OpenRouter response was truncated; regenerating once with {$newBudget} max tokens)\n",
-                        );
+                        Narrator::write("    (OpenRouter response was truncated; regenerating once with {$newBudget} max tokens)\n");
                         continue;
                     }
                     throw new \RuntimeException("stream error: {$terminationError}");

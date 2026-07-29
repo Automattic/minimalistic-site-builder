@@ -174,10 +174,7 @@ final class ImageTransparency
     private static function unmatteEdges(\Imagick $im): void
     {
         if (!self::canUnmatteEdges()) {
-            fwrite(
-                STDERR,
-                "    (image: edge unmatting needs ImageMagick 7; keeping hard-keyed edges)\n",
-            );
+            Narrator::write("    (image: edge unmatting needs ImageMagick 7; keeping hard-keyed edges)\n");
             return;
         }
         try {
