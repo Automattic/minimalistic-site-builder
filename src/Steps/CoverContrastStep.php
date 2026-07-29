@@ -311,7 +311,15 @@ final class CoverContrastStep implements Step
             }
 
             $position = is_string($attrs['contentPosition'] ?? null) ? $attrs['contentPosition'] : '';
-            $image = self::regionStats($path, $position);
+            // Columns and split rows inside the cover push text away from the
+            // contentPosition anchor, so a single-quadrant sample measures a
+            // region the text never touches (BIGR-738/pulso3). Judge such
+            // covers against the worst case of every quadrant instead.
+            $spans = self::coverContentSpansQuadrants($doc, $i);
+            if ($spans) {
+                $position = '';
+            }
+            $image = $spans ? self::regionStatsWorstCase($path) : self::regionStats($path, $position);
             if ($image === null) {
                 $report[] = "[{$rel}] cover image unreadable, skipped: " . basename($path);
                 continue;
@@ -849,6 +857,45 @@ final class CoverContrastStep implements Step
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Whether a cover's inner content can render outside the contentPosition
+     * quadrant: any columns or media-text layout repositions its children
+     * across the cover's width, so no single quadrant sample is sound.
+     * Pure — unit-testable.
+     */
+    public static function coverContentSpansQuadrants(BlockMarkup $doc, int $cover): bool
+    {
+        foreach ($doc->children($cover) as $child) {
+            if (in_array($doc->name($child), ['columns', 'media-text'], true)
+                || self::coverContentSpansQuadrants($doc, $child)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Worst-case luminance statistics across ALL four quadrants of the image:
+     * the union of each quadrant's representative samples. planCover requires
+     * every sample to pass, so text is judged against wherever it could
+     * actually sit. Null when the image can't be read.
+     *
+     * @return list<array{0:int,1:int,2:int}>|null
+     */
+    public static function regionStatsWorstCase(string $path): ?array
+    {
+        $samples = [];
+        foreach (['top left', 'top right', 'bottom left', 'bottom right'] as $quadrant) {
+            $stats = self::regionStats($path, $quadrant);
+            if ($stats === null) {
+                return null;
+            }
+            $samples = array_merge($samples, $stats);
+        }
+        return $samples;
     }
 
     /**

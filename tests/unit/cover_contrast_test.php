@@ -457,3 +457,51 @@ test('a fixer failure rolls plugin-page cover repairs back too', function () {
     assert_contains('rolled back', $project->readText('logs/cover-contrast-report.txt'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('covers with columns are judged against every quadrant, not the contentPosition one (BIGR-738)', function () {
+    // pulso3's shape: contentPosition anchors one quadrant, but inner columns
+    // push a caption right-of-center over a region regionStats never sampled.
+    $markup = '<!-- wp:cover {"url":"theme:./assets/x.jpg","contentPosition":"center left"} -->'
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column --><div class="wp-block-column"><!-- wp:paragraph --><p>Ticket</p><!-- /wp:paragraph --></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->'
+        . '</div></div><!-- /wp:cover -->';
+    $doc = \Automattic\SiteBuild\BlockMarkup::parse($markup);
+    $cover = null;
+    foreach ($doc->indices() as $i) {
+        if ($doc->name($i) === 'cover') { $cover = $i; }
+    }
+    assert_true(CoverContrastStep::coverContentSpansQuadrants($doc, $cover));
+
+    $plain = \Automattic\SiteBuild\BlockMarkup::parse('<!-- wp:cover {"url":"theme:./assets/x.jpg"} -->'
+        . '<div class="wp-block-cover"><!-- wp:paragraph --><p>Text</p><!-- /wp:paragraph --></div><!-- /wp:cover -->');
+    assert_true(!CoverContrastStep::coverContentSpansQuadrants($plain, $plain->indices()[0]));
+});
+
+test('regionStatsWorstCase unions samples from all four quadrants', function () {
+    if (!extension_loaded('imagick')) {
+        return; // environment without imagick: the step skips itself the same way
+    }
+    // Left half white, right half black: a "center left" sample sees only
+    // white; the worst case must include the dark right side too.
+    $im = new Imagick();
+    $im->newImage(64, 64, new ImagickPixel('white'));
+    $draw = new ImagickDraw();
+    $draw->setFillColor(new ImagickPixel('black'));
+    $draw->rectangle(32, 0, 63, 63);
+    $im->drawImage($draw);
+    $im->setImageFormat('png');
+    $path = tempnam(sys_get_temp_dir(), 'covtest') . '.png';
+    file_put_contents($path, $im->getImageBlob());
+
+    $left = CoverContrastStep::regionStats($path, 'center left');
+    $all = CoverContrastStep::regionStatsWorstCase($path);
+    unlink($path);
+
+    assert_true($left[0][0] > 240, 'left-quadrant sample sees only the white half');
+    $lums = array_map(static fn (array $rgb) => $rgb[0], $all);
+    assert_true(min($lums) < 15, 'worst case includes the dark right half');
+    assert_true(max($lums) > 240, 'worst case includes the bright left half');
+    assert_eq(12, count($all), 'three samples per quadrant, four quadrants');
+});
