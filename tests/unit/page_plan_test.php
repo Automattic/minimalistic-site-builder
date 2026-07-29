@@ -785,7 +785,7 @@ test('PagePlanStep::repairFields coerces a cross-wired enum instead of rejecting
     $out = PagePlanStep::repairFields([
         plan_section(['slug' => 'hero']),
         plan_section(['slug' => 'before-after-preview', 'layout_archetype' => 'contrast']),
-    ], true, $warnings);
+    ], $warnings);
 
     assert_contains('contrast', $warnings[0]);
     assert_eq(true, in_array($out[1]['layout_archetype'], PagePlanStep::ARCHETYPES, true));
@@ -808,7 +808,7 @@ test('PagePlanStep::repairFields fills every other field-level rejection', funct
             'handoff'          => '',
         ]),
         plan_section(['slug' => 'closer', 'title' => 'Closer']),
-    ], true, $warnings);
+    ], $warnings);
 
     assert_eq('base', $out[1]['background']);
     assert_eq('standard', $out[1]['vertical_density']);
@@ -830,7 +830,7 @@ test('PagePlanStep::repairFields hands repairVariety no new work', function () {
             'layout_archetype' => $i % 2 === 0 ? 'nonsense' : 'centered-stack',
         ]);
     }
-    $out = PagePlanStep::repairFields($sections, false, $warnings);
+    $out = PagePlanStep::repairFields($sections, $warnings);
 
     $archetypes = array_column($out, 'layout_archetype');
     foreach ($archetypes as $i => $archetype) {

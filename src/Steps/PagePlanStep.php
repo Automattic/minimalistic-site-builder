@@ -228,7 +228,7 @@ final class PagePlanStep implements ConcurrentStep
             } catch (\RuntimeException $stillInvalid) {
                 $sections = self::normalize(
                     self::repairVariety(
-                        self::repairFields($repaired['sections'] ?? null, $front, $warnings),
+                        self::repairFields($repaired['sections'] ?? null, $warnings),
                         $front
                     ),
                     $front
@@ -537,14 +537,14 @@ final class PagePlanStep implements ConcurrentStep
      *
      * Together the two passes cover every rejection normalize() can raise except
      * an empty section list, which no amount of mechanical repair can invent.
-     * Pure — unit-testable.
+     * Interior-page rules (leading full-bleed cover) belong to repairVariety(),
+     * which still receives the page's $front flag. Pure — unit-testable.
      *
      * @param mixed $raw
-     * @param bool $front whether the page is the front page
      * @param list<string> $warnings appended to in place, one per coercion
      * @return array<int,array<string,mixed>>
      */
-    public static function repairFields($raw, bool $front = true, array &$warnings = []): array
+    public static function repairFields($raw, array &$warnings = []): array
     {
         if (!is_array($raw)) {
             return [];
