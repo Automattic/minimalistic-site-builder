@@ -88,7 +88,7 @@ final class WpcomImageClient implements ImageClient
             fn (array $subset): array => $this->multiRequest($subset),
             $this->retryDelays,
             static function (int $count, int $attempt, int $wait): void {
-                fwrite(STDERR, "    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
+                Narrator::write("    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
             }
         );
         $this->requests += $out['succeeded'];
@@ -174,7 +174,7 @@ final class WpcomImageClient implements ImageClient
                 }
                 $wait = $delays[$attempt];
                 $attempt++;
-                fwrite(STDERR, "    (transient image API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
+                Narrator::write("    (transient image API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
                 sleep($wait);
             }
         }

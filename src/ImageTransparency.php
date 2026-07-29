@@ -174,10 +174,7 @@ final class ImageTransparency
     private static function unmatteEdges(\Imagick $im): void
     {
         if (!self::canUnmatteEdges()) {
-            fwrite(
-                STDERR,
-                "    (image: edge unmatting needs ImageMagick 7; keeping hard-keyed edges)\n",
-            );
+            Narrator::write("    (image: edge unmatting needs ImageMagick 7; keeping hard-keyed edges)\n");
             return;
         }
         try {
@@ -215,7 +212,7 @@ final class ImageTransparency
             // though — swallowing this silently is what let an Imagick 7-only
             // constant ship a white fringe on every anti-aliased edge for
             // every ImageMagick 6 host, invisibly.
-            fwrite(STDERR, "    (image: edge unmatting skipped: {$e->getMessage()})\n");
+            Narrator::write("    (image: edge unmatting skipped: {$e->getMessage()})\n");
         }
     }
 

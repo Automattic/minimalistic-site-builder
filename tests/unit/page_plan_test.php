@@ -727,7 +727,7 @@ test('page-plan enforces the compact interior opening through repair and mechani
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan throws when the repair is still invalid beyond the variety rules', function () {
+test('page-plan coerces a field the repair round could not fix, instead of aborting', function () {
     $tmp = sys_get_temp_dir() . '/builder_ppr2_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A bakery']);
@@ -735,15 +735,23 @@ test('page-plan throws when the repair is still invalid beyond the variety rules
         ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
     ]]));
 
+    // The model repeats the same invalid enum in its repair. That used to end
+    // the build; the deterministic pass now answers it and the build ships.
     $bad = ['sections' => [plan_section(['background' => 'plaid'])]];
     $llm = new FakeLlm();
     $llm->queueJson($bad);
     $llm->queueJson($bad);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new PagePlanStep($llm, $renderer))->run($project);
-    });
+    (new PagePlanStep($llm, $renderer))->run($project);
+
+    $plan = $project->readJson('pages.json');
+    assert_eq('base', $plan['pages'][0]['sections'][0]['background']);
+    // The repair round still ran: coercion is the backstop, not the first move.
+    assert_eq(2, count($llm->calls));
+    // A changed delivered value is recorded durably, not just narrated.
+    $warnings = $project->readJson('warnings.json');
+    assert_contains('plaid', implode("\n", $warnings['page-plan']));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -767,4 +775,120 @@ test('page-plan repairs an empty page plan and throws when the repair is empty t
     assert_eq(2, count($llm->calls));
     assert_contains('has no sections', $llm->calls[1]['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('PagePlanStep::recoverSections coerces a mis-filled field through the mechanical backstop', function () {
+    $warnings = [];
+    $out = PagePlanStep::recoverSections([
+        plan_section(['slug' => 'hero', 'background' => 'plaid']),
+    ], true, $warnings, 'home');
+
+    assert_eq('base', $out[0]['background']);
+    assert_contains('plaid', $warnings[0]);
+    // Survives the validator that rejected the repair round.
+    PagePlanStep::normalize($out, true);
+});
+
+test('PagePlanStep::recoverSections returns empty for an empty plan', function () {
+    $warnings = [];
+    assert_eq([], PagePlanStep::recoverSections([], true, $warnings));
+    assert_eq([], PagePlanStep::recoverSections(null, true, $warnings));
+    assert_eq([], $warnings, 'empty input is not a coercion');
+});
+
+test('PagePlanStep::acceptRepairedSections degrades residual validation instead of throwing', function () {
+    // Simulate a future normalize rule the field/variety passes missed: hand
+    // an unrepaired invalid list straight to the accept step. The build must
+    // keep a page, not abort.
+    $warnings = [];
+    $out = PagePlanStep::acceptRepairedSections([
+        plan_section(['slug' => 'broken', 'layout_archetype' => 'not-a-real-archetype']),
+    ], true, $warnings, 'home');
+
+    assert_eq(1, count($out));
+    assert_eq('content', $out[0]['slug']);
+    assert_eq('full-bleed-cover', $out[0]['layout_archetype']);
+    assert_contains('residual validation', $warnings[0]);
+    assert_contains("page 'home'", $warnings[0]);
+    assert_contains('not-a-real-archetype', $warnings[0]);
+    PagePlanStep::normalize($out, true);
+});
+
+test('PagePlanStep::fallbackSections is a minimal plan normalize accepts', function () {
+    $front = PagePlanStep::fallbackSections(true);
+    assert_eq(1, count($front));
+    assert_eq('full-bleed-cover', $front[0]['layout_archetype']);
+    PagePlanStep::normalize($front, true);
+
+    $interior = PagePlanStep::fallbackSections(false);
+    assert_eq(1, count($interior));
+    assert_eq('centered-stack', $interior[0]['layout_archetype']);
+    PagePlanStep::normalize($interior, false);
+});
+
+test('PagePlanStep::repairFields coerces a cross-wired enum instead of rejecting', function () {
+    // 'contrast' is a valid background, so the model emitting it as a
+    // layout_archetype is the commonest field slip — and the one that used to
+    // end a build outright when the repair round reproduced it.
+    $warnings = [];
+    $out = PagePlanStep::repairFields([
+        plan_section(['slug' => 'hero']),
+        plan_section(['slug' => 'before-after-preview', 'layout_archetype' => 'contrast']),
+    ], $warnings);
+
+    assert_contains('contrast', $warnings[0]);
+    assert_eq(true, in_array($out[1]['layout_archetype'], PagePlanStep::ARCHETYPES, true));
+    // Never lands on the two archetypes that carry their own rules.
+    assert_eq(false, in_array($out[1]['layout_archetype'], ['full-bleed-cover', 'equal-card-grid'], true));
+    // And the coerced value survives the validator it used to fail.
+    PagePlanStep::normalize($out, true);
+});
+
+test('PagePlanStep::repairFields fills every other field-level rejection', function () {
+    $warnings = [];
+    $out = PagePlanStep::repairFields([
+        plan_section(['slug' => 'hero', 'title' => 'Hero']),
+        plan_section([
+            'slug'             => 'gap',
+            'title'            => 'Gap',
+            'background'       => 'plaid',
+            'vertical_density' => 'roomy',
+            'type'             => '',
+            'handoff'          => '',
+        ]),
+        plan_section(['slug' => 'closer', 'title' => 'Closer']),
+    ], $warnings);
+
+    assert_eq('base', $out[1]['background']);
+    assert_eq('standard', $out[1]['vertical_density']);
+    assert_eq('content', $out[1]['type']);
+    // The synthesized handoff names the real neighbours, not a placeholder.
+    assert_contains('Hero', $out[1]['handoff']);
+    assert_contains('Closer', $out[1]['handoff']);
+    assert_eq(4, count($warnings));
+});
+
+test('PagePlanStep::repairFields hands repairVariety no new work', function () {
+    // A coerced archetype must not collide with either neighbour, or the
+    // variety pass would have to undo it.
+    $warnings = [];
+    $sections = [];
+    foreach (['a', 'b', 'c', 'd', 'e'] as $i => $slug) {
+        $sections[] = plan_section([
+            'slug'             => $slug,
+            'layout_archetype' => $i % 2 === 0 ? 'nonsense' : 'centered-stack',
+        ]);
+    }
+    $out = PagePlanStep::repairFields($sections, $warnings);
+
+    $archetypes = array_column($out, 'layout_archetype');
+    foreach ($archetypes as $i => $archetype) {
+        assert_eq(true, in_array($archetype, PagePlanStep::ARCHETYPES, true));
+        if ($i > 0) {
+            assert_eq(false, $archetype === $archetypes[$i - 1]);
+        }
+    }
+    // Interior page: the opening section must not have become a cover.
+    assert_eq(false, $archetypes[0] === 'full-bleed-cover');
+    PagePlanStep::normalize(PagePlanStep::repairVariety($out, false), false);
 });

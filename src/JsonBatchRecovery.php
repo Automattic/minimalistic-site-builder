@@ -80,8 +80,7 @@ final class JsonBatchRecovery
             }
 
             $attempt++;
-            fwrite(
-                STDERR,
+            Narrator::write(
                 '    (invalid JSON in ' . count($retry) . ' batch request(s); repairing only: '
                     . self::keys(array_keys($retry)) . ")\n"
             );
