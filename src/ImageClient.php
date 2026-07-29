@@ -36,7 +36,10 @@ interface ImageClient
      * The optional $onResult fires once per spec index when that image's
      * result is FINAL (success, or failure with retries exhausted) — never for
      * an intermediate attempt — so callers can persist progress while the rest
-     * of the batch is still generating.
+     * of the batch is still generating. When it is provided, the callback is
+     * the delivery path for image bytes and the returned success records omit
+     * `bytes` — a batch must never hold every generated image in memory at
+     * once. Callers that need bytes in the return value pass no callback.
      *
      * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string,mime?:?string}> $specs
      * @param callable(int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}):void|null $onResult

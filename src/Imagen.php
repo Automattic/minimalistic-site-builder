@@ -186,7 +186,10 @@ final class Imagen
      *
      * The optional $onResult fires once per body when its result is FINAL
      * (success, or failure with retries exhausted) — never for an outcome that
-     * will retry — so callers can persist progress incrementally.
+     * will retry — so callers can persist progress incrementally. When it is
+     * provided, the callback is the delivery path for image bytes: the
+     * returned success records omit `bytes` so the batch never holds every
+     * image in memory at once.
      *
      * @param array<int,array<string,mixed>> $bodies request bodies keyed by index
      * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,held?:bool,filtered?:bool}> $transport
@@ -214,7 +217,11 @@ final class Imagen
             $retry = [];
             foreach ($outcomes as $i => $outcome) {
                 if ($outcome['ok']) {
-                    $results[$i] = ['ok' => true, 'bytes' => $outcome['bytes']];
+                    // A pooled transport may have delivered the bytes out-of-band
+                    // already (success is always final) — record the outcome
+                    // without inventing a bytes key.
+                    $results[$i] = ['ok' => true]
+                        + (array_key_exists('bytes', $outcome) ? ['bytes' => $outcome['bytes']] : []);
                     $succeeded++;
                 } elseif (($outcome['held'] ?? false) === true) {
                     $retry[] = $i; // never sent — retry without charging the budget
@@ -229,6 +236,12 @@ final class Imagen
                 }
                 if ($onResult !== null && array_key_exists($i, $results)) {
                     $onResult($i, $results[$i]);
+                    // The callback just took delivery (typically writing the
+                    // image to disk). Retaining a second copy of every image
+                    // until the whole batch returns exhausts memory on large
+                    // builds (52 images ≈ 150MB), so the returned record
+                    // keeps the outcome, not the payload.
+                    unset($results[$i]['bytes']);
                 }
             }
 

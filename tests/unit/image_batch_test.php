@@ -262,5 +262,50 @@ test('retryBatch reports each result once, at its final state, via onResult', fu
     );
     sort($seen);
     assert_eq([[0, true], [1, true], [2, false]], $seen, 'one final callback per image, no transient intermediates');
-    assert_eq('IMG0', $out['results'][0]['bytes'], 'return shape is unchanged');
+    assert_eq(true, $out['results'][0]['ok'], 'the outcome survives in the return value (bytes ride the callback)');
+});
+
+test('retryBatch releases image bytes after onResult delivers them', function () {
+    // With onResult, bytes reach the caller (and disk) the moment each image
+    // finishes - retaining a second copy of every image in the returned
+    // results held ~150MB on a 52-image build and hit PHP's memory limit.
+    // The returned record keeps the outcome, not the payload.
+    $onResultBytes = [];
+    $out = Imagen::retryBatch(
+        [0 => ['p' => 'a'], 1 => ['p' => 'b']],
+        fn (array $subset): array => array_map(fn ($body): array => ['ok' => true, 'bytes' => 'BYTES-' . $body['p']], $subset),
+        [],
+        null,
+        function (int $i, array $result) use (&$onResultBytes): void {
+            $onResultBytes[$i] = $result['bytes'] ?? null;
+        },
+    );
+    assert_eq(['BYTES-a', 'BYTES-b'], [$onResultBytes[0], $onResultBytes[1]], 'the callback receives the bytes');
+    assert_true(!array_key_exists('bytes', $out['results'][0]), 'the returned record does not retain a second copy');
+    assert_eq(true, $out['results'][0]['ok'], 'the outcome survives');
+    assert_eq(2, $out['succeeded']);
+
+    // Without onResult the return value is the only delivery path - bytes stay.
+    $out = Imagen::retryBatch(
+        [0 => ['p' => 'a']],
+        fn (array $subset): array => [0 => ['ok' => true, 'bytes' => 'BYTES']],
+        [],
+    );
+    assert_eq('BYTES', $out['results'][0]['bytes'], 'no callback, bytes returned as before');
+});
+
+test('retryBatch accepts a success outcome whose bytes were already delivered out-of-band', function () {
+    // The pooled transport hands success bytes to the caller the moment a
+    // transfer is classified (success is always final) and returns a light
+    // outcome without bytes - the pool must never accumulate every image.
+    // retryBatch records the outcome without warning and without inventing
+    // a bytes key.
+    $out = Imagen::retryBatch(
+        [0 => ['p' => 'a']],
+        fn (array $subset): array => [0 => ['ok' => true]],
+        [],
+    );
+    assert_eq(true, $out['results'][0]['ok']);
+    assert_true(!array_key_exists('bytes', $out['results'][0]), 'no phantom bytes key');
+    assert_eq(1, $out['succeeded']);
 });

@@ -90,14 +90,29 @@ final class WpcomImageClient implements ImageClient
             ]);
         }
 
+        // With a caller callback, success bytes leave the pipeline the moment
+        // a transfer is classified (success is always final): the transport
+        // delivers them straight to $onResult and returns light outcomes, so
+        // neither the pool nor retryBatch ever holds every generated image at
+        // once (52 images ≈ 150MB — over PHP's default limit). retryBatch
+        // then reports only the FAILURES, whose finality it alone knows.
+        $onBytes = $onResult === null ? null
+            : static function (int $i, string $bytes) use ($onResult): void {
+                $onResult($i, ['ok' => true, 'bytes' => $bytes]);
+            };
         $out = Imagen::retryBatch(
             $bodies,
-            fn (array $subset): array => $this->multiRequest($subset),
+            fn (array $subset): array => $this->multiRequest($subset, $onBytes),
             $this->retryDelays,
             static function (int $count, int $attempt, int $wait): void {
                 Narrator::write("    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
             },
-            $onResult,
+            $onResult === null ? null
+                : static function (int $i, array $result) use ($onResult): void {
+                    if (!($result['ok'] ?? false)) {
+                        $onResult($i, $result);
+                    }
+                },
         );
         $this->requests += $out['succeeded'];
         return $out['results'];
@@ -113,10 +128,16 @@ final class WpcomImageClient implements ImageClient
      * without charging its budget, and the pool doesn't fire the whole batch
      * into a rate-limit event as fast as the 429s bounce back.
      *
+     * With $onBytes, a successful transfer's decoded bytes are handed to the
+     * callback immediately and the returned outcome is `['ok' => true]` with
+     * no payload — the pool's result set stays light no matter how many
+     * images the batch carries.
+     *
      * @param array<int,array<string,mixed>> $bodies request body keyed by index
+     * @param callable(int,string):void|null $onBytes immediate delivery for each success
      * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,held?:bool,filtered?:bool}>
      */
-    private function multiRequest(array $bodies): array
+    private function multiRequest(array $bodies, ?callable $onBytes = null): array
     {
         $multi = curl_multi_init();
         /** @var array<int,\CurlHandle> $handles */
@@ -152,7 +173,7 @@ final class WpcomImageClient implements ImageClient
         };
 
         // Classify one finished transfer and release its handle (and slot).
-        $finish = function (string|int $i, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$holding): array {
+        $finish = function (string|int $i, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$holding, $onBytes): array {
             $raw    = (string) curl_multi_getcontent($ch);
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
@@ -171,7 +192,12 @@ final class WpcomImageClient implements ImageClient
                     // operational, not the prompt's fault — retry it.
                     throw new TransientApiException('no response received before the transfer stopped');
                 }
-                return ['ok' => true, 'bytes' => Imagen::interpret($raw, $httpStatus)];
+                $bytes = Imagen::interpret($raw, $httpStatus);
+                if ($onBytes !== null) {
+                    $onBytes((int) $i, $bytes);
+                    return ['ok' => true];
+                }
+                return ['ok' => true, 'bytes' => $bytes];
             } catch (ImageFilteredException $e) {
                 // The safety filter is non-deterministic: retry like a
                 // transient failure, but keep the filtered flag so the caller

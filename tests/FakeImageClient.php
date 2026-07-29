@@ -67,6 +67,9 @@ final class FakeImageClient implements ImageClient
             }
             if ($onResult !== null) {
                 $onResult($i, $results[$i]);
+                // Mirror the production contract: with a callback, the
+                // returned records omit bytes.
+                unset($results[$i]['bytes']);
                 if ($this->afterEachResult !== null) {
                     ($this->afterEachResult)($i);
                 }
