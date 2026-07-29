@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\BlockSerializer\DroppedValue;
 use Automattic\SiteBuild\BlockSerializer\FileReport;
 use Automattic\SiteBuild\BlockSerializer\FixerReport;
 use Automattic\SiteBuild\PhpBlockFixer;
@@ -124,6 +125,184 @@ test('FixBlocksStep warns but does not fail when block repair drops vertical rhy
             'dropped vertical rhythm CSS `padding-top:8rem`',
             implode("\n", $warnings['fix-blocks'] ?? []),
             'the non-fatal defect is durable, not only present in the human log',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep records a heading that lost its centering', function () {
+    $tmp = sys_get_temp_dir() . '/fix-blocks-alignment-' . uniqid();
+    $project = new Project($tmp);
+    // A legacy top-level textAlign plus an inline colour no attribute backs:
+    // the deprecated save cannot match either, so the recovered alignment class
+    // is dropped and the heading renders left-aligned instead of centred.
+    $project->writeText(
+        'theme/parts/signature.html',
+        '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
+            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
+            . 'style="color:var(--wp--preset--color--base)">Signature Flavours</h2>'
+            . '<!-- /wp:heading -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        $fixed = $project->readText('theme/parts/signature.html');
+        assert_contains('Signature Flavours', $fixed, 'the heading keeps its content');
+        assert_true(
+            !str_contains($fixed, 'has-text-align-center'),
+            'the alignment class is genuinely gone from the delivered markup'
+        );
+
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        $joined = implode("\n", $warnings);
+        assert_contains('has-text-align-center', $joined, 'the lost alignment reaches warnings.json');
+        assert_contains(
+            'parts/signature.html block 0 (core/heading)',
+            $joined,
+            'the row locates the block that lost it',
+        );
+        assert_contains('authored "has-text-align-center"', $joined);
+        assert_contains('delivered removed', $joined);
+        assert_contains('disposition: authored class removed', $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('a paragraph opacity repair does not hide a heading alignment loss in the same file', function () {
+    $tmp = sys_get_temp_dir() . '/fix-blocks-mixed-alignment-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/mixed.html',
+        '<!-- wp:paragraph --><p style="opacity:0.4">Readable</p><!-- /wp:paragraph -->'
+            . '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
+            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
+            . 'style="color:var(--wp--preset--color--base)">Still centred</h2>'
+            . '<!-- /wp:heading -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        assert_eq(2, count($warnings), 'the opacity and heading losses each keep one warning');
+        $joined = implode("\n", $warnings);
+        assert_contains('parts/mixed.html block 0: core/paragraph style "opacity"', $joined);
+        assert_contains('parts/mixed.html block 1 (core/heading)', $joined);
+        assert_contains('alignment class "has-text-align-center"', $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep reports vertical alignment losses with their nested block paths', function () {
+    $fake = new class implements BlockFixer {
+        public function fix(string $themeDir): string
+        {
+            file_put_contents(
+                $themeDir . '/parts/columns.html',
+                '<!-- wp:columns {"verticalAlignment":"center"} -->'
+                    . '<div class="wp-block-columns">'
+                    . '<!-- wp:column {"verticalAlignment":"bottom"} -->'
+                    . '<div class="wp-block-column"></div><!-- /wp:column -->'
+                    . '</div><!-- /wp:columns -->',
+            );
+            return '[fix-templates] simulated vertical alignment loss';
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/fix-blocks-vertical-alignment-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/columns.html',
+        '<!-- wp:columns {"verticalAlignment":"center"} -->'
+            . '<div class="wp-block-columns are-vertically-aligned-center">'
+            . '<!-- wp:column {"verticalAlignment":"bottom"} -->'
+            . '<div class="wp-block-column is-vertically-aligned-bottom"></div>'
+            . '<!-- /wp:column -->'
+            . '</div><!-- /wp:columns -->',
+    );
+
+    try {
+        (new FixBlocksStep($fake))->run($project);
+
+        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
+        assert_eq(2, count($warnings));
+        $joined = implode("\n", $warnings);
+        assert_contains(
+            'parts/columns.html block 0 (core/columns): alignment class '
+                . '"are-vertically-aligned-center"',
+            $joined,
+        );
+        assert_contains(
+            'parts/columns.html block 0/0 (core/column): alignment class '
+                . '"is-vertically-aligned-bottom"',
+            $joined,
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep does not warn when a later fixer pass restores an alignment class', function () {
+    $fixer = new class implements ReportingBlockFixer {
+        public int $calls = 0;
+
+        public function fix(string $themeDir): string
+        {
+            throw new LogicException('FixBlocksStep must consume the typed fixer contract');
+        }
+
+        public function fixReport(string $themeDir): FixerReport
+        {
+            $this->calls++;
+            $path = $themeDir . '/parts/section.html';
+            if ($this->calls === 1) {
+                file_put_contents(
+                    $path,
+                    '<!-- wp:group {"align":"wide"} -->'
+                        . '<div class="wp-block-group"></div><!-- /wp:group -->',
+                );
+                return new FixerReport([
+                    new FileReport(
+                        'parts/section.html',
+                        'fixed',
+                        [new DroppedValue('class', 'alignwide')],
+                    ),
+                ]);
+            }
+
+            file_put_contents(
+                $path,
+                '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} -->'
+                    . '<div class="wp-block-group alignwide"></div><!-- /wp:group -->',
+            );
+            return new FixerReport([new FileReport('parts/section.html', 'fixed')]);
+        }
+    };
+
+    $tmp = sys_get_temp_dir() . '/fix-blocks-restored-alignment-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeText(
+        'theme/parts/section.html',
+        '<!-- wp:group {"align":"wide"} --><div class="wp-block-group alignwide">',
+    );
+
+    try {
+        (new FixBlocksStep($fixer))->run($project);
+
+        assert_eq(2, $fixer->calls, 'post-repair layout normalization triggers the final pass');
+        assert_contains('alignwide', $project->readText('theme/parts/section.html'));
+        $warnings = $project->exists('warnings.json')
+            ? ($project->readJson('warnings.json')['fix-blocks'] ?? [])
+            : [];
+        assert_true(
+            !str_contains(implode("\n", $warnings), 'alignment class'),
+            'an intermediate report cannot describe a class present in final output',
         );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
@@ -700,4 +879,3 @@ HTML;
     assert_contains('"mediaType":"image"', $fixed);
     assert_contains('<img src="theme:./assets/hero.jpg"', $fixed);
 });
-
