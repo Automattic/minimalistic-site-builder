@@ -571,6 +571,7 @@ test('sections drops a part with no block markup and prunes it from the plan', f
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('just text, no blocks'); // hero — invalid
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText('still just text, no blocks'); // hero repair — also invalid
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);
@@ -596,6 +597,8 @@ test('sections delivers deterministic chrome and an empty front page when every 
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
     $llm->queueText('just text, no blocks');                               // page-home--hero — invalid
     $llm->queueText('also just text, no blocks');                          // page-home--about — invalid
+    $llm->queueText('repair still not blocks');                            // hero repair — invalid
+    $llm->queueText('repair still not blocks either');                     // about repair — invalid
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);
@@ -618,6 +621,7 @@ test('sections falls back to deterministic chrome when the header markup is unus
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
     $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $llm->queueText('repair: still just prose');                            // header repair — invalid
     $renderer = new PromptRenderer(repo_path('prompts'));
 
     (new SectionsStep($llm, $renderer))->run($project);
@@ -722,5 +726,42 @@ test('sections persists an exhausted abnormal batch note even when balanced mark
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
     assert_contains("part 'page-home--hero': model response remained abnormally terminated", $joined);
     assert_contains('max_tokens', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections recovers an unusable part with a one-shot repair pass (BIGR-738)', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // header — valid
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');                 // footer — valid
+    // The atlas2/portfolio3 failure shape: plausible markup wrapped in prose,
+    // rejected as "does not contain a standalone block document".
+    $llm->queueText("Sure! Here is the hero section you asked for:\n"
+        . '<!-- wp:group {"anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group"><p>Hero</p></div><!-- /wp:group -->'
+        . "\nAnd one alternative version:\n"
+        . '<!-- wp:group --><div class="wp-block-group"><p>Alt</p></div><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->'); // about — valid
+    // The repair pass returns the corrected single document.
+    $llm->queueText('<!-- wp:group {"anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group"><p>Hero</p></div><!-- /wp:group -->');
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    (new SectionsStep($llm, $renderer))->run($project);
+
+    // The section ships and stays in the plan instead of being dropped.
+    assert_contains('<p>Hero</p>', $project->readText('theme/parts/page-home--hero.html'));
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(['hero', 'about'], array_column($sections, 'slug'), 'no section pruned');
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains('recovered by the one-shot repair pass', $joined);
+    assert_true(!str_contains($joined, 'dropped from the page plan'), 'nothing dropped');
+
+    // The repair prompt shows the model its own response and the exact error.
+    $repairPrompt = $llm->calls[count($llm->calls) - 1]['prompt'];
+    assert_contains('YOUR PREVIOUS RESPONSE', $repairPrompt);
+    assert_contains('Sure! Here is the hero section', $repairPrompt);
+    assert_contains('block document', $repairPrompt);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -115,8 +115,8 @@ final class SectionsStep implements Step
 
     public function __construct(
         private Llm $llm,
-        PromptRenderer $renderer,
-        ?string $model = null,
+        private PromptRenderer $renderer,
+        private ?string $model = null,
         ?float $temperature = null,
     ) {
         $this->sectionUnit = new SectionUnit($llm, $renderer, $model, $temperature);
@@ -178,8 +178,8 @@ final class SectionsStep implements Step
         // generated-content failure degrades too.
         $files = [];
         $dropped = [];
+        $failures = [];
         foreach ($jobs as $key => $job) {
-            $isChrome = in_array($key, ['header', 'footer'], true);
             try {
                 if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
                     throw new \RuntimeException('the batch returned no result');
@@ -187,17 +187,31 @@ final class SectionsStep implements Step
                 $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
                 array_push($warnings, ...$batch->notesFor($key));
             } catch (\RuntimeException $e) {
-                if ($isChrome) {
-                    $files[$job['file']] = self::fallbackChrome($key);
-                    $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
-                        . "deterministic minimal {$key} delivered";
-                } else {
-                    $dropped[$key] = true;
-                    $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
-                        . 'section dropped from the page plan';
-                }
-                Narrator::write("    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
+                $failures[$key] = [
+                    'job'   => $job,
+                    'raw'   => is_string($parts[$key] ?? null) ? $parts[$key] : null,
+                    'error' => $e->getMessage(),
+                ];
             }
+        }
+
+        // One-shot repair before any degradation (BIGR-738): most "does not
+        // contain a standalone block document" responses begin with plausible
+        // markup the model can mend when shown its own output and the exact
+        // error. Only parts still unusable after the repair pass degrade.
+        $failures = $this->repairFailedParts($failures, $files, $warnings);
+        foreach ($failures as $key => $failure) {
+            $error = $failure['error'];
+            if (in_array($key, ['header', 'footer'], true)) {
+                $files[$failure['job']['file']] = self::fallbackChrome($key);
+                $warnings[] = "part '{$key}': unusable generated markup ({$error}); "
+                    . "deterministic minimal {$key} delivered";
+            } else {
+                $dropped[$key] = true;
+                $warnings[] = "part '{$key}': unusable generated markup ({$error}); "
+                    . 'section dropped from the page plan';
+            }
+            Narrator::write("    (part '{$key}': unusable generated markup — {$error})\n");
         }
 
         // Commit the repaired/pruned plan only after every generated response
@@ -212,6 +226,70 @@ final class SectionsStep implements Step
         }
         $project->writeJson('pages.json', $plan);
         $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * Give every unusable part ONE repair attempt before it is dropped or
+     * replaced by fallback chrome: re-send the model its own response with the
+     * normalization error (prompts/section-repair.md — the same pattern as
+     * image-prompt-repair) and run the repaired text through the identical
+     * finish() intake. Parts whose repair also fails (or that have no raw
+     * response to repair, or whose repair batch fails operationally) are
+     * returned for the caller's existing degradation path.
+     *
+     * @param array<string,array{job:array{unit:MarkupUnit,input:array<mixed>,file:string},raw:?string,error:string}> $failures
+     * @param array<string,string> $files part file => markup, appended to in place
+     * @param list<string> $warnings appended to in place
+     * @return array<string,array{job:array{unit:MarkupUnit,input:array<mixed>,file:string},raw:?string,error:string}>
+     */
+    private function repairFailedParts(array $failures, array &$files, array &$warnings): array
+    {
+        $contract = rtrim($this->renderer->render('block-markup-output-contract.md', []), "\r\n");
+        $requests = [];
+        foreach ($failures as $key => $failure) {
+            if (!is_string($failure['raw']) || trim($failure['raw']) === '') {
+                continue; // an operationally missing result has nothing to repair
+            }
+            $request = ['prompt' => $this->renderer->render('section-repair.md', [
+                'error' => $failure['error'],
+                'raw'   => $failure['raw'],
+                'block_markup_output_contract' => $contract,
+            ])];
+            if ($this->model !== null) {
+                $request['model'] = $this->model;
+            }
+            $requests[$key] = $request;
+        }
+        if ($requests === []) {
+            return $failures;
+        }
+
+        Narrator::write('    repairing ' . count($requests) . " unusable part(s) with a one-shot repair pass\n");
+        try {
+            $repaired = $this->llm->completeBatch($requests)->texts;
+        } catch (\Throwable $e) {
+            Narrator::write("    part repair batch failed ({$e->getMessage()}); degrading the failed parts\n");
+            return $failures;
+        }
+
+        foreach ($requests as $key => $request) {
+            $failure = $failures[$key];
+            try {
+                if (!is_string($repaired[$key] ?? null)) {
+                    throw new \RuntimeException('the repair batch returned no result');
+                }
+                $files[$failure['job']['file']] = $failure['job']['unit']
+                    ->finish($repaired[$key], $failure['job']['input'], $warnings);
+                $warnings[] = "part '{$key}': first response was unusable ({$failure['error']}); "
+                    . 'recovered by the one-shot repair pass';
+                Narrator::write("    (part '{$key}': recovered by the repair pass)\n");
+                unset($failures[$key]);
+            } catch (\RuntimeException $e) {
+                $failures[$key]['error'] = $failure['error']
+                    . '; repair attempt also unusable (' . $e->getMessage() . ')';
+            }
+        }
+        return $failures;
     }
 
     /**
