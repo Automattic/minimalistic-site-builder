@@ -88,3 +88,49 @@ test('composition oracles report per file through the project pass', function ()
     assert_contains('plugin/pages/home.html:', $warnings[0]);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('narrow-heading oracle flags display H1s that cannot fit their column', function () {
+    // portfolio4's shipped shape: a display H1 in a 36% column whose longest
+    // word ("photographing", 13 chars) broke mid-word at masthead scale.
+    $midWordBreak = '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column {"width":"36%"} --><div class="wp-block-column" style="flex-basis:36%">'
+        . '<!-- wp:heading {"level":1,"fontSize":"display"} -->'
+        . '<h1 class="wp-block-heading has-display-font-size">Twenty years photographing what Argentina decided in the street.</h1>'
+        . '<!-- /wp:heading --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"64%"} --><div class="wp-block-column" style="flex-basis:64%"><p>img</p></div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->';
+    $risks = ThemeValidator::narrowHeadingRisks($midWordBreak);
+    assert_eq(1, count($risks));
+    assert_contains('36% column', $risks[0]);
+    assert_contains('break mid-word', $risks[0]);
+
+    // An extreme sliver column is flagged regardless of word length.
+    $sliver = str_replace(['"width":"36%"', 'flex-basis:36%'], ['"width":"20%"', 'flex-basis:20%'], $midWordBreak);
+    $risks = ThemeValidator::narrowHeadingRisks($sliver);
+    assert_eq(1, count($risks));
+    assert_contains('one word', $risks[0]);
+});
+
+test('narrow-heading oracle passes wide columns, short words, and non-display headings', function () {
+    // atlas5's shape: same 36% column but the longest word is 8 chars — the
+    // headline wraps into whole lines without breaking; not flagged.
+    $shortWords = '<!-- wp:columns --><div class="wp-block-columns">'
+        . '<!-- wp:column {"width":"36%"} --><div class="wp-block-column">'
+        . '<!-- wp:heading {"level":1,"fontSize":"display"} -->'
+        . '<h1 class="wp-block-heading has-display-font-size">The job ran clean because everyone knew where to be.</h1>'
+        . '<!-- /wp:heading --></div><!-- /wp:column --></div><!-- /wp:columns -->';
+    assert_eq([], ThemeValidator::narrowHeadingRisks($shortWords));
+
+    // A 60% column holds a display heading fine.
+    $wide = str_replace('"width":"36%"', '"width":"60%"', $shortWords);
+    assert_eq([], ThemeValidator::narrowHeadingRisks($wide));
+
+    // Section-title scale in a narrow column is the sanctioned alternative.
+    $capped = str_replace('"fontSize":"display"', '"fontSize":"section-title"', $shortWords);
+    assert_eq([], ThemeValidator::narrowHeadingRisks($capped));
+
+    // A display heading outside any column is judged elsewhere.
+    assert_eq([], ThemeValidator::narrowHeadingRisks(
+        '<!-- wp:heading {"level":1,"fontSize":"display"} --><h1 class="wp-block-heading">Extraordinarily long words everywhere</h1><!-- /wp:heading -->'
+    ));
+});

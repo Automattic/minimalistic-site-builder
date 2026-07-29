@@ -455,7 +455,12 @@ final class ThemeValidator
                 str_starts_with($file, $root) ? substr($file, strlen($root)) : $file,
             );
             $markup = (string) file_get_contents($file);
-            foreach (array_merge(self::overlapRisks($markup), self::headingOrphanRisks($markup)) as $risk) {
+            $risks = array_merge(
+                self::overlapRisks($markup),
+                self::headingOrphanRisks($markup),
+                self::narrowHeadingRisks($markup),
+            );
+            foreach ($risks as $risk) {
                 $warnings[] = "{$rel}: {$risk}";
             }
         }
@@ -529,6 +534,66 @@ final class ThemeValidator
             $risks[] = "heading \"{$text}\" pins its lines with <br> and ends \"{$last}\" with punctuation — "
                 . 'if the last word fills the column the punctuation wraps into a one-character orphan line; '
                 . 'drop the trailing punctuation or the <br> segmentation';
+        }
+        return $risks;
+    }
+
+    /**
+     * Display-scale headings squeezed into narrow columns (BIGR-738 follow-up):
+     * a masthead-size H1 in a ≤25% column wraps to one word per line, and in a
+     * ≤40% column a long word cannot fit at all and breaks mid-word
+     * (portfolio4 shipped "photographin / g" in a 36% column). Both defeat the
+     * headline no matter how good the copy is. Pure — unit-testable.
+     *
+     * @return string[]
+     */
+    public static function narrowHeadingRisks(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $risks = [];
+        foreach ($doc->indices() as $i) {
+            if ($doc->name($i) !== 'heading'
+                || (string) (($doc->attrs($i) ?? [])['fontSize'] ?? '') !== 'display'
+            ) {
+                continue;
+            }
+            $width = null;
+            for ($p = $doc->parent($i); $p !== null; $p = $doc->parent($p)) {
+                if ($doc->name($p) !== 'column') {
+                    continue;
+                }
+                $raw = trim((string) (($doc->attrs($p) ?? [])['width'] ?? ''));
+                if (preg_match('/^([0-9.]+)%$/', $raw, $m)) {
+                    $width = (float) $m[1];
+                }
+                break;
+            }
+            if ($width === null) {
+                continue;
+            }
+
+            $text = trim((string) preg_replace('/\s+/', ' ', strip_tags($doc->innerHtml($i))));
+            $longest = 0;
+            foreach (preg_split('/\s+/u', $text) ?: [] as $word) {
+                $longest = max($longest, mb_strlen(trim($word, '.,!?;:…—–-"\'')));
+            }
+            if ($width <= 25.0) {
+                $risks[] = sprintf(
+                    'display heading "%s" sits in a %.0f%% column — at masthead scale it wraps to one word '
+                        . 'per line; widen the column or use "fontSize":"section-title" instead',
+                    $text,
+                    $width,
+                );
+            } elseif ($width <= 40.0 && $longest >= 10) {
+                $risks[] = sprintf(
+                    'display heading "%s" sits in a %.0f%% column and its longest word (%d chars) cannot fit '
+                        . 'at masthead scale — it will break mid-word; shorten the wording, widen the column, '
+                        . 'or use "fontSize":"section-title" instead',
+                    $text,
+                    $width,
+                    $longest,
+                );
+            }
         }
         return $risks;
     }
