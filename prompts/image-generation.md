@@ -49,10 +49,10 @@ When creating multiple images that will be displayed together in a row or grid (
 **No decorative or transparent images:**
 Generated imagery is for CONTENT — hero covers, feature/gallery/card images, photographic bands. Never emit a decorative image: no drawn ornaments, flourishes, motif marks, sprigs, crests, rosettes, stamps, emblems, icons, or tick/rule strips as AI imagery, and never a `.png` or any "transparent background" asset. Generated ornaments come out off-palette (the model cannot match the theme's hexes) and geometrically wobbly, and small raster icons turn to mush at display size — the build strips such placeholders, so emitting one only wastes the slot.
 
-Build small decorative moments with theme primitives instead — they inherit the palette exactly and stay crisp at any size:
-- A motif mark above a heading or eyebrow: a real Unicode glyph character (e.g. ✳ ❖ ✦ ◆ ✷) in a small paragraph styled with a palette `textColor` (typically `accent`) and a suitable `fontSize` — this IS the sanctioned way to execute a signature-device mark.
+Decoration, when a section needs any at all, comes from theme primitives — they inherit the palette exactly and stay crisp at any size:
 - Rules, hairlines, underlines, tick strips and dividers: `wp:separator`, border styles, or spacing — never imagery.
-- Feature icons: prefer no icon (let type and layout carry the hierarchy) or a styled glyph character; never an AI-generated icon image.
+- A typographic glyph mark (a Unicode character in a small paragraph styled with a palette `textColor`) is allowed ONLY when the DESIGN DIRECTION's signature device explicitly commits to a specific character — then use exactly that character and color, only at the moments the direction names. Never add decorative glyph characters on your own initiative — no marks before headings or eyebrows, no glyph list bullets or metadata separators; whitespace, type scale and color already carry the hierarchy.
+- Feature icons: use none — let type and layout carry the hierarchy; never an AI-generated icon image.
 
 **Subject guidelines:**
 - 1-3 specific sentences describing ONLY the image itself: what it shows and from what point of view (composition, framing, vantage, mood). This is the actual generation subject — do not put the page placement here, that goes in `page-context`.
