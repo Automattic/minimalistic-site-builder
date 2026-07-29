@@ -49,99 +49,19 @@ test('collect-images dedupes the same asset across files and records sources', f
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('collect-images removes a decorative .png ornament block and warns', function () {
+test('collect-images collects .png placeholders (transparent-background assets)', function () {
     [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/parts/page-home--about.html',
-        "<!-- wp:heading --><h2 class=\"wp-block-heading\">Before</h2><!-- /wp:heading -->\n\n"
-        . '<!-- wp:image {"width":"84px","sizeSlug":"large"} -->'
-        . '<figure class="wp-block-image"><img src="theme:./assets/grapevine-flourish.png" '
-        . 'alt="AI_IMAGE: A small grapevine flourish, thin gold linework | decorative accent under a subheading | illustration | landscape"/></figure>'
-        . "<!-- /wp:image -->\n\n"
-        . '<!-- wp:paragraph --><p>After</p><!-- /wp:paragraph -->'
-    );
-
-    (new CollectImagesStep())->run($project);
-
-    // The ornament's spec never reaches images.json — nothing gets generated.
-    assert_eq([], $project->readJson('images.json'));
-    $markup = $project->readText('theme/parts/page-home--about.html');
-    assert_true(!str_contains($markup, 'wp:image'), 'ornament block removed');
-    // Siblings survive byte-for-byte.
-    assert_contains('<h2 class="wp-block-heading">Before</h2>', $markup);
-    assert_contains('<p>After</p>', $markup);
-    // The removal is durable and actionable per AGENTS.md rung 4.
-    $warnings = $project->readJson('warnings.json');
-    assert_eq(1, count($warnings['collect-images']));
-    assert_contains('grapevine-flourish.png', $warnings['collect-images'][0]);
-    assert_contains('decorative accent under a subheading', $warnings['collect-images'][0]);
-
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('collect-images removes a tiny-width .png block even without ornament words', function () {
-    [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/parts/page-home--hero.html',
-        '<!-- wp:image {"width":"14px","sizeSlug":"large","className":"hero-star"} -->'
-        . '<figure class="wp-block-image"><img src="theme:./assets/eight-point-star.png" '
-        . 'alt="AI_IMAGE: A small symmetrical eight-point star | above the hero headline | minimalist | square"/></figure>'
-        . '<!-- /wp:image -->'
-    );
-
-    (new CollectImagesStep())->run($project);
-
-    assert_eq([], $project->readJson('images.json'));
-    assert_true(
-        !str_contains($project->readText('theme/parts/page-home--hero.html'), 'eight-point-star'),
-        'tiny ornament removed'
-    );
-
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('collect-images converts a non-decorative .png content image to .jpg', function () {
-    [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/parts/page-home--gallery.html',
-        '<!-- wp:image {"sizeSlug":"large"} -->'
-        . '<figure class="wp-block-image"><img src="theme:./assets/harbor-at-dusk.png" '
-        . 'alt="AI_IMAGE: Fishing boats moored in a small harbor at dusk | gallery card in a 3-column row | photorealistic | landscape"/></figure>'
-        . '<!-- /wp:image -->'
-    );
-
-    (new CollectImagesStep())->run($project);
-
-    // The image survives as an opaque asset under the .jpg name.
-    $images = $project->readJson('images.json');
-    assert_eq(1, count($images));
-    assert_eq('harbor-at-dusk.jpg', $images[0]['filename']);
-    assert_eq('theme:./assets/harbor-at-dusk.jpg', $images[0]['src']);
-    $markup = $project->readText('theme/parts/page-home--gallery.html');
-    assert_contains('theme:./assets/harbor-at-dusk.jpg', $markup);
-    assert_true(!str_contains($markup, '.png'), 'no transparent reference left');
-    $warnings = $project->readJson('warnings.json');
-    assert_contains('harbor-at-dusk.png', $warnings['collect-images'][0]);
-
-    exec('rm -rf ' . escapeshellarg($tmp));
-});
-
-test('collect-images converts a .png cover background on both url and src', function () {
-    [$project, $tmp] = collect_fixture();
-    $project->writeText('theme/parts/page-home--band.html',
-        '<!-- wp:cover {"url":"theme:./assets/vineyard-rows.png","dimRatio":50} -->'
-        . '<div class="wp-block-cover">'
-        . '<img class="wp-block-cover__image-background" src="theme:./assets/vineyard-rows.png" '
-        . 'alt="AI_IMAGE: Vineyard rows on a hillside at golden hour | full-bleed band behind a quote | photorealistic | landscape"/>'
-        . '</div><!-- /wp:cover -->'
+    $project->writeText('theme/parts/footer.html',
+        '<img src="theme:./assets/grapevine-flourish.png" '
+        . 'alt="AI_IMAGE: A small grapevine flourish, thin gold linework | decorative accent under a subheading | illustration | landscape"/>'
     );
 
     (new CollectImagesStep())->run($project);
 
     $images = $project->readJson('images.json');
     assert_eq(1, count($images));
-    assert_eq('vineyard-rows.jpg', $images[0]['filename']);
-    $markup = $project->readText('theme/parts/page-home--band.html');
-    // Both the JSON url and the rendered src move to the opaque asset.
-    assert_eq(2, substr_count($markup, 'theme:./assets/vineyard-rows.jpg'));
-    assert_true(!str_contains($markup, 'vineyard-rows.png'), 'cover fully converted');
+    assert_eq('grapevine-flourish.png', $images[0]['filename']);
+    assert_eq('theme:./assets/grapevine-flourish.png', $images[0]['src']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

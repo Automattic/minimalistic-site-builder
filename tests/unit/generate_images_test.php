@@ -316,9 +316,6 @@ test('generate-images requests 2K for landscape images and 1K otherwise', functi
 test('generate-images requests PNG and a transparent background for .png assets', function () {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
-    // collect-images strips or converts .png placeholders nowadays, so seed
-    // the spec directly: this test pins the generate-side contract that still
-    // backs any .png reaching it (defense in depth).
     $project->writeText('theme/parts/footer.html',
         '<!-- wp:image --><figure class="wp-block-image">'
         . '<img src="theme:./assets/grapevine-flourish.png" '
@@ -329,22 +326,7 @@ test('generate-images requests PNG and a transparent background for .png assets'
         . 'alt="AI_IMAGE: Rolling vineyard hills at dusk | wide feature image | photorealistic | landscape"/></figure>'
         . '<!-- /wp:image -->'
     );
-    $project->writeJson('images.json', [
-        [
-            'filename' => 'grapevine-flourish.png', 'src' => 'theme:./assets/grapevine-flourish.png',
-            'subject' => 'A small grapevine flourish, thin gold linework',
-            'pageContext' => 'decorative accent under a subheading',
-            'style' => 'illustration', 'aspectRatio' => 'landscape', 'status' => 'pending',
-            'sources' => ['parts/footer.html'],
-        ],
-        [
-            'filename' => 'vineyard-hills.jpg', 'src' => 'theme:./assets/vineyard-hills.jpg',
-            'subject' => 'Rolling vineyard hills at dusk',
-            'pageContext' => 'wide feature image',
-            'style' => 'photorealistic', 'aspectRatio' => 'landscape', 'status' => 'pending',
-            'sources' => ['parts/footer.html'],
-        ],
-    ]);
+    (new CollectImagesStep())->run($project);
     $images = new FakeImageClient('PNGDATA');
 
     (new GenerateImagesStep($images))->run($project);
@@ -616,7 +598,7 @@ test('generate-images ships manifest-listed content images with the plugin', fun
     // The hero is referenced by page content (in the plugin manifest); a
     // second, chrome-only image is not.
     $project->writeText('theme/parts/header.html',
-        '<img src="theme:./assets/masthead.jpg" alt="AI_IMAGE: a monochrome skyline | header | photorealistic | square">');
+        '<img src="theme:./assets/wordmark.png" alt="AI_IMAGE: wordmark | header | flat | square">');
     (new CollectImagesStep())->run($project);
     $project->writeJson('plugin/images.json', ['images' => [
         ['filename' => 'hero.jpg', 'title' => 'A bakery at dawn'],
@@ -629,8 +611,8 @@ test('generate-images ships manifest-listed content images with the plugin', fun
     assert_true($project->exists('plugin/images/hero.jpg'), 'content image shipped with the plugin');
     assert_eq('JPEGDATA', $project->readText('plugin/images/hero.jpg'));
     // Chrome-only image stays theme-only.
-    assert_true(!$project->exists('plugin/images/masthead.jpg'), 'chrome image not shipped with the plugin');
-    assert_true($project->exists('theme/assets/masthead.jpg'), 'chrome image in the theme');
+    assert_true(!$project->exists('plugin/images/wordmark.png'), 'chrome image not shipped with the plugin');
+    assert_true($project->exists('theme/assets/wordmark.png'), 'chrome image in the theme');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
