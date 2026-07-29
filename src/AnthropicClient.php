@@ -647,7 +647,7 @@ final class AnthropicClient implements Llm
         };
 
         try {
-            return self::rollingPool($bodies, $start, $await);
+            return RollingPool::run($bodies, $start, $await, self::MAX_CONCURRENCY);
         } finally {
             curl_multi_close($multi);
         }
@@ -665,58 +665,6 @@ final class AnthropicClient implements Llm
     public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
     {
         return array_chunk($bodies, max(1, $maxConcurrency ?? self::MAX_CONCURRENCY), true);
-    }
-
-    /**
-     * Drive a batch through a bounded rolling pool: at most $cap transfers in
-     * flight, and the moment one completes the next pending request starts. A
-     * slow member holds only its own slot — unlike windowing, it never blocks
-     * unrelated requests behind a batch-wide barrier. Pure orchestration
-     * ($start begins one transfer; $await blocks until at least one in-flight
-     * transfer completes and returns those results keyed by request id), so it
-     * is unit-testable with fakes; streamMulti supplies the curl_multi glue.
-     *
-     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
-     * @param callable(string|int,array<string,mixed>):void $start
-     * @param callable():array<array-key,mixed> $await
-     * @return array<array-key,mixed> results keyed and ordered as $bodies
-     */
-    public static function rollingPool(array $bodies, callable $start, callable $await, ?int $cap = null): array
-    {
-        $cap = max(1, $cap ?? self::MAX_CONCURRENCY);
-        $pending = array_keys($bodies);
-        $inFlight = [];
-        $results = [];
-
-        $launch = function () use (&$pending, &$inFlight, $bodies, $start, $cap): void {
-            while ($pending !== [] && count($inFlight) < $cap) {
-                $key = array_shift($pending);
-                $inFlight[$key] = true;
-                $start($key, $bodies[$key]);
-            }
-        };
-
-        $launch();
-        while ($inFlight !== []) {
-            $completed = $await();
-            if ($completed === []) {
-                throw new \RuntimeException('rolling pool await returned no transfer completions');
-            }
-            foreach ($completed as $key => $result) {
-                if (!isset($inFlight[$key])) {
-                    throw new \RuntimeException("rolling pool got a completion for request '{$key}', which is not in flight");
-                }
-                unset($inFlight[$key]);
-                $results[$key] = $result;
-            }
-            $launch();
-        }
-
-        $out = [];
-        foreach ($bodies as $key => $_body) {
-            $out[$key] = $results[$key];
-        }
-        return $out;
     }
 
     /**
