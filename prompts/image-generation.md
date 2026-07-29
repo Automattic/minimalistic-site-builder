@@ -4,7 +4,7 @@ When a section needs imagery (hero covers, feature/gallery/card images), emit a 
 
 Use ONLY the native `src` and `alt` attributes on `img` elements. Do NOT use any custom data attributes.
 
-- **src**: The image path using the `theme:./assets/` prefix followed by the filename. The filename must only contain lowercase letters (a-z), numbers (0-9), and hyphens (-) — no spaces or special characters — and must be descriptive of the image. Use the `.jpg` extension for regular images; use `.png` ONLY for images that need a transparent background (see "Transparent backgrounds" below). Give every image a UNIQUE filename. Example: `theme:./assets/hero-mountain-dawn.jpg`
+- **src**: The image path using the `theme:./assets/` prefix followed by the filename. The filename must only contain lowercase letters (a-z), numbers (0-9), and hyphens (-) — no spaces or special characters — and must be descriptive of the image. ALWAYS use the `.jpg` extension — every generated image is an opaque content image; never use `.png` (see "No decorative or transparent images" below). Give every image a UNIQUE filename. Example: `theme:./assets/hero-mountain-dawn.jpg`
 
 - **alt**: A structured string containing all image generation parameters, e.g. `AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape`
 
@@ -46,15 +46,13 @@ When creating multiple images that will be displayed together in a row or grid (
 - `abstract` — Abstract artistic style
 - `watercolor` — Watercolor painting style
 
-**Transparent backgrounds (`.png`):**
-An image whose extension is `.png` is generated with a TRANSPARENT background, so it sits directly on whatever the page background is. Use `.png` only for assets that need this: small decorative ornaments, accent motifs and pictorial logo marks (an emblem or symbol — never lettering; see the no-rendered-text rule under Subject guidelines) — typically `illustration`, `minimalist` or `flat-design` style. Everything photographic or full-bleed stays `.jpg` (photos have no transparency to preserve, and JPEG is much smaller).
+**No decorative or transparent images:**
+Generated imagery is for CONTENT — hero covers, feature/gallery/card images, photographic bands. Never emit a decorative image: no drawn ornaments, flourishes, motif marks, sprigs, crests, rosettes, stamps, emblems, icons, or tick/rule strips as AI imagery, and never a `.png` or any "transparent background" asset. Generated ornaments come out off-palette (the model cannot match the theme's hexes) and geometrically wobbly, and small raster icons turn to mush at display size — a mismatched ornament reads as a stain on the design, far worse than no ornament at all.
 
-Decorative ornaments are a scarce garnish, not a layout tool — ration them hard:
-- Most sections need NO decorative image. Emit one only where the design direction's signature device genuinely calls for a drawn motif, and never more than ONE decorative image per section.
-- REUSE, don't multiply: when the page repeats an ornament, reference the SAME `theme:./assets/<name>.png` path (with the same alt) everywhere it appears. Repeated references to one filename produce one shared asset; minting near-identical variants (`leaf-sprig-2.png`, `leaf-sprig-menu.png`, …) wastes generations and makes the page look cluttered.
-- NEVER generate a plain rule, hairline, straight underline or simple divider as an image — build those with a `wp:separator`, a border style, or spacing. A generated `.png` is only justified for a genuinely pictorial motif (a leaf sprig, a knot, a crest, a stamp); a straight line rendered as AI imagery reads as noise and often fails to isolate cleanly.
-
-For a `.png` image, describe ONLY the subject itself — never a backdrop. Do not write "centered on empty dark space", "on a white field" or any background color into the subject: the background is transparent, and describing one would get it painted into the image. Give the motif clearly visible stroke weight — ultra-thin hairline linework tends to vanish when the background is keyed out. Example: `theme:./assets/grapevine-flourish.png` with alt `AI_IMAGE: A small symmetrical grapevine flourish with a single grape cluster and two curling tendrils, thin gold linework | decorative accent beneath a section subheading | illustration | landscape`
+Decoration, when a section needs any at all, comes from theme primitives — they inherit the palette exactly and stay crisp at any size:
+- Rules, hairlines, underlines, tick strips and dividers: `wp:separator`, border styles, or spacing — never imagery.
+- A typographic glyph mark (a Unicode character in a small paragraph styled with a palette `textColor`) is allowed ONLY when the DESIGN DIRECTION's signature device explicitly commits to a specific character — then use exactly that character and color, only at the moments the direction names. Never add decorative glyph characters on your own initiative — no marks before headings or eyebrows, no glyph list bullets or metadata separators; whitespace, type scale and color already carry the hierarchy.
+- Feature icons: use none — let type and layout carry the hierarchy; never an AI-generated icon image.
 
 **Subject guidelines:**
 - 1-3 specific sentences describing ONLY the image itself: what it shows and from what point of view (composition, framing, vantage, mood). This is the actual generation subject — do not put the page placement here, that goes in `page-context`.
