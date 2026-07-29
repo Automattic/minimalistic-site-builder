@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
@@ -77,6 +78,12 @@ final class SectionsStep implements Step
         return $pageCount > 1 ? self::NAV_RULE_MULTI : self::NAV_RULE_SINGLE;
     }
 
+    /** {{nav_rule}} text for footer generation given how many pages the plan has. */
+    public static function footerNavRuleFor(int $pageCount): string
+    {
+        return FooterComposition::navigationRule($pageCount);
+    }
+
     private SectionUnit $sectionUnit;
     private HeaderUnit $headerUnit;
     private FooterUnit $footerUnit;
@@ -94,6 +101,9 @@ final class SectionsStep implements Step
         'double-decker',
         'split-nav',
     ];
+
+    /** Footer composition menu shared with the stateless FooterUnit. */
+    public const FOOTER_ARCHETYPES = FooterComposition::ARCHETYPES;
 
     /** Floats transparently over the hero, so it needs an image-led hero under it. */
     private const OVERLAY_ARCHETYPE = 'minimal-overlay';
@@ -187,14 +197,31 @@ final class SectionsStep implements Step
                 $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
                 array_push($warnings, ...$batch->notesFor($key));
             } catch (\RuntimeException $e) {
+                $authoredFailure = json_encode(
+                    $e->getMessage(),
+                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                );
+                if (!is_string($authoredFailure)) {
+                    $authoredFailure = get_debug_type($e->getMessage());
+                }
+                $warningContext = "file='theme/{$job['file']}'; block='part root'; "
+                    . "authored={$authoredFailure}; ";
                 if ($isChrome) {
-                    $files[$job['file']] = self::fallbackChrome($key);
-                    $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
-                        . "deterministic minimal {$key} delivered";
+                    $footerSurface = $key === 'footer'
+                        ? FooterComposition::surface((string) ($job['input']['composition_archetype'] ?? ''))
+                        : null;
+                    $footerPageCount = $key === 'footer' && is_int($job['input']['page_count'] ?? null)
+                        ? $job['input']['page_count']
+                        : null;
+                    $files[$job['file']] = self::fallbackChrome($key, $footerSurface, $footerPageCount);
+                    $warnings[] = "part '{$key}': unusable generated markup; {$warningContext}"
+                        . "delivered=deterministic minimal {$key}; disposition=unusable template-part markup "
+                        . 'replaced while preserving the rest of the generated site';
                 } else {
                     $dropped[$key] = true;
-                    $warnings[] = "part '{$key}': unusable generated markup ({$e->getMessage()}); "
-                        . 'section dropped from the page plan';
+                    $warnings[] = "part '{$key}': unusable generated markup; {$warningContext}"
+                        . 'delivered=removed; disposition=only the unusable section part was removed and pruned '
+                        . 'from pages.json';
                 }
                 Narrator::write("    (part '{$key}': unusable generated markup — {$e->getMessage()})\n");
             }
@@ -219,13 +246,63 @@ final class SectionsStep implements Step
      * header/footer markup is unusable: a constrained group carrying the site
      * title, so templates referencing the part render something coherent.
      */
-    public static function fallbackChrome(string $key): string
+    public static function fallbackChrome(
+        string $key,
+        ?string $footerSurface = null,
+        ?int $footerPageCount = null
+    ): string
     {
-        $tag = $key === 'header' ? 'header' : 'footer';
-        return '<!-- wp:group {"tagName":"' . $tag . '","layout":{"type":"constrained"},'
-            . '"style":{"spacing":{"padding":{"top":"var:preset|spacing|md","bottom":"var:preset|spacing|md"}}}} -->' . "\n"
-            . '<' . $tag . ' class="wp-block-group" style="padding-top:var(--wp--preset--spacing--md);'
-            . 'padding-bottom:var(--wp--preset--spacing--md)"><!-- wp:site-title /--></' . $tag . '>' . "\n"
+        if (!in_array($key, ['header', 'footer'], true)) {
+            throw new \InvalidArgumentException("unknown chrome part '{$key}'");
+        }
+
+        $attrs = [
+            'layout' => ['type' => 'constrained'],
+            'style' => [
+                'spacing' => [
+                    'padding' => [
+                        'top' => 'var:preset|spacing|md',
+                        'bottom' => 'var:preset|spacing|md',
+                    ],
+                ],
+            ],
+        ];
+        $classes = ['wp-block-group'];
+        $siteTitleAttrs = [];
+        if ($key === 'footer') {
+            $surface = $footerSurface ?? 'base';
+            if (!in_array($surface, ['base', 'contrast'], true)) {
+                throw new \InvalidArgumentException("unknown footer surface '{$surface}'");
+            }
+            $pageCount = $footerPageCount ?? 1;
+            if ($pageCount < 1) {
+                throw new \InvalidArgumentException('footer page count must be at least 1');
+            }
+            $foreground = $surface === 'contrast' ? 'base' : 'contrast';
+            $attrs['backgroundColor'] = $surface;
+            $attrs['textColor'] = $foreground;
+            $classes[] = "has-{$surface}-background-color";
+            $classes[] = 'has-background';
+            $classes[] = "has-{$foreground}-color";
+            $classes[] = 'has-text-color';
+            $siteTitleAttrs['textColor'] = $foreground;
+            if ($pageCount === 1) {
+                $siteTitleAttrs['isLink'] = false;
+            }
+        }
+        $json = json_encode($attrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($json)) {
+            throw new \RuntimeException("could not encode deterministic {$key} fallback");
+        }
+
+        $siteTitleJson = $siteTitleAttrs === []
+            ? ''
+            : ' ' . json_encode($siteTitleAttrs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        return '<!-- wp:group ' . $json . ' -->' . "\n"
+            . '<div class="' . implode(' ', $classes) . '" style="padding-top:var(--wp--preset--spacing--md);'
+            . 'padding-bottom:var(--wp--preset--spacing--md)"><!-- wp:site-title'
+            . $siteTitleJson . ' /--></div>' . "\n"
             . '<!-- /wp:group -->';
     }
 
@@ -368,29 +445,35 @@ final class SectionsStep implements Step
     private function jobs(Project $project, array &$warnings = [], ?array $sourcePages = null): array
     {
         $pages = self::repairedPages($sourcePages ?? self::pages($project), $warnings);
+        $siteSpec = $project->readText('siteSpec.json');
+        $designDirection = DesignDirectionStep::readFor($project);
 
         $common = [
-            'site_spec'        => $project->readText('siteSpec.json'),
+            'site_spec'        => $siteSpec,
             'language'         => SiteSpecStep::languageOf($project),
             'theme_json'       => $project->readText('theme/theme.json'),
-            'design_direction' => DesignDirectionStep::readFor($project),
+            'design_direction' => $designDirection,
             'site_pages'       => PagePlanStep::sitePagesList($pages),
         ];
 
-        // The chrome is briefed on the FRONT page: that's what the header sits
-        // directly above (or floats on) and what sets the site's opening tone.
-        // The header mode is the shared contract: both sides of the page-top
-        // seam derive it from the same pure headerMode(), so the header's
-        // archetype assignment and every hero section's brief compose
-        // deliberately instead of each guessing. headerAssignment() derives it
-        // again from the canvas rather than taking it as an argument, which
-        // keeps its signature usable from tests.
+        // Chrome is briefed on both ends of the FRONT page: the header receives
+        // the opening hero, while the footer receives the actual final section.
+        // Each chrome archetype is also carried into the neighboring section's
+        // brief so content and seam ownership are agreed from both sides.
+        //
+        // The header mode is the shared top-seam contract: both sides derive it
+        // from the same pure headerMode(), so the header's archetype assignment
+        // and every hero section's brief compose deliberately instead of each
+        // guessing. headerAssignment() derives it again from the canvas rather
+        // than taking it as an argument, which keeps its signature usable from
+        // tests.
         $canvas = DesignDirectionStep::canvasFor($project);
         $headerMode = self::headerMode($pages, $canvas);
         // Fixed for the whole build, so the hero brief is built once, not once
         // per hero section.
         $headerContract = self::headerContract($headerMode);
         $frontSections = self::frontPage($pages)['sections'];
+        $footerArchetype = self::footerArchetype($pages, $siteSpec, $designDirection);
         $jobs = [
             'header' => [
                 'unit'  => $this->headerUnit,
@@ -404,7 +487,12 @@ final class SectionsStep implements Step
             ],
             'footer' => [
                 'unit'  => $this->footerUnit,
-                'input' => $common + ['outline' => self::outline($frontSections)],
+                'input' => $common + [
+                    'outline' => self::outline($frontSections),
+                    'final_section_brief' => self::finalSectionBrief($frontSections),
+                    'composition_archetype' => $footerArchetype,
+                    'page_count' => count($pages),
+                ],
                 'file'  => 'parts/footer.html',
             ],
         ];
@@ -422,7 +510,7 @@ final class SectionsStep implements Step
                         'path'  => (string) ($page['path'] ?? '/'),
                     ],
                     'section'   => $section,
-                    'neighbors' => self::neighbors($sections, $i),
+                    'neighbors' => self::neighbors($sections, $i, $footerArchetype),
                     // Only page-opening sections share the viewport with the
                     // header; everything below scrolls in under its own rules.
                     'header_contract' => (string) ($section['role'] ?? '') === SectionRole::HERO
@@ -434,7 +522,8 @@ final class SectionsStep implements Step
                     'unit'  => $this->sectionUnit,
                     'input' => $input,
                     'file'  => 'parts/' . $key . '.html',
-                ];            }
+                ];
+            }
         }
 
         return $jobs;
@@ -508,7 +597,7 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $sections
      */
-    public static function neighbors(array $sections, int $i): string
+    public static function neighbors(array $sections, int $i, string $footerArchetype = ''): string
     {
         $describe = function (?array $s): ?string {
             if (!is_array($s)) {
@@ -520,8 +609,33 @@ final class SectionsStep implements Step
         };
 
         $above = $describe($sections[$i - 1] ?? null) ?? 'the site header (this is the first section)';
-        $below = $describe($sections[$i + 1] ?? null) ?? 'the site footer (this is the last section)';
+        $below = $describe($sections[$i + 1] ?? null);
+        if ($below === null) {
+            $below = self::footerNeighborContract($footerArchetype);
+        }
         return "Above: {$above}\nBelow: {$below}";
+    }
+
+    /**
+     * The footer-side contract injected as every page's final section neighbor.
+     * The same archetype is sent to FooterUnit, so the two independently
+     * generated parts agree about content ownership and the visual handoff.
+     * Passing '' preserves the compact legacy description for direct callers
+     * whose adapter has not assigned a footer composition. Pure — unit-testable.
+     */
+    public static function footerNeighborContract(string $archetype): string
+    {
+        if ($archetype === '') {
+            return 'the site footer (this is the last section)';
+        }
+        FooterComposition::assertKnown($archetype);
+        $surface = FooterComposition::surface($archetype);
+        return "the site footer (this is the last section) — assigned {$archetype} composition opening on the "
+            . "exact **{$surface}** background surface. "
+            . 'This section owns its planned narrative, facts, imagery, and primary CTA; the footer owns persistent '
+            . 'identity, compact site-wide utility, and credit. If this section also uses that exact solid surface, '
+            . 'hand off continuously through spacing; otherwise make one decisive color or image cut. Do not repeat '
+            . 'copy, contact/hours clusters, CTA, or a second signature ornament.';
     }
 
     /**
@@ -567,6 +681,83 @@ final class SectionsStep implements Step
             }
         }
         return $lines === [] ? '(No hero section planned.)' : implode("\n", $lines);
+    }
+
+    /**
+     * A plain-text brief of the FRONT page's actual final planned section, so
+     * the footer can avoid repeating its content and can design the shared
+     * seam against its assigned surface/composition. Unlike heroBrief(), this
+     * is positional: the section immediately before the template footer is the
+     * relevant neighbor even if a stale plan supplied the wrong role.
+     * Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $sections
+     */
+    public static function finalSectionBrief(array $sections): string
+    {
+        $final = null;
+        for ($i = count($sections) - 1; $i >= 0; $i--) {
+            if (is_array($sections[$i])) {
+                $final = $sections[$i];
+                break;
+            }
+        }
+        if (!is_array($final)) {
+            return '(No final section planned.)';
+        }
+
+        $lines = [];
+        foreach (
+            [
+                'title' => 'Title',
+                'role' => 'Role',
+                'type' => 'Type',
+                'purpose' => 'Purpose',
+                'content_notes' => 'Notes',
+                'layout_archetype' => 'Layout archetype',
+                'background' => 'Background',
+                'vertical_density' => 'Vertical density',
+                'handoff' => 'Planned handoff',
+            ] as $key => $label
+        ) {
+            $value = trim((string) ($final[$key] ?? ''));
+            if ($value !== '') {
+                $lines[] = "{$label}: {$value}";
+            }
+        }
+        return $lines === [] ? '(No final section planned.)' : implode("\n", $lines);
+    }
+
+    /**
+     * Select one footer composition deterministically from stable build
+     * context. The hash is folded modulo the catalog size byte by byte, so it
+     * is portable across integer widths and never depends on process-local
+     * randomness. Site identity/direction spread different builds across the
+     * catalog; the front outline makes a materially changed plan eligible for
+     * a different coda. Pure — unit-testable.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     */
+    public static function footerArchetype(array $pages, string $siteSpec, string $designDirection): string
+    {
+        $front = self::frontPage($pages);
+        $seed = $siteSpec . "\n"
+            . $designDirection . "\n"
+            . (string) ($front['slug'] ?? '') . "\n"
+            . (string) ($front['title'] ?? '') . "\n"
+            . self::outline((array) ($front['sections'] ?? []));
+        $bucket = 0;
+        $count = count(self::FOOTER_ARCHETYPES);
+        foreach (str_split(hash('sha256', $seed, true)) as $byte) {
+            $bucket = (($bucket * 256) + ord($byte)) % $count;
+        }
+        return self::FOOTER_ARCHETYPES[$bucket];
+    }
+
+    /** The exact, single-archetype directive rendered into footer.md. */
+    public static function footerAssignment(string $archetype): string
+    {
+        return FooterComposition::assignment($archetype);
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
@@ -106,7 +107,7 @@ test('sections fans out across every page and gives each section its own page co
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections passes the design direction and hero brief to header and footer prompts', function () {
+test('sections passes the design direction and the front-page edge briefs to chrome prompts', function () {
     [$project, $tmp] = sections_fixture();
     $project->writeJson('designDirection.json', [
         'title'       => 'Archivo Silencioso',
@@ -124,6 +125,106 @@ test('sections passes the design direction and hero brief to header and footer p
     assert_contains('Archivo Silencioso', $reqs['header']['prompt']);
     assert_contains('Archivo Silencioso', $reqs['footer']['prompt']);
     assert_contains('Full-viewport cover photo.', $reqs['header']['prompt']);
+    assert_contains('Title: About', $reqs['footer']['prompt']);
+    assert_contains('Role: closing', $reqs['footer']['prompt']);
+    assert_contains('Layout archetype: centered-stack', $reqs['footer']['prompt']);
+    assert_contains('Background: base', $reqs['footer']['prompt']);
+    assert_true(
+        !str_contains($reqs['footer']['prompt'], 'Full-viewport cover photo.'),
+        'the footer receives the final section, not the hero brief'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('footer composition is stable, varied, and shared with the closing-section handoff', function () {
+    [$project, $tmp] = sections_fixture();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $step = new SectionsStep(new FakeLlm(), $renderer);
+    $reqs = $step->requests($project);
+    $footer = $reqs['footer']['prompt'];
+
+    assert_true(
+        (bool) preg_match(
+            '/ASSIGNED FOOTER COMPOSITION for this build: \*\*([a-z-]+)\*\*/',
+            $footer,
+            $match,
+        ),
+        'footer prompt carries one assigned composition'
+    );
+    $archetype = $match[1];
+    assert_true(in_array($archetype, SectionsStep::FOOTER_ARCHETYPES, true));
+    $surface = FooterComposition::surface($archetype);
+    assert_contains("ASSIGNED FOOTER SURFACE: **{$surface}**", $footer);
+    $closingPrompt = sections_request_text($reqs['page-home--about']);
+    assert_contains(
+        "Below: the site footer (this is the last section) — assigned {$archetype} composition opening on the exact **{$surface}** background surface",
+        $closingPrompt
+    );
+    assert_contains('This section owns its planned narrative, facts, imagery, and primary CTA', $closingPrompt);
+    assert_contains('otherwise make one decisive color or image cut', $closingPrompt);
+
+    $pages = $project->readJson('pages.json')['pages'];
+    $siteSpec = $project->readText('siteSpec.json');
+    $direction = \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project);
+    assert_eq(
+        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
+        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
+        'identical build context always selects the same composition'
+    );
+
+    $picks = [];
+    foreach (range(1, 30) as $n) {
+        $pick = SectionsStep::footerArchetype($pages, "{\"name\":\"Site {$n}\"}", "Direction {$n}");
+        $picks[$pick] = true;
+    }
+    assert_true(count($picks) >= 4, 'different site identities spread across the footer catalog');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('footer prompt renders only its selected high-impact recipe without overriding signature placement', function () {
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('designDirection.json', [
+        'title' => 'Restricted device',
+        'description' => 'A graphic editorial system.',
+        'signature_device' => 'Use the stepped accent only in the hero and nowhere else.',
+    ]);
+    $reqs = (new SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->requests($project);
+    $footer = $reqs['footer']['prompt'];
+
+    assert_true(
+        (bool) preg_match(
+            '/ASSIGNED FOOTER COMPOSITION for this build: \*\*([a-z-]+)\*\*/',
+            $footer,
+            $match,
+        ),
+        'footer prompt carries one assigned composition'
+    );
+    $archetype = $match[1];
+    $recipeMarkers = [
+        'typographic-billboard' => 'One display-scale identity or short brand-coda',
+        'photographic-split' => 'deliberately unequal 60/40 or 65/35',
+        'image-plinth' => 'Treat ONE foreground wp:image as the focal object',
+        'conversion-panel' => 'Build a bold, offset invitation',
+        'editorial-colophon' => 'final plate of a book or',
+        'split-ledger' => 'Build a strong 65/35 or 70/30 split',
+    ];
+    assert_contains($recipeMarkers[$archetype], $footer);
+    foreach ($recipeMarkers as $otherArchetype => $marker) {
+        if ($otherArchetype !== $archetype) {
+            assert_true(!str_contains($footer, $marker), "recipe for {$otherArchetype} stays out of the prompt");
+        }
+    }
+    assert_contains('ONE dominant focal gesture and low content density', $footer);
+    assert_contains('signature-device PLACEMENT restrictions are binding', $footer);
+    assert_contains('ONLY when the direction explicitly makes it site-wide', $footer);
+    assert_contains('NEVER set `"tagName":"footer"`', $footer);
+    assert_contains('External/social links use only an exact URL present in the SITE SPEC', $footer);
+    assert_contains('NEVER invent `is-style-none`, `is-style-plain`', $footer);
+    assert_eq(
+        FooterComposition::usesGeneratedImage($archetype),
+        str_contains($footer, 'AI_IMAGE: subject | page-context | style | aspect-ratio'),
+        'only image-led recipes receive image-generation instructions'
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -282,6 +383,40 @@ test('heroBrief selects only the structural hero role, not the semantic type', f
     assert_eq('(No hero section planned.)', $brief);
 
     assert_eq('(No hero section planned.)', SectionsStep::heroBrief([]));
+});
+
+test('finalSectionBrief describes the positional footer neighbor', function () {
+    $brief = SectionsStep::finalSectionBrief([
+        ['title' => 'Hero', 'role' => 'hero', 'type' => 'welcome', 'content_notes' => 'Opening image.'],
+        [
+            'title' => 'Reserve',
+            'role' => 'closing',
+            'type' => 'reservation',
+            'purpose' => 'Turn interest into a booking.',
+            'content_notes' => 'Show the canonical hours and one booking action.',
+            'layout_archetype' => 'asymmetric-split',
+            'background' => 'contrast',
+            'vertical_density' => 'spacious',
+            'handoff' => 'Contrast band meets the footer.',
+        ],
+    ]);
+    foreach (
+        [
+            'Title: Reserve',
+            'Role: closing',
+            'Type: reservation',
+            'Purpose: Turn interest into a booking.',
+            'Notes: Show the canonical hours and one booking action.',
+            'Layout archetype: asymmetric-split',
+            'Background: contrast',
+            'Vertical density: spacious',
+            'Planned handoff: Contrast band meets the footer.',
+        ] as $expected
+    ) {
+        assert_contains($expected, $brief);
+    }
+    assert_true(!str_contains($brief, 'Opening image.'), 'only the section directly above the footer is described');
+    assert_eq('(No final section planned.)', SectionsStep::finalSectionBrief([]));
 });
 
 /** A one-page pages.json fixture whose front hero has the given plan fields. */
@@ -627,17 +762,73 @@ test('sections falls back to deterministic chrome when the header markup is unus
     assert_contains('"layout":{"type":"constrained"}', $header);
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
     assert_contains("part 'header': unusable generated markup", $joined);
-    assert_contains('deterministic minimal header delivered', $joined);
+    assert_contains('delivered=deterministic minimal header', $joined);
+    assert_contains('disposition=', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('header nav rule follows the page count: anchors for one page, page-list for several', function () {
+test('sections keeps the assigned surface when generated footer markup is unusable', function () {
+    [$project, $tmp] = sections_fixture();
+    $pages = $project->readJson('pages.json')['pages'];
+    $archetype = SectionsStep::footerArchetype(
+        $pages,
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project)
+    );
+    $surface = FooterComposition::surface($archetype);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('just prose, not a footer');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $footer = $project->readText('theme/parts/footer.html');
+    assert_contains("\"backgroundColor\":\"{$surface}\"", $footer);
+    assert_contains("has-{$surface}-background-color", $footer);
+    assert_contains('wp:site-title', $footer);
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'footer': unusable generated markup", $joined);
+    assert_contains("file='theme/parts/footer.html'", $joined);
+    assert_contains("block='part root'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=deterministic minimal footer', $joined);
+    assert_contains('disposition=', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('fallback chrome relies on the template-part landmark instead of nesting one', function () {
+    foreach (['header', 'footer'] as $key) {
+        $markup = SectionsStep::fallbackChrome($key);
+        assert_contains('<div class="wp-block-group', $markup);
+        assert_true(!str_contains($markup, '"tagName"'), "{$key} fallback has no redundant tagName");
+        assert_true(!str_contains($markup, "<{$key}"), "{$key} fallback has no nested semantic landmark");
+    }
+    $contrastFooter = SectionsStep::fallbackChrome('footer', 'contrast');
+    assert_contains('"backgroundColor":"contrast"', $contrastFooter);
+    assert_contains('"textColor":"base"', $contrastFooter);
+    assert_contains('"isLink":false', $contrastFooter);
+    assert_contains('has-contrast-background-color', $contrastFooter);
+    assert_true(
+        !str_contains(SectionsStep::fallbackChrome('footer', 'contrast', 2), '"isLink":false'),
+        'a multi-page fallback may link the site title home'
+    );
+});
+
+test('chrome nav rules follow the page count: anchors for one page, page-list for several', function () {
     [$project, $tmp] = sections_fixture(); // homepage only
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_contains('do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_contains('href="#menu-highlights"', $reqs['header']['prompt']);
+    assert_contains('This site is ONE page: NEVER use `wp:page-list`', $reqs['footer']['prompt']);
+    assert_contains('root-relative `/#anchor`', $reqs['footer']['prompt']);
+    assert_contains('`href="/"`', $reqs['footer']['prompt']);
+    assert_contains('site-title MUST explicitly set `"isLink":false`', $reqs['footer']['prompt']);
 
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
@@ -651,6 +842,8 @@ test('header nav rule follows the page count: anchors for one page, page-list fo
 
     assert_contains('should contain `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_true(!str_contains($reqs['header']['prompt'], 'do NOT use `<!-- wp:page-list /-->`'), 'multi-page header keeps the page-list default');
+    assert_contains('A compact `wp:page-list` is permitted', $reqs['footer']['prompt']);
+    assert_true(!str_contains($reqs['footer']['prompt'], 'This site is ONE page'), 'multi-page footer may list pages');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -38,7 +38,11 @@ test('markup generation units share one output-only contract', function () {
             'nav_rule' => '- Use wp:page-list.',
             'archetype_assignment' => 'ASSIGNED HEADER ARCHETYPE: standard-row',
         ]),
-        'footer' => (new FooterUnit($llm, $renderer))->request($input),
+        'footer' => (new FooterUnit($llm, $renderer))->request($input + [
+            'final_section_brief' => 'A quiet closing section.',
+            'composition_archetype' => 'typographic-billboard',
+            'page_count' => 1,
+        ]),
         'section' => (new SectionUnit($llm, $renderer))->request($input + [
             'page' => [
                 'slug' => 'home',
