@@ -224,12 +224,17 @@ final class SectionsStep implements Step
      * whole — an empty page in the nav is worse than an absent one — except
      * the front page, which templates and the seeder rely on.
      *
+     * Public for the same reason repairedPages() is: the wpcom fan-out path
+     * replaces this step and must apply the identical drop-and-prune
+     * degradation when a part is unusable, or one lost section discards a
+     * whole build the CLI would have shipped. Pure — unit-testable.
+     *
      * @param array<int,array<string,mixed>> $sourcePages
      * @param array<string,true> $dropped part keys (partSlug) of dropped sections
      * @param list<string>       $warnings appended to in place
      * @return array<int,array<string,mixed>>
      */
-    private static function pruneDroppedSections(array $sourcePages, array $dropped, array &$warnings): array
+    public static function pruneDroppedSections(array $sourcePages, array $dropped, array &$warnings): array
     {
         $pages = [];
         foreach ($sourcePages as $page) {
