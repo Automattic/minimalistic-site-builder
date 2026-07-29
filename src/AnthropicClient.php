@@ -495,7 +495,11 @@ final class AnthropicClient implements Llm
      * transfer completes — and classify each transfer. Pure transport — no
      * retry, no request counting, no throwing on a single failure (the
      * orchestrator decides). Bounding in-flight transfers keeps a wide fan-out
-     * (every planned section at once) from tripping the API's rate limits.
+     * (every planned section at once) from tripping the API's rate limits, and
+     * a 429 on any member holds all further launches for the round: the held
+     * members come back transient, so retryTextBatch re-sends them after its
+     * backoff instead of the pool firing the whole batch into a rate-limit
+     * event as fast as the 429s bounce back.
      *
      * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
      * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}>
@@ -512,7 +516,23 @@ final class AnthropicClient implements Llm
         $keysById = [];
         $raw = [];
 
-        $start = function (string|int $key, array $body) use ($multi, &$handles, &$keysById, &$raw): void {
+        /** @var array<array-key,array<string,mixed>> $queuedOutcomes synthetic transient outcomes (refused adds, held launches) drained by $await before any I/O */
+        $queuedOutcomes = [];
+        // Once any member 429s, further launches this round are held: firing
+        // the rest of the batch into a rate-limit event as fast as the 429s
+        // bounce back only extends the penalty. Held members return transient
+        // and retryTextBatch re-sends them after its backoff round.
+        $holding = false;
+
+        $start = function (string|int $key, array $body) use ($multi, &$handles, &$keysById, &$raw, &$queuedOutcomes, &$holding): void {
+            if ($holding) {
+                $queuedOutcomes[$key] = [
+                    'ok' => false,
+                    'transient' => true,
+                    'error' => 'launch held: a sibling request was rate-limited (HTTP 429)',
+                ];
+                return;
+            }
             $raw[$key] = '';
             $ch = curl_init(self::ENDPOINT);
             curl_setopt_array($ch, [
@@ -532,18 +552,34 @@ final class AnthropicClient implements Llm
                     return strlen($chunk);
                 },
             ]);
+            // A refused add would otherwise be a phantom in-flight transfer
+            // that never produces a CURLMSG_DONE. Queue it as a transient
+            // outcome instead; retryTextBatch re-sends it on a fresh stack.
+            if (curl_multi_add_handle($multi, $ch) !== CURLM_OK) {
+                curl_close($ch);
+                unset($raw[$key]);
+                $queuedOutcomes[$key] = [
+                    'ok' => false,
+                    'transient' => true,
+                    'error' => 'curl_multi_add_handle refused the transfer',
+                ];
+                return;
+            }
             $handles[$key] = $ch;
             $keysById[spl_object_id($ch)] = $key;
-            curl_multi_add_handle($multi, $ch);
         };
 
         // Classify one finished transfer and release its handle (and slot).
-        $finish = function (string|int $key, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$raw): array {
+        $finish = function (string|int $key, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$raw, &$holding): array {
+            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($httpStatus === 429) {
+                $holding = true;
+            }
             $outcome = self::interpretStream(
                 $raw[$key],
                 curl_errno($ch),
                 curl_error($ch),
-                (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+                $httpStatus,
                 (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
             );
             unset($handles[$key], $keysById[spl_object_id($ch)], $raw[$key]);
@@ -552,7 +588,12 @@ final class AnthropicClient implements Llm
             return $outcome;
         };
 
-        $await = function () use ($multi, &$handles, &$keysById, $finish): array {
+        $await = function () use ($multi, &$handles, &$keysById, &$queuedOutcomes, $finish): array {
+            if ($queuedOutcomes !== []) {
+                $done = $queuedOutcomes;
+                $queuedOutcomes = [];
+                return $done;
+            }
             // Drive the stack until at least one transfer finishes (see
             // WpcomImageClient::multiRequest for the -1 busy-spin guard).
             do {
@@ -562,7 +603,8 @@ final class AnthropicClient implements Llm
                     if ($msg['msg'] !== CURLMSG_DONE) {
                         continue;
                     }
-                    $key = $keysById[spl_object_id($msg['handle'])];
+                    $key = $keysById[spl_object_id($msg['handle'])]
+                        ?? throw new \RuntimeException('rolling pool got a completion for an unregistered curl handle');
                     $done[$key] = $finish($key, $msg['handle']);
                 }
                 if ($done !== []) {
@@ -575,8 +617,9 @@ final class AnthropicClient implements Llm
 
             // The multi stack stopped without reporting a completion (a CURLM
             // failure). Classify what every remaining transfer holds so far —
-            // interpretStream marks severed streams transient — rather than
-            // hanging the pool or discarding sibling responses.
+            // interpretStream marks severed streams and never-responded
+            // transfers (status 0) transient — rather than hanging the pool
+            // or discarding sibling responses.
             $done = [];
             foreach ($handles as $key => $ch) {
                 $done[$key] = $finish($key, $ch);
@@ -661,12 +704,15 @@ final class AnthropicClient implements Llm
      * Classify one completed streaming transfer into an outcome (never throws),
      * so the batch orchestrator can retry the transient ones. Same transient vs
      * permanent split as streamRequest(): connection-level cURL errors (incl. 6
-     * "could not resolve host") and 429/5xx are transient; a clean 4xx or any
-     * other cURL error is permanent and aborts the build. Pure — no I/O.
+     * "could not resolve host"), 429/5xx, and a transfer with no response at
+     * all (status 0 — the rolling pool's CURLM-failure fallback classifies
+     * handles that never received headers) are transient; a clean 4xx or any
+     * other cURL error is permanent and aborts the build. Public for tests,
+     * like parseSse. Pure — no I/O.
      *
      * @return array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,time?:float,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}
      */
-    private static function interpretStream(
+    public static function interpretStream(
         string $raw,
         int $errno,
         string $error,
@@ -676,6 +722,12 @@ final class AnthropicClient implements Llm
     {
         if ($errno !== 0) {
             return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}"];
+        }
+        // Status 0 with no cURL error: the transfer stopped before any
+        // response headers arrived (a CURLM-level failure or a rejected add).
+        // Operational, not the request's fault — retry it.
+        if ($status === 0) {
+            return ['ok' => false, 'transient' => true, 'error' => 'no response received before the transfer stopped'];
         }
         if ($status < 200 || $status >= 300) {
             $param = self::rejectedParamForHttpError($status, $raw);

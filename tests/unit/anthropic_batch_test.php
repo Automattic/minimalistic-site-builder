@@ -734,3 +734,36 @@ test('rollingPool rejects an await that returns nothing or an unknown key', func
     }
     assert_true(is_string($err) && str_contains($err, 'ghost'), 'a completion for a key not in flight is a transport bug');
 });
+
+test('interpretStream classifies a transfer with no response at all as transient', function () {
+    // The rolling pool's CURLM-failure fallback classifies in-flight handles
+    // that never received response headers: errno 0 (never reported through
+    // info_read), HTTP status 0. That is an operational failure - retry it;
+    // a permanent "HTTP 0" outcome would abort the build and discard every
+    // paid-for sibling response.
+    $out = AnthropicClient::interpretStream('', 0, '', 0, 0.0);
+    assert_eq(false, $out['ok'], 'no response is not a success');
+    assert_eq(true, $out['transient'] ?? false, 'no response at all must be retryable, not a build abort');
+});
+
+test('rollingPool rejects a second completion for an already-finished key', function () {
+    $script = [['a'], ['a']];
+    $err = null;
+    try {
+        AnthropicClient::rollingPool(
+            ['a' => [], 'b' => []],
+            function (): void {},
+            function () use (&$script): array {
+                $out = [];
+                foreach (array_shift($script) as $key) {
+                    $out[$key] = 'R';
+                }
+                return $out;
+            },
+            1,
+        );
+    } catch (RuntimeException $e) {
+        $err = $e->getMessage();
+    }
+    assert_true(is_string($err) && str_contains($err, 'not in flight'), 'a duplicate completion is a transport bug');
+});
