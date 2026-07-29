@@ -45,9 +45,6 @@ final class GenerateImagesStep implements Step
     /** Written only once this step has completed all generation and rewrites. */
     public const COMPLETION_ARTIFACT = 'images.generated.json';
 
-    /** How many images to generate concurrently per batch. */
-    private const BATCH_SIZE = 10;
-
     /**
      * @param ?Llm    $llm         used only to rewrite safety-filtered prompts;
      *        null disables that repair (filtered images just fail)
@@ -146,54 +143,66 @@ final class GenerateImagesStep implements Step
             $pending[$i] = $spec; // preserve the original images.json index
         }
 
-        // Generate the pending images in concurrent batches rather than one by
-        // one: a slow Imagen round-trip per call otherwise dominates the step.
-        $batches = array_chunk($pending, self::BATCH_SIZE, true);
-        $batchCount = count($batches);
+        // Generate every pending image through ONE pooled batch: concurrency
+        // is bounded by the client's rolling pool, so a slow image holds only
+        // its own slot instead of a barrier between step-level chunks.
         if ($pending !== []) {
             Narrator::write(sprintf(
-                "    generating %d image(s) in %d batch(es) of up to %d…\n",
-                count($pending), $batchCount, self::BATCH_SIZE
+                "    generating %d image(s) through the client's rolling pool…\n",
+                count($pending)
             ));
-        }
-        foreach ($batches as $b => $batch) {
-            Narrator::write(sprintf("    batch %d/%d: %d image(s)\n", $b + 1, $batchCount, count($batch)));
 
-            // Map this batch's original indices to generation specs (order kept).
-            $indices = array_keys($batch);
+            // Map original images.json indices to generation specs (order kept).
+            $indices = array_keys($pending);
             $batchSpecs = array_map(
                 fn (array $spec): array => self::generationSpec($spec, $siteContext, $imageGrade),
-                array_values($batch)
+                array_values($pending)
             );
 
-            $results = $this->images->generateBatch($batchSpecs);
-
             $repairs = []; // original index => the filtered failure's error
-            foreach ($indices as $pos => $i) {
-                $filename = (string) $specs[$i]['filename'];
-                $result = $results[$pos] ?? ['ok' => false, 'error' => 'no result returned'];
+            $handled = []; // batch position => true, so stragglers get exactly one pass
 
-                // A safety-filtered prompt (already retried by the client) is
-                // repairable: log the failed attempt so the sequence stays
-                // inspectable, then hold it for the LLM rewrite pass below
-                // instead of marking it failed outright.
+            // One image's FINAL result. A safety-filtered prompt (already
+            // retried by the client) is repairable: log the failed attempt so
+            // the sequence stays inspectable, then hold it for the LLM rewrite
+            // pass below instead of marking it failed outright. Everything
+            // else finishes and persists immediately, so progress survives an
+            // interruption while the rest of the batch is still generating.
+            $handle = function (int $pos, array $result) use (
+                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs, &$handled
+            ): void {
+                if (isset($handled[$pos])) {
+                    return;
+                }
+                $handled[$pos] = true;
+                $i = $indices[$pos];
+                $filename = (string) $specs[$i]['filename'];
+
                 if ($this->llm !== null && !($result['ok'] ?? false) && ($result['filtered'] ?? false)) {
                     $error = (string) ($result['error'] ?? 'safety-filtered');
                     Narrator::write("    FILTERED {$filename}: {$error}\n");
                     ImageLogger::log($filename, $this->requestLog($specs[$i], $batchSpecs[$pos], $imageGrade), [], $error);
                     $repairs[$i] = $error;
-                    continue;
+                    return;
                 }
 
                 $this->finish($project, $specs, $i, $batchSpecs[$pos], $result, $resolved, $imageGrade);
+                $project->writeJson('images.json', $specs);
+            };
+
+            $results = $this->images->generateBatch($batchSpecs, $handle);
+
+            // A client that omitted a result (or delivered no onResult) still
+            // yields exactly one final record per image.
+            foreach ($indices as $pos => $i) {
+                if (!isset($handled[$pos])) {
+                    $handle($pos, $results[$pos] ?? ['ok' => false, 'error' => 'no result returned']);
+                }
             }
 
             if ($repairs !== []) {
                 $this->repairFiltered($project, $specs, $repairs, $siteContext, $imageGrade, $resolved);
             }
-
-            // Persist after each batch so progress survives an interruption.
-            $project->writeJson('images.json', $specs);
         }
 
         $project->writeJson('images.json', $specs);

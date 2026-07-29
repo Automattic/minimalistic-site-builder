@@ -192,3 +192,75 @@ test('estimateTokens is conservative and grows with length', function () {
     assert_eq(0, Imagen::estimateTokens('   '));
     assert_true(Imagen::estimateTokens('a b c d e') >= 5, 'at least one token per short word');
 });
+
+test('retryBatch retries held launches without burning the transient budget', function () {
+    // held => true means the pool never sent the request; it must not consume
+    // the finite retry rounds, and a twice-held image still gets a real
+    // attempt instead of degrading to a never-attempted placeholder failure.
+    $round = 0;
+    $out = Imagen::retryBatch(
+        [0 => ['p' => 'real'], 1 => ['p' => 'held']],
+        function (array $subset) use (&$round): array {
+            $round++;
+            $res = [];
+            foreach (array_keys($subset) as $i) {
+                $res[$i] = match (true) {
+                    $i === 0 && $round === 1 => ['ok' => false, 'transient' => true, 'error' => 'HTTP 429'],
+                    $i === 1 && $round <= 2 => ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)'],
+                    default => ['ok' => true, 'bytes' => "IMG{$i}"],
+                };
+            }
+            return $res;
+        },
+        [0],
+    );
+    assert_eq('IMG0', $out['results'][0]['bytes']);
+    assert_eq('IMG1', $out['results'][1]['bytes'], 'a twice-held image still generates after the budget');
+    assert_eq(3, $round, 'held keys retry in their own round instead of failing');
+    assert_eq(2, $out['succeeded']);
+});
+
+test('retryBatch survives a held launch with an empty delay schedule', function () {
+    $round = 0;
+    $out = Imagen::retryBatch(
+        [0 => ['p' => 'h']],
+        function (array $subset) use (&$round): array {
+            $round++;
+            return [0 => $round === 1
+                ? ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)']
+                : ['ok' => true, 'bytes' => 'IMG']];
+        },
+        [],
+    );
+    assert_eq('IMG', $out['results'][0]['bytes'], 'a held image retries even with no transient rounds configured');
+});
+
+test('retryBatch reports each result once, at its final state, via onResult', function () {
+    // Incremental persistence hook: fires when a result is FINAL (success or
+    // out-of-retries failure), never for a transient outcome that will retry.
+    $seen = [];
+    $round = 0;
+    $out = Imagen::retryBatch(
+        [0 => ['p' => 'slow-ok'], 1 => ['p' => 'ok'], 2 => ['p' => 'dies']],
+        function (array $subset) use (&$round): array {
+            $round++;
+            $res = [];
+            foreach (array_keys($subset) as $i) {
+                $res[$i] = match (true) {
+                    $i === 0 && $round === 1 => ['ok' => false, 'transient' => true, 'error' => 'HTTP 503'],
+                    $i === 2 => ['ok' => false, 'transient' => false, 'error' => 'permanent'],
+                    default => ['ok' => true, 'bytes' => "IMG{$i}"],
+                };
+            }
+            return $res;
+        },
+        [0],
+        null,
+        function (int $i, array $result) use (&$seen): void {
+            $seen[] = [$i, $result['ok']];
+        },
+    );
+    sort($seen);
+    assert_eq([[0, true], [1, true], [2, false]], $seen, 'one final callback per image, no transient intermediates');
+    assert_eq('IMG0', $out['results'][0]['bytes'], 'return shape is unchanged');
+});

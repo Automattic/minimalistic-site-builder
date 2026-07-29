@@ -178,13 +178,30 @@ final class Imagen
      * progress line stays in the transport, not here). Unit-testable with a
      * fake transport and zero delays.
      *
+     * An outcome carrying `held` (the pool declined to send the request after
+     * a sibling was rate-limited) retries without consuming the finite delay
+     * budget: it says nothing about its own request, and the really-attempted
+     * sibling's gate still bounds the batch — a never-attempted image must not
+     * degrade to a placeholder failure.
+     *
+     * The optional $onResult fires once per body when its result is FINAL
+     * (success, or failure with retries exhausted) — never for an outcome that
+     * will retry — so callers can persist progress incrementally.
+     *
      * @param array<int,array<string,mixed>> $bodies request bodies keyed by index
-     * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,filtered?:bool}> $transport
+     * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,held?:bool,filtered?:bool}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param callable(int,int,int):void|null $onRetry called before each backoff with (pending count, attempt #, wait seconds)
+     * @param callable(int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}):void|null $onResult called once per index with its final result
      * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>,succeeded:int}
      */
-    public static function retryBatch(array $bodies, callable $transport, array $delays, ?callable $onRetry = null): array
+    public static function retryBatch(
+        array $bodies,
+        callable $transport,
+        array $delays,
+        ?callable $onRetry = null,
+        ?callable $onResult = null,
+    ): array
     {
         $results = [];
         $succeeded = 0;
@@ -199,6 +216,8 @@ final class Imagen
                 if ($outcome['ok']) {
                     $results[$i] = ['ok' => true, 'bytes' => $outcome['bytes']];
                     $succeeded++;
+                } elseif (($outcome['held'] ?? false) === true) {
+                    $retry[] = $i; // never sent — retry without charging the budget
                 } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
                     $retry[] = $i; // try this one again next round
                 } else {
@@ -208,11 +227,16 @@ final class Imagen
                     $results[$i] = ['ok' => false, 'error' => $outcome['error']]
                         + (($outcome['filtered'] ?? false) ? ['filtered' => true] : []);
                 }
+                if ($onResult !== null && array_key_exists($i, $results)) {
+                    $onResult($i, $results[$i]);
+                }
             }
 
             $pending = $retry;
             if ($pending !== []) {
-                $wait = $delays[$attempt];
+                // Held keys can outlive the delay schedule; clamp to its last
+                // (or zero) instead of indexing past the end.
+                $wait = $delays === [] ? 0 : $delays[min($attempt, count($delays) - 1)];
                 $attempt++;
                 if ($onRetry !== null) {
                     $onRetry(count($pending), $attempt, $wait);

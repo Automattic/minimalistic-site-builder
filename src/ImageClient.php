@@ -33,12 +33,18 @@ interface ImageClient
      * requests together (not one-at-a-time) and tolerate partial failure: one
      * image failing must not abort the others.
      *
+     * The optional $onResult fires once per spec index when that image's
+     * result is FINAL (success, or failure with retries exhausted) — never for
+     * an intermediate attempt — so callers can persist progress while the rest
+     * of the batch is still generating.
+     *
      * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string,mime?:?string}> $specs
+     * @param callable(int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}):void|null $onResult
      * @return array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>
      *         keyed by the same index as $specs (one result per spec, order
      *         preserved); `filtered` marks a failure caused by the endpoint's
      *         safety filter rejecting the prompt — repairable by rewording it,
      *         unlike a transport failure
      */
-    public function generateBatch(array $specs): array;
+    public function generateBatch(array $specs, ?callable $onResult = null): array;
 }

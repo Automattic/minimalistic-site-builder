@@ -22,6 +22,13 @@ final class WpcomImageClient implements ImageClient
     private const ENDPOINT_TPL =
         'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/publishers/google/models/%s:predict';
 
+    /**
+     * Most concurrent in-flight predict requests. The rolling pool keeps up to
+     * this many transfers running and refills a slot the moment its transfer
+     * completes, so a wide batch is bounded without stalling behind a barrier.
+     */
+    private const MAX_CONCURRENCY = 10;
+
     private int $requests = 0;
 
     /**
@@ -67,7 +74,7 @@ final class WpcomImageClient implements ImageClient
      *         keyed by the same index as $specs (order preserved); `filtered`
      *         marks a prompt the safety filter rejected on every attempt
      */
-    public function generateBatch(array $specs): array
+    public function generateBatch(array $specs, ?callable $onResult = null): array
     {
         if ($specs === []) {
             return [];
@@ -89,65 +96,137 @@ final class WpcomImageClient implements ImageClient
             $this->retryDelays,
             static function (int $count, int $attempt, int $wait): void {
                 Narrator::write("    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
-            }
+            },
+            $onResult,
         );
         $this->requests += $out['succeeded'];
         return $out['results'];
     }
 
     /**
-     * Run a set of predict requests concurrently with curl_multi and classify
-     * each transfer. Pure transport — no retry, no request counting.
+     * Run a set of predict requests through a rolling pool — at most
+     * MAX_CONCURRENCY in flight, the freed slot refilled the moment any
+     * transfer completes — and classify each transfer. Pure transport — no
+     * retry, no request counting. A 429 on any member holds all further
+     * launches for the round: held members come back transient with
+     * `held: true`, so Imagen::retryBatch re-sends them after its backoff
+     * without charging its budget, and the pool doesn't fire the whole batch
+     * into a rate-limit event as fast as the 429s bounce back.
      *
      * @param array<int,array<string,mixed>> $bodies request body keyed by index
-     * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,filtered?:bool}>
+     * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,held?:bool,filtered?:bool}>
      */
     private function multiRequest(array $bodies): array
     {
         $multi = curl_multi_init();
+        /** @var array<int,\CurlHandle> $handles */
         $handles = [];
-        foreach ($bodies as $i => $body) {
-            $ch = $this->buildHandle($body);
-            $handles[$i] = $ch;
-            curl_multi_add_handle($multi, $ch);
-        }
+        /** @var array<int,int> $keysById spl_object_id(handle) => request index */
+        $keysById = [];
+        /** @var array<int,array<string,mixed>> $queuedOutcomes synthetic transient outcomes (refused adds, held launches) drained by $await before any I/O */
+        $queuedOutcomes = [];
+        $holding = false;
 
-        // Drive all transfers to completion. curl_multi_select() blocks until
-        // there is activity; it returns -1 when there is no socket to wait on
-        // yet (e.g. during DNS), so guard against a busy-spin in that case.
-        do {
-            $status = curl_multi_exec($multi, $running);
-            if ($running && curl_multi_select($multi, 1.0) === -1) {
-                usleep(1000);
+        $start = function (string|int $i, array $body) use ($multi, &$handles, &$keysById, &$queuedOutcomes, &$holding): void {
+            if ($holding) {
+                $queuedOutcomes[$i] = [
+                    'ok' => false,
+                    'transient' => true,
+                    'held' => true,
+                    'error' => 'launch held: a sibling request was rate-limited (HTTP 429)',
+                ];
+                return;
             }
-        } while ($running && $status === CURLM_OK);
+            $ch = $this->buildHandle($body);
+            if (curl_multi_add_handle($multi, $ch) !== CURLM_OK) {
+                curl_close($ch);
+                $queuedOutcomes[$i] = [
+                    'ok' => false,
+                    'transient' => true,
+                    'error' => 'curl_multi_add_handle refused the transfer',
+                ];
+                return;
+            }
+            $handles[$i] = $ch;
+            $keysById[spl_object_id($ch)] = $i;
+        };
 
-        $out = [];
-        foreach ($handles as $i => $ch) {
+        // Classify one finished transfer and release its handle (and slot).
+        $finish = function (string|int $i, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$holding): array {
             $raw    = (string) curl_multi_getcontent($ch);
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
-            $httpStatus = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($httpStatus === 429) {
+                $holding = true;
+            }
+            unset($handles[$i], $keysById[spl_object_id($ch)]);
             curl_multi_remove_handle($multi, $ch);
             curl_close($ch);
 
             try {
                 self::throwOnTransportError($errno, $error);
-                $out[$i] = ['ok' => true, 'bytes' => Imagen::interpret($raw, (int) $httpStatus)];
+                if ($errno === 0 && $httpStatus === 0) {
+                    // No response headers at all (a CURLM-level failure):
+                    // operational, not the prompt's fault — retry it.
+                    throw new TransientApiException('no response received before the transfer stopped');
+                }
+                return ['ok' => true, 'bytes' => Imagen::interpret($raw, $httpStatus)];
             } catch (ImageFilteredException $e) {
                 // The safety filter is non-deterministic: retry like a
                 // transient failure, but keep the filtered flag so the caller
                 // can repair the prompt once the retries run out.
-                $out[$i] = ['ok' => false, 'transient' => true, 'filtered' => true, 'error' => $e->getMessage()];
+                return ['ok' => false, 'transient' => true, 'filtered' => true, 'error' => $e->getMessage()];
             } catch (TransientApiException $e) {
-                $out[$i] = ['ok' => false, 'transient' => true, 'error' => $e->getMessage()];
+                return ['ok' => false, 'transient' => true, 'error' => $e->getMessage()];
             } catch (\Throwable $e) {
-                $out[$i] = ['ok' => false, 'transient' => false, 'error' => $e->getMessage()];
+                return ['ok' => false, 'transient' => false, 'error' => $e->getMessage()];
             }
-        }
+        };
 
-        curl_multi_close($multi);
-        return $out;
+        $await = function () use ($multi, &$handles, &$keysById, &$queuedOutcomes, $finish): array {
+            if ($queuedOutcomes !== []) {
+                $done = $queuedOutcomes;
+                $queuedOutcomes = [];
+                return $done;
+            }
+            // Drive the stack until at least one transfer finishes. The -1
+            // guard prevents a busy-spin while there is no socket yet (DNS).
+            do {
+                $status = curl_multi_exec($multi, $running);
+                $done = [];
+                while (($msg = curl_multi_info_read($multi)) !== false) {
+                    if ($msg['msg'] !== CURLMSG_DONE) {
+                        continue;
+                    }
+                    $i = $keysById[spl_object_id($msg['handle'])]
+                        ?? throw new \RuntimeException('rolling pool got a completion for an unregistered curl handle');
+                    $done[$i] = $finish($i, $msg['handle']);
+                }
+                if ($done !== []) {
+                    return $done;
+                }
+                if ($running && $status === CURLM_OK && curl_multi_select($multi, 1.0) === -1) {
+                    usleep(1000);
+                }
+            } while ($running && $status === CURLM_OK);
+
+            // The multi stack stopped without reporting a completion (a CURLM
+            // failure). Classify what every remaining transfer holds so far —
+            // $finish marks never-responded transfers transient — rather than
+            // hanging the pool or discarding sibling responses.
+            $done = [];
+            foreach ($handles as $i => $ch) {
+                $done[$i] = $finish($i, $ch);
+            }
+            return $done;
+        };
+
+        try {
+            return RollingPool::run($bodies, $start, $await, self::MAX_CONCURRENCY);
+        } finally {
+            curl_multi_close($multi);
+        }
     }
 
     /**
