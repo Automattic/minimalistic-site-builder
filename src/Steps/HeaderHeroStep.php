@@ -401,7 +401,7 @@ final class HeaderHeroStep implements Step
             } elseif ($name === 'button') {
                 $label = trim(strip_tags($doc->innerHtml($i)));
                 $width += self::BUTTON_PAD_PX + mb_strlen($label) * self::BUTTON_CHAR_PX;
-                $buttons++;
+                $hasButton = true;
             }
         }
         if ($hasPageList) {
