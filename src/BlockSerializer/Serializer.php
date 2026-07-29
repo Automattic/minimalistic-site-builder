@@ -23,10 +23,12 @@ final class Serializer implements TemplateTransformer
         private ?BlockRegistry $registry = null,
         private ?ParagraphFixer $paragraphs = null,
         private ?WpAutop $autop = null,
+        private ?ListItemFixer $lists = null,
     ) {
         $this->registry ??= new BlockRegistry();
         $this->paragraphs ??= new ParagraphFixer();
         $this->autop ??= new WpAutop();
+        $this->lists ??= new ListItemFixer();
         $this->saves = new SaveStrategyRegistry($this->registry);
         $this->normalizer = new AttributeNormalizer($this->registry, $this->saves);
         $this->comments = new CommentSerializer($this->registry);
@@ -35,8 +37,19 @@ final class Serializer implements TemplateTransformer
     public function transform(string $html): TransformResult
     {
         $repairs = [];
-        $pre = $this->paragraphs->fix($html);
+        // Raw <li> children of a wp:list gain their missing wp:list-item
+        // delimiters BEFORE parsing: the save renderer rebuilds a list's body
+        // from innerBlocks alone, so unwrapped items would be silently
+        // discarded and the list would ship as an empty <ul> (BIGR-738).
+        $listFix = $this->lists->fix($html);
+        $pre = $this->paragraphs->fix($listFix->html);
         $document = DefaultParser::parse($pre->html);
+        if ($listFix->count > 0) {
+            $listPaths = $this->blockPaths($document, 'core/list');
+            foreach ($listFix->repairedListOrdinals as $ordinal) {
+                $repairs[] = new Repair('raw-list-item-wrapped', $listPaths[$ordinal] ?? 'document');
+            }
+        }
         if ($pre->count > 0) {
             $paragraphPaths = $this->paragraphPaths($document);
             foreach ($pre->repairedParagraphOrdinals as $ordinal) {
@@ -85,7 +98,9 @@ final class Serializer implements TemplateTransformer
         // bytes exactly, Node returns repaired HTML with changed=false; its
         // caller therefore retains the original bytes. Preserve that quirk so
         // PHP and the canonical fixed point agree on bytes, N, and K.
-        $effectiveHtml = $post->html === $pre->html ? $html : $post->html;
+        // A list-item wrap is always a real change: returning the original
+        // bytes would undo it and the fixed point would converge unrepaired.
+        $effectiveHtml = $post->html === $pre->html && $listFix->count === 0 ? $html : $post->html;
         return new TransformResult($effectiveHtml, $this->uniqueRepairs($repairs));
     }
 
@@ -160,23 +175,29 @@ final class Serializer implements TemplateTransformer
     /** @return list<string> Paragraph paths in opening-delimiter order. */
     private function paragraphPaths(\Automattic\SiteBuild\BlockSerializer\Parser\Document $document): array
     {
+        return $this->blockPaths($document, 'core/paragraph');
+    }
+
+    /** @return list<string> Paths of every $name block, in opening-delimiter order. */
+    private function blockPaths(\Automattic\SiteBuild\BlockSerializer\Parser\Document $document, string $name): array
+    {
         $paths = [];
         foreach ($document->nodes() as $index => $node) {
             if ($node instanceof BlockNode) {
-                $this->collectParagraphPaths($node, (string) $index, $paths);
+                $this->collectBlockPaths($node, (string) $index, $name, $paths);
             }
         }
         return $paths;
     }
 
     /** @param list<string> $paths */
-    private function collectParagraphPaths(BlockNode $node, string $path, array &$paths): void
+    private function collectBlockPaths(BlockNode $node, string $path, string $name, array &$paths): void
     {
-        if ($node->name === 'core/paragraph') {
+        if ($node->name === $name) {
             $paths[] = $path;
         }
         foreach ($node->innerBlocks as $index => $child) {
-            $this->collectParagraphPaths($child, $path . '/' . $index, $paths);
+            $this->collectBlockPaths($child, $path . '/' . $index, $name, $paths);
         }
     }
 
