@@ -767,3 +767,47 @@ test('rollingPool rejects a second completion for an already-finished key', func
     }
     assert_true(is_string($err) && str_contains($err, 'not in flight'), 'a duplicate completion is a transport bug');
 });
+
+test('retryTextBatch retries held launches without burning the transient budget', function () {
+    // A held outcome ('held' => true) means the pool never sent the request -
+    // it carries no information about that request, so it must not consume
+    // the finite transient rounds and must never be the error a batch aborts
+    // with. delays = [0]: one transient round for really-attempted requests.
+    $bodies = ['real' => ['model' => 'm'], 'held' => ['model' => 'm']];
+    $round = 0;
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            $out = [];
+            foreach ($subset as $key => $_body) {
+                $out[$key] = match (true) {
+                    $key === 'real' && $round === 1 => ['ok' => false, 'transient' => true, 'error' => 'HTTP 429: slow down'],
+                    $key === 'held' && $round <= 2 => ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)'],
+                    default => ['ok' => true, 'text' => strtoupper((string) $key), 'input' => 1, 'output' => 1],
+                };
+            }
+            return $out;
+        },
+        [0],
+    );
+    assert_eq('REAL', $results['real']['text']);
+    assert_eq('HELD', $results['held']['text'], 'a twice-held launch still gets its real attempt after the budget');
+    assert_eq(3, $round, 'held keys retry in their own round instead of aborting');
+});
+
+test('retryTextBatch survives a held launch with an empty delay schedule', function () {
+    $bodies = ['h' => ['model' => 'm']];
+    $round = 0;
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            return ['h' => $round === 1
+                ? ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)']
+                : ['ok' => true, 'text' => 'H', 'input' => 1, 'output' => 1]];
+        },
+        [],
+    );
+    assert_eq('H', $results['h']['text'], 'a held launch retries even when no transient rounds are configured');
+});

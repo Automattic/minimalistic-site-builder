@@ -1148,3 +1148,14 @@ test('OpenAiCompatibleClient concurrencyWindows applies a provider-specific cap'
     assert_eq([4, 4, 1], array_map('count', $windows));
     assert_eq(array_keys($bodies), array_keys(array_merge(...$windows)), 'keys and order are preserved');
 });
+
+test('OpenAiCompatibleClient interpretStream classifies a transfer with no response at all as transient', function () {
+    // The CURLM-failure loop exit leaves unfinished handles with errno 0 and
+    // HTTP status 0. That is operational - retry it; a permanent "HTTP 0"
+    // outcome aborts the batch and discards every sibling response.
+    $method = new ReflectionMethod(OpenAiCompatibleClient::class, 'interpretStream');
+    $method->setAccessible(true);
+    $out = $method->invoke(null, '', 0, '', 0, 0.0, true);
+    assert_eq(false, $out['ok'], 'no response is not a success');
+    assert_eq(true, $out['transient'] ?? false, 'no response at all must be retryable, not a batch abort');
+});

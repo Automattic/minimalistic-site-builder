@@ -421,8 +421,12 @@ final class AnthropicClient implements Llm
      * A request rejected for carrying a recoverable parameter (outcome carries
      * `retry_without`) is retried immediately with every occurrence stripped
      * from its body — it can't recur (the key is gone), so it doesn't consume a
-     * transient-retry attempt. $bodies is by-reference so the caller's
-     * post-batch logging reflects what was actually sent.
+     * transient-retry attempt. An outcome carrying `held` (the pool declined
+     * to send the request after a sibling was rate-limited) is likewise
+     * retried without consuming the budget: it says nothing about its own
+     * request, and the really-attempted sibling's gate still bounds the batch.
+     * $bodies is by-reference so the caller's post-batch logging reflects what
+     * was actually sent.
      *
      * @param array<array-key,array<string,mixed>> $bodies request bodies keyed by id
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}> $transport
@@ -463,6 +467,16 @@ final class AnthropicClient implements Llm
                     } elseif ($dropParam !== null && self::stripRejectedParam($bodies[$key], $dropParam)) {
                         $stripRetry[] = $key;
                         Narrator::write("    (model rejected '{$dropParam}' on request '{$key}'; retrying without it)\n");
+                    } elseif (($outcome['held'] ?? false) === true) {
+                        // A held launch was never sent, so its outcome carries
+                        // no information about the request — it must not burn
+                        // the finite transient budget, and "launch held" must
+                        // never be the error a batch aborts with. Bounded all
+                        // the same: a hold only exists because a sibling was
+                        // really attempted and rate-limited, and that
+                        // sibling's own transient gate below still aborts the
+                        // batch if the event outlasts the budget.
+                        $transientRetry[] = $key;
                     } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
                         $transientRetry[] = $key;
                     } else {
@@ -478,7 +492,9 @@ final class AnthropicClient implements Llm
 
             $pending = $transientRetry;
             if ($pending !== []) {
-                $wait = $delays[$attempt];
+                // Held keys can outlive the delay schedule; clamp to its last
+                // (or zero) instead of indexing past the end.
+                $wait = $delays === [] ? 0 : $delays[min($attempt, count($delays) - 1)];
                 $attempt++;
                 Narrator::write('    (transient API error on ' . count($pending)
                     . " request(s); retry {$attempt} in {$wait}s)\n");
@@ -529,6 +545,9 @@ final class AnthropicClient implements Llm
                 $queuedOutcomes[$key] = [
                     'ok' => false,
                     'transient' => true,
+                    // Never sent: retryTextBatch retries held keys without
+                    // charging its finite transient budget.
+                    'held' => true,
                     'error' => 'launch held: a sibling request was rate-limited (HTTP 429)',
                 ];
                 return;

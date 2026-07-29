@@ -628,6 +628,12 @@ final class OpenAiCompatibleClient implements Llm
         if ($errno !== 0) {
             return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}", 'time' => $time];
         }
+        // Status 0 with no cURL error: the transfer stopped before any
+        // response headers arrived (a CURLM-level failure). Operational, not
+        // the request's fault — retry it. Mirrors AnthropicClient.
+        if ($status === 0) {
+            return ['ok' => false, 'transient' => true, 'error' => 'no response received before the transfer stopped', 'time' => $time];
+        }
         $parsed = null;
         $typedTerminalReason = null;
         if ($provider === 'openrouter') {
