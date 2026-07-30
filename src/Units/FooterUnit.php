@@ -59,6 +59,7 @@ final class FooterUnit extends AbstractMarkupUnit
         if ($this->pageCount($input) === 1) {
             $markup = GeneratedMarkup::withoutSiteTitleLinks($markup);
         }
+        $markup = GeneratedMarkup::withoutPortraitImagePlaceholders($markup, $notes);
         $markup = GeneratedMarkup::withRootBackgroundColor(
             $markup,
             FooterComposition::surface($archetype),

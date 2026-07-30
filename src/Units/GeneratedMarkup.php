@@ -240,6 +240,40 @@ final class GeneratedMarkup
     }
 
     /**
+     * Cap footer AI_IMAGE placeholders to non-portrait aspect ratios.
+     *
+     * A `portrait` placeholder generates a 9:16 asset; rendered in a footer
+     * column it grows nearly twice as tall as wide, stretches the whole band,
+     * and strands blank space beside the short utility rows. The documented
+     * `<img alt>` form and any mirrored block-JSON "alt" value are rewritten
+     * together so block re-serialization cannot restore the portrait spec.
+     * Idempotent: a capped placeholder no longer matches either pattern.
+     *
+     * @param list<string> $notes appended to once per rewritten placeholder
+     */
+    public static function withoutPortraitImagePlaceholders(string $markup, array &$notes = []): string
+    {
+        $patterns = [
+            '/(?<prefix>alt\s*=\s*(?<quote>["\'])AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)portrait(?<suffix>\s*\k{quote})/is',
+            '/(?<prefix>"alt"\s*:\s*"AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)portrait(?<suffix>\s*")/is',
+        ];
+        foreach ($patterns as $pattern) {
+            $markup = (string) preg_replace_callback(
+                $pattern,
+                static function (array $m) use (&$notes): string {
+                    $notes[] = "file='parts/footer.html'; block='AI_IMAGE placeholder'; "
+                        . 'authored aspect-ratio=portrait; delivered=square; '
+                        . 'disposition=a 9:16 footer image stretches the band and strands blank '
+                        . 'space beside the utility rows, so the placeholder was capped to square';
+                    return $m['prefix'] . 'square' . $m['suffix'];
+                },
+                $markup
+            );
+        }
+        return $markup;
+    }
+
+    /**
      * Enforce the concrete surface shared by the footer and closing sections.
      *
      * The comment attribute is the source of truth consumed by downstream

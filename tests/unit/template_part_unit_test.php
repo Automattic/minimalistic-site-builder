@@ -120,7 +120,38 @@ test('FooterUnit renders exactly one reviewed recipe and image instructions only
             str_contains($prompt, 'AI_IMAGE: subject | page-context | style | aspect-ratio'),
             "{$archetype} receives the right image-instruction contract"
         );
+        assert_eq(
+            FooterComposition::usesGeneratedImage($archetype),
+            str_contains($prompt, 'never `portrait`'),
+            "{$archetype} image recipe forbids portrait footer images"
+        );
     }
+});
+
+test('FooterUnit caps portrait image placeholders to square in alt and mirrored block JSON', function () {
+    $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $raw = '<!-- wp:group {"backgroundColor":"base"} --><div class="wp-block-group">'
+        . '<!-- wp:image {"sizeSlug":"large","alt":"AI_IMAGE: A carpenter\'s clay pitcher | footer plinth | photorealistic | portrait"} -->'
+        . '<figure class="wp-block-image size-large">'
+        . '<img src="theme:./assets/footer-pitcher.jpg" alt="AI_IMAGE: A carpenter\'s clay pitcher | footer plinth | photorealistic | portrait"/>'
+        . '</figure><!-- /wp:image -->'
+        . '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/footer-room.jpg" alt="AI_IMAGE: A dining room | footer image field | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image --></div><!-- /wp:group -->';
+    $input = array_merge(template_part_unit_input(), ['composition_archetype' => 'image-plinth']);
+
+    $notes = [];
+    $once = $unit->finish($raw, $input, $notes);
+
+    assert_true(!str_contains($once, 'portrait'), 'no portrait placeholder survives');
+    assert_eq(2, substr_count($once, 'photorealistic | square"'), 'HTML alt and mirrored JSON alt are both capped');
+    assert_contains('| photorealistic | landscape', $once);
+    $joined = implode("\n", $notes);
+    assert_contains('authored aspect-ratio=portrait', $joined);
+    assert_contains('delivered=square', $joined);
+    assert_contains('disposition=', $joined);
+    assert_eq(2, count(array_filter($notes, fn ($n) => str_contains($n, 'AI_IMAGE placeholder'))), 'alt and mirrored JSON each record their rewrite');
+    assert_eq($once, $unit->finish($once, $input), 'portrait capping reaches a fixed point');
 });
 
 test('FooterUnit rejects an unknown composition before generation', function () {
