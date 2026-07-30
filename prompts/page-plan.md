@@ -57,7 +57,7 @@ Layout archetypes (pick the one that best serves each section's content):
 
 Section structure and types:
 - List sections in their intended page order. The builder derives each section's structural role from that order after generation, so do not return a `role` field.
-- `type` is an open-ended semantic label. Choose or invent the most specific short label for what the section actually contains; do not collapse a menu, timeline, case-study index, process, event calendar, or location guide into a generic bucket.
+- `type` is an open-ended semantic label, always in English. Choose or invent the most specific short label for what the section actually contains; do not collapse a menu, timeline, case-study index, process, event calendar, or location guide into a generic bucket.
 
 Background treatments:
 - base — the default page background
@@ -76,7 +76,7 @@ author improvises:
   moments where whitespace itself carries the composition
 
 Rules:
-- LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" stays lowercase a-z ASCII regardless (transliterate).
+- LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" and "type" are machine-facing identifiers and are ALWAYS plain English words in lowercase a-z ASCII, regardless of {{language}} — they are never rendered on the page.
 - IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly, and any planned email uses the spec's `email_domain` — never invent alternates.
 - THIS PAGE ONLY: plan only content that belongs here per this page's purpose and the SITE PAGES list. Content that lives on a sibling page gets, at most, a teaser that links onward — "content_notes" may reference another page by its path ONLY when that exact path appears in SITE PAGES (e.g. "closes with a link to /menu/"). Never invent paths for pages that are not listed; on a one-page site, keep CTAs on-page (section anchors or same-page actions) instead of dead routes like /menu/ or /about/.
 - The FIRST section is the page-opening hero. In a plan with two or more sections, the LAST provides a strong closing next step, while every section between them carries the page's content. A one-section plan is necessarily the opening hero.

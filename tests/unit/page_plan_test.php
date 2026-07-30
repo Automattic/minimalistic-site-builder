@@ -171,6 +171,14 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         'type' => 'utility',
         'layout_archetype' => 'full-bleed-cover',
     ]);
+    // The prompt commits slug/type to English identifiers; a localized TITLE
+    // alone is on-page copy, never a footer identity.
+    $localizedTitle = plan_section([
+        'slug' => 'visit',
+        'title' => 'Visítanos',
+        'type' => 'utility',
+        'layout_archetype' => 'centered-stack',
+    ]);
     $raw = [
         $hero,
         plan_section(['slug' => 'utility', 'title' => 'Footer Info', 'type' => 'contact']),
@@ -179,8 +187,7 @@ test('PagePlanStep removes template-owned footer identities without touching sib
         plan_section(['slug' => 'legal', 'title' => 'Legal', 'type' => 'footerInfo']),
         plan_section(['slug' => 'chrome', 'title' => 'Chrome', 'type' => 'site chrome']),
         plan_section(['slug' => 'colophon', 'title' => 'Credits', 'type' => 'credits']),
-        plan_section(['slug' => 'pie-de-pagina', 'title' => 'Pie de página', 'type' => 'utility']),
-        plan_section(['slug' => 'rodape', 'title' => 'Rodapé', 'type' => 'utility']),
+        $localizedTitle,
         $siteInfo,
         $copyright,
         $legalTeam,
@@ -193,11 +200,11 @@ test('PagePlanStep removes template-owned footer identities without touching sib
     $filtered = PagePlanStep::removeTemplateFooterSections($raw, $warnings, 'home');
 
     assert_eq(
-        [$hero, $story, $siteInfo, $copyright, $legalTeam, $siteGuide, $siteInformation, $closing],
+        [$hero, $story, $localizedTitle, $siteInfo, $copyright, $legalTeam, $siteGuide, $siteInformation, $closing],
         $filtered,
         'non-footer siblings remain byte-for-byte and in order'
     );
-    assert_eq(7, count($warnings), 'each removed section has its own actionable warning');
+    assert_eq(5, count($warnings), 'each removed section has its own actionable warning');
     $joined = implode("\n", $warnings);
     assert_contains("file='pages.json'", $joined);
     assert_contains("pages[slug='home'].sections[1]", $joined);
@@ -208,7 +215,7 @@ test('PagePlanStep removes template-owned footer identities without touching sib
 
     $normalized = PagePlanStep::normalize($filtered);
     assert_eq(
-        ['hero', 'content', 'content', 'content', 'content', 'content', 'content', 'closing'],
+        ['hero', 'content', 'content', 'content', 'content', 'content', 'content', 'content', 'closing'],
         array_column($normalized, 'role')
     );
 
@@ -568,7 +575,8 @@ test('page-plan fans out one request per page with per-page context', function (
     assert_contains('"Menu"', $reqs['menu']['prompt']);              // its own title
     assert_contains('What we bake', $reqs['menu']['prompt']);        // its own purpose
     assert_contains('/menu/breads/', $reqs['menu']['prompt']);       // site pages list
-    assert_contains('`type` is an open-ended semantic label', $reqs['home']['prompt']);
+    assert_contains('`type` is an open-ended semantic label, always in English', $reqs['home']['prompt']);
+    assert_contains('"slug" and "type" are machine-facing identifiers and are ALWAYS plain English words', $reqs['home']['prompt']);
     assert_contains('builder derives each section\'s structural role', $reqs['home']['prompt']);
     assert_contains('examples:', $reqs['home']['prompt']);
     assert_contains('Never plan a footer or site-chrome section', $reqs['home']['prompt']);
