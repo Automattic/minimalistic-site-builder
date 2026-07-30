@@ -86,7 +86,7 @@ test('FooterUnit generates a constrained footer from self-contained input', func
 test('FooterUnit renders exactly one reviewed recipe and image instructions only when needed', function () {
     $renderer = new PromptRenderer(repo_path('prompts'));
     $markers = [
-        'typographic-billboard' => 'One display-scale identity or short brand-coda',
+        'typographic-billboard' => 'ONE viewport-filling brand line',
         'photographic-split' => 'deliberately unequal 60/40 or 65/35',
         'image-plinth' => 'Treat ONE foreground wp:image as the focal object',
         'conversion-panel' => 'Build a bold, offset invitation',
@@ -237,6 +237,35 @@ test('FooterUnit wraps a single non-group root instead of discarding it for the 
     assert_contains('class="wp-block-group has-contrast-background-color has-background"', $once);
     assert_contains('Credit survives.', $once);
     assert_eq($once, $unit->finish($once, $input), 'single non-group-root repair reaches a fixed point');
+});
+
+test('FooterUnit preserves a fit-text billboard heading through finish and block re-serialization', function () {
+    $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $raw = '<!-- wp:group {"backgroundColor":"base","align":"full","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignfull has-base-background-color has-background">'
+        . '<!-- wp:heading {"align":"full","fitText":true} -->'
+        . '<h2 class="wp-block-heading alignfull has-fit-text">Hola</h2>'
+        . '<!-- /wp:heading --></div><!-- /wp:group -->';
+    $input = array_merge(template_part_unit_input(), ['composition_archetype' => 'typographic-billboard']);
+
+    $once = $unit->finish($raw, $input);
+
+    assert_contains('"fitText":true', $once);
+    assert_contains('has-fit-text', $once);
+    assert_contains('"backgroundColor":"base"', $once);
+    assert_eq($once, $unit->finish($once, $input), 'fit-text footer reaches a fixed point');
+
+    $tmp = sys_get_temp_dir() . '/builder_footer_fit_text_' . bin2hex(random_bytes(6));
+    $project = (new ProjectStore($tmp))->create('demo');
+    try {
+        $project->writeText('theme/parts/footer.html', $once);
+        (new PhpBlockFixer())->fix($project->themePath());
+        $fixed = $project->readText('theme/parts/footer.html');
+        assert_contains('"fitText":true', $fixed);
+        assert_contains('has-fit-text', $fixed);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
 
 test('FooterUnit removes a malformed root style attribute instead of discarding usable content', function () {

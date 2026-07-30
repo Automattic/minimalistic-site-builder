@@ -201,7 +201,7 @@ test('footer prompt renders only its selected high-impact recipe without overrid
     );
     $archetype = $match[1];
     $recipeMarkers = [
-        'typographic-billboard' => 'One display-scale identity or short brand-coda',
+        'typographic-billboard' => 'ONE viewport-filling brand line',
         'photographic-split' => 'deliberately unequal 60/40 or 65/35',
         'image-plinth' => 'Treat ONE foreground wp:image as the focal object',
         'conversion-panel' => 'Build a bold, offset invitation',
