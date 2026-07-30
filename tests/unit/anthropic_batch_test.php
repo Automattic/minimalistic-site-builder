@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\RejectedApiParameterException;
+use Automattic\SiteBuild\RollingPool;
 
 /**
  * Unit tests for the concurrent-batch retry orchestration
@@ -672,7 +673,7 @@ test('rollingPool starts the next pending request the moment one completes', fun
         return $out;
     };
 
-    $out = AnthropicClient::rollingPool($bodies, $start, $await, 2);
+    $out = RollingPool::run($bodies, $start, $await, 2);
 
     assert_eq(['a', 'b', 'c', 'd', 'e'], $started, 'requests start in input order as slots free up');
     assert_eq(2, $maxInFlight, 'the cap holds while slots roll');
@@ -683,7 +684,7 @@ test('rollingPool starts the next pending request the moment one completes', fun
 test('rollingPool starts a sub-cap batch all at once and an empty batch not at all', function () {
     $calls = 0;
     $started = [];
-    $out = AnthropicClient::rollingPool(
+    $out = RollingPool::run(
         ['x' => ['prompt' => 'X'], 'y' => ['prompt' => 'Y']],
         function (string|int $key, array $body) use (&$started): void {
             $started[] = $key;
@@ -698,7 +699,7 @@ test('rollingPool starts a sub-cap batch all at once and an empty batch not at a
     assert_eq(1, $calls, 'one await drains the whole sub-cap batch');
     assert_eq(['x' => 'RX', 'y' => 'RY'], $out);
 
-    $out = AnthropicClient::rollingPool(
+    $out = RollingPool::run(
         [],
         function (): void {
             throw new RuntimeException('start must not be called for an empty batch');
@@ -715,7 +716,7 @@ test('rollingPool rejects an await that returns nothing or an unknown key', func
     $none = fn (): array => [];
     $err = null;
     try {
-        AnthropicClient::rollingPool(['a' => []], function (): void {}, $none, 2);
+        RollingPool::run(['a' => []], function (): void {}, $none, 2);
     } catch (RuntimeException $e) {
         $err = $e->getMessage();
     }
@@ -723,7 +724,7 @@ test('rollingPool rejects an await that returns nothing or an unknown key', func
 
     $err = null;
     try {
-        AnthropicClient::rollingPool(
+        RollingPool::run(
             ['a' => []],
             function (): void {},
             fn (): array => ['ghost' => 'R'],
@@ -750,7 +751,7 @@ test('rollingPool rejects a second completion for an already-finished key', func
     $script = [['a'], ['a']];
     $err = null;
     try {
-        AnthropicClient::rollingPool(
+        RollingPool::run(
             ['a' => [], 'b' => []],
             function (): void {},
             function () use (&$script): array {
@@ -794,6 +795,38 @@ test('retryTextBatch retries held launches without burning the transient budget'
     assert_eq('REAL', $results['real']['text']);
     assert_eq('HELD', $results['held']['text'], 'a twice-held launch still gets its real attempt after the budget');
     assert_eq(3, $round, 'held keys retry in their own round instead of aborting');
+});
+
+test('retryTextBatch gives a previously held request its own transient retry budget', function () {
+    $bodies = ['real' => ['model' => 'm'], 'held' => ['model' => 'm']];
+    $round = 0;
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            $out = [];
+            foreach ($subset as $key => $_body) {
+                $out[$key] = match (true) {
+                    $key === 'real' && $round === 1 => [
+                        'ok' => false, 'transient' => true, 'error' => 'HTTP 429: slow down',
+                    ],
+                    $key === 'held' && $round <= 2 => [
+                        'ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held',
+                    ],
+                    $key === 'held' && $round === 3 => [
+                        'ok' => false, 'transient' => true, 'error' => 'first real attempt timed out',
+                    ],
+                    default => [
+                        'ok' => true, 'text' => strtoupper((string) $key), 'input' => 1, 'output' => 1,
+                    ],
+                };
+            }
+            return $out;
+        },
+        [0],
+    );
+    assert_eq('HELD', $results['held']['text'], 'held rounds do not consume the request retry');
+    assert_eq(4, $round, 'the first real transient gets its configured retry');
 });
 
 test('retryTextBatch survives a held launch with an empty delay schedule', function () {

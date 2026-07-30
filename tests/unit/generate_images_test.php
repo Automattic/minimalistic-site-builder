@@ -383,16 +383,17 @@ function batch_fixture(int $n): array
     return [$project, $tmp];
 }
 
-test('generate-images processes pending images in concurrent batches of 10', function () {
-    [$project, $tmp] = batch_fixture(12); // 12 -> batches of 10 + 2
+test('generate-images hands every pending image to one pooled batch', function () {
+    // Concurrency is bounded by the CLIENT's rolling pool, not by step-level
+    // chunks: one generateBatch call carries all 12, so a slow image never
+    // blocks a barrier between chunks.
+    [$project, $tmp] = batch_fixture(12);
     $images = new FakeImageClient('JPEGDATA');
 
     (new GenerateImagesStep($images))->run($project);
 
-    // Two batches were issued, sized 10 then 2 (not 12 single calls).
-    assert_eq(2, count($images->batches), 'two batches');
-    assert_eq(10, count($images->batches[0]), 'first batch has 10');
-    assert_eq(2, count($images->batches[1]), 'second batch has 2');
+    assert_eq(1, count($images->batches), 'one pooled batch, no step-level chunking');
+    assert_eq(12, count($images->batches[0]), 'the batch carries every pending image');
 
     // All 12 assets written and marked completed.
     $specs = $project->readJson('images.json');
@@ -400,6 +401,31 @@ test('generate-images processes pending images in concurrent batches of 10', fun
         assert_eq('completed', $s['status']);
         assert_true($project->exists('theme/assets/' . $s['filename']), "{$s['filename']} written");
     }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images persists each completed image as it lands, not only at the end', function () {
+    // The step's interruption-survival property, kept without barrier chunks:
+    // an image's bytes and completed status reach disk via onResult while the
+    // rest of the batch is still generating.
+    [$project, $tmp] = batch_fixture(3);
+    $images = new FakeImageClient('JPEGDATA');
+    $snapshots = [];
+    $images->afterEachResult = function (int $i) use ($project, &$snapshots): void {
+        $onDisk = $project->readJson('images.json');
+        $snapshots[$i] = [
+            'completed_on_disk' => count(array_filter($onDisk, fn (array $s): bool => ($s['status'] ?? '') === 'completed')),
+            'asset_written'     => $project->exists('theme/assets/img-' . $i . '.jpg'),
+        ];
+    };
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, $snapshots[0]['completed_on_disk'], 'first image persisted while two are still pending');
+    assert_true($snapshots[0]['asset_written'], 'first asset bytes on disk before the batch ends');
+    assert_eq(2, $snapshots[1]['completed_on_disk'], 'second image persisted incrementally');
+    assert_eq(3, $snapshots[2]['completed_on_disk'], 'third image persisted incrementally');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -451,6 +477,38 @@ test('generate-images repairs a safety-filtered prompt with the small model and 
     $specs = $project->readJson('images.json');
     assert_eq('completed', $specs[0]['status']);
     assert_true($project->exists('theme/assets/hero.jpg'), 'asset written after repair');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images persists each safety-filter repair as it lands', function () {
+    [$project, $tmp] = batch_fixture(2);
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['image 0', 'image 1'];
+    $llm = new FakeLlm();
+    $llm->queueText('a sunlit reading nook');
+    $llm->queueText('a quiet garden terrace');
+    $repairSnapshots = [];
+    $images->afterEachResult = function (int $pos) use ($project, $images, &$repairSnapshots): void {
+        if (count($images->batches) !== 2) {
+            return; // Ignore the original filtered batch.
+        }
+        $onDisk = $project->readJson('images.json');
+        $repairSnapshots[$pos] = [
+            'completed_on_disk' => count(array_filter(
+                $onDisk,
+                fn (array $spec): bool => ($spec['status'] ?? '') === 'completed'
+            )),
+            'asset_written' => $project->exists("theme/assets/img-{$pos}.jpg"),
+        ];
+    };
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, $repairSnapshots[0]['completed_on_disk'], 'first repair persisted before the second landed');
+    assert_true($repairSnapshots[0]['asset_written'], 'first repaired asset written during the batch');
+    assert_eq(2, $repairSnapshots[1]['completed_on_disk'], 'second repair persisted incrementally');
+    assert_true($repairSnapshots[1]['asset_written'], 'second repaired asset written during the batch');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

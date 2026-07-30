@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\NativeStagedFileWriter;
+
 /**
  * A single project on disk: projects/<slug>/. All artifacts (meta.json,
  * siteSpec.json, theme/...) live under its root. Files are the
@@ -106,6 +108,40 @@ final class Project
             $rel,
             json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n"
         );
+    }
+
+    /**
+     * Replace a JSON artifact atomically through a complete same-directory
+     * staging file. Use this for resumable progress manifests: interruption
+     * leaves either the previous valid JSON or the complete new JSON, never a
+     * truncated target.
+     *
+     * @param array<mixed> $data
+     */
+    public function writeJsonAtomic(string $rel, array $data): void
+    {
+        $full = $this->path($rel);
+        $dir = dirname($full);
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new \RuntimeException("Could not create directory: {$dir}");
+        }
+
+        $content = json_encode(
+            $data,
+            JSON_PRETTY_PRINT
+                | JSON_UNESCAPED_SLASHES
+                | JSON_UNESCAPED_UNICODE
+                | JSON_INVALID_UTF8_SUBSTITUTE
+                | JSON_THROW_ON_ERROR
+        ) . "\n";
+        $writer = new NativeStagedFileWriter();
+        $staged = $writer->stage($full, $content);
+        try {
+            $writer->replace($staged, $full);
+        } catch (\Throwable $error) {
+            $writer->discard($staged);
+            throw $error;
+        }
     }
 
     /**

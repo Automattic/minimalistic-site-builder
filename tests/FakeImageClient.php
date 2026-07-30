@@ -42,7 +42,10 @@ final class FakeImageClient implements ImageClient
         return $this->bytes;
     }
 
-    public function generateBatch(array $specs): array
+    /** Test hook: runs after each onResult delivery, to observe mid-batch state. */
+    public ?\Closure $afterEachResult = null;
+
+    public function generateBatch(array $specs, ?callable $onResult = null): array
     {
         $this->batches[] = $specs;
         $results = [];
@@ -61,6 +64,15 @@ final class FakeImageClient implements ImageClient
                 $results[$i] = ['ok' => false, 'error' => 'Image safety filter rejected the prompt: fake rai', 'filtered' => true];
             } else {
                 $results[$i] = ['ok' => true, 'bytes' => $this->bytes];
+            }
+            if ($onResult !== null) {
+                $onResult($i, $results[$i]);
+                // Mirror the production contract: with a callback, the
+                // returned records omit bytes.
+                unset($results[$i]['bytes']);
+                if ($this->afterEachResult !== null) {
+                    ($this->afterEachResult)($i);
+                }
             }
         }
         return $results;

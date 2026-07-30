@@ -57,9 +57,9 @@ the batch on a permanent one). Two batch entry points sit on top of it:
 `Llm::completeJsonBatch()` for structured steps (theme.json, the section plan)
 and `Llm::completeBatch()` for steps whose answer IS the payload — the section
 parts return raw block markup verbatim rather than escaping it inside a JSON
-string (brittle + wasteful). The transport runs at most `MAX_CONCURRENCY` (5)
-requests in flight at once — a wide fan-out (every landing-page part) is split
-into ordered windows so it never trips the API's rate limits. A `ConcurrentStep`
+string (brittle + wasteful). The Anthropic transport keeps at most
+`MAX_CONCURRENCY` (10) requests in flight in one rolling pool: each completion
+immediately refills its slot while the cap protects the API's rate limit. A `ConcurrentStep`
 exposes `requests()`/`consume()` so its prompts can be fired together; a
 `ConcurrentGroup` (itself a `Step`) merges several steps' requests into one batch.
 This overlaps theme-json beside the section plan, and generates every landing-page
@@ -79,9 +79,9 @@ and internal-integrity failures remain fatal. A public invocation runs to a
 fixed point and is idempotent; production builds require neither Node nor
 `node_modules`.
 
-**Tests: 869 unit + 2 integration = 871 passing.** Run with
-`php tests/run.php` and `php tests/run-integration.php`. The integration test
-runs the real `Pipeline` with a `FakeLlm` and asserts the output passes
+**Tests:** Run the full suites with `php tests/run.php` and
+`php tests/run-integration.php`. The integration test runs the real `Pipeline`
+with a `FakeLlm` and asserts the output passes
 `ThemeValidator` (files present, theme.json v3, balanced block grammar, no
 leftover placeholders, fonts enqueued) — this is the full-sequence integration test.
 
