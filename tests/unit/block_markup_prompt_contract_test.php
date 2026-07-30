@@ -109,16 +109,14 @@ test('block-markup output contract pins clean document boundaries and examples',
     [, $afterExampleStart] = explode($exampleStart, $contract, 2);
     [$example] = explode($invalidStart, $afterExampleStart, 2);
     assert_eq(
-        "<!-- wp:group {\"layout\":{\"type\":\"constrained\"}} -->\n"
-        . "<div class=\"wp-block-group\"><!-- wp:paragraph -->\n"
+        "<!-- wp:paragraph -->\n"
         . "<p>Example.</p>\n"
-        . "<!-- /wp:paragraph --></div>\n"
-        . "<!-- /wp:group -->",
+        . "<!-- /wp:paragraph -->",
         $example,
-        'positive example is only one valid Gutenberg group document',
+        'positive example is one neutral Gutenberg paragraph document',
     );
     assert_true(str_starts_with($example, '<!-- wp:'));
-    assert_true(str_ends_with($example, '<!-- /wp:group -->'));
+    assert_true(str_ends_with($example, '<!-- /wp:paragraph -->'));
     assert_true(!str_contains($example, '```'), 'positive example is unfenced');
 
     foreach (['Here is the markup:', '```html', 'Hope this helps'] as $invalidWrapper) {

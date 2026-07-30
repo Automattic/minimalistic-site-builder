@@ -447,6 +447,10 @@ test('sections writes header, footer and a part per page section', function () {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
         assert_contains('wp:', $project->readText('theme/' . $rel));
     }
+    assert_eq(
+        "No block grammar repairs needed.\n",
+        $project->readText('logs/sections-repairs.log'),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -661,7 +665,8 @@ test('section prompts carry the slug as the anchor and the outline exposes it', 
 
     $about = sections_request_text($reqs['page-home--about']);
     assert_contains('"anchor":"about"', $about);
-    assert_contains('id="about"', $about);
+    assert_contains('the build restores the matching wrapper `id`', $about);
+    assert_true(!str_contains($about, 'id="about"'), 'the prompt does not ask the model to duplicate the anchor');
     assert_contains('[#about]', $about); // its own outline line ends with the anchor
     assert_contains('[#hero]', $reqs['header']['prompt']); // the header sees the anchors too
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -698,6 +703,41 @@ HTML);
         'every group opener has a closer',
     );
     assert_eq(substr_count($about, '<div'), substr_count($about, '</div>'), 'the div stack is rebalanced');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections retains deterministically repaired block grammar and reports the repair', function () {
+    [$project, $tmp] = sections_fixture();
+    $llm = new FakeLlm();
+    $llm->queueText('OK'); // cache warm-up probe
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>(c)</p><!-- /wp:paragraph --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText(
+        '<!-- wp:group {"anchor":"about","layout":{"type":"constrained"}} -->'
+        . '<div>'
+        . '<!-- wp:paragraph {"backgroundColor":"secondary","style":{"spacing":{"padding":{"top":"var:preset|spacing|sm"}}} -->'
+        . '<p>About survives.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->',
+    );
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_contains(
+        '<p>About survives.</p>',
+        $project->readText('theme/parts/page-home--about.html'),
+        'the repaired section is delivered',
+    );
+    assert_eq(
+        ['hero', 'about'],
+        array_column($project->readJson('pages.json')['pages'][0]['sections'], 'slug'),
+        'the repaired section remains in the page plan',
+    );
+    assert_true(!$project->exists('warnings.json'), 'lossless repair produces no warning');
+    assert_contains(
+        'wp:paragraph attributes omitted their final root closer',
+        $project->readText('logs/sections-repairs.log'),
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

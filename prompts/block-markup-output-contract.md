@@ -7,11 +7,9 @@ Return exactly the intended Gutenberg block document and nothing else.
 - Preambles, reasoning, acknowledgements, Markdown code fences, trailing notes, alternative drafts, and illustrative block examples outside the intended document are all forbidden.
 
 Valid response example (the entire response):
-<!-- wp:group {"layout":{"type":"constrained"}} -->
-<div class="wp-block-group"><!-- wp:paragraph -->
+<!-- wp:paragraph -->
 <p>Example.</p>
-<!-- /wp:paragraph --></div>
-<!-- /wp:group -->
+<!-- /wp:paragraph -->
 
 Invalid response examples (these wrappers are never valid):
 - `Here is the markup:` before the first block.

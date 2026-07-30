@@ -33,8 +33,14 @@ final class HeaderUnit extends AbstractMarkupUnit
         ]);
     }
 
-    public function finish(string $raw, array $input, array &$notes = []): string
-    {
-        return GeneratedMarkup::constrainedPart(GeneratedMarkup::normalize($raw, $this->key($input), $notes));
+    public function finish(
+        string $raw,
+        array $input,
+        array &$notes = [],
+        array &$repairs = [],
+    ): string {
+        return GeneratedMarkup::constrainedPart(
+            GeneratedMarkup::normalize($raw, $this->key($input), $notes, $repairs),
+        );
     }
 }

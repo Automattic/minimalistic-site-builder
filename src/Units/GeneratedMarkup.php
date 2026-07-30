@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
+use Automattic\SiteBuild\BlockCommentRepair;
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
@@ -22,12 +23,25 @@ final class GeneratedMarkup
      * that changed the delivered content (sanitizer strips, wrapper recovery,
      * truncation salvage). Callers with a Project route them to warnings.json;
      * every note is also narrated for live visibility.
+     *
+     * $repairs receives lossless block-grammar corrections only after the
+     * repaired document passes every strict gate. Callers keep these in a
+     * repair report rather than warnings.json because no authored value was
+     * lost.
      */
-    public static function normalize(string $text, string $key, array &$notes = []): string
-    {
+    public static function normalize(
+        string $text,
+        string $key,
+        array &$notes = [],
+        array &$repairs = [],
+    ): string {
         $record = static function (string $note) use ($key, &$notes): void {
             Narrator::write("    (part '{$key}': {$note})\n");
             $notes[] = "part '{$key}': {$note}";
+        };
+        $recordRepair = static function (string $note) use ($key, &$repairs): void {
+            Narrator::write("    (part '{$key}': repaired block grammar — {$note})\n");
+            $repairs[] = "part '{$key}': {$note}";
         };
 
         // Sanitize the whole response before looking for a document boundary:
@@ -37,6 +51,8 @@ final class GeneratedMarkup
         foreach ($sanitizerNotes as $note) {
             $record("sanitized script-capable markup — {$note}");
         }
+        $commentRepair = BlockCommentRepair::repair($text);
+        $text = $commentRepair['markup'];
         $recoveryNotes = [];
         try {
             $markup = BlockDocumentRecovery::recover($text, $recoveryNotes);
@@ -66,6 +82,9 @@ final class GeneratedMarkup
             BlockDocumentRecovery::assertComplete($salvage['markup']);
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
+        }
+        foreach ($commentRepair['notes'] as $note) {
+            $recordRepair($note);
         }
         return $salvage['markup'];
     }

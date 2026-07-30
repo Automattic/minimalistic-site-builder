@@ -65,13 +65,13 @@ Decoration, when a section needs any at all, comes from theme primitives — the
 - A short phrase naming where and how the image is used: the section and its role (e.g. `full-bleed hero section with the headline overlaid on top`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`). The generator uses this to fit the image to its slot — it is not drawn into the image.
 
 **Cover backgrounds:**
-For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOTH the block's `url` attribute and the inner `<img class="wp-block-cover__image-background">` src, and put the `AI_IMAGE` spec in that img's alt. The `url` and `src` are asset PATHS only — never write the `AI_IMAGE:` spec into a `url` or `src`; it belongs solely in the `alt`. A cover whose `url` is an `AI_IMAGE:` string ships the raw prompt text as the image and renders no picture.
+For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOTH the block's `url` attribute and the inner `<img>` src, and put the `AI_IMAGE` spec in that img's alt. The `url` and `src` are asset PATHS only — never write the `AI_IMAGE:` spec into a `url` or `src`; it belongs solely in the `alt`. A cover whose `url` is an `AI_IMAGE:` string ships the raw prompt text as the image and renders no picture.
 
 ### Example Image Block
 
 ```html
 <!-- wp:image {"sizeSlug":"large"} -->
-<figure class="wp-block-image size-large"><img src="theme:./assets/loaf-sourdough.jpg" alt="AI_IMAGE: A rustic sourdough loaf with a crackled golden crust on a floured wooden board, warm side light, shot slightly from above | menu item card in the bakery's signature loaves section | photorealistic | square"/></figure>
+<figure><img src="theme:./assets/loaf-sourdough.jpg" alt="AI_IMAGE: A rustic sourdough loaf with a crackled golden crust on a floured wooden board, warm side light, shot slightly from above | menu item card in the bakery's signature loaves section | photorealistic | square"/></figure>
 <!-- /wp:image -->
 ```
 
@@ -79,17 +79,16 @@ For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOT
 
 ```html
 <!-- wp:group {"align":"full","style":{"spacing":{"margin":{"top":"0"}}},"layout":{"type":"constrained"}} -->
-<div class="wp-block-group alignfull" style="margin-top:0">
+<div>
     <!-- wp:cover {"url":"theme:./assets/hero-mountain-dawn.jpg","dimRatio":50,"align":"full","minHeight":80,"minHeightUnit":"vh"} -->
-    <div class="wp-block-cover alignfull" style="min-height:80vh">
-        <span aria-hidden="true" class="wp-block-cover__background has-background-dim-50 has-background-dim"></span>
-        <img class="wp-block-cover__image-background" alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
-        <div class="wp-block-cover__inner-container">
+    <div>
+        <img alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
+        <div>
             <!-- wp:heading {"level":1,"textAlign":"center","textColor":"base","fontFamily":"heading","fontSize":"display"} -->
-            <h1 class="wp-block-heading has-text-align-center has-base-color has-text-color has-heading-font-family has-display-font-size">Into the High Country</h1>
+            <h1>Into the High Country</h1>
             <!-- /wp:heading -->
             <!-- wp:paragraph {"align":"center","textColor":"base","fontSize":"lead"} -->
-            <p class="has-text-align-center has-base-color has-text-color has-lead-font-size">Guided treks through the alpine wilderness.</p>
+            <p>Guided treks through the alpine wilderness.</p>
             <!-- /wp:paragraph -->
         </div>
     </div>

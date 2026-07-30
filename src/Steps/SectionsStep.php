@@ -24,6 +24,7 @@ use Automattic\SiteBuild\Units\SectionUnit;
  * Input:  siteSpec.json + theme/theme.json + pages.json (the plan).
  * Output: theme/parts/header.html, theme/parts/footer.html, and
  *         theme/parts/page-<pageSlug>--<sectionSlug>.html per planned section.
+ *         Lossless grammar repairs are recorded in logs/sections-repairs.log.
  *         The page-* parts are transient build artifacts: assemble-pages later
  *         inlines them into the content plugin's page files and removes them
  *         from the theme (header/footer stay — they are the site chrome).
@@ -44,6 +45,7 @@ use Automattic\SiteBuild\Units\SectionUnit;
 final class SectionsStep implements Step
 {
     private const CACHE_WARM_PROMPT = 'Warm the cached section context.';
+    private const REPAIR_LOG = 'logs/sections-repairs.log';
 
     /** Prefix for a page section part's request key and filename. */
     public const PART_PREFIX = SectionUnit::KEY_PREFIX;
@@ -147,7 +149,7 @@ final class SectionsStep implements Step
             ],
             // pages.json: a section whose markup is unusable is dropped and
             // pruned from the plan so downstream steps see a consistent site.
-            writes: ['theme/parts/*', 'pages.json', 'warnings.json'],
+            writes: ['theme/parts/*', 'pages.json', 'warnings.json', self::REPAIR_LOG],
             concurrent: true,
         );
     }
@@ -178,13 +180,19 @@ final class SectionsStep implements Step
         // generated-content failure degrades too.
         $files = [];
         $dropped = [];
+        $repairs = [];
         foreach ($jobs as $key => $job) {
             $isChrome = in_array($key, ['header', 'footer'], true);
             try {
                 if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
                     throw new \RuntimeException('the batch returned no result');
                 }
-                $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
+                $files[$job['file']] = $job['unit']->finish(
+                    $parts[$key],
+                    $job['input'],
+                    $warnings,
+                    $repairs,
+                );
                 array_push($warnings, ...$batch->notesFor($key));
             } catch (\RuntimeException $e) {
                 if ($isChrome) {
@@ -211,6 +219,12 @@ final class SectionsStep implements Step
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
         $project->writeJson('pages.json', $plan);
+        $project->writeText(
+            self::REPAIR_LOG,
+            $repairs === []
+                ? "No block grammar repairs needed.\n"
+                : '- ' . implode("\n- ", $repairs) . "\n",
+        );
         $project->addWarnings($this->id(), $warnings);
     }
 
