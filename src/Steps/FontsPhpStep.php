@@ -3,38 +3,28 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\Llm;
-use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 
 /**
- * Step (LLM): write theme/fonts.php — the module that loads the theme's Google
- * Fonts (telex-style file split: the deterministic functions.php only wires
- * style.css and require_once's this file).
+ * Step (deterministic): write theme/fonts.php — the module that loads the
+ * theme's Google Fonts (telex-style file split: the deterministic
+ * functions.php only wires style.css and require_once's this file).
  *
- * Input:  theme/theme.json + designDirection.md + the final section markup
- *         (theme/parts/*.html, theme/templates/*.html — i.e. AFTER fix-blocks).
+ * Input:  theme/theme.json + the final generated markup (theme parts/templates
+ *         and companion-plugin pages — i.e. AFTER fix-blocks and assembly).
  * Output: theme/fonts.php, hooked on enqueue_block_assets so the fonts render
  *         in the block editor as well as the front end. Skipped entirely when
  *         theme.json names only system/web-safe families.
  *
- * The model writes the file so design intent can reach font loading — a
- * direction built on a light display face can request 300, an editorial serif
- * can request true italics — beyond what a literal scan of the markup finds.
- * But the scan still runs first and acts as the floor: the model's css2 URL
- * MUST request every family and every weight/italic the build actually uses
- * (issue #49's guarantee), touch no URL outside fonts.googleapis.com/
- * fonts.gstatic.com, and lint clean. Any violation is logged and the file is
- * replaced by a deterministic fallback built from the scan — the build never
- * degrades below the scanned minimum.
+ * The step scans the delivered theme and markup, then builds the file from a
+ * fixed template. Model-authored family names are URL-encoded and never reach
+ * executable PHP source.
  */
 final class FontsPhpStep implements Step
 {
-    use LlmOptions;
-
     /** Weights every build loads: body default + strong. Scanned weights add to these. */
     private const BASE_WEIGHTS = [400, 700];
 
@@ -46,7 +36,6 @@ final class FontsPhpStep implements Step
         'courier', 'courier new', 'verdana', 'tahoma', 'trebuchet ms', 'palatino',
         'garamond', 'inherit', 'initial',
     ];
-
 
     public function id(): string
     {
@@ -63,7 +52,7 @@ final class FontsPhpStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/theme.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*'],
             writes: ['theme/fonts.php'],
             concurrent: false,
         );
@@ -86,7 +75,6 @@ final class FontsPhpStep implements Step
         $project->writeText('theme/fonts.php', rtrim(self::build($handle, $requirements)) . "\n");
         echo '  fonts-php: ' . count($requirements) . " family/families enqueued\n";
     }
-
 
     /**
      * Every font weight the build references, plus whether italics appear.
@@ -181,7 +169,7 @@ final class FontsPhpStep implements Step
                 : 'wght@' . implode(';', $required['weights']);
 
             // rawurlencode turns spaces into %20; Google Fonts wants '+'.
-            $params[] = 'family=' . str_replace('%20', '+', rawurlencode($name)) . ':' . $axis;
+            $params[] = 'family=' . str_replace('%20', '+', rawurlencode((string) $name)) . ':' . $axis;
         }
         return 'https://fonts.googleapis.com/css2?' . implode('&', $params) . '&display=swap';
     }
@@ -335,11 +323,12 @@ final class FontsPhpStep implements Step
                 $attrs = $tag[2];
                 $familySlug = null;
                 if (preg_match('/\bclass=(["\'])(.*?)\1/is', $attrs, $classMatch) === 1) {
-                    foreach (array_keys($familiesBySlug) as $slug) {
-                        if (preg_match('/(?<![\w-])has-' . preg_quote($slug, '/') . '-font-family(?![\w-])/', $classMatch[2]) === 1) {
-                            $familySlug = $slug;
-                            break;
-                        }
+            foreach (array_keys($familiesBySlug) as $slugKey) {
+                $slug = (string) $slugKey;
+                if (preg_match('/(?<![\w-])has-' . preg_quote($slug, '/') . '-font-family(?![\w-])/', $classMatch[2]) === 1) {
+                    $familySlug = $slug;
+                    break;
+                }
                     }
                 }
                 $familySlug ??= self::defaultFamilySlugForTag($tag[1]);
@@ -386,9 +375,9 @@ final class FontsPhpStep implements Step
         }
         $primary = self::primaryFamily($value);
         if ($primary !== null) {
-            foreach ($familiesBySlug as $slug => $family) {
+            foreach ($familiesBySlug as $slugKey => $family) {
                 if (strcasecmp($primary, $family) === 0) {
-                    return $slug;
+                    return (string) $slugKey;
                 }
             }
         }
@@ -459,12 +448,6 @@ final class FontsPhpStep implements Step
         return $normalized;
     }
 
-
-
-
-
-
-
     /**
      * Walk decoded theme.json collecting fontWeight / fontStyle:italic values
      * wherever they appear.
@@ -509,7 +492,4 @@ final class FontsPhpStep implements Step
         $first = trim($first, "\"'");
         return $first === '' ? null : $first;
     }
-
-
-
 }

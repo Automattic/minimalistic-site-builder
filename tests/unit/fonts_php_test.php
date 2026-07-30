@@ -64,6 +64,11 @@ test('googleFontsUrl builds the css2 axis forms', function () {
         FontsPhpStep::googleFontsUrl(['Source Serif 4' => ['weights' => [400, 700], 'italic' => true]])
     );
     assert_eq(
+        'https://fonts.googleapis.com/css2?family=123:wght@400&display=swap',
+        FontsPhpStep::googleFontsUrl(['123' => ['weights' => [400], 'italic' => false]]),
+        'numeric-looking model family names cannot become fatal integer array keys'
+    );
+    assert_eq(
         'https://fonts.googleapis.com/css2?family=Marcellus:wght@400&family=Lora:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&display=swap',
         FontsPhpStep::googleFontsUrl([
             'Marcellus' => ['weights' => [400], 'italic' => false],
@@ -88,6 +93,32 @@ test('fontRequirements keeps scanned variants attached to their family', functio
         'Marcellus' => ['weights' => [400], 'italic' => false],
         'Lora' => ['weights' => [400, 600, 700], 'italic' => true],
     ], FontsPhpStep::fontRequirements($theme, $markup));
+});
+
+test('fontRequirements tolerates a numeric-looking model font slug', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => '123', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Display'],
+        ]]],
+    ];
+    $markup = '<p class="has-123-font-family" style="font-weight:500">Numeric slug</p>';
+
+    assert_eq([
+        'Oswald' => ['weights' => [400, 500], 'italic' => false],
+    ], FontsPhpStep::fontRequirements($theme, $markup));
+});
+
+test('fontRequirements resolves a literal family with a numeric-looking slug', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => '123', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Display'],
+        ]]],
+        'styles' => ['typography' => ['fontFamily' => '"Oswald", sans-serif']],
+    ];
+
+    assert_eq([
+        'Oswald' => ['weights' => [400], 'italic' => false],
+    ], FontsPhpStep::fontRequirements($theme, ''));
 });
 
 test('build emits only program-controlled values, never model text', function () {

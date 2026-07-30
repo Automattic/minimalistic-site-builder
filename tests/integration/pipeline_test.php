@@ -260,9 +260,9 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'appendix appended after the theme header'
     );
 
-    // fonts-php accepted the model's module; finalize-theme wrote the
-    // deterministic loader that enqueues style.css (block themes don't load
-    // it automatically) and require_once's fonts.php.
+    // fonts-php deterministically built the module from the final markup scan;
+    // finalize-theme wrote the loader that enqueues style.css (block themes
+    // don't load it automatically) and require_once's fonts.php.
     assert_contains('fonts.googleapis.com', $project->readText('theme/fonts.php'));
     $functions = $project->readText('theme/functions.php');
     assert_contains('get_stylesheet_uri()', $functions);

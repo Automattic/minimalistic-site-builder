@@ -74,8 +74,8 @@ one step (any model id, wins over the config):
 - `LLM_MODEL_<STEP>` — a single step, e.g. `LLM_MODEL_SITE_SPEC=gpt-5.5`
 
 The OpenRouter profile uses K3 for every quality-critical large-tier step:
-`design-direction`, `theme-json`, `sections`, `page-styles`, `custom-motion`,
-and `fonts-php`. Fast K2.5 `:nitro`, with optional reasoning disabled, is
+`design-direction`, `theme-json`, `sections`, `page-styles`, and
+`custom-motion`. Fast K2.5 `:nitro`, with optional reasoning disabled, is
 reserved for the small structural steps. K3's maximum-effort reasoning shares
 its completion budget with the visible answer, so the transport gives it a
 larger token budget and timeout. OpenRouter demo batches run up to three sites

@@ -83,8 +83,8 @@ final class ApplyIdentityStep implements Step
      * docblock, where a value carrying a star-slash comment terminator would
      * close the header and whatever follows would execute BEFORE the ABSPATH
      * guard. Newlines and control characters collapse to spaces (they would
-     * also forge extra header lines), then comment terminators are removed
-     * until none can reassemble.
+     * also forge extra header lines), then stars are removed so no comment
+     * terminator can survive or reassemble.
      */
     private static function headerSafe(string $value): string
     {
