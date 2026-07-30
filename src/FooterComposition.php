@@ -44,8 +44,9 @@ final class FooterComposition
 
     /** Footer utility/action behavior when sibling pages offer useful destinations. */
     private const NAV_RULE_MULTI = '- This site has multiple pages. A compact `wp:page-list` is permitted for '
-        . 'site-wide utility navigation. A footer button may use one purposeful canonical SITE PAGES destination '
-        . '(for example booking, contact, or work), but never a generic Home/back action merely to fill the design; '
+        . 'site-wide utility navigation. A footer button may use one purposeful canonical SITE PAGES destination — '
+        . 'the page holding what this site actually asks visitors to do next — '
+        . 'but never a generic Home/back action merely to fill the design; '
         . 'a spec-backed mailto: action is also valid.';
 
     /** Footer utility/action behavior for a one-page site. */
