@@ -73,7 +73,9 @@ final class FooterUnit extends AbstractMarkupUnit
         if (!is_int($pageCount)) {
             throw new \InvalidArgumentException("unit input 'page_count' must be an integer");
         }
-        FooterComposition::navigationRule($pageCount);
+        if ($pageCount < 1) {
+            throw new \InvalidArgumentException('footer page_count must be at least 1');
+        }
         return $pageCount;
     }
 }

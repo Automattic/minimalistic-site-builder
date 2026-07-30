@@ -226,6 +226,19 @@ test('FooterUnit wraps multiple generated roots in one assigned-surface group wi
     assert_eq($once, $unit->finish($once, $input), 'multiple-root repair reaches a fixed point');
 });
 
+test('FooterUnit wraps a single non-group root instead of discarding it for the fallback', function () {
+    $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $raw = '<!-- wp:paragraph --><p>Credit survives.</p><!-- /wp:paragraph -->';
+    $input = template_part_unit_input(); // photographic-split maps to contrast.
+
+    $once = $unit->finish($raw, $input);
+
+    assert_true(str_starts_with($once, '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}} -->'));
+    assert_contains('class="wp-block-group has-contrast-background-color has-background"', $once);
+    assert_contains('Credit survives.', $once);
+    assert_eq($once, $unit->finish($once, $input), 'single non-group-root repair reaches a fixed point');
+});
+
 test('FooterUnit removes a malformed root style attribute instead of discarding usable content', function () {
     $unit = new FooterUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $raw = '<!-- wp:group -->'

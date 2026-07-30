@@ -207,8 +207,12 @@ final class SectionsStep implements Step
                 $warningContext = "file='theme/{$job['file']}'; block='part root'; "
                     . "authored={$authoredFailure}; ";
                 if ($isChrome) {
+                    // This is an error handler: an unknown archetype falls
+                    // back to the default surface instead of throwing again.
+                    $assignedArchetype = (string) ($job['input']['composition_archetype'] ?? '');
                     $footerSurface = $key === 'footer'
-                        ? FooterComposition::surface((string) ($job['input']['composition_archetype'] ?? ''))
+                        && in_array($assignedArchetype, FooterComposition::ARCHETYPES, true)
+                        ? FooterComposition::surface($assignedArchetype)
                         : null;
                     $footerPageCount = $key === 'footer' && is_int($job['input']['page_count'] ?? null)
                         ? $job['input']['page_count']

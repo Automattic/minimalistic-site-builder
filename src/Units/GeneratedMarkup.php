@@ -243,10 +243,10 @@ final class GeneratedMarkup
      * Enforce the concrete surface shared by the footer and closing sections.
      *
      * The comment attribute is the source of truth consumed by downstream
-     * layout/contrast passes. Multiple generated roots are wrapped without
-     * dropping content, and any saved root element is synchronized as well so
-     * stale generated classes/styles cannot be sourced back into the block
-     * before re-serialization.
+     * layout/contrast passes. Multiple generated roots — or a single root that
+     * is not a wp:group — are wrapped without dropping content, and any saved
+     * root element is synchronized as well so stale generated classes/styles
+     * cannot be sourced back into the block before re-serialization.
      *
      * @param list<string> $notes appended to when opaque authored styling must
      *                            be removed to make the surface enforceable
@@ -262,7 +262,10 @@ final class GeneratedMarkup
             $document->indices(),
             static fn (int $index): bool => $document->parent($index) === null
         ));
-        if (count($roots) > 1) {
+        if (
+            $roots !== []
+            && (count($roots) > 1 || $document->name($roots[0]) !== 'group')
+        ) {
             $markup = '<!-- wp:group -->' . "\n"
                 . '<div class="wp-block-group">' . "\n"
                 . $markup . "\n"
