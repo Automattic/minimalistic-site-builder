@@ -178,28 +178,63 @@ final class Imagen
      * progress line stays in the transport, not here). Unit-testable with a
      * fake transport and zero delays.
      *
+     * An outcome carrying `held` (the pool declined to send the request after
+     * a sibling was rate-limited) retries without consuming the finite delay
+     * budget: it says nothing about its own request, and the really-attempted
+     * sibling's gate still bounds the batch — a never-attempted image must not
+     * degrade to a placeholder failure.
+     *
+     * The optional $onResult fires once per body when its result is FINAL
+     * (success, or failure with retries exhausted) — never for an outcome that
+     * will retry — so callers can persist progress incrementally. When it is
+     * provided, the callback is the delivery path for image bytes: the
+     * returned success records omit `bytes` so the batch never holds every
+     * image in memory at once.
+     *
      * @param array<int,array<string,mixed>> $bodies request bodies keyed by index
-     * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,filtered?:bool}> $transport
+     * @param callable(array<int,array<string,mixed>>):array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,held?:bool,filtered?:bool}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param callable(int,int,int):void|null $onRetry called before each backoff with (pending count, attempt #, wait seconds)
+     * @param callable(int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}):void|null $onResult called once per index with its final result
      * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>,succeeded:int}
      */
-    public static function retryBatch(array $bodies, callable $transport, array $delays, ?callable $onRetry = null): array
+    public static function retryBatch(
+        array $bodies,
+        callable $transport,
+        array $delays,
+        ?callable $onRetry = null,
+        ?callable $onResult = null,
+    ): array
     {
         $results = [];
         $succeeded = 0;
         $pending = array_keys($bodies);
-        $attempt = 0;
+        /** @var array<int,int> $attempts transient retries consumed by each request */
+        $attempts = array_fill_keys($pending, 0);
+        $retryWave = 0;
 
         while ($pending !== []) {
             $outcomes = $transport(array_intersect_key($bodies, array_flip($pending)));
 
             $retry = [];
+            $retryWaits = [];
             foreach ($outcomes as $i => $outcome) {
                 if ($outcome['ok']) {
-                    $results[$i] = ['ok' => true, 'bytes' => $outcome['bytes']];
+                    // A pooled transport may have delivered the bytes out-of-band
+                    // already (success is always final) — record the outcome
+                    // without inventing a bytes key.
+                    $results[$i] = ['ok' => true]
+                        + (array_key_exists('bytes', $outcome) ? ['bytes' => $outcome['bytes']] : []);
                     $succeeded++;
-                } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
+                } elseif (($outcome['held'] ?? false) === true) {
+                    $retry[] = $i; // never sent — retry without charging the budget
+                } elseif (
+                    ($outcome['transient'] ?? false)
+                    && ($attempts[$i] ?? 0) < count($delays)
+                ) {
+                    $attempt = $attempts[$i] ?? 0;
+                    $attempts[$i] = $attempt + 1;
+                    $retryWaits[$i] = $delays[$attempt];
                     $retry[] = $i; // try this one again next round
                 } else {
                     // Keep the filtered flag on the final failure so the caller
@@ -208,14 +243,26 @@ final class Imagen
                     $results[$i] = ['ok' => false, 'error' => $outcome['error']]
                         + (($outcome['filtered'] ?? false) ? ['filtered' => true] : []);
                 }
+                if ($onResult !== null && array_key_exists($i, $results)) {
+                    $onResult($i, $results[$i]);
+                    // The callback just took delivery (typically writing the
+                    // image to disk). Retaining a second copy of every image
+                    // until the whole batch returns exhausts memory on large
+                    // builds (52 images ≈ 150MB), so the returned record
+                    // keeps the outcome, not the payload.
+                    unset($results[$i]['bytes']);
+                }
             }
 
             $pending = $retry;
             if ($pending !== []) {
-                $wait = $delays[$attempt];
-                $attempt++;
+                // Wait long enough for every really-attempted transient in
+                // this wave. A held-only wave waits zero: no request consumed
+                // a retry or owns a backoff slot.
+                $wait = $retryWaits === [] ? 0 : max($retryWaits);
+                $retryWave++;
                 if ($onRetry !== null) {
-                    $onRetry(count($pending), $attempt, $wait);
+                    $onRetry(count($pending), $retryWave, $wait);
                 }
                 sleep($wait);
             }
