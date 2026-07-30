@@ -80,7 +80,6 @@ final class StepDefaults
             'sections'         => self::temperature('SECTIONS', 0.9),
             'page-styles'      => self::temperature('PAGE_STYLES', null),
             'custom-motion'    => self::temperature('CUSTOM_MOTION', null),
-            'fonts-php'        => self::temperature('FONTS_PHP', null),
         ];
     }
 

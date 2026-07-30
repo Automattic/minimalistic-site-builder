@@ -142,7 +142,9 @@ final class StepComposition
             // validated against a deterministic scan of the final theme.json +
             // markup (every family/weight/italic the build uses MUST be requested;
             // scan-built fallback otherwise).
-            new FontsPhpStep($llm, $renderer, $models['fonts-php'], $temps['fonts-php']),
+            // Deterministic: builds fonts.php from the scanned requirements.
+            // It takes no model — see BIGR-750.
+            new FontsPhpStep(),
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
             new FinalizeThemeStep(),
