@@ -125,6 +125,12 @@ test('FooterUnit renders exactly one reviewed recipe and image instructions only
             str_contains($prompt, 'never `portrait`'),
             "{$archetype} image recipe forbids portrait footer images"
         );
+        assert_contains(
+            'FIT-TEXT IDENTITY LINE',
+            $prompt,
+            "{$archetype} receives the shared fit-text identity device"
+        );
+        assert_contains('"fitText":true', $prompt);
     }
 });
 

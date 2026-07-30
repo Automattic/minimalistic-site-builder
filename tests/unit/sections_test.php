@@ -215,6 +215,8 @@ test('footer prompt renders only its selected high-impact recipe without overrid
         }
     }
     assert_contains('ONE dominant focal gesture and low content density', $footer);
+    assert_contains('FIT-TEXT IDENTITY LINE', $footer);
+    assert_contains('"fitText":true', $footer);
     assert_contains('signature-device PLACEMENT restrictions are binding', $footer);
     assert_contains('ONLY when the direction explicitly makes it site-wide', $footer);
     assert_contains('NEVER set `"tagName":"footer"`', $footer);

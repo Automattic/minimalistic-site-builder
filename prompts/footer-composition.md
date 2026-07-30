@@ -19,4 +19,19 @@ Content ownership and handoff contract:
 ASSIGNED COMPOSITION RECIPE:
 {{composition_recipe}}
 
+FIT-TEXT IDENTITY LINE (shared device, available to every composition): a
+single wp:heading carrying `"fitText":true` plus a real `"align":"full"` or
+`"align":"wide"` attribute — saved HTML mirroring the support as
+`class="wp-block-heading alignfull has-fit-text"` — renders its text at the
+exact width of the band. Its text is the spec's exact identity on ONE short
+line; never set a fontSize preset, raw font-size, or clamp() on it, never
+build it from wp:site-title (no fit-text support), and use at most ONE
+fit-text line per footer. When the assigned recipe names it as the focal
+gesture, build it at full contrast. Any other composition MAY instead close
+the band with a dimmed version: the identity in a muted palette slug read
+quietly against the assigned surface — still clearing large-text contrast,
+since the deterministic contrast pass overrules a tone that fails — placed as
+the band's final low layer beneath the utility baseline, where it reads as
+background identity rather than a second focal gesture.
+
 Across every archetype, use ONE dominant focal gesture and low content density. Scale, contrast, an image crop, or an offset panel may make the footer high-impact, but do not restage a multi-section hero. A footer is a decisive brand coda plus a small utility layer—not a miniature sitemap.
