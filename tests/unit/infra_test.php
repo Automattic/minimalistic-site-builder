@@ -44,6 +44,33 @@ test('project writes and reads text and json round-trip', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('project atomically replaces a JSON progress artifact', function () {
+    $tmp = sys_get_temp_dir() . '/builder_atomic_json_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', [['status' => 'pending']]);
+
+    $project->writeJsonAtomic('images.json', [['status' => 'completed']]);
+
+    assert_eq([['status' => 'completed']], $project->readJson('images.json'));
+    assert_eq([], glob($project->root . '/.block-fixer-*') ?: [], 'no staging file remains');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('project atomic JSON replacement preserves the target when replace fails', function () {
+    $tmp = sys_get_temp_dir() . '/builder_atomic_json_fail_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $target = $project->path('images.json');
+    mkdir($target);
+
+    assert_throws(
+        fn () => $project->writeJsonAtomic('images.json', [['status' => 'completed']]),
+        'a target that cannot be replaced must remain untouched',
+    );
+    assert_true(is_dir($target), 'failed replacement preserves the prior target');
+    assert_eq([], glob($project->root . '/.block-fixer-*') ?: [], 'failed replacement discards staging');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('project readText throws when an existing file cannot be read', function () {
     $tmp = sys_get_temp_dir() . '/builder_unreadable_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

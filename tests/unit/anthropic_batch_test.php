@@ -797,6 +797,38 @@ test('retryTextBatch retries held launches without burning the transient budget'
     assert_eq(3, $round, 'held keys retry in their own round instead of aborting');
 });
 
+test('retryTextBatch gives a previously held request its own transient retry budget', function () {
+    $bodies = ['real' => ['model' => 'm'], 'held' => ['model' => 'm']];
+    $round = 0;
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            $out = [];
+            foreach ($subset as $key => $_body) {
+                $out[$key] = match (true) {
+                    $key === 'real' && $round === 1 => [
+                        'ok' => false, 'transient' => true, 'error' => 'HTTP 429: slow down',
+                    ],
+                    $key === 'held' && $round <= 2 => [
+                        'ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held',
+                    ],
+                    $key === 'held' && $round === 3 => [
+                        'ok' => false, 'transient' => true, 'error' => 'first real attempt timed out',
+                    ],
+                    default => [
+                        'ok' => true, 'text' => strtoupper((string) $key), 'input' => 1, 'output' => 1,
+                    ],
+                };
+            }
+            return $out;
+        },
+        [0],
+    );
+    assert_eq('HELD', $results['held']['text'], 'held rounds do not consume the request retry');
+    assert_eq(4, $round, 'the first real transient gets its configured retry');
+});
+
 test('retryTextBatch survives a held launch with an empty delay schedule', function () {
     $bodies = ['h' => ['model' => 'm']];
     $round = 0;

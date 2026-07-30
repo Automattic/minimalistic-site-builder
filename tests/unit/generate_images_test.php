@@ -481,6 +481,38 @@ test('generate-images repairs a safety-filtered prompt with the small model and 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images persists each safety-filter repair as it lands', function () {
+    [$project, $tmp] = batch_fixture(2);
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['image 0', 'image 1'];
+    $llm = new FakeLlm();
+    $llm->queueText('a sunlit reading nook');
+    $llm->queueText('a quiet garden terrace');
+    $repairSnapshots = [];
+    $images->afterEachResult = function (int $pos) use ($project, $images, &$repairSnapshots): void {
+        if (count($images->batches) !== 2) {
+            return; // Ignore the original filtered batch.
+        }
+        $onDisk = $project->readJson('images.json');
+        $repairSnapshots[$pos] = [
+            'completed_on_disk' => count(array_filter(
+                $onDisk,
+                fn (array $spec): bool => ($spec['status'] ?? '') === 'completed'
+            )),
+            'asset_written' => $project->exists("theme/assets/img-{$pos}.jpg"),
+        ];
+    };
+
+    (new GenerateImagesStep($images, $llm, 'small-model'))->run($project);
+
+    assert_eq(1, $repairSnapshots[0]['completed_on_disk'], 'first repair persisted before the second landed');
+    assert_true($repairSnapshots[0]['asset_written'], 'first repaired asset written during the batch');
+    assert_eq(2, $repairSnapshots[1]['completed_on_disk'], 'second repair persisted incrementally');
+    assert_true($repairSnapshots[1]['asset_written'], 'second repaired asset written during the batch');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images marks failed when the repaired prompt is filtered too', function () {
     [$project, $tmp] = generate_fixture();
     $images = new FakeImageClient('JPEGDATA');

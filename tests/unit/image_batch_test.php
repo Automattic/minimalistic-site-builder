@@ -220,6 +220,36 @@ test('retryBatch retries held launches without burning the transient budget', fu
     assert_eq(2, $out['succeeded']);
 });
 
+test('retryBatch gives a previously held image its own transient retry budget', function () {
+    $round = 0;
+    $out = Imagen::retryBatch(
+        [0 => ['p' => 'real'], 1 => ['p' => 'held']],
+        function (array $subset) use (&$round): array {
+            $round++;
+            $res = [];
+            foreach (array_keys($subset) as $i) {
+                $res[$i] = match (true) {
+                    $i === 0 && $round === 1 => [
+                        'ok' => false, 'transient' => true, 'error' => 'HTTP 429',
+                    ],
+                    $i === 1 && $round <= 2 => [
+                        'ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held',
+                    ],
+                    $i === 1 && $round === 3 => [
+                        'ok' => false, 'transient' => true, 'error' => 'first real attempt timed out',
+                    ],
+                    default => ['ok' => true, 'bytes' => "IMG{$i}"],
+                };
+            }
+            return $res;
+        },
+        [0],
+    );
+    assert_eq('IMG1', $out['results'][1]['bytes'], 'held rounds do not consume the image retry');
+    assert_eq(4, $round, 'the first real transient gets its configured retry');
+    assert_eq(2, $out['succeeded']);
+});
+
 test('retryBatch survives a held launch with an empty delay schedule', function () {
     $round = 0;
     $out = Imagen::retryBatch(

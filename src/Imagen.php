@@ -209,12 +209,15 @@ final class Imagen
         $results = [];
         $succeeded = 0;
         $pending = array_keys($bodies);
-        $attempt = 0;
+        /** @var array<int,int> $attempts transient retries consumed by each request */
+        $attempts = array_fill_keys($pending, 0);
+        $retryWave = 0;
 
         while ($pending !== []) {
             $outcomes = $transport(array_intersect_key($bodies, array_flip($pending)));
 
             $retry = [];
+            $retryWaits = [];
             foreach ($outcomes as $i => $outcome) {
                 if ($outcome['ok']) {
                     // A pooled transport may have delivered the bytes out-of-band
@@ -225,7 +228,13 @@ final class Imagen
                     $succeeded++;
                 } elseif (($outcome['held'] ?? false) === true) {
                     $retry[] = $i; // never sent — retry without charging the budget
-                } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
+                } elseif (
+                    ($outcome['transient'] ?? false)
+                    && ($attempts[$i] ?? 0) < count($delays)
+                ) {
+                    $attempt = $attempts[$i] ?? 0;
+                    $attempts[$i] = $attempt + 1;
+                    $retryWaits[$i] = $delays[$attempt];
                     $retry[] = $i; // try this one again next round
                 } else {
                     // Keep the filtered flag on the final failure so the caller
@@ -247,12 +256,13 @@ final class Imagen
 
             $pending = $retry;
             if ($pending !== []) {
-                // Held keys can outlive the delay schedule; clamp to its last
-                // (or zero) instead of indexing past the end.
-                $wait = $delays === [] ? 0 : $delays[min($attempt, count($delays) - 1)];
-                $attempt++;
+                // Wait long enough for every really-attempted transient in
+                // this wave. A held-only wave waits zero: no request consumed
+                // a retry or owns a backoff slot.
+                $wait = $retryWaits === [] ? 0 : max($retryWaits);
+                $retryWave++;
                 if ($onRetry !== null) {
-                    $onRetry(count($pending), $attempt, $wait);
+                    $onRetry(count($pending), $retryWave, $wait);
                 }
                 sleep($wait);
             }

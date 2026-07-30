@@ -193,11 +193,6 @@ final class WpcomImageClient implements ImageClient
                     throw new TransientApiException('no response received before the transfer stopped');
                 }
                 $bytes = Imagen::interpret($raw, $httpStatus);
-                if ($onBytes !== null) {
-                    $onBytes((int) $i, $bytes);
-                    return ['ok' => true];
-                }
-                return ['ok' => true, 'bytes' => $bytes];
             } catch (ImageFilteredException $e) {
                 // The safety filter is non-deterministic: retry like a
                 // transient failure, but keep the filtered flag so the caller
@@ -205,9 +200,18 @@ final class WpcomImageClient implements ImageClient
                 return ['ok' => false, 'transient' => true, 'filtered' => true, 'error' => $e->getMessage()];
             } catch (TransientApiException $e) {
                 return ['ok' => false, 'transient' => true, 'error' => $e->getMessage()];
-            } catch (\Throwable $e) {
+            } catch (\RuntimeException $e) {
                 return ['ok' => false, 'transient' => false, 'error' => $e->getMessage()];
             }
+
+            // Delivery belongs to the caller, not the transport classifier:
+            // persistence/I/O failures and programming invariants must escape
+            // instead of being mislabeled as a permanent image API failure.
+            if ($onBytes !== null) {
+                $onBytes((int) $i, $bytes);
+                return ['ok' => true];
+            }
+            return ['ok' => true, 'bytes' => $bytes];
         };
 
         $await = function () use ($multi, &$handles, &$keysById, &$queuedOutcomes, $finish): array {

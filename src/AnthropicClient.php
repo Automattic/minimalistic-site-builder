@@ -429,7 +429,7 @@ final class AnthropicClient implements Llm
      * was actually sent.
      *
      * @param array<array-key,array<string,mixed>> $bodies request bodies keyed by id
-     * @param callable(array<array-key,array<string,mixed>>):array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}> $transport
+     * @param callable(array<array-key,array<string,mixed>>):array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,stop_reason?:?string}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param null|callable(string|int,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
      * @return array<array-key,array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}>
@@ -438,10 +438,13 @@ final class AnthropicClient implements Llm
     {
         $results = [];
         $pending = array_keys($bodies);
-        $attempt = 0;
+        /** @var array<array-key,int> $attempts transient retries consumed by each request */
+        $attempts = array_fill_keys($pending, 0);
+        $retryWave = 0;
 
         while ($pending !== []) {
             $transientRetry = [];
+            $retryWaits = [];
             $immediate = $pending;
 
             // Complete every deterministic strip retry before delaying any
@@ -470,14 +473,21 @@ final class AnthropicClient implements Llm
                     } elseif (($outcome['held'] ?? false) === true) {
                         // A held launch was never sent, so its outcome carries
                         // no information about the request — it must not burn
-                        // the finite transient budget, and "launch held" must
-                        // never be the error a batch aborts with. Bounded all
-                        // the same: a hold only exists because a sibling was
-                        // really attempted and rate-limited, and that
-                        // sibling's own transient gate below still aborts the
-                        // batch if the event outlasts the budget.
+                        // or inherit another request's finite transient budget,
+                        // and "launch held" must never be the error a batch
+                        // aborts with. Bounded all the same: a hold only exists
+                        // because a sibling was really attempted and
+                        // rate-limited, and that sibling's own transient gate
+                        // below still aborts the batch if the event outlasts
+                        // its per-request budget.
                         $transientRetry[] = $key;
-                    } elseif (($outcome['transient'] ?? false) && $attempt < count($delays)) {
+                    } elseif (
+                        ($outcome['transient'] ?? false)
+                        && ($attempts[$key] ?? 0) < count($delays)
+                    ) {
+                        $attempt = $attempts[$key] ?? 0;
+                        $attempts[$key] = $attempt + 1;
+                        $retryWaits[$key] = $delays[$attempt];
                         $transientRetry[] = $key;
                     } else {
                         $error = (string) ($outcome['error'] ?? 'unknown');
@@ -492,12 +502,13 @@ final class AnthropicClient implements Llm
 
             $pending = $transientRetry;
             if ($pending !== []) {
-                // Held keys can outlive the delay schedule; clamp to its last
-                // (or zero) instead of indexing past the end.
-                $wait = $delays === [] ? 0 : $delays[min($attempt, count($delays) - 1)];
-                $attempt++;
+                // Wait long enough for every really-attempted transient in
+                // this wave. A held-only wave waits zero: no request consumed
+                // a retry or owns a backoff slot.
+                $wait = $retryWaits === [] ? 0 : max($retryWaits);
+                $retryWave++;
                 Narrator::write('    (transient API error on ' . count($pending)
-                    . " request(s); retry {$attempt} in {$wait}s)\n");
+                    . " request(s); retry {$retryWave} in {$wait}s)\n");
                 sleep($wait);
             }
         }
@@ -518,7 +529,7 @@ final class AnthropicClient implements Llm
      * event as fast as the 429s bounce back.
      *
      * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,retry_without?:string,stop_reason?:?string}>
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,stop_reason?:?string}>
      */
     private function streamMulti(array $bodies): array
     {

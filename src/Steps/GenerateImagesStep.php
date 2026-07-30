@@ -187,7 +187,7 @@ final class GenerateImagesStep implements Step
                 }
 
                 $this->finish($project, $specs, $i, $batchSpecs[$pos], $result, $resolved, $imageGrade);
-                $project->writeJson('images.json', $specs);
+                $project->writeJsonAtomic('images.json', $specs);
             };
 
             $results = $this->images->generateBatch($batchSpecs, $handle);
@@ -205,7 +205,7 @@ final class GenerateImagesStep implements Step
             }
         }
 
-        $project->writeJson('images.json', $specs);
+        $project->writeJsonAtomic('images.json', $specs);
 
         if ($resolved !== []) {
             $this->rewriteMarkup($project, $resolved);
@@ -503,10 +503,39 @@ final class GenerateImagesStep implements Step
             return;
         }
 
-        $results = $this->images->generateBatch(array_values($regenSpecs));
-        foreach (array_keys($regenSpecs) as $pos => $i) {
-            $result = $results[$pos] ?? ['ok' => false, 'error' => 'no result returned'];
-            $this->finish($project, $specs, $i, $regenSpecs[$i], $result, $resolved, $imageGrade, $subjects[$i]);
+        // Stream repaired images through the same bounded-memory contract as
+        // the original batch. Persist each completion immediately so a large
+        // filtered cohort cannot rebuild the all-bytes-in-memory/OOM path or
+        // lose every successful repair if a later request is interrupted.
+        $indices = array_keys($regenSpecs);
+        $batchSpecs = array_values($regenSpecs);
+        $handled = [];
+        $handle = function (int $pos, array $result) use (
+            $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, $subjects, &$handled
+        ): void {
+            if (isset($handled[$pos])) {
+                return;
+            }
+            $handled[$pos] = true;
+            $i = $indices[$pos];
+            $this->finish(
+                $project,
+                $specs,
+                $i,
+                $batchSpecs[$pos],
+                $result,
+                $resolved,
+                $imageGrade,
+                $subjects[$i]
+            );
+            $project->writeJsonAtomic('images.json', $specs);
+        };
+
+        $results = $this->images->generateBatch($batchSpecs, $handle);
+        foreach ($indices as $pos => $i) {
+            if (!isset($handled[$pos])) {
+                $handle($pos, $results[$pos] ?? ['ok' => false, 'error' => 'no result returned']);
+            }
         }
     }
 
