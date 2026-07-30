@@ -13,8 +13,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * theme's Google Fonts (telex-style file split: the deterministic
  * functions.php only wires style.css and require_once's this file).
  *
- * Input:  theme/theme.json + the final generated markup (theme parts/templates
- *         and companion-plugin pages — i.e. AFTER fix-blocks and assembly).
+ * Input:  designDirection.json + theme/theme.json + the final generated markup
+ *         (theme parts/templates and companion-plugin pages — i.e. AFTER
+ *         fix-blocks and assembly).
  * Output: theme/fonts.php, hooked on enqueue_block_assets so the fonts render
  *         in the block editor as well as the front end. Skipped entirely when
  *         theme.json names only system/web-safe families.
@@ -37,6 +38,12 @@ final class FontsPhpStep implements Step
         'garamond', 'inherit', 'initial',
     ];
 
+    /** HTML elements that never establish an inherited-family stack frame. */
+    private const VOID_TAGS = [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr',
+    ];
+
     public function id(): string
     {
         return 'fonts-php';
@@ -52,8 +59,14 @@ final class FontsPhpStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*'],
-            writes: ['theme/fonts.php'],
+            reads: [
+                'designDirection.json',
+                'theme/theme.json',
+                'theme/parts/*',
+                'theme/templates/*',
+                'plugin/pages/*',
+            ],
+            writes: ['theme/fonts.php', 'warnings.json'],
             concurrent: false,
         );
     }
@@ -61,7 +74,15 @@ final class FontsPhpStep implements Step
     public function run(Project $project): void
     {
         $theme = $project->readJson('theme/theme.json');
-        $requirements = self::fontRequirements($theme, self::themeMarkup($project));
+        $direction = $project->readJson('designDirection.json');
+        $warnings = [];
+        $requirements = self::fontRequirements(
+            $theme,
+            self::themeMarkup($project),
+            $direction,
+            $warnings,
+        );
+        $project->addWarnings($this->id(), $warnings);
         if ($requirements === []) {
             $fontsFile = $project->themePath('fonts.php');
             if (is_file($fontsFile) && !unlink($fontsFile)) {
@@ -120,9 +141,16 @@ final class FontsPhpStep implements Step
      * not accidentally let one family cover another family's variant.
      *
      * @param array<mixed> $theme decoded theme.json
-     * @return array<string,array{weights:int[],italic:bool}>
+     * @param array<mixed> $direction normalized designDirection.json
+     * @param list<string> $warnings
+     * @return array<string,array{weights:int[],italic:bool,axes?:array<string,array{min:float,max:float}>}>
      */
-    public static function fontRequirements(array $theme, string $markup): array
+    public static function fontRequirements(
+        array $theme,
+        string $markup,
+        array $direction = [],
+        array &$warnings = [],
+    ): array
     {
         $familiesBySlug = self::googleFamiliesBySlug($theme);
         if ($familiesBySlug === []) {
@@ -138,6 +166,7 @@ final class FontsPhpStep implements Step
             self::addFamilyWeight($requirements, $familiesBySlug['body'], 700);
         }
 
+        self::collectDirectionRequirements($direction, $familiesBySlug, $requirements, $warnings);
         $styles = $theme['styles'] ?? [];
         if (is_array($styles)) {
             self::collectThemeRequirements($styles, 'body', $familiesBySlug, $requirements);
@@ -153,25 +182,51 @@ final class FontsPhpStep implements Step
      * italics, plain `wght` otherwise. Used by the deterministic fallback.
      * Pure — unit-testable.
      *
-     * @param array<string,array{weights:int[],italic:bool}> $requirements
+     * @param array<string,array{weights:int[],italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements
      */
     public static function googleFontsUrl(array $requirements): string
     {
         $params = [];
         foreach (self::normalizeRequirements($requirements) as $name => $required) {
-            // css2 requires axis tuples in ascending order: all 0,(upright)
-            // before 1,(italic).
-            $axis = $required['italic']
-                ? 'ital,wght@' . implode(';', array_merge(
-                    array_map(static fn (int $w): string => "0,{$w}", $required['weights']),
-                    array_map(static fn (int $w): string => "1,{$w}", $required['weights']),
-                ))
-                : 'wght@' . implode(';', $required['weights']);
-
             // rawurlencode turns spaces into %20; Google Fonts wants '+'.
-            $params[] = 'family=' . str_replace('%20', '+', rawurlencode((string) $name)) . ':' . $axis;
+            $params[] = 'family=' . str_replace('%20', '+', rawurlencode((string) $name))
+                . ':' . self::css2Variant($required);
         }
         return 'https://fonts.googleapis.com/css2?' . implode('&', $params) . '&display=swap';
+    }
+
+    /**
+     * @param array{weights:list<int>,italic:bool,axes?:array<string,array{min:float,max:float}>} $required
+     */
+    private static function css2Variant(array $required): string
+    {
+        $axes = is_array($required['axes'] ?? null) ? $required['axes'] : [];
+        $tags = ['wght'];
+        if (isset($axes['opsz'])) {
+            $tags[] = 'opsz';
+        }
+        if ($required['italic']) {
+            $tags[] = 'ital';
+        }
+        sort($tags, SORT_STRING);
+
+        $tuples = [];
+        $italics = $required['italic'] ? [0, 1] : [null];
+        foreach ($italics as $italic) {
+            foreach ($required['weights'] as $weight) {
+                $values = [];
+                foreach ($tags as $tag) {
+                    $values[] = match ($tag) {
+                        'ital' => (string) $italic,
+                        'opsz' => self::formatAxisRange($axes['opsz']),
+                        'wght' => (string) $weight,
+                    };
+                }
+                $tuples[] = implode(',', $values);
+            }
+        }
+
+        return implode(',', $tags) . '@' . implode(';', $tuples);
     }
 
     /**
@@ -189,7 +244,7 @@ final class FontsPhpStep implements Step
      *
      * Pure — unit-testable.
      *
-     * @param array<string,array{weights:int[],italic:bool}> $requirements
+     * @param array<string,array{weights:int[],italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements
      */
     public static function build(string $handle, array $requirements): string
     {
@@ -254,9 +309,112 @@ final class FontsPhpStep implements Step
     }
 
     /**
+     * The committed direction is a floor, not a hint: final observed usage may
+     * add variants, but it cannot remove a family variant the design director
+     * explicitly selected.
+     *
+     * @param array<mixed> $direction
+     * @param array<string,string> $familiesBySlug
+     * @param array<string,array{weights:array<int,bool>,italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements
+     * @param list<string> $warnings
+     */
+    private static function collectDirectionRequirements(
+        array $direction,
+        array $familiesBySlug,
+        array &$requirements,
+        array &$warnings,
+    ): void {
+        $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
+        foreach (['heading', 'body'] as $slot) {
+            $plan = is_array($type[$slot] ?? null) ? $type[$slot] : [];
+            $authoredFamily = is_string($plan['family'] ?? null) ? trim($plan['family']) : '';
+            if ($authoredFamily === '') {
+                continue;
+            }
+
+            $deliveredFamily = isset($familiesBySlug[$slot])
+                ? (string) $familiesBySlug[$slot]
+                : '';
+            if ($deliveredFamily === '') {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                    . self::warningValue($authoredFamily)
+                    . '; delivered removed; disposition theme.json has no Google-hosted family for this slot';
+                continue;
+            }
+            if (strcasecmp($authoredFamily, $deliveredFamily) !== 0) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                    . self::warningValue($authoredFamily) . '; delivered '
+                    . self::warningValue($deliveredFamily)
+                    . '; disposition theme font family differed from the committed direction';
+            }
+
+            $rawWeights = $plan['weights'] ?? [];
+            $weights = [];
+            $invalidWeights = false;
+            if (is_array($rawWeights) && array_is_list($rawWeights)) {
+                foreach ($rawWeights as $weight) {
+                    if (
+                        (is_int($weight) || (is_string($weight) && ctype_digit($weight)))
+                        && (int) $weight >= 100
+                        && (int) $weight <= 900
+                        && (int) $weight % 100 === 0
+                    ) {
+                        $weights[] = (int) $weight;
+                    } else {
+                        $invalidWeights = true;
+                    }
+                }
+            } elseif ($rawWeights !== []) {
+                $invalidWeights = true;
+            }
+            $weights = array_values(array_unique($weights));
+            sort($weights);
+            foreach ($weights as $weight) {
+                self::addFamilyWeight($requirements, $deliveredFamily, $weight);
+            }
+            if ($invalidWeights) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
+                    . self::warningValue($rawWeights) . '; delivered ' . self::warningValue($weights)
+                    . '; disposition invalid weights removed';
+            }
+
+            if (($plan['italic'] ?? false) === true) {
+                self::markFamilyItalic($requirements, $deliveredFamily);
+            } elseif (array_key_exists('italic', $plan) && !is_bool($plan['italic'])) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
+                    . self::warningValue($plan['italic'])
+                    . '; delivered false; disposition non-boolean value removed';
+            }
+
+            $axes = $plan['axes'] ?? [];
+            if (!is_array($axes)) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
+                    . self::warningValue($axes)
+                    . '; delivered removed; disposition non-object axes removed';
+                continue;
+            }
+            foreach ($axes as $tag => $range) {
+                $path = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag;
+                if ($tag !== 'opsz') {
+                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                        . '; delivered removed; disposition axis is not supported by the deterministic CSS2 contract';
+                    continue;
+                }
+                $normalizedRange = self::normalizeAxisRange($range);
+                if ($normalizedRange === null) {
+                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                        . '; delivered removed; disposition invalid optical-size range';
+                    continue;
+                }
+                self::addFamilyAxis($requirements, $deliveredFamily, 'opsz', $normalizedRange);
+            }
+        }
+    }
+
+    /**
      * @param array<mixed> $node
      * @param array<string,string> $familiesBySlug
-     * @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements
+     * @param array<string,array{weights:array<int,bool>,italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements
      */
     private static function collectThemeRequirements(
         array $node,
@@ -287,7 +445,7 @@ final class FontsPhpStep implements Step
 
     /**
      * @param array<string,string> $familiesBySlug
-     * @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements
+     * @param array<string,array{weights:array<int,bool>,italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements
      */
     private static function collectMarkupRequirements(string $markup, array $familiesBySlug, array &$requirements): void
     {
@@ -318,36 +476,78 @@ final class FontsPhpStep implements Step
             }
         }
 
-        if (preg_match_all('/<([a-z0-9-]+)\b([^>]*)>/i', $markup, $tags, PREG_SET_ORDER) > 0) {
+        /** @var list<array{tag:string,family:?string}> $stack */
+        $stack = [];
+        if (preg_match_all('/<\/?([a-z0-9-]+)\b([^>]*)>/i', $markup, $tags, PREG_SET_ORDER) > 0) {
             foreach ($tags as $tag) {
-                $attrs = $tag[2];
-                $familySlug = null;
-                if (preg_match('/\bclass=(["\'])(.*?)\1/is', $attrs, $classMatch) === 1) {
-            foreach (array_keys($familiesBySlug) as $slugKey) {
-                $slug = (string) $slugKey;
-                if (preg_match('/(?<![\w-])has-' . preg_quote($slug, '/') . '-font-family(?![\w-])/', $classMatch[2]) === 1) {
-                    $familySlug = $slug;
-                    break;
+                $rawTag = $tag[0];
+                $tagName = strtolower($tag[1]);
+                if (str_starts_with($rawTag, '</')) {
+                    while ($stack !== []) {
+                        $closed = array_pop($stack);
+                        if ($closed['tag'] === $tagName) {
+                            break;
+                        }
+                    }
+                    continue;
                 }
+
+                $attrs = $tag[2];
+                $parentSlug = $stack === [] ? null : $stack[array_key_last($stack)]['family'];
+                $familySlug = self::familySlugFromHtmlAttrs($attrs, $familiesBySlug);
+                if ($familySlug === null && preg_match('/^h[1-6]$/', $tagName) === 1) {
+                    $familySlug = isset($familiesBySlug['heading']) ? 'heading' : null;
+                }
+                $familySlug ??= $parentSlug;
+                $familySlug ??= isset($familiesBySlug['body']) ? 'body' : null;
+
+                $typography = [];
+                if (preg_match('/\bstyle=(["\'])(.*?)\1/is', $attrs, $styleMatch) === 1) {
+                    if (preg_match('/font-weight:\s*([1-9]00)\b/i', $styleMatch[2], $m) === 1) {
+                        $typography['fontWeight'] = $m[1];
+                    }
+                    if (preg_match('/font-style:\s*italic\b/i', $styleMatch[2]) === 1) {
+                        $typography['fontStyle'] = 'italic';
                     }
                 }
-                $familySlug ??= self::defaultFamilySlugForTag($tag[1]);
-                if ($familySlug === null || !isset($familiesBySlug[$familySlug])) {
-                    continue;
+                if (in_array($tagName, ['strong', 'b'], true)) {
+                    $typography['fontWeight'] = 700;
                 }
-                if (preg_match('/\bstyle=(["\'])(.*?)\1/is', $attrs, $styleMatch) !== 1) {
-                    continue;
-                }
-                $typography = [];
-                if (preg_match('/font-weight:\s*([1-9]00)\b/i', $styleMatch[2], $m) === 1) {
-                    $typography['fontWeight'] = $m[1];
-                }
-                if (preg_match('/font-style:\s*italic\b/i', $styleMatch[2]) === 1) {
+                if (in_array($tagName, ['em', 'i'], true)) {
                     $typography['fontStyle'] = 'italic';
                 }
-                self::addTypographyUse($requirements, $familiesBySlug[$familySlug], $typography);
+                if ($familySlug !== null && isset($familiesBySlug[$familySlug])) {
+                    self::addTypographyUse($requirements, $familiesBySlug[$familySlug], $typography);
+                }
+
+                if (
+                    !str_ends_with(rtrim($rawTag), '/>')
+                    && !in_array($tagName, self::VOID_TAGS, true)
+                ) {
+                    $stack[] = ['tag' => $tagName, 'family' => $familySlug];
+                }
             }
         }
+    }
+
+    /** @param array<string,string> $familiesBySlug */
+    private static function familySlugFromHtmlAttrs(string $attrs, array $familiesBySlug): ?string
+    {
+        if (preg_match('/\bclass=(["\'])(.*?)\1/is', $attrs, $classMatch) !== 1) {
+            return null;
+        }
+        foreach (array_keys($familiesBySlug) as $slugKey) {
+            $slug = (string) $slugKey;
+            if (
+                preg_match(
+                    '/(?<![\w-])has-' . preg_quote($slug, '/') . '-font-family(?![\w-])/',
+                    $classMatch[2],
+                ) === 1
+            ) {
+                return $slug;
+            }
+        }
+        return null;
     }
 
     /** @return array<mixed>|null */
@@ -389,13 +589,8 @@ final class FontsPhpStep implements Step
         return in_array($blockName, ['heading', 'site-title'], true) ? 'heading' : 'body';
     }
 
-    private static function defaultFamilySlugForTag(string $tag): ?string
-    {
-        return preg_match('/^h[1-6]$/i', $tag) === 1 ? 'heading' : 'body';
-    }
-
     /**
-     * @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements
+     * @param array<string,array{weights:array<int,bool>,italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements
      * @param array<mixed> $typography
      */
     private static function addTypographyUse(array &$requirements, string $family, array $typography): void
@@ -408,14 +603,14 @@ final class FontsPhpStep implements Step
         }
     }
 
-    /** @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements */
+    /** @param array<string,array{weights:array<int,bool>,italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements */
     private static function addFamilyWeight(array &$requirements, string $family, int $weight): void
     {
         $requirements[$family] ??= ['weights' => [], 'italic' => false];
         $requirements[$family]['weights'][$weight] = true;
     }
 
-    /** @param array<string,array{weights:array<int,bool>,italic:bool}> $requirements */
+    /** @param array<string,array{weights:array<int,bool>,italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements */
     private static function markFamilyItalic(array &$requirements, string $family): void
     {
         $requirements[$family] ??= ['weights' => [400 => true], 'italic' => false];
@@ -423,8 +618,28 @@ final class FontsPhpStep implements Step
     }
 
     /**
-     * @param array<string,array{weights:int[]|array<int,bool>,italic:bool}> $requirements
-     * @return array<string,array{weights:int[],italic:bool}>
+     * @param array<string,array{weights:array<int,bool>,italic:bool,axes?:array<string,array{min:float,max:float}>}> $requirements
+     * @param array{min:float,max:float} $range
+     */
+    private static function addFamilyAxis(
+        array &$requirements,
+        string $family,
+        string $tag,
+        array $range,
+    ): void {
+        $requirements[$family] ??= ['weights' => [400 => true], 'italic' => false];
+        $current = $requirements[$family]['axes'][$tag] ?? null;
+        $requirements[$family]['axes'][$tag] = is_array($current)
+            ? [
+                'min' => min((float) $current['min'], $range['min']),
+                'max' => max((float) $current['max'], $range['max']),
+            ]
+            : $range;
+    }
+
+    /**
+     * @param array<string,array{weights:int[]|array<int,bool>,italic:bool,axes?:array<mixed>}> $requirements
+     * @return array<string,array{weights:int[],italic:bool,axes?:array<string,array{min:float,max:float}>}>
      */
     private static function normalizeRequirements(array $requirements): array
     {
@@ -440,12 +655,67 @@ final class FontsPhpStep implements Step
                 $weights = [400];
             }
             sort($weights);
-            $normalized[$family] = [
+            $entry = [
                 'weights' => $weights,
                 'italic' => (bool) ($required['italic'] ?? false),
             ];
+            $axes = [];
+            foreach (is_array($required['axes'] ?? null) ? $required['axes'] : [] as $tag => $range) {
+                if ($tag !== 'opsz') {
+                    continue;
+                }
+                $normalizedRange = self::normalizeAxisRange($range);
+                if ($normalizedRange !== null) {
+                    $axes['opsz'] = $normalizedRange;
+                }
+            }
+            if ($axes !== []) {
+                $entry['axes'] = $axes;
+            }
+            $normalized[$family] = $entry;
         }
         return $normalized;
+    }
+
+    /** @return ?array{min:float,max:float} */
+    private static function normalizeAxisRange(mixed $range): ?array
+    {
+        if (!is_array($range)) {
+            return null;
+        }
+        $min = $range['min'] ?? null;
+        $max = $range['max'] ?? null;
+        if (
+            (!is_int($min) && !is_float($min))
+            || (!is_int($max) && !is_float($max))
+            || !is_finite((float) $min)
+            || !is_finite((float) $max)
+            || (float) $min <= 0
+            || (float) $max < (float) $min
+            || (float) $max > 1000
+        ) {
+            return null;
+        }
+        return ['min' => (float) $min, 'max' => (float) $max];
+    }
+
+    /** @param array{min:float,max:float} $range */
+    private static function formatAxisRange(array $range): string
+    {
+        $min = self::formatAxisNumber($range['min']);
+        $max = self::formatAxisNumber($range['max']);
+        return $min === $max ? $min : "{$min}..{$max}";
+    }
+
+    private static function formatAxisNumber(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 4, '.', ''), '0'), '.');
+    }
+
+    private static function warningValue(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : get_debug_type($value);
     }
 
     /**

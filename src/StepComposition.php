@@ -139,7 +139,8 @@ final class StepComposition
             // zero LLM calls.
             new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
             // Also after fix-blocks: deterministically builds fonts.php from the
-            // final theme.json + markup scan. It takes no model — see BIGR-750.
+            // committed typography floor plus final theme/markup usage. Usage may
+            // add variants, never remove direction-selected ones. No model call.
             new FontsPhpStep(),
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.

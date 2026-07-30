@@ -15,9 +15,9 @@ use Automattic\SiteBuild\StepDeclaration;
 /**
  * Step (LLM): generate the block theme's theme.json.
  *
- * Input:  meta.json (user prompt) + siteSpec.json (factual info). The model
- *         makes the design decisions (palette, typography, spacing) inline —
- *         there is no separate design document.
+ * Input:  meta.json (user prompt) + siteSpec.json (factual info) +
+ *         designDirection.json (the committed creative and typography floor).
+ *         The model translates that direction into theme.json tokens.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the five color
@@ -173,7 +173,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             : [];
         $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
         [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
-        [$theme, $fontWarnings] = self::repairFonts($theme);
+        $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
+        [$theme, $fontWarnings] = self::repairFonts($theme, $preferredType);
         $warnings = array_merge($warnings, $colorWarnings, $fontWarnings);
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
@@ -370,9 +371,25 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function repairFonts(array $theme): array
+    public static function repairFonts(array $theme, array $preferredType = []): array
     {
         $warnings = [];
+        $preferred = [];
+        foreach (self::REQUIRED_FONTS as $slot) {
+            $typeSlot = is_array($preferredType[$slot] ?? null) ? $preferredType[$slot] : [];
+            $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
+            if (
+                $family !== ''
+                && preg_match("/^\\p{L}[\\p{L}\\p{N} .&'_-]{0,99}$/u", $family) === 1
+            ) {
+                $preferred[$slot] = $family;
+            } elseif ($family !== '') {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                    . self::warningValue($family)
+                    . '; delivered removed; disposition invalid family name could not be applied to theme.json';
+            }
+        }
+
         $families = $theme['settings']['typography']['fontFamilies'] ?? null;
         if (!is_array($families)) {
             $warnings[] = 'theme.json missing settings.typography.fontFamilies; rebuilt with system stacks';
@@ -399,6 +416,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             }
             $entry['slug'] = $slug;
             $entry['fontFamily'] = trim($family);
+            if (isset($preferred[$slug])) {
+                $entry['fontFamily'] = self::replacePrimaryFamily($entry['fontFamily'], $preferred[$slug]);
+            }
             $entries[] = $entry;
         }
         if ($nonObjects > 0) {
@@ -411,12 +431,25 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             if (in_array($needed, $slugs, true)) {
                 continue;
             }
-            $stack = self::FALLBACK_FONTS[$needed];
+            $stack = isset($preferred[$needed])
+                ? self::replacePrimaryFamily(self::FALLBACK_FONTS[$needed], $preferred[$needed])
+                : self::FALLBACK_FONTS[$needed];
             $families[] = ['slug' => $needed, 'name' => ucfirst($needed), 'fontFamily' => $stack];
-            $warnings[] = "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
+            $warnings[] = isset($preferred[$needed])
+                ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
+                : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
         }
         $theme['settings']['typography']['fontFamilies'] = $families;
         return [$theme, $warnings];
+    }
+
+    private static function replacePrimaryFamily(string $stack, string $family): string
+    {
+        $parts = explode(',', $stack, 2);
+        $fallback = isset($parts[1]) && trim($parts[1]) !== ''
+            ? ', ' . trim($parts[1])
+            : ', system-ui, sans-serif';
+        return '"' . $family . '"' . $fallback;
     }
 
     /** Compact authored-value evidence for one actionable warnings.json row. */
