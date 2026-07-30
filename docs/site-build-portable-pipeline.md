@@ -110,11 +110,11 @@ The useful part is that it's just a registered capability. The orchestrator can 
 
 ## Two concurrency engines
 
-Both orchestrators run the same section graph; they just fan it out differently. The library orchestrator does it in-process: `SectionsStep` asks each Project-free section/header/footer unit to prepare its request, collects the requests into one `completeBatch`, and the Anthropic client runs them with `curl_multi` against the direct API (or the proxy), windowed at ten in flight. Once every result is back, the same units normalize and validate their own output before the step writes any project files.
+Both orchestrators run the same section graph; they just fan it out differently. The library orchestrator does it in-process: `SectionsStep` asks each Project-free section/header/footer unit to prepare its request, collects the requests into one `completeBatch`, and the Anthropic client runs them with `curl_multi` against the direct API (or the proxy) through a rolling pool of ten in flight — a freed slot starts the next request immediately. Once every result is back, the same units normalize and validate their own output before the step writes any project files.
 
 The wpcom workflow does it out-of-process. Inside the workflow the header, footer, and per-section steps are marked `promise: true` - emitted, not run inline - and a single `execute_promises` step hands the whole batch to wpcom's `promise-all`, which fires them concurrently with `curl_multi`, up to 25 at once. Each promise is a fresh, stateless HTTP call to its matching unit ability, and each result streams back over SSE (through the `ai_agent_update` hook for the feature) the moment it lands. Plan more than 23 sections (plus header and footer) and you split the work across more than one promise group.
 
-So it's one section graph and two concurrency engines: in-process `curl_multi` windowed at ten, or server-side promises capped at 25. The graph doesn't know which one is driving it.
+So it's one section graph and two concurrency engines: an in-process `curl_multi` rolling pool of ten, or server-side promises capped at 25. The graph doesn't know which one is driving it.
 
 ## Why the units are stateless
 
@@ -128,7 +128,7 @@ Write the hard part once. The deterministic logic that produces a good theme - a
 
 Each host uses what it already has. wpcom has its AI proxy; Studio has a logged-in user; a coding agent has a subscription the developer is already paying for. None of them need a fresh API key provisioned, and none of them scatter a new secret around. That's cheaper - a flat subscription or an existing proxy beats per-token billing - and it's a lot less to keep secure.
 
-Concurrency comes along for free wherever the transport can carry it. When the transport is a real network endpoint - the CLI's direct API, Studio's proxy - the builder overlaps its section generation and the batch methods fan out for real, `curl_multi` windowed at ten. A coding-agent harness still fans out, just heavier: `completeBatch` spawns up to five `proc_open` subprocesses - real parallelism, but a process per call rather than a socket. Only wpcom's simple in-process adapter runs the batch sequentially. The pipeline code is identical in every case; only the adapter changes.
+Concurrency comes along for free wherever the transport can carry it. When the transport is a real network endpoint - the CLI's direct API, Studio's proxy - the builder overlaps its section generation and the batch methods fan out for real, `curl_multi` rolling ten in flight. A coding-agent harness still fans out, just heavier: `completeBatch` spawns up to five `proc_open` subprocesses - real parallelism, but a process per call rather than a socket. Only wpcom's simple in-process adapter runs the batch sequentially. The pipeline code is identical in every case; only the adapter changes.
 
 Adding a host is small. The interface is four methods, so a new environment is a new adapter and not a rewrite. Swapping model providers is the same size of change - a transport detail, not a pipeline detail.
 

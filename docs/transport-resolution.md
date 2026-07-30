@@ -115,7 +115,7 @@ Revisit only if #1785 ships — and bench it before adopting. See `teach/learnin
 
 ## Performance framing
 
-- **Fast tiers:** direct API (`curl_multi`, window 5 — tunable toward the API's concurrency ceiling) and **wpcom-native** (25 server promises + SSE). Full per-step model control.
+- **Fast tiers:** direct API (`curl_multi`, rolling pool of 10 — tunable toward the API's concurrency ceiling) and **wpcom-native** (25 server promises + SSE). Full per-step model control.
 - **Cost / convenience tier:** harness shell-out. Each `claude -p` boots the *full agent* per call — structurally slower than a socket, even with `--bare`. Chosen to spend a subscription, not for speed. Set expectations accordingly.
 
 ## Proving correctness

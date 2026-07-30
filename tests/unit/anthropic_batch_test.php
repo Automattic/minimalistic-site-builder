@@ -641,3 +641,173 @@ test('bodyFor disables thinking only on models that think by default (Opus 5)', 
         assert_true(!array_key_exists('thinking', $body), "no thinking key for {$model}");
     }
 });
+
+test('rollingPool starts the next pending request the moment one completes', function () {
+    // 5 requests, cap 2. Completion order: b, a, then c+d together, then e.
+    // A freed slot must be refilled immediately - c starts on b's completion
+    // while a is still in flight, never waiting for the rest of a "window".
+    $bodies = [
+        'a' => ['prompt' => 'A'],
+        'b' => ['prompt' => 'B'],
+        'c' => ['prompt' => 'C'],
+        'd' => ['prompt' => 'D'],
+        'e' => ['prompt' => 'E'],
+    ];
+    $started = [];
+    $inFlight = [];
+    $maxInFlight = 0;
+    $start = function (string|int $key, array $body) use (&$started, &$inFlight, &$maxInFlight): void {
+        $started[] = $key;
+        $inFlight[$key] = true;
+        $maxInFlight = max($maxInFlight, count($inFlight));
+    };
+    $script = [['b'], ['a'], ['c', 'd'], ['e']];
+    $await = function () use (&$script, &$inFlight): array {
+        $completed = array_shift($script);
+        $out = [];
+        foreach ($completed as $key) {
+            unset($inFlight[$key]);
+            $out[$key] = ['ok' => true, 'text' => strtoupper((string) $key)];
+        }
+        return $out;
+    };
+
+    $out = AnthropicClient::rollingPool($bodies, $start, $await, 2);
+
+    assert_eq(['a', 'b', 'c', 'd', 'e'], $started, 'requests start in input order as slots free up');
+    assert_eq(2, $maxInFlight, 'the cap holds while slots roll');
+    assert_eq(array_keys($bodies), array_keys($out), 'results are keyed and ordered as the input');
+    assert_eq(['ok' => true, 'text' => 'C'], $out['c'], 'each result reaches its own key');
+});
+
+test('rollingPool starts a sub-cap batch all at once and an empty batch not at all', function () {
+    $calls = 0;
+    $started = [];
+    $out = AnthropicClient::rollingPool(
+        ['x' => ['prompt' => 'X'], 'y' => ['prompt' => 'Y']],
+        function (string|int $key, array $body) use (&$started): void {
+            $started[] = $key;
+        },
+        function () use (&$calls): array {
+            $calls++;
+            return ['x' => 'RX', 'y' => 'RY'];
+        },
+        10,
+    );
+    assert_eq(['x', 'y'], $started, 'both start before the first await');
+    assert_eq(1, $calls, 'one await drains the whole sub-cap batch');
+    assert_eq(['x' => 'RX', 'y' => 'RY'], $out);
+
+    $out = AnthropicClient::rollingPool(
+        [],
+        function (): void {
+            throw new RuntimeException('start must not be called for an empty batch');
+        },
+        function (): array {
+            throw new RuntimeException('await must not be called for an empty batch');
+        },
+        10,
+    );
+    assert_eq([], $out, 'an empty batch resolves without any transport calls');
+});
+
+test('rollingPool rejects an await that returns nothing or an unknown key', function () {
+    $none = fn (): array => [];
+    $err = null;
+    try {
+        AnthropicClient::rollingPool(['a' => []], function (): void {}, $none, 2);
+    } catch (RuntimeException $e) {
+        $err = $e->getMessage();
+    }
+    assert_true(is_string($err) && str_contains($err, 'no transfer'), 'an empty await result is a hang, not progress');
+
+    $err = null;
+    try {
+        AnthropicClient::rollingPool(
+            ['a' => []],
+            function (): void {},
+            fn (): array => ['ghost' => 'R'],
+            2,
+        );
+    } catch (RuntimeException $e) {
+        $err = $e->getMessage();
+    }
+    assert_true(is_string($err) && str_contains($err, 'ghost'), 'a completion for a key not in flight is a transport bug');
+});
+
+test('interpretStream classifies a transfer with no response at all as transient', function () {
+    // The rolling pool's CURLM-failure fallback classifies in-flight handles
+    // that never received response headers: errno 0 (never reported through
+    // info_read), HTTP status 0. That is an operational failure - retry it;
+    // a permanent "HTTP 0" outcome would abort the build and discard every
+    // paid-for sibling response.
+    $out = AnthropicClient::interpretStream('', 0, '', 0, 0.0);
+    assert_eq(false, $out['ok'], 'no response is not a success');
+    assert_eq(true, $out['transient'] ?? false, 'no response at all must be retryable, not a build abort');
+});
+
+test('rollingPool rejects a second completion for an already-finished key', function () {
+    $script = [['a'], ['a']];
+    $err = null;
+    try {
+        AnthropicClient::rollingPool(
+            ['a' => [], 'b' => []],
+            function (): void {},
+            function () use (&$script): array {
+                $out = [];
+                foreach (array_shift($script) as $key) {
+                    $out[$key] = 'R';
+                }
+                return $out;
+            },
+            1,
+        );
+    } catch (RuntimeException $e) {
+        $err = $e->getMessage();
+    }
+    assert_true(is_string($err) && str_contains($err, 'not in flight'), 'a duplicate completion is a transport bug');
+});
+
+test('retryTextBatch retries held launches without burning the transient budget', function () {
+    // A held outcome ('held' => true) means the pool never sent the request -
+    // it carries no information about that request, so it must not consume
+    // the finite transient rounds and must never be the error a batch aborts
+    // with. delays = [0]: one transient round for really-attempted requests.
+    $bodies = ['real' => ['model' => 'm'], 'held' => ['model' => 'm']];
+    $round = 0;
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            $out = [];
+            foreach ($subset as $key => $_body) {
+                $out[$key] = match (true) {
+                    $key === 'real' && $round === 1 => ['ok' => false, 'transient' => true, 'error' => 'HTTP 429: slow down'],
+                    $key === 'held' && $round <= 2 => ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)'],
+                    default => ['ok' => true, 'text' => strtoupper((string) $key), 'input' => 1, 'output' => 1],
+                };
+            }
+            return $out;
+        },
+        [0],
+    );
+    assert_eq('REAL', $results['real']['text']);
+    assert_eq('HELD', $results['held']['text'], 'a twice-held launch still gets its real attempt after the budget');
+    assert_eq(3, $round, 'held keys retry in their own round instead of aborting');
+});
+
+test('retryTextBatch survives a held launch with an empty delay schedule', function () {
+    $bodies = ['h' => ['model' => 'm']];
+    $round = 0;
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            return ['h' => $round === 1
+                ? ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)']
+                : ['ok' => true, 'text' => 'H', 'input' => 1, 'output' => 1]];
+        },
+        [],
+    );
+    assert_eq('H', $results['h']['text'], 'a held launch retries even when no transient rounds are configured');
+});
