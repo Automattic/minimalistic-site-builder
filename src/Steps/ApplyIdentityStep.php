@@ -89,10 +89,13 @@ final class ApplyIdentityStep implements Step
     private static function headerSafe(string $value): string
     {
         $value = trim((string) preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $value));
-        while (str_contains($value, '*/')) {
-            $value = str_replace('*/', '', $value);
-        }
-        return $value;
+        // These values are model-authored and land inside a PHP docblock, so a
+        // comment terminator would end the comment early and make the rest of
+        // the value executable. Removing '*/' in a loop is a denylist: it has
+        // to be right about every sequence that can close a comment. Neutralise
+        // the only character that can start one instead — a '*' cannot end a
+        // block comment, and the header stays legible (BIGR-750).
+        return str_replace('*', '', $value);
     }
 
     /**

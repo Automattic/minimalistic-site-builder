@@ -7,7 +7,6 @@ use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
-use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 
@@ -48,14 +47,6 @@ final class FontsPhpStep implements Step
         'garamond', 'inherit', 'initial',
     ];
 
-    private const LOG_FILE = 'fonts-php.log';
-
-    public function __construct(
-        private Llm $llm,
-        private PromptRenderer $renderer,
-        private ?string $model = null,
-        private ?float $temperature = null,
-    ) {}
 
     public function id(): string
     {
@@ -73,7 +64,7 @@ final class FontsPhpStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['theme/theme.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
-            writes: ['theme/fonts.php', 'warnings.json'],
+            writes: ['theme/fonts.php'],
             concurrent: false,
         );
     }
@@ -92,123 +83,10 @@ final class FontsPhpStep implements Step
         }
 
         $handle = ProjectStore::slugify($project->slug()) . '-fonts';
-
-        $rendered = $this->renderer->render('fonts-php.md', [
-            'design_direction' => DesignDirectionStep::readFor($project),
-            'families'         => implode(', ', array_keys($requirements)),
-            'usage'            => self::usageText($requirements),
-            'handle'           => $handle,
-        ]);
-        $php = self::stripFences(trim(
-            $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
-        ));
-
-        $problems = self::validate($php, $requirements);
-        if ($problems !== []) {
-            file_put_contents(
-                $project->logPath(self::LOG_FILE),
-                "REJECTED fonts.php:\n{$php}\n\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
-            );
-            echo '  fonts-php: model output rejected (' . count($problems)
-                . ' problem(s)); using the deterministic fallback — see logs/' . self::LOG_FILE . "\n";
-            $project->addWarnings($this->id(), [sprintf(
-                'model fonts.php rejected (%s); deterministic scan-built fallback delivered — see logs/%s',
-                implode('; ', $problems),
-                self::LOG_FILE,
-            )]);
-            $php = self::fallback($handle, $requirements);
-        }
-
-        $project->writeText('theme/fonts.php', rtrim($php) . "\n");
+        $project->writeText('theme/fonts.php', rtrim(self::build($handle, $requirements)) . "\n");
+        echo '  fonts-php: ' . count($requirements) . " family/families enqueued\n";
     }
 
-    /**
-     * Validate the model's fonts.php against the constraints that make it safe
-     * to execute and complete for the design: required hook and enqueues, only
-     * Google Fonts URLs, every scanned family/weight/italic requested per
-     * family, and clean `php -l`. Returns problems; empty = valid.
-     *
-     * @param array<string,array{weights:int[],italic:bool}> $requirements
-     * @return string[]
-     */
-    public static function validate(string $php, array $requirements): array
-    {
-        $problems = [];
-        if (!str_starts_with(trim($php), '<?php')) {
-            $problems[] = 'must start with <?php';
-        }
-        if (!str_contains($php, 'wp_enqueue_style')) {
-            $problems[] = 'missing wp_enqueue_style';
-        }
-
-        // This module only enqueues styles — it has nothing to include, and a
-        // generated include is a runtime fatal `php -l` cannot see. One build
-        // emitted `require_once __DIR__ . '/fonts.php' === __FILE__ ? '' : '';`
-        // as a self-inclusion guard: operator precedence makes that
-        // `require_once ''`, which fatals on every load and takes the whole
-        // site down with it once the theme is active.
-        if (preg_match('/(?<![\w$>-])(?:require|include)(?:_once)?\b/i', $php) === 1) {
-            $problems[] = 'must not require or include anything';
-        }
-
-        // The only hook allowed is enqueue_block_assets (front end + editor).
-        if (preg_match_all('/add_action\s*\(\s*[\'"]([^\'"]+)[\'"]/', $php, $m) > 0) {
-            foreach (array_unique($m[1]) as $hook) {
-                if ($hook !== 'enqueue_block_assets') {
-                    $problems[] = "disallowed hook: {$hook}";
-                }
-            }
-        } else {
-            $problems[] = 'missing add_action(\'enqueue_block_assets\', …)';
-        }
-
-        // Only Google Fonts hosts may appear.
-        preg_match_all('~https?://[^\s\'"<>)]+~i', $php, $m);
-        $coverage = [];
-        $hasGoogleCss = false;
-        foreach ($m[0] as $url) {
-            $host = strtolower((string) parse_url($url, PHP_URL_HOST));
-            if (!in_array($host, ['fonts.googleapis.com', 'fonts.gstatic.com'], true)) {
-                $problems[] = "URL outside Google Fonts: {$url}";
-            }
-            if ($host === 'fonts.googleapis.com') {
-                $hasGoogleCss = true;
-                self::mergeCoverage($coverage, self::coverageFromGoogleUrl($url));
-            }
-        }
-
-        // The scan is the floor: every family must cover its own required
-        // weights and italics. The model may request more than the scan.
-        if (!$hasGoogleCss) {
-            $problems[] = 'no fonts.googleapis.com URL';
-        } else {
-            foreach ($requirements as $name => $required) {
-                $key = self::familyKey($name);
-                if (!isset($coverage[$key])) {
-                    $problems[] = "family not requested: {$name}";
-                    continue;
-                }
-                foreach ($required['weights'] as $weight) {
-                    if (!self::coverageHasWeight($coverage[$key]['upright'], $weight)) {
-                        $problems[] = "family {$name} missing scanned weight: {$weight}";
-                    }
-                }
-                if ($required['italic']) {
-                    foreach ($required['weights'] as $weight) {
-                        if (!self::coverageHasWeight($coverage[$key]['italic'], $weight)) {
-                            $problems[] = "family {$name} missing scanned italic weight: {$weight}";
-                        }
-                    }
-                }
-            }
-        }
-
-        // Lint last: only worth the subprocess when the structure is right.
-        if ($problems === []) {
-            $problems = self::lint($php);
-        }
-        return $problems;
-    }
 
     /**
      * Every font weight the build references, plus whether italics appear.
@@ -309,22 +187,32 @@ final class FontsPhpStep implements Step
     }
 
     /**
-     * The deterministic fonts.php built straight from the scan — the guaranteed
-     * floor the model output is measured against. Pure — unit-testable.
+     * The theme's fonts.php, built straight from the scanned requirements.
+     *
+     * This is the only writer of the file, and every value it interpolates is
+     * program-controlled: the handle is slugified to [a-z0-9-], and the URL is
+     * assembled by googleFontsUrl() from rawurlencode()d family names and
+     * integer weights. Model-authored strings — family names above all — are
+     * never emitted into this template. They used to be, in the docblock
+     * below, where a name carrying a comment terminator closed the comment
+     * early and made the rest of itself executable PHP (BIGR-750). The family
+     * list is legible in the URL a line further down; the comment does not
+     * need to repeat it.
+     *
+     * Pure — unit-testable.
      *
      * @param array<string,array{weights:int[],italic:bool}> $requirements
      */
-    public static function fallback(string $handle, array $requirements): string
+    public static function build(string $handle, array $requirements): string
     {
         $requirements = self::normalizeRequirements($requirements);
         $url = self::googleFontsUrl($requirements);
-        $list = implode(', ', array_keys($requirements));
 
         return <<<PHP
             <?php
             /**
-             * Webfonts ({$list}) from Google Fonts at the weights the design uses,
-             * on enqueue_block_assets so they render in the block editor as well
+             * Webfonts from Google Fonts at the weights the design uses, on
+             * enqueue_block_assets so they render in the block editor as well
              * as the front end.
              */
             add_action('enqueue_block_assets', function () {
@@ -571,137 +459,11 @@ final class FontsPhpStep implements Step
         return $normalized;
     }
 
-    /**
-     * @return array<string,array{
-     *   upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},
-     *   italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}
-     * }>
-     */
-    private static function coverageFromGoogleUrl(string $url): array
-    {
-        $query = (string) parse_url($url, PHP_URL_QUERY);
-        if ($query === '') {
-            return [];
-        }
 
-        $coverage = [];
-        foreach (explode('&', $query) as $part) {
-            [$key, $value] = array_pad(explode('=', $part, 2), 2, '');
-            if (urldecode($key) !== 'family') {
-                continue;
-            }
-            $spec = urldecode($value);
-            [$family, $variant] = array_pad(explode(':', $spec, 2), 2, '');
-            $family = trim($family);
-            if ($family === '') {
-                continue;
-            }
-            $key = self::familyKey($family);
-            $coverage[$key] ??= self::emptyCoverage();
-            self::mergeOneCoverage($coverage[$key], self::coverageFromVariant($variant));
-        }
-        return $coverage;
-    }
 
-    /** @return array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}} */
-    private static function coverageFromVariant(string $variant): array
-    {
-        $coverage = self::emptyCoverage();
-        if ($variant === '') {
-            self::addCoverageValue($coverage['upright'], '400');
-            return $coverage;
-        }
 
-        [$axisText, $tupleText] = array_pad(explode('@', $variant, 2), 2, '');
-        if ($tupleText === '') {
-            return $coverage;
-        }
 
-        $axes = array_map('strtolower', array_map('trim', explode(',', $axisText)));
-        $weightIndex = array_search('wght', $axes, true);
-        $italicIndex = array_search('ital', $axes, true);
 
-        foreach (explode(';', $tupleText) as $tuple) {
-            $parts = array_map('trim', explode(',', $tuple));
-            $weight = $weightIndex === false ? '400' : ($parts[$weightIndex] ?? '');
-            if ($weight === '') {
-                continue;
-            }
-            $slot = 'upright';
-            if ($italicIndex !== false && ($parts[$italicIndex] ?? '') === '1') {
-                $slot = 'italic';
-            }
-            self::addCoverageValue($coverage[$slot], $weight);
-        }
-
-        return $coverage;
-    }
-
-    /** @return array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}} */
-    private static function emptyCoverage(): array
-    {
-        return [
-            'upright' => ['exact' => [], 'ranges' => []],
-            'italic'  => ['exact' => [], 'ranges' => []],
-        ];
-    }
-
-    /**
-     * @param array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>} $slot
-     */
-    private static function addCoverageValue(array &$slot, string $weight): void
-    {
-        if (preg_match('/^([1-9]00)$/', $weight, $m) === 1) {
-            $slot['exact'][(int) $m[1]] = true;
-            return;
-        }
-        if (preg_match('/^([1-9]00)\.\.([1-9]00)$/', $weight, $m) === 1) {
-            $slot['ranges'][] = [(int) $m[1], (int) $m[2]];
-        }
-    }
-
-    /**
-     * @param array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>} $slot
-     */
-    private static function coverageHasWeight(array $slot, int $weight): bool
-    {
-        if (isset($slot['exact'][$weight])) {
-            return true;
-        }
-        foreach ($slot['ranges'] as [$min, $max]) {
-            if ($weight >= min($min, $max) && $weight <= max($min, $max)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** @param array<string,array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}}> $into */
-    private static function mergeCoverage(array &$into, array $from): void
-    {
-        foreach ($from as $family => $coverage) {
-            $into[$family] ??= self::emptyCoverage();
-            self::mergeOneCoverage($into[$family], $coverage);
-        }
-    }
-
-    /** @param array{upright:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>},italic:array{exact:array<int,bool>,ranges:array<int,array{0:int,1:int}>}} $into */
-    private static function mergeOneCoverage(array &$into, array $from): void
-    {
-        foreach (['upright', 'italic'] as $slot) {
-            foreach ($from[$slot]['exact'] as $weight => $_) {
-                $into[$slot]['exact'][(int) $weight] = true;
-            }
-            foreach ($from[$slot]['ranges'] as $range) {
-                $into[$slot]['ranges'][] = $range;
-            }
-        }
-    }
-
-    private static function familyKey(string $family): string
-    {
-        return strtolower(trim($family));
-    }
 
     /**
      * Walk decoded theme.json collecting fontWeight / fontStyle:italic values
@@ -748,37 +510,6 @@ final class FontsPhpStep implements Step
         return $first === '' ? null : $first;
     }
 
-    /** @param array<string,array{weights:int[],italic:bool}> $requirements */
-    private static function usageText(array $requirements): string
-    {
-        $lines = [];
-        foreach (self::normalizeRequirements($requirements) as $family => $required) {
-            $lines[] = $family . ': weights ' . implode(', ', $required['weights'])
-                . '; italics ' . ($required['italic'] ? 'yes' : 'no');
-        }
-        return implode("\n", $lines);
-    }
 
-    /** @return string[] problems from `php -l`, empty when the file parses */
-    private static function lint(string $php): array
-    {
-        $tmp = tempnam(sys_get_temp_dir(), 'fontsphp-');
-        if ($tmp === false) {
-            return []; // can't lint here; the structural checks above still hold
-        }
-        file_put_contents($tmp, $php);
-        exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($tmp) . ' 2>&1', $out, $rc);
-        @unlink($tmp);
-        return $rc === 0 ? [] : ['php -l failed: ' . implode(' ', $out)];
-    }
 
-    /** Strip a leading/trailing markdown code fence if the model added one. */
-    private static function stripFences(string $text): string
-    {
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
-    }
 }
