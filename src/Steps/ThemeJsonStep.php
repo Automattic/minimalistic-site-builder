@@ -61,6 +61,23 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         'body'    => 'system-ui, sans-serif',
     ];
     /**
+     * The type scale the scaffold wires roles to. Every slug here is
+     * referenced by SCAFFOLD, so a missing one would leave a dangling
+     * var:preset|font-size|… — PresetReferences does scan theme.json's own
+     * strings and would report it, but as a build-time problem rather than a
+     * rendered site. Filling them keeps the scaffold's references valid.
+     *
+     * @var list<array{slug: string, name: string, size: string}>
+     */
+    private const FONT_SIZE_PROFILE = [
+        ['slug' => 'caption', 'name' => 'Caption', 'size' => '0.875rem'],
+        ['slug' => 'body', 'name' => 'Body', 'size' => '1.125rem'],
+        ['slug' => 'lead', 'name' => 'Lead', 'size' => '1.375rem'],
+        ['slug' => 'heading', 'name' => 'Heading', 'size' => '1.75rem'],
+        ['slug' => 'section-title', 'name' => 'Section Title', 'size' => 'clamp(2.25rem, 3vw, 3rem)'],
+        ['slug' => 'display', 'name' => 'Display', 'size' => 'clamp(3rem, 7vw, 6rem)'],
+    ];
+    /**
      * One bounded spacing vocabulary for every generated site.
      *
      * sm/md are component-level gaps. lg/xl/xxl are the compact, standard,
@@ -76,6 +93,118 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
         ['slug' => 'xl', 'name' => 'Standard', 'size' => 'clamp(4rem, 6vw, 6rem)'],
         ['slug' => 'xxl', 'name' => 'Spacious', 'size' => 'clamp(5rem, 7vw, 7rem)'],
+    ];
+    /**
+     * Build-supplied wiring the model no longer writes. It maps presets to
+     * roles and makes zero aesthetic choices — every value is a var:preset
+     * token whose actual color, family and size the model chose, so sites stay
+     * visually distinct. No borders, radii, shadows or decorative treatment.
+     *
+     * Context-free block/caption text colors are deliberately absent:
+     * ContrastFixStep evaluates rendered backgrounds but cannot see
+     * theme-level block defaults. button, link and heading are also absent:
+     * ContrastFixStep reads those paths and rewrites failing colors, so they
+     * stay model-authored.
+     *
+     * @var array<mixed>
+     */
+    private const SCAFFOLD = [
+        'styles' => [
+            'color' => [
+                'background' => 'var:preset|color|base',
+                'text' => 'var:preset|color|contrast',
+            ],
+            'typography' => [
+                'fontFamily' => 'var:preset|font-family|body',
+                'fontSize' => 'var:preset|font-size|body',
+                'lineHeight' => '1.6',
+            ],
+            'elements' => [
+                'h1' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|display',
+                    ],
+                ],
+                'h2' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|section-title',
+                    ],
+                ],
+                'h3' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'h4' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'h5' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'h6' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'caption' => [
+                    'typography' => ['fontSize' => 'var:preset|font-size|caption'],
+                ],
+            ],
+            'blocks' => [
+                'core/quote' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|lead',
+                    ],
+                ],
+                'core/pullquote' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'core/table' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|body',
+                    ],
+                ],
+                'core/list' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|body',
+                    ],
+                ],
+                'core/image' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|caption',
+                    ],
+                ],
+                'core/site-title' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|heading',
+                        'fontSize' => 'var:preset|font-size|heading',
+                    ],
+                ],
+                'core/navigation' => [
+                    'typography' => [
+                        'fontFamily' => 'var:preset|font-family|body',
+                        'fontSize' => 'var:preset|font-size|caption',
+                    ],
+                ],
+            ],
+        ],
     ];
     private const REQ = 'theme-json';
 
@@ -157,8 +286,27 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // title/tagline stack) renders editor-only and the frontend falls back
         // to browser default margins. (settings.spacing.blockGap is already
         // forced non-null by normalizeSpacingSettings above.)
+        if (array_key_exists('styles', $theme)
+            && (!is_array($theme['styles'])
+                || ($theme['styles'] !== [] && array_is_list($theme['styles'])))) {
+            $warnings[] = 'theme/theme.json styles: authored '
+                . self::warningValue($theme['styles'])
+                . '; delivered build-supplied styles object'
+                . '; disposition replaced malformed shape before normalization';
+            $theme['styles'] = [];
+        }
         if (!is_array($theme['styles'] ?? null)) {
             $theme['styles'] = [];
+        }
+        if (array_key_exists('spacing', $theme['styles'])
+            && (!is_array($theme['styles']['spacing'])
+                || ($theme['styles']['spacing'] !== []
+                    && array_is_list($theme['styles']['spacing'])))) {
+            $warnings[] = 'theme/theme.json styles.spacing: authored '
+                . self::warningValue($theme['styles']['spacing'])
+                . '; delivered {"blockGap":"var:preset|spacing|md"}'
+                . '; disposition replaced malformed shape before normalization';
+            $theme['styles']['spacing'] = [];
         }
         if (!is_array($theme['styles']['spacing'] ?? null)) {
             $theme['styles']['spacing'] = [];
@@ -175,7 +323,19 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         [$theme, $fontWarnings] = self::repairFonts($theme, $preferredType);
-        $warnings = array_merge($warnings, $colorWarnings, $fontWarnings);
+        [$theme, $sizeWarnings] = self::repairFontSizes($theme);
+
+        // Last: the scaffold references the preset slugs repaired above, and
+        // every well-shaped model-authored leaf wins over the wiring it fills in.
+        [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
+        $warnings = array_merge(
+            $warnings,
+            $colorWarnings,
+            $fontWarnings,
+            $sizeWarnings,
+            $scaffoldWarnings,
+        );
+
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
             echo '  [theme-json] warning: ' . count($warnings)
@@ -450,6 +610,279 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ? ', ' . trim($parts[1])
             : ', system-ui, sans-serif';
         return '"' . $family . '"' . $fallback;
+    }
+
+    /**
+     * Ensure every font-size slug the scaffold references exists. A preset
+     * that is usable but unnamed keeps its authored size — only the name is
+     * synthesized from the slug. Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairFontSizes(array $theme): array
+    {
+        $warnings = [];
+        $sizes = $theme['settings']['typography']['fontSizes'] ?? null;
+        if (!is_array($sizes) || ($sizes !== [] && !array_is_list($sizes))) {
+            if ($sizes !== null) {
+                $warnings[] = 'theme.json settings.typography.fontSizes: invalid container '
+                    . self::warningValue($sizes) . '; rebuilt from the default scale';
+            }
+            $sizes = [];
+        }
+
+        $entries = [];
+        $seen = [];
+        foreach ($sizes as $entry) {
+            if (!is_array($entry)) {
+                $warnings[] = 'theme.json fontSizes: removed malformed (non-object) entry '
+                    . self::warningValue($entry);
+                continue;
+            }
+            $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
+            if ($slug === '') {
+                $warnings[] = 'theme.json fontSizes: entry with missing or invalid slug '
+                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                continue;
+            }
+            $size = $entry['size'] ?? null;
+            if (!is_string($size) || !self::isSafeFontSize($size)) {
+                $warnings[] = "theme.json fontSizes slug '{$slug}': invalid size "
+                    . self::warningValue($size) . '; malformed entry removed';
+                continue;
+            }
+            $entry['slug'] = $slug;
+            $entry['size'] = trim($size);
+            if (isset($seen[$slug])) {
+                $warnings[] = "theme.json fontSizes duplicate slug '{$slug}': authored size "
+                    . self::warningValue($entry['size']) . '; delivered first authored size '
+                    . self::warningValue($seen[$slug]) . '; disposition removed duplicate';
+                continue;
+            }
+            // Only the name is missing — keep the authored size rather than
+            // discarding a usable preset over a cosmetic field.
+            if (!is_string($entry['name'] ?? null) || trim($entry['name']) === '') {
+                $entry['name'] = ucwords(str_replace(['-', '_'], ' ', $slug));
+                $warnings[] = "theme.json fontSizes slug '{$slug}': missing name; "
+                    . "kept authored size {$entry['size']}, synthesized name '{$entry['name']}'";
+            }
+            $seen[$slug] = $entry['size'];
+            $entries[] = $entry;
+        }
+
+        $slugs = array_column($entries, 'slug');
+        foreach (self::FONT_SIZE_PROFILE as $fallback) {
+            if (in_array($fallback['slug'], $slugs, true)) {
+                continue;
+            }
+            $entries[] = $fallback;
+            $warnings[] = "theme.json fontSizes missing slug '{$fallback['slug']}'; "
+                . "filled with {$fallback['size']}";
+        }
+
+        $theme['settings']['typography']['fontSizes'] = $entries;
+        return [$theme, $warnings];
+    }
+
+    /**
+     * The prompt's bounded font-size grammar: a CSS length/percentage, or a
+     * composition of the safe sizing functions it asks the model to use.
+     */
+    private static function isSafeFontSize(string $size): bool
+    {
+        $size = trim($size);
+        if ($size === '' || strlen($size) > 160) {
+            return false;
+        }
+        $number = '(?:\d+(?:\.\d+)?|\.\d+)';
+        $unit = '(?:px|r?em|vw|vh|vmin|vmax|%|ch|ex|cap|ic|lh|rlh|pt|pc|in|cm|mm|q)';
+        $length = '(?:0|' . $number . $unit . ')';
+        $variable = 'var\(\s*--[A-Za-z_][A-Za-z0-9_-]*(?:\s*,\s*' . $length . ')?\s*\)';
+        $calculation = 'calc\(\s*' . $length . '(?:\s*[+-]\s*' . $length . ')+\s*\)';
+        $component = '(?:' . $length . '|' . $variable . '|' . $calculation . ')';
+
+        return preg_match('/^' . $component . '$/i', $size) === 1
+            || preg_match(
+                '/^clamp\(\s*' . $component . '\s*,\s*' . $component . '\s*,\s*' . $component . '\s*\)$/i',
+                $size,
+            ) === 1
+            || preg_match('/^(?:min|max)\(\s*' . $component . '(?:\s*,\s*' . $component . ')+\s*\)$/i', $size) === 1;
+    }
+
+    /**
+     * Fill the build-supplied wiring, letting any well-shaped model-authored
+     * leaf win.
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function applyScaffold(array $theme): array
+    {
+        return self::repairScaffold($theme)[0];
+    }
+
+    /**
+     * Fill scaffold omissions and repair wrong-shaped scaffold-owned nodes.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairScaffold(array $theme): array
+    {
+        [$theme, $warnings] = self::removeUnverifiedContextColors($theme);
+        $shapeWarnings = [];
+        $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
+        return [$theme, array_merge($warnings, $shapeWarnings)];
+    }
+
+    /**
+     * Remove theme-level text colors the rendered-background contrast pass
+     * cannot see. The declaration is the smallest isolatable unit; sibling
+     * color properties and typography survive.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function removeUnverifiedContextColors(array $theme): array
+    {
+        $warnings = [];
+        foreach (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'caption'] as $element) {
+            self::removeContextTextColor(
+                $theme,
+                ['styles', 'elements', $element, 'color'],
+                "styles.elements.{$element}.color",
+                $warnings,
+            );
+        }
+        $blocks = $theme['styles']['blocks'] ?? null;
+        if (is_array($blocks) && ($blocks === [] || !array_is_list($blocks))) {
+            foreach (array_keys($blocks) as $block) {
+                if (!is_string($block)) {
+                    continue;
+                }
+                self::removeContextTextColor(
+                    $theme,
+                    ['styles', 'blocks', $block, 'color'],
+                    "styles.blocks.{$block}.color",
+                    $warnings,
+                );
+            }
+        }
+        return [$theme, $warnings];
+    }
+
+    /**
+     * @param array<mixed> $theme
+     * @param list<string> $path
+     * @param list<string> $warnings
+     */
+    private static function removeContextTextColor(
+        array &$theme,
+        array $path,
+        string $label,
+        array &$warnings,
+    ): void {
+        $leaf = array_pop($path);
+        if (!is_string($leaf)) {
+            return;
+        }
+        $parent =& $theme;
+        foreach ($path as $key) {
+            if (!is_array($parent) || !array_key_exists($key, $parent)) {
+                return;
+            }
+            $parent =& $parent[$key];
+        }
+        if (!is_array($parent) || !array_key_exists($leaf, $parent)) {
+            return;
+        }
+        if (!is_array($parent[$leaf])
+            || ($parent[$leaf] !== [] && array_is_list($parent[$leaf]))) {
+            $warnings[] = "theme/theme.json {$label}: authored "
+                . self::warningValue($parent[$leaf])
+                . '; delivered removed'
+                . '; disposition removed malformed context-free color container';
+            unset($parent[$leaf]);
+            return;
+        }
+        if (!array_key_exists('text', $parent[$leaf])) {
+            return;
+        }
+        $warnings[] = "theme/theme.json {$label}.text: authored "
+            . self::warningValue($parent[$leaf]['text'])
+            . '; delivered removed'
+            . '; disposition removed context-free text color invisible to contrast repair';
+        unset($parent[$leaf]['text']);
+        if ($parent[$leaf] === []) {
+            unset($parent[$leaf]);
+        }
+    }
+
+    /**
+     * Recursively fill associative-map omissions while preserving every
+     * well-shaped model-authored leaf. An empty array is also PHP's
+     * representation of a decoded empty JSON object, so it receives the
+     * scaffold map.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $scaffold
+     * @param array<mixed> $model
+     * @return array<mixed>
+     */
+    public static function mergeScaffoldDefaults(array $scaffold, array $model): array
+    {
+        $warnings = [];
+        return self::mergeScaffoldDefaultsAtPath($scaffold, $model, '', $warnings);
+    }
+
+    /**
+     * @param array<mixed> $scaffold
+     * @param array<mixed> $model
+     * @param list<string> $warnings
+     * @return array<mixed>
+     */
+    private static function mergeScaffoldDefaultsAtPath(
+        array $scaffold,
+        array $model,
+        string $path,
+        array &$warnings,
+    ): array {
+        foreach ($scaffold as $key => $scaffoldValue) {
+            $currentPath = $path === '' ? (string) $key : $path . '.' . $key;
+            if (!array_key_exists($key, $model)) {
+                $model[$key] = $scaffoldValue;
+                continue;
+            }
+
+            $modelValue = $model[$key];
+            $modelIsMap = is_array($modelValue)
+                && ($modelValue === [] || !array_is_list($modelValue));
+            $scaffoldIsMap = is_array($scaffoldValue)
+                && ($scaffoldValue === [] || !array_is_list($scaffoldValue));
+            if ($modelIsMap && $scaffoldIsMap) {
+                $model[$key] = self::mergeScaffoldDefaultsAtPath(
+                    $scaffoldValue,
+                    $modelValue,
+                    $currentPath,
+                    $warnings,
+                );
+                continue;
+            }
+            if (($scaffoldIsMap && !$modelIsMap)
+                || (!is_array($scaffoldValue)
+                    && get_debug_type($modelValue) !== get_debug_type($scaffoldValue))) {
+                $warnings[] = "theme/theme.json {$currentPath}: authored "
+                    . self::warningValue($modelValue) . '; delivered '
+                    . self::warningValue($scaffoldValue)
+                    . '; disposition replaced malformed shape with scaffold default';
+                $model[$key] = $scaffoldValue;
+            }
+        }
+
+        return $model;
     }
 
     /** Compact authored-value evidence for one actionable warnings.json row. */

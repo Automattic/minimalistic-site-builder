@@ -22,7 +22,7 @@ Design intelligence to encode as tokens:
     `section-title` — a gentle fluid clamp around 2.25–3rem. h2 / section titles.
     `display` — the hero masthead: a fluid `clamp()` reaching roughly 5–7rem at desktop widths, sized to the DESIGN DIRECTION's ambition (a broadsheet/poster direction earns ~7rem; a quiet editorial one ~5rem). Size it to the direction's `hero_composition`, not the viewport alone: when the composition places the headline inside a narrow column (half the page or less) or explicitly commits to a restrained size, follow it down — cap near 4.5rem, because a viewport-scaled headline in a ~450px column wraps to five broken lines, which reads far worse than a modest one. Otherwise do NOT cap it near 3.5–4rem — an undersized hero headline on a full-width stage reads as timid.
   Example: `0.875rem / 1.125rem / 1.375rem / 1.75rem / clamp(2.25rem, 3vw, 3rem) / clamp(3rem, 7vw, 6rem)`. Only caption and body are paragraph sizes (lead is for ONE short line per section); everything above is heading territory, and display exists for ONE hero/masthead moment per page.
-- **Line height.** Body 1.5–1.65; headings 1.1–1.3; never below 1.0. Set `styles.typography.lineHeight` and `styles.elements.heading.typography.lineHeight`.
+- **Heading line height.** This remains a model-authored design choice. Choose 1.1–1.3; never below 1.0, and set it at `styles.elements.heading.typography.lineHeight` — the build supplies the body line-height but not this one, so headings inherit a body rhythm unless you set it.
 - **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` RARE: CTAs/interaction, plus at most the ONE micro-motif the DESIGN DIRECTION's `signature_device` explicitly commits accent to — never body text, large-area backgrounds, or any motif the direction didn't name. Avoid purple-on-white and generic blue-gray.
 - **CONTRAST REQUIREMENTS (WCAG 2.1, non-negotiable).** The contrast ratio is (L1+0.05)/(L2+0.05) over relative luminance; 4.5:1 is the minimum for normal text, 3:1 for large headings. A deterministic build step verifies these and rewrites colors that fail, so a palette that misses them will be altered — pick hexes that pass on your own terms instead:
     `contrast` on `base` ≥ 7:1 (body text; aim comfortably above the 4.5 floor — near-black on near-white territory, tinted toward the palette's hue is fine)
@@ -32,6 +32,11 @@ Design intelligence to encode as tokens:
   Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
 - **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool — lines belong only to a direction whose signature device explicitly commits to them. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
+
+Build-supplied wiring — do not emit it:
+
+- The build supplies global background/text and body typography wiring, h1–h6 and caption role wiring, and family/size wiring for exactly these blocks: `core/quote`, `core/pullquote`, `core/table`, `core/list`, `core/image`, `core/site-title`, and `core/navigation`.
+- You may add `styles.blocks` decoration only where this site's design genuinely calls for it. Keep those choices site-specific; do not restate the build-supplied family/size wiring. Do not set context-free `styles.blocks.*.color.text` or `styles.elements.{h1,h2,h3,h4,h5,h6,caption}.color.text` values: let them inherit the surrounding block's repaired text color so the build's rendered-background contrast pass stays accurate.
 
 Hard requirements — follow exactly so downstream templates can rely on the slugs:
 
@@ -63,10 +68,6 @@ Hard requirements — follow exactly so downstream templates can rely on the slu
     `xxl` — Spacious — `clamp(5rem, 7vw, 7rem)`
   Use sm/md for component gaps and lg/xl/xxl for compact/standard/spacious section padding. Never replace these with fixed large values: the fluid bounds keep mobile padding proportional and cap a spacious desktop edge at 7rem.
 - styles.spacing.blockGap: a default vertical rhythm between sibling blocks, from the spacing scale (e.g. "var:preset|spacing|md") — a null blockGap makes WordPress skip ALL frontend block-gap CSS while the editor still previews it, so the two render different spacing.
-- styles.color.background = var(--wp--preset--color--base), styles.color.text = var(--wp--preset--color--contrast).
-- styles.typography.fontFamily = body font var, fontSize = var(--wp--preset--font-size--body), lineHeight 1.5–1.65.
-- styles.elements.heading.typography.lineHeight = a tight heading line-height (1.1–1.3).
-- styles.elements.h1 / h2 / h3 typography.fontFamily = heading font var, with sizes drawn from the scale via `var(--wp--preset--font-size--<slug>)` references: h1 = display (it renders once per page, as the hero masthead), h2 = section-title, h3 = heading.
 - styles.elements.button: background = accent (or primary), text = whichever of base/contrast reads ≥ 4.5:1 on that background, with padding and borderRadius. Also define the button's `:hover` state here (e.g. a decisively darkened/lightened background, or swap background↔text, keeping label contrast ≥ 4.5:1) — theme.json is the ONLY place button hover styling exists; per-block hover attributes in section markup do not work and must never be written there.
 - styles.elements.link: color = primary (which must meet 4.5:1 on base — see CONTRAST REQUIREMENTS); :hover color = accent.
 
