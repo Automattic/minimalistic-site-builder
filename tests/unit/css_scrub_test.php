@@ -272,10 +272,42 @@ test('css scrub removes bare remote strings after raw or escaped leading whitesp
     }
 });
 
+test('css scrub removes bare remote strings after CSS-escaped leading C0 controls', function (): void {
+    $cases = [
+        'vertical tab' => '\b http://127.0.0.1:9/vtab.png',
+        'unit separator' => '\1f https://evil.example/unit-separator.png',
+    ];
+
+    foreach ($cases as $label => $value) {
+        $css = '.bad{background-image:image-set("' . $value . '" 1x);color:red}';
+        $result = CssScrub::scrub($css);
+
+        assert_eq('.bad{color:red}', $result['css'], $label);
+        assert_eq(1, count($result['removals']), $label);
+        assert_eq(
+            'background-image:image-set("' . $value . '" 1x);',
+            $result['removals'][0]['authored_value'],
+            $label
+        );
+        assert_eq('removed_external_url', $result['removals'][0]['disposition'], $label);
+    }
+});
+
 test('css scrub preserves allowed bare string urls in image functions byte for byte on one line', function (): void {
     $css = '.relative{background-image:image-set("./asset.png" 1x)}'
         . '.data{background-image:-webkit-image-set("data:image/png;base64,AAAA" 2x)}'
         . '.fragment{background-image:image("#local-paint")}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
+test('css scrub preserves allowed bare string urls after CSS-escaped leading C0 controls', function (): void {
+    $css = '.relative{background-image:image-set("\b ./asset.png" 1x)}'
+        . '.data{background-image:image-set("\1f data:image/png;base64,AAAA" 2x)}'
+        . '.fragment{background-image:image("\b #local-paint")}';
 
     $result = CssScrub::scrub($css);
 

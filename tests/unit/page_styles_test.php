@@ -582,6 +582,51 @@ test('site CSS path scrubs image-set remote strings after leading whitespace nor
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path scrubs image-set remote strings after leading C0 control normalization', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_c0_scrub_');
+    $base = $project->readText('theme/style.css');
+    $vtabRemote = 'http://127.0.0.1:9/vtab.png';
+    $unitRemote = 'https://evil.example/unit-separator.png';
+    $siteCss = '.vtab{background-image:image-set("\b ' . $vtabRemote . '" 1x);display:grid}'
+        . '.unit{background-image:image-set("\1f ' . $unitRemote . '" 2x);padding:1rem}'
+        . '.safe{margin:2rem}';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, $vtabRemote), 'vertical-tab remote bytes never reach theme/style.css');
+    assert_true(!str_contains($style, $unitRemote), 'unit-separator remote bytes never reach theme/style.css');
+    assert_eq(
+        $base . '.vtab{display:grid}.unit{padding:1rem}.safe{margin:2rem}',
+        $style,
+        'deterministic merge keeps every safe sibling'
+    );
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+    $warningRows = $project->readJson('warnings.json')['page-styles'] ?? [];
+    assert_eq(2, count($warningRows), 'one warning per removed declaration');
+    $warnings = implode("\n", $warningRows);
+    assert_contains('source=design/site.css', $warnings);
+    assert_contains(
+        'authored_value="background-image:image-set(\\"\\\\b http://127.0.0.1:9/vtab.png\\" 1x);"',
+        $warnings
+    );
+    assert_contains(
+        'authored_value="background-image:image-set(\\"\\\\1f https://evil.example/unit-separator.png\\" 2x);"',
+        $warnings
+    );
+    assert_contains('delivered_value=removed', $warnings);
+    assert_contains('disposition=removed_external_url', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(
