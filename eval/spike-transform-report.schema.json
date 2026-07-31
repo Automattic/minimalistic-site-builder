@@ -31,7 +31,9 @@
                 "type": "object",
                 "required": [
                     "selector",
-                    "tag"
+                    "tag",
+                    "disposition",
+                    "evidence"
                 ],
                 "additionalProperties": false,
                 "properties": {
@@ -42,6 +44,15 @@
                     "tag": {
                         "type": "string",
                         "minLength": 1
+                    },
+                    "disposition": {
+                        "enum": [
+                            "replaced",
+                            "dropped"
+                        ]
+                    },
+                    "evidence": {
+                        "type": "string"
                     }
                 }
             }
