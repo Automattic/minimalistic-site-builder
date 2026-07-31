@@ -31,6 +31,13 @@ test('OpenAiCompatibleClient implements the frozen finish-reason capability', fu
     assert_eq(null, $client->lastFinishReason(), 'finish reason starts unknown');
 });
 
+test('OpenAiCompatibleClient has no client-local truncation classifier', function () {
+    assert_true(
+        !method_exists(OpenAiCompatibleClient::class, 'isTruncationStopReason'),
+        'single and batch paths must share TextBatchRecovery::isTruncation()',
+    );
+});
+
 test('OpenAiCompatibleClient single complete exposes the transport finish reason', function () {
     $client = new OpenAiCompatibleClient(
         'key',
