@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild;
 
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
+use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
@@ -60,6 +61,7 @@ final class StepComposition
         array $models = [],
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
     ): self {
         $blockFixer ??= BlockFixers::default();
         $models = array_merge(StepDefaults::models(), $models);
@@ -138,10 +140,12 @@ final class StepComposition
             // it verbatim) AND a section tagged its target. Default path: no-op,
             // zero LLM calls.
             new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
-            // Also after fix-blocks: writes fonts.php from the design direction,
-            // validated against a deterministic scan of the final theme.json +
-            // markup (every family/weight/italic the build uses MUST be requested;
-            // scan-built fallback otherwise).
+            // Also after fix-blocks: ships each Google family the scan selected as
+            // theme assets declared in theme.json, so visitors are never sent to
+            // fonts.googleapis.com. A family the catalog does not know, or whose
+            // faces fail to download, degrades to the link path below.
+            new BundleFontsStep($fontFetcher),
+            // Hotlinks exactly the families BundleFontsStep left unbundled.
             // Deterministic: builds fonts.php from the scanned requirements.
             // It takes no model — see BIGR-750.
             new FontsPhpStep(),

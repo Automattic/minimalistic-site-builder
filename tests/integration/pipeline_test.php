@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../FakeFontFetcher.php';
+
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Package;
@@ -24,6 +26,7 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
         outputRoot: $outputRoot,
         blockFixer: BlockFixers::default(),
         models: [],
+        fontFetcher: new \Automattic\SiteBuild\Tests\FakeFontFetcher(),
     );
 }
 
@@ -260,14 +263,24 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'appendix appended after the theme header'
     );
 
-    // fonts-php accepted the model's module; finalize-theme wrote the
-    // deterministic loader that enqueues style.css (block themes don't load
-    // it automatically) and require_once's fonts.php.
-    assert_contains('fonts.googleapis.com', $project->readText('theme/fonts.php'));
+    // bundle-fonts shipped every Google family as theme assets declared in
+    // theme.json, so no fonts.php exists and nothing hotlinks Google; the
+    // guarded require in functions.php keeps the fontless theme valid.
+    assert_true(!is_file($project->themePath('fonts.php')), 'all families bundled; no fonts.php');
+    $bundledTheme = $project->readJson('theme/theme.json');
+    $bundledFaces = [];
+    foreach ($bundledTheme['settings']['typography']['fontFamilies'] as $bundledFamily) {
+        foreach ($bundledFamily['fontFace'] ?? [] as $bundledFace) {
+            $bundledFaces[] = $bundledFace['src'][0];
+            assert_true(str_starts_with($project->readText(
+                'theme/' . str_replace('file:./', '', $bundledFace['src'][0])
+            ), 'FONTBYTES:'));
+        }
+    }
+    assert_true($bundledFaces !== [], 'the Google families carry bundled fontFace entries');
     $functions = $project->readText('theme/functions.php');
     assert_contains('get_stylesheet_uri()', $functions);
-    assert_contains("require_once __DIR__ . '/fonts.php'", $functions);
-    assert_true(!str_contains($functions, 'googleapis'), 'fonts stay in fonts.php');
+    assert_true(!str_contains($functions, 'googleapis'), 'nothing hotlinks Google');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -279,7 +292,7 @@ test('pipeline step order is correct', function () {
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'sections', 'section-rhythm',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
-        'fonts-php', 'finalize-theme', 'validate-theme',
+        'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
     ], $ids);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
