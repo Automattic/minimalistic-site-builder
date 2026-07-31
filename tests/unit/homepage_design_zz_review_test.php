@@ -591,6 +591,61 @@ test('homepage-design extracts a raw-text style with slash syntax', function () 
     homepage_cleanup($tmp);
 });
 
+test('homepage-design removes unsafe markup after an unterminated attribute quote', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $winner = '<!doctype html><html><head><style>.safe{}</style><style"x>.evil{}</style>'
+        . '<script>alert(1)</script></head><body><header>H</header><main>M</main>'
+        . '<footer>F</footer></body></html>';
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe-fallback { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    $home = $project->readText('design/home.html');
+    assert_true(!str_contains($home, '<script>'), 'script after malformed tag removed');
+    assert_true(!str_contains($home, '<style"x>'), 'malformed style opener removed');
+    assert_eq('.safe{}', $project->readText('design/site.css'));
+    $warnings = homepage_review_warnings($project);
+    assert_contains('<style\\"x>', $warnings);
+    assert_contains('<script>', $warnings);
+    assert_contains('delivered removed', $warnings);
+    homepage_cleanup($tmp);
+});
+
+test('homepage-design does not let a marker validate an invalid style tag name', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $winner = '<!doctype html><html><head><style.x>.p{}</style></head><body>'
+        . '<header>H</header><main>M</main><footer>F</footer></body></html>';
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+    $llm->queueText(homepage_document('REPAIRED', "\n.repaired { color: green; }\n"));
+
+    homepage_run($project, $llm);
+
+    assert_true(
+        !str_contains($project->readText('design/home.html'), '.p{}'),
+        'invalid style-like element not silently delivered',
+    );
+    assert_true(
+        !str_contains($project->readText('design/site.css'), '.p{}'),
+        'invalid style-like element not extracted as site CSS',
+    );
+    $warnings = homepage_review_warnings($project);
+    assert_contains('<style.x>', $warnings);
+    assert_contains('delivered removed', $warnings);
+    homepage_cleanup($tmp);
+});
+
 test('homepage-design does not treat a style after body text as head content', function () {
     [$project, $llm, $tmp] = homepage_fixture([
         'design_candidates' => 2,
