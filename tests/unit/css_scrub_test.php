@@ -412,6 +412,32 @@ test('css scrub preserves strings outside immediate image function url context',
     assert_eq([], $result['removals']);
 });
 
+foreach (['hash' => '#', 'at-keyword' => '@'] as $label => $prefix) {
+    test("css scrub preserves {$label} image-set lookalikes byte for byte", function () use ($label, $prefix): void {
+        $css = '.tokens{--' . $label . ':' . $prefix
+            . 'image-set("https://evil.example/not-a-function.png");color:red}';
+
+        $result = CssScrub::scrub($css);
+
+        assert_eq(strlen($css), strlen($result['css']));
+        assert_eq(hash('sha256', $css), hash('sha256', $result['css']));
+        assert_eq($css, $result['css']);
+        assert_eq([], $result['removals']);
+    });
+}
+
+test('css scrub still removes a real image-set function beside token lookalikes', function (): void {
+    $declaration = 'background-image:image-set("https://evil.example/not-a-function.png" 1x);';
+    $css = '.actual{' . $declaration . 'color:red}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq('.actual{color:red}', $result['css']);
+    assert_eq(1, count($result['removals']));
+    assert_eq($declaration, $result['removals'][0]['authored_value']);
+    assert_eq('removed_external_url', $result['removals'][0]['disposition']);
+});
+
 test('css scrub recovers function context at a rule boundary before a later remote image string', function (): void {
     $css = '.broken{color:foo(1}.later{background-image:image-set("https://evil/px.png" 1x);display:block}';
 
