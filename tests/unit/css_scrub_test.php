@@ -81,6 +81,31 @@ CSS;
     assert_eq(2, count($result['removals']));
 });
 
+test('css scrub recognizes CSS-escaped import and url identifiers', function (): void {
+    $css = <<<'CSS'
+@\69mport url(https://evil.example/x.css);
+.a{background:u\72l(https://evil.example/x.png);color:red}
+.b{mask:\75 rl(//evil.example/x.svg);display:block}
+CSS;
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq("\n.a{color:red}\n.b{display:block}", $result['css']);
+    assert_eq(
+        ['import', 'external_url_declaration', 'external_url_declaration'],
+        array_column($result['removals'], 'kind')
+    );
+});
+
+test('css scrub does not match a url suffix inside a longer escaped identifier', function (): void {
+    $css = '.safe{background:\\78 url(https://evil.example/x.png);color:red}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
 test('css scrub leaves malformed CSS url escapes unchanged without losing safe siblings', function (): void {
     $css = '.bad{background:url(h\\);color:red}.safe{display:block}';
 

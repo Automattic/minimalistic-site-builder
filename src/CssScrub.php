@@ -49,8 +49,11 @@ final class CssScrub
                 continue;
             }
 
-            if ($byte === '@' && self::isImportAt($css, $offset)) {
-                $end = self::atRuleStatementEnd($css, $offset + 7);
+            $importIdentifierEnd = $byte === '@'
+                ? self::importIdentifierEndAt($css, $offset)
+                : null;
+            if ($importIdentifierEnd !== null) {
+                $end = self::atRuleStatementEnd($css, $importIdentifierEnd);
                 if ($end !== null) {
                     $ranges["{$offset}:{$end}"] = [
                         'start' => $offset,
@@ -77,6 +80,12 @@ final class CssScrub
                 }
 
                 $offset = $url['end'];
+                continue;
+            }
+
+            $identifier = self::identifierAt($css, $offset);
+            if ($identifier !== null) {
+                $offset = $identifier['end'];
                 continue;
             }
 
@@ -115,14 +124,12 @@ final class CssScrub
         return ['css' => $css, 'removals' => $removals];
     }
 
-    private static function isImportAt(string $css, int $offset): bool
+    private static function importIdentifierEndAt(string $css, int $offset): ?int
     {
-        if (strncasecmp(substr($css, $offset, 7), '@import', 7) !== 0) {
-            return false;
-        }
-
-        $next = $offset + 7;
-        return $next >= strlen($css) || !self::isIdentifierByte($css[$next]);
+        $identifier = self::identifierAt($css, $offset + 1);
+        return $identifier !== null && strcasecmp($identifier['value'], 'import') === 0
+            ? $identifier['end']
+            : null;
     }
 
     private static function atRuleStatementEnd(string $css, int $offset): ?int
@@ -167,15 +174,18 @@ final class CssScrub
     {
         $length = strlen($css);
         if (
-            $offset + 3 > $length
-            || strncasecmp(substr($css, $offset, 3), 'url', 3) !== 0
-            || ($offset > 0 && self::isIdentifierByte($css[$offset - 1]))
-            || ($offset + 3 < $length && self::isIdentifierByte($css[$offset + 3]))
+            $offset > 0
+            && (self::isIdentifierByte($css[$offset - 1]) || ord($css[$offset - 1]) >= 0x80)
         ) {
             return null;
         }
 
-        $cursor = self::skipWhitespaceAndComments($css, $offset + 3);
+        $identifier = self::identifierAt($css, $offset);
+        if ($identifier === null || strcasecmp($identifier['value'], 'url') !== 0) {
+            return null;
+        }
+
+        $cursor = self::skipWhitespaceAndComments($css, $identifier['end']);
         if ($cursor >= $length || $css[$cursor] !== '(') {
             return null;
         }
@@ -228,6 +238,48 @@ final class CssScrub
         }
 
         return null;
+    }
+
+    /**
+     * @return array{end:int,value:string}|null
+     */
+    private static function identifierAt(string $css, int $offset): ?array
+    {
+        $length = strlen($css);
+        $start = $offset;
+
+        while ($offset < $length) {
+            if ($css[$offset] === '\\') {
+                $escaped = $css[$offset + 1] ?? null;
+                if (
+                    $escaped === null
+                    || $escaped === "\n"
+                    || $escaped === "\r"
+                    || $escaped === "\f"
+                ) {
+                    return null;
+                }
+
+                $end = CssSyntaxScanner::escapeEnd($css, $offset);
+                if ($end === null) {
+                    return null;
+                }
+                $offset = $end;
+                continue;
+            }
+
+            if (!self::isIdentifierByte($css[$offset]) && ord($css[$offset]) < 0x80) {
+                break;
+            }
+            $offset++;
+        }
+
+        if ($offset === $start) {
+            return null;
+        }
+
+        $decoded = self::decodeCssEscapes(substr($css, $start, $offset - $start));
+        return $decoded === null ? null : ['end' => $offset, 'value' => $decoded];
     }
 
     private static function isExternalUrl(string $url): bool
