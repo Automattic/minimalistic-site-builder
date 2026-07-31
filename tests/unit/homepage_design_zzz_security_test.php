@@ -49,6 +49,86 @@ test('homepage-design removes an unterminated comment remainder with a warning',
     homepage_assert_malformed_comment_removed('<!--unterminated');
 });
 
+test('homepage-design merges nested removal spans without exposing following markup', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $attack = '<svg><a=></svg><!--<script>alert("PWNED")</script>-->';
+    $survivor = '<footer>KEEPME-FOOTER</footer>';
+    $unsafe = str_replace(
+        '<footer><p>Footer OVERLAP-ONE</p></footer>',
+        $attack . $survivor,
+        homepage_document('OVERLAP-ONE', "\n.safe { color: red; }\n"),
+    );
+    homepage_queue_tournament($llm, [
+        $unsafe,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    $candidate = $project->readText('design/candidate-1.html');
+    assert_true(!str_contains(strtolower($candidate), '<script'), 'nested removal never exposes script');
+    assert_contains($survivor, $candidate, 'trailing landmark survives byte-intact');
+    assert_contains('delivered removed', homepage_review_warnings($project));
+    homepage_cleanup($tmp);
+});
+
+test('homepage-design merges overlapping removals across both sanitation passes', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $attack = '<svg><a=></svg><!--<svg><a=></svg><!--<script>alert("PWNED")</script>-->';
+    $unsafe = str_replace(
+        '<footer><p>Footer OVERLAP-TWO</p></footer>',
+        $attack . '<footer><p>Footer OVERLAP-TWO</p></footer>',
+        homepage_document('OVERLAP-TWO', "\n.safe { color: red; }\n"),
+    );
+    homepage_queue_tournament($llm, [
+        $unsafe,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    $home = $project->readText('design/home.html');
+    assert_true(!str_contains(strtolower($home), '<script'), 'second sanitation pass never exposes script');
+    assert_contains('delivered removed', homepage_review_warnings($project));
+    homepage_cleanup($tmp);
+});
+
+test('homepage-design ends doctype declarations at the first greater-than byte', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $unsafe = '<!doctype html><html><head><style>.safe{}</style></head><body>'
+        . '<header>H</header><main>M</main><footer>F</footer>'
+        . '<!DOCTYPE html PUBLIC "><script>document.title=\'PWNED\'</script>">'
+        . '</body></html>';
+    homepage_queue_tournament($llm, [
+        $unsafe,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    $home = $project->readText('design/home.html');
+    assert_true(!str_contains(strtolower($home), '<script'), 'doctype cannot hide a live script');
+    $warnings = homepage_review_warnings($project);
+    assert_contains('malformed_design', $warnings);
+    assert_contains('delivered removed', $warnings);
+    homepage_cleanup($tmp);
+});
+
+test('homepage-design text normalization fails closed on invalid UTF-8', function () {
+    $method = new ReflectionMethod(HomepageDesignStep::class, 'normalizedText');
+
+    assert_eq(null, $method->invoke(null, "unsafe\xC3"));
+});
+
 test('homepage-design removes active head markup and unsafe URL schemes before delivery', function () {
     [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
     $unsafe = str_replace(
