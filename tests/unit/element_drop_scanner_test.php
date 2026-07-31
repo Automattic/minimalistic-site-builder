@@ -29,8 +29,18 @@ test('element drop scanner distinguishes fallback survival replacement and absen
     $dropped = (new ElementDropScanner())->scan($probes, $fallbacks, $assets, $markup);
 
     assert_eq([
-        ['selector' => 'header > svg', 'tag' => 'svg'],
-        ['selector' => 'main > canvas', 'tag' => 'canvas'],
+        [
+            'selector' => 'header > svg',
+            'tag' => 'svg',
+            'disposition' => 'replaced',
+            'evidence' => 'header > svg',
+        ],
+        [
+            'selector' => 'main > canvas',
+            'tag' => 'canvas',
+            'disposition' => 'dropped',
+            'evidence' => '',
+        ],
     ], $dropped);
 });
 
@@ -48,7 +58,12 @@ test('element drop scanner reports a selector-bearing asset as source element re
         '<img class="fallback-probe-svg">',
     );
 
-    assert_eq([['selector' => 'header > svg', 'tag' => 'svg']], $dropped);
+    assert_eq([[
+        'selector' => 'header > svg',
+        'tag' => 'svg',
+        'disposition' => 'replaced',
+        'evidence' => 'header > svg',
+    ]], $dropped);
 });
 
 test('element drop scanner keeps a marker that survives on the original tag', function (): void {
@@ -78,7 +93,34 @@ test('element drop scanner requires an exact marker token', function (): void {
         '<img class="fallback-probe-svg-copy">',
     );
 
-    assert_eq([['selector' => 'header > svg', 'tag' => 'svg']], $dropped);
+    assert_eq([[
+        'selector' => 'header > svg',
+        'tag' => 'svg',
+        'disposition' => 'dropped',
+        'evidence' => '',
+    ]], $dropped);
+});
+
+test('element drop scanner reports a different-tag marker as replacement evidence', function (): void {
+    $probe = [[
+        'selector' => 'header > svg',
+        'tag' => 'svg',
+        'marker' => 'fallback-probe-svg',
+    ]];
+
+    $dropped = (new ElementDropScanner())->scan(
+        $probe,
+        [],
+        [],
+        '<img class="brand-mark fallback-probe-svg">',
+    );
+
+    assert_eq([[
+        'selector' => 'header > svg',
+        'tag' => 'svg',
+        'disposition' => 'replaced',
+        'evidence' => 'img',
+    ]], $dropped);
 });
 
 test('element drop scanner output is sorted deduplicated and deterministic', function (): void {
@@ -93,8 +135,18 @@ test('element drop scanner output is sorted deduplicated and deterministic', fun
     $second = $scanner->scan($probes, [], [], '');
 
     assert_eq([
-        ['selector' => 'a > form', 'tag' => 'form'],
-        ['selector' => 'z > svg', 'tag' => 'svg'],
+        [
+            'selector' => 'a > form',
+            'tag' => 'form',
+            'disposition' => 'dropped',
+            'evidence' => '',
+        ],
+        [
+            'selector' => 'z > svg',
+            'tag' => 'svg',
+            'disposition' => 'dropped',
+            'evidence' => '',
+        ],
     ], $first);
     assert_eq($first, $second);
 });
