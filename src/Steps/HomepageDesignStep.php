@@ -1116,6 +1116,7 @@ final class HomepageDesignStep implements Step
     ): string {
         $removals = self::malformedCommentRemovals($html);
         $head = self::headContentRange($html);
+        $headStyleStarts = self::domHeadStyleStarts($html);
         $offset = 0;
         while (($token = self::nextTag($html, $offset)) !== null) {
             $offset = $token['end'];
@@ -1124,9 +1125,13 @@ final class HomepageDesignStep implements Step
             }
 
             $name = $token['name'];
-            $inHead = $head !== null
-                && $token['start'] >= $head[0]
-                && $token['start'] < $head[1];
+            $inHead = $name === 'style'
+                ? isset($headStyleStarts[$token['start']])
+                : (
+                    $head !== null
+                    && $token['start'] >= $head[0]
+                    && $token['start'] < $head[1]
+                );
             if ($name === 'meta') {
                 if (!$inHead || !self::isSafeHeadMeta($html, $token)) {
                     $removals[] = self::tokenRemoval($html, $token);
@@ -1297,6 +1302,68 @@ final class HomepageDesignStep implements Step
             }
         }
         return null;
+    }
+
+    /**
+     * @return array<int,true>
+     */
+    private static function domHeadStyleStarts(string $html): array
+    {
+        $sourceStyles = [];
+        $offset = 0;
+        while (($token = self::nextTag($html, $offset)) !== null) {
+            $offset = $token['end'];
+            if ($token['closing']) {
+                continue;
+            }
+            if ($token['name'] === 'style') {
+                $sourceStyles[] = $token;
+            }
+            if (
+                !$token['self_closing']
+                && in_array($token['name'], self::RAW_TEXT_ELEMENTS, true)
+            ) {
+                $close = self::matchingCloseToken($html, $token);
+                if ($close === null) {
+                    break;
+                }
+                $offset = $close['end'];
+            }
+        }
+        if ($sourceStyles === []) {
+            return [];
+        }
+
+        $dom = self::loadDocument($html);
+        if ($dom === null) {
+            return [];
+        }
+        $domStyles = $dom->getElementsByTagName('style');
+        if ($domStyles->length !== count($sourceStyles)) {
+            return [];
+        }
+
+        $headStarts = [];
+        foreach ($sourceStyles as $ordinal => $sourceStyle) {
+            $domStyle = $domStyles->item($ordinal);
+            if (!$domStyle instanceof \DOMElement) {
+                return [];
+            }
+            for (
+                $ancestor = $domStyle->parentNode;
+                $ancestor !== null;
+                $ancestor = $ancestor->parentNode
+            ) {
+                if (
+                    $ancestor instanceof \DOMElement
+                    && strtolower($ancestor->tagName) === 'head'
+                ) {
+                    $headStarts[$sourceStyle['start']] = true;
+                    break;
+                }
+            }
+        }
+        return $headStarts;
     }
 
     private static function isAllowedElement(string $name, bool $inHead): bool
