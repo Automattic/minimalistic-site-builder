@@ -81,3 +81,66 @@ test('css-token-extractor caps one-off-heavy palettes with a stable top ten', fu
     );
     assert_eq(3, $tokens['palette'][0]['count']);
 });
+
+test('css-token-extractor resolves defined vars without scanning nested fallbacks', function () {
+    $tokens = CssTokenExtractor::extract(<<<'CSS'
+:root {
+    --brand: #112233;
+    --other: #445566;
+}
+body {
+    color: var(--brand, rgb(255, 255, 255));
+    background: var(--brand, var(--other));
+    font-family: serif;
+}
+CSS);
+
+    assert_eq([
+        ['color' => '#112233', 'count' => 2],
+    ], $tokens['palette']);
+});
+
+test('css-token-extractor degrades invalid UTF-8 font tokens to sparse', function () {
+    $tokens = CssTokenExtractor::extract(
+        "body { color: #112233; font-family: \"Bad\xC3\", serif; padding: 1rem; }",
+    );
+
+    assert_eq([
+        'palette' => [],
+        'fonts' => [],
+        'spacing' => [],
+    ], $tokens);
+});
+
+test('css-token-extractor preserves commas and escapes inside quoted font families', function () {
+    $tokens = CssTokenExtractor::extract(<<<'CSS'
+body {
+    color: #112233;
+    font-family: "A,B", serif;
+}
+.quote {
+    font-family: "Quote\",Comma", monospace;
+}
+CSS);
+
+    assert_eq([
+        '"A,B", serif',
+        '"Quote\\",Comma", monospace',
+    ], $tokens['fonts']);
+});
+
+test('css-token-extractor requires color token boundaries and keeps adjacent controls', function () {
+    $tokens = CssTokenExtractor::extract(<<<'CSS'
+body {
+    font-family: serif;
+    color: myrgb(1 2 3);
+    border-color: #123456xyz;
+    background: linear-gradient(#ABCDEF,rgb(4 5 6));
+}
+CSS);
+
+    assert_eq([
+        ['color' => '#ABCDEF', 'count' => 1],
+        ['color' => '#040506', 'count' => 1],
+    ], $tokens['palette']);
+});

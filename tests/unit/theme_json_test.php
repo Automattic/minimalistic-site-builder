@@ -1016,6 +1016,43 @@ test('theme-json sparse CSS keeps direction prompt and writes actionable warning
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json invalid UTF-8 CSS keeps direction prompt and writes sparse warning', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_invalid_utf8_tokens_' . uniqid();
+    $store = new ProjectStore($tmp);
+    $legacy = $store->create('legacy');
+    $invalid = $store->create('invalid');
+    $direction = [
+        'concept' => 'Polar editorial',
+        'palette' => [
+            'base' => '#F5FBFF',
+            'contrast' => '#061A24',
+            'primary' => '#0C5B78',
+            'secondary' => '#315D6D',
+            'accent' => '#B63A1E',
+        ],
+        'type_pairing' => 'Fraunces with Source Sans 3',
+    ];
+    foreach ([$legacy, $invalid] as $project) {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        $project->writeJson('designDirection.json', $direction);
+    }
+    $invalid->writeText(
+        'design/site.css',
+        "body { color: #112233; font-family: \"Bad\xC3\", serif; padding: 1rem; }",
+    );
+    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    $legacyPrompt = $step->requests($legacy)['theme-json']['prompt'];
+    $invalidPrompt = $step->requests($invalid)['theme-json']['prompt'];
+
+    assert_eq($legacyPrompt, $invalidPrompt, 'invalid token bytes use unchanged design-direction prompt');
+    $warnings = implode(' ', $invalid->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('sparse_tokens', $warnings);
+    assert_contains('design/site.css', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json run wires the scaffold into the written theme', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_scaffold_run_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
