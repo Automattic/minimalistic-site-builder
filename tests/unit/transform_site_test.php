@@ -111,6 +111,43 @@ test('transform-site writes exact legacy part names and AssemblePagesStep accept
     transform_site_cleanup($tmp);
 });
 
+test('transform-site excludes design preview from the compiler bundle', function () {
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body>'
+        . '<header><p>Shared header</p></header>'
+        . '<main><section id="hero"><h1>Homepage hero</h1></section></main>'
+        . '<footer><p>Shared footer</p></footer>'
+        . '</body></html>',
+    );
+    $cssMarker = 'preview-only-css-marker';
+    $preview = '<!doctype html><html><head><style>:root{--content-size:800px;--wide-size:1280px}'
+        . ".{$cssMarker}{width:777px}</style></head>"
+        . '<body><header><nav></nav></header><main><section id="hero">'
+        . '<dialog>PREVIEW-ONLY-UNSUPPORTED</dialog>'
+        . '<img alt="AI_IMAGE: A baker at a stone oven | homepage hero | photorealistic | landscape">'
+        . '</section></main></body></html>';
+    $project->writeText('design/preview.html', $preview);
+
+    transform_site_run($project, $llm);
+
+    assert_eq($preview, $project->readText('design/preview.html'), 'transform leaves preview byte-identical');
+    assert_eq(0, count($llm->calls), 'preview diagnostics never enter repair');
+    $report = $project->readText(TransformArtifacts::REPORT);
+    assert_eq([], $project->readJson(TransformArtifacts::REPORT)['fallback_codes']);
+    assert_true(!str_contains($report, $cssMarker), 'preview CSS marker absent from report');
+    assert_true(
+        !str_contains($project->readText(TransformArtifacts::CARRIED_CSS), $cssMarker),
+        'preview CSS marker absent from carried CSS',
+    );
+    $outputs = implode("\n", transform_site_outputs($project));
+    assert_true(!str_contains($outputs, $cssMarker), 'preview CSS marker absent from transformed output');
+    assert_true(
+        !str_contains($outputs, 'PREVIEW-ONLY-UNSUPPORTED'),
+        'preview bytes never enter transformed output',
+    );
+    transform_site_cleanup($tmp);
+});
+
 test('transform-site batches missing shell through legacy unit and keeps marker local', function () {
     $benign = 'BENIGN __TRANSFORM_SENTINEL__ COPY';
     [$project, $llm, $tmp] = transform_site_fixture(

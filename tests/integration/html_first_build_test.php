@@ -113,9 +113,23 @@ HTML;
     return str_replace('HTML-FIRST-HOME', $marker, $html);
 }
 
+function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
+{
+    return '<!doctype html>'
+        . '<html lang="en"><head><meta charset="utf-8">'
+        . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
+        . 'body { margin: 0; font-family: system-ui, sans-serif; }</style>'
+        . '</head><body><header><nav aria-label="Primary"><a href="/">Home</a></nav></header>'
+        . '<main><section id="hero"><h1>' . $marker . '</h1>'
+        . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
+        . '</section></main></body></html>';
+}
+
 function html_first_queue_success(FakeLlm $llm, array $siteSpec, string $home): void
 {
     $llm->queueText('A warm neighborhood bakery site with a clear visit path.');
+    $llm->queueText(html_first_preview_document());
     $llm->queueText($home);
 
     $llm->queueJson($siteSpec);
@@ -133,9 +147,10 @@ test('HTML-first default builds and validates every single-page artifact', funct
     putenv('SITE_BUILD_LEGACY');
     try {
         $llm = new FakeLlm();
+        $homeDocument = html_first_home_document();
         html_first_queue_success($llm, html_first_site_spec([
             ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
-        ]), html_first_home_document());
+        ]), $homeDocument);
 
         $builder = html_first_integration_builder($llm, $tmp);
         $project = $builder->createProject('A neighborhood bakery', 'demo');
@@ -147,6 +162,7 @@ test('HTML-first default builds and validates every single-page artifact', funct
         $builder->pipeline()->runThrough($project);
 
         foreach ([
+            'design/preview.html',
             'design/candidate-1.html',
             'design/critique-1.json',
             'design/home.html',
@@ -168,6 +184,9 @@ test('HTML-first default builds and validates every single-page artifact', funct
         ] as $path) {
             assert_true($project->exists($path), "missing HTML-first artifact {$path}");
         }
+
+        assert_eq(html_first_preview_document(), $project->readText('design/preview.html'));
+        assert_eq($homeDocument, $project->readText('design/home.html'), 'homepage output stays unchanged');
 
         $home = $project->readText('plugin/pages/home.html');
         assert_contains('HTML-FIRST-HOME', $home);

@@ -90,6 +90,26 @@ test('assign-image-sources rewrites every design page and logs what it assigned'
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('assign-image-sources excludes design preview bytes and log entries', function () {
+    [$project, $tmp] = ais_fixture();
+    $preview = '<header><nav></nav></header><main><section id="hero">'
+        . '<img alt="AI_IMAGE: A baker at a stone oven | homepage hero | photorealistic | landscape">'
+        . '</section></main>';
+    $project->writeText('design/preview.html', $preview);
+    $project->writeText('design/home.html', '<img src="" alt="Steam rising off a fresh pour">');
+
+    (new AssignImageSourcesStep())->run($project);
+
+    assert_eq($preview, $project->readText('design/preview.html'), 'preview is byte-identical');
+    assert_contains('theme:./assets/steam-rising-off-a-fresh-pour-', $project->readText('design/home.html'));
+    assert_true(
+        !str_contains($project->readText('logs/assign-image-sources.log'), 'design/preview.html'),
+        'preview is absent from assignment log',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images on HTML-first builds specs from assigned paths and prose alts', function () {
     [$project, $tmp] = ais_fixture();
     $assigned = AssignImageSourcesStep::assign(

@@ -32,6 +32,7 @@ test('malformed homepage reroutes the build through the legacy tail and records 
     try {
         $llm = new FakeLlm();
         $llm->queueText('A warm neighborhood bakery site.');
+        $llm->queueText(html_first_preview_document('FALLBACK-DESIGN-PREVIEW'));
         $llm->queueText('<!doctype html><html><body><main>GARBAGE-CANDIDATE</main></body></html>');
         $llm->queueText('<!doctype html><html><body><main>GARBAGE-REPAIR</main></body></html>');
         $llm->queueText('OK');
