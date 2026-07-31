@@ -55,36 +55,31 @@ php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu,
 ### Embedding with an existing site spec
 
 An embedding host that already owns the factual site specification can pass
-the package-canonical object to `SiteBuilder::createProject()` instead of paying
-for the `site-spec` LLM call:
+the package-canonical decoded object to `SiteBuilder::createProject()` instead
+of paying for the `site-spec` LLM call:
 
 ```php
 $project = $builder->createProject(
     prompt: $userPrompt,
     slug: $projectSlug,
-    siteSpec: [
-        'name' => 'Hearth & Crumb',
-        'slug' => 'hearth-crumb',
-        'description' => 'A neighborhood bakery specializing in sourdough and pastries.',
-        'site_type' => 'business storefront',
-        'topic' => 'artisan bread and pastries',
-        'area' => 'bakery',
-        'audience' => 'neighborhood residents',
-        'language' => 'en',
-        'persona_name' => '',
-        'email_domain' => 'hearthandcrumb.com',
-        'invented' => [],
-        'visual_vibe' => 'warm and rustic',
-        'animation_request' => '',
-        'sections' => ['Hero', 'Menu', 'Story', 'Visit'],
-        'pages' => [
-            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
-            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'Show breads and pastries', 'children' => []],
-        ],
-    ],
+    siteSpec: $canonicalSiteSpec,
 );
 $builder->pipeline()->runThrough($project);
 ```
+
+The consumer contract ships with the package in two forms:
+
+- [`schemas/site-spec.schema.json`](schemas/site-spec.schema.json) — JSON
+  Schema Draft 2020-12 for the complete canonical object.
+- [`examples/site-spec.json`](examples/site-spec.json) — a complete payload,
+  including nested pages and host-defined factual fields.
+
+Vendored consumers can resolve those files without assuming an installation
+path through `Package::siteSpecSchemaPath()` and
+`Package::siteSpecExamplePath()`. The schema describes the recommended input
+and normalized `siteSpec.json` artifact. Runtime intake remains deliberately
+forgiving: missing or malformed candidate fields are normalized, repaired, or
+warned about rather than becoming a new build-stopping validation gate.
 
 The value crosses the portable project boundary as `meta.json.site_spec`; the
 normal `site-spec` step still canonicalizes it and writes `siteSpec.json`, but
@@ -94,9 +89,12 @@ tree. Pass `multiPage: false` to deliberately force one homepage. A non-empty
 exact caller-owned list. The user prompt is still required because the design
 and content steps consume both inputs.
 
-The supplied object must use this package's canonical snake-case fields. A host
-with its own metadata shape (including WordPress.com) maps that payload in its
-adapter rather than adding host-specific aliases to this package.
+The fixed properties use this package's canonical snake-case fields. Additional
+top-level properties may carry grounded facts such as hours, location, or
+services; page objects have the exact recursive `title` / `slug` / `purpose` /
+`children` shape shown in the schema. A host with its own metadata shape
+(including WordPress.com) maps that payload in its adapter rather than adding
+host-specific aliases to this package.
 
 ### Choosing the model / provider
 

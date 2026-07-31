@@ -66,8 +66,8 @@ Same step, same pipeline, four different transports, and only that first line mo
 ### A host can supply the site spec
 
 Some hosts already have the factual site spec before this package starts. They
-pass that package-canonical object as request data instead of asking the shared
-library to infer it again:
+pass that package-canonical decoded object as request data instead of asking the
+shared library to infer it again:
 
 ```php
 $project = $builder->createProject(
@@ -91,12 +91,21 @@ explicit `multiPage: false` still forces the homepage-only product. A non-empty
 supplied tree. A missing `siteSpec` keeps the CLI/default behavior: the step
 generates the candidate from the refined prompt.
 
-The input contract is the package's `siteSpec.json` shape (`name`, `slug`,
-`description`, `site_type`, `language`, `pages`, and the other factual fields),
-not a host's similarly named metadata object. WordPress.com maps its own SiteSpec
-representation at its adapter/ability boundary and passes a decoded JSON object,
-not a double-encoded string. The shared package deliberately contains no
-WordPress.com-specific field aliases.
+The machine-readable input contract is
+[`schemas/site-spec.schema.json`](../schemas/site-spec.schema.json), with a
+complete payload at [`examples/site-spec.json`](../examples/site-spec.json).
+Both ship with the package and are available programmatically through
+`Package::siteSpecSchemaPath()` and `Package::siteSpecExamplePath()`. The schema
+requires all 16 canonical fixed fields, permits additional grounded factual
+properties at the top level, and defines strict recursive page objects. It
+describes the recommended input and normalized artifact; intake remains
+repair-oriented rather than adding a fatal schema-validation boundary.
+
+That contract is the package's `siteSpec.json` shape, not a host's similarly
+named metadata object. WordPress.com maps its own SiteSpec representation at its
+adapter/ability boundary and passes a decoded JSON object, not a double-encoded
+string. The shared package deliberately contains no WordPress.com-specific
+field aliases.
 
 ## The four hosts
 

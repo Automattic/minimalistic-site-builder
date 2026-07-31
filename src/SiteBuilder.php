@@ -81,7 +81,9 @@ final class SiteBuilder
      * it already owns. It is persisted as the `site_spec` input in meta.json;
      * SiteSpecStep deterministically normalizes it into siteSpec.json instead
      * of making its own LLM request. The prompt remains required because later
-     * design and content steps consume both it and the normalized spec.
+     * design and content steps consume both it and the normalized spec. See
+     * Package::siteSpecSchemaPath() and Package::siteSpecExamplePath() for the
+     * shipped consumer contract.
      *
      * @param array<int,string|array<string,mixed>> $pages
      * @param array<string,mixed>|null              $siteSpec
