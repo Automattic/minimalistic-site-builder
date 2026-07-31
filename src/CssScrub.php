@@ -537,11 +537,18 @@ final class CssScrub
 
         while ($offset < $length) {
             if ($css[$offset] === '\\') {
-                $offset += min(2, $length - $offset);
+                $escapeEnd = CssSyntaxScanner::escapeEnd($css, $offset);
+                if ($escapeEnd === null) {
+                    return $length;
+                }
+                $offset = $escapeEnd;
                 continue;
             }
             if ($css[$offset] === $quote) {
                 return $offset + 1;
+            }
+            if ($css[$offset] === "\n" || $css[$offset] === "\r" || $css[$offset] === "\f") {
+                return $offset;
             }
             $offset++;
         }
