@@ -329,9 +329,12 @@ function mkdir_or_fail(string $dir): void
 
 function open_url(string $url): void
 {
-    $opener = trim((string) shell_exec('command -v xdg-open 2>/dev/null'));
+    $opener = trim((string) shell_exec('command -v open 2>/dev/null'));
     if ($opener === '') {
-        fwrite(STDERR, "No xdg-open found; open this URL manually:\n{$url}\n");
+        $opener = trim((string) shell_exec('command -v xdg-open 2>/dev/null'));
+    }
+    if ($opener === '') {
+        fwrite(STDERR, "No open or xdg-open found; open this URL manually:\n{$url}\n");
         return;
     }
     exec(escapeshellarg($opener) . ' ' . escapeshellarg($url) . ' >/dev/null 2>&1 &');
