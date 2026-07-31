@@ -747,6 +747,15 @@ test('interpretStream classifies a transfer with no response at all as transient
     assert_eq(true, $out['transient'] ?? false, 'no response at all must be retryable, not a build abort');
 });
 
+test('interpretStream records the elapsed time on failure outcomes', function () {
+    // Failure outcomes feed the batch log via the onFailure callback; without
+    // the time key every failed request would be recorded as 0.0s.
+    $curl = AnthropicClient::interpretStream('', 28, 'timeout', 0, 1.25);
+    assert_eq(1.25, $curl['time'] ?? null, 'cURL failure outcome carries the elapsed time');
+    $http = AnthropicClient::interpretStream('boom', 0, '', 500, 2.5);
+    assert_eq(2.5, $http['time'] ?? null, 'HTTP failure outcome carries the elapsed time');
+});
+
 test('rollingPool rejects a second completion for an already-finished key', function () {
     $script = [['a'], ['a']];
     $err = null;

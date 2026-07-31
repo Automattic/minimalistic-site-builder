@@ -699,17 +699,17 @@ final class AnthropicClient implements Llm
     ): array
     {
         if ($errno !== 0) {
-            return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}"];
+            return ['ok' => false, 'transient' => self::isTransientCurl($errno), 'error' => "cURL ({$errno}): {$error}", 'time' => $time];
         }
         // Status 0 with no cURL error: the transfer stopped before any
         // response headers arrived (a CURLM-level failure or a rejected add).
         // Operational, not the request's fault — retry it.
         if ($status === 0) {
-            return ['ok' => false, 'transient' => true, 'error' => 'no response received before the transfer stopped'];
+            return ['ok' => false, 'transient' => true, 'error' => 'no response received before the transfer stopped', 'time' => $time];
         }
         if ($status < 200 || $status >= 300) {
             $param = self::rejectedParamForHttpError($status, $raw);
-            $out = ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw)];
+            $out = ['ok' => false, 'transient' => self::isTransientStatus($status), 'error' => "HTTP {$status}: " . self::truncate($raw), 'time' => $time];
             // A rejected recoverable parameter is stripped from the body before
             // the orchestrator retries (see retryTextBatch).
             if ($param !== null) {
@@ -721,7 +721,7 @@ final class AnthropicClient implements Llm
         $parsed = self::parseSse($raw);
         if ($parsed['error'] !== null) {
             $transient = in_array($parsed['error_type'], ['overloaded_error', 'api_error'], true);
-            return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}"];
+            return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
         }
         // Every successful Messages stream ends with a message_delta carrying
         // stop_reason. A 200 stream without one was severed mid-response (a
@@ -733,6 +733,7 @@ final class AnthropicClient implements Llm
                 'ok' => false,
                 'transient' => true,
                 'error' => 'stream severed before completion (no stop_reason received)',
+                'time' => $time,
             ];
         }
         // Preserve recognized abnormal terminal responses (including empty
@@ -741,7 +742,7 @@ final class AnthropicClient implements Llm
         if (trim($parsed['text']) === ''
             && JsonBatchRecovery::terminationError($parsed['stop_reason']) === null
         ) {
-            return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response'];
+            return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response', 'time' => $time];
         }
         return [
             'ok' => true,
