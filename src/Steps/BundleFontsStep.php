@@ -108,7 +108,7 @@ final class BundleFontsStep implements Step
 
             $fontFace = [];
             foreach ($downloads as [$face, $bytes]) {
-                $filename = self::faceFilename($slug, $face);
+                $filename = self::faceFilename((string) $family['slug'], $face);
                 $project->writeText('theme/assets/fonts/' . $filename, $bytes);
                 $fontFace[] = [
                     'fontFamily' => $family['name'],
@@ -131,22 +131,22 @@ final class BundleFontsStep implements Step
     }
 
     /**
-     * Both halves are attacker-reachable and both land in a filesystem path, so
-     * neither is trusted: the slug is model-authored (theme.json fontFamilies,
-     * where `../..` would escape assets/fonts/) and the extension is parsed out
-     * of a URL. Slugify matches what every other filesystem-facing name in the
-     * build already does, and the catalog is woff2 throughout, so the extension
-     * allowlist is a no-op on real data.
+     * Name the asset after the resolved family rather than the theme preset that
+     * uses it (`heading`, `body`, etc.), so the filename identifies its contents
+     * and remains stable when a family moves between roles. Both the catalog slug
+     * and the URL-derived extension still cross a filesystem boundary: slugify
+     * the former and allowlist the latter. The catalog is woff2 throughout, so
+     * the extension allowlist is a no-op on real data.
      *
      * @param array{fontWeight:string,fontStyle:string,src:string} $face
      */
-    private static function faceFilename(string $slug, array $face): string
+    private static function faceFilename(string $familySlug, array $face): string
     {
         $extension = strtolower(pathinfo((string) parse_url($face['src'], PHP_URL_PATH), PATHINFO_EXTENSION));
         if (!in_array($extension, self::FACE_EXTENSIONS, true)) {
             $extension = 'woff2';
         }
-        return ProjectStore::slugify($slug) . '-' . $face['fontWeight']
+        return ProjectStore::slugify($familySlug) . '-' . $face['fontWeight']
             . ($face['fontStyle'] === 'italic' ? '-italic' : '')
             . '.' . $extension;
     }

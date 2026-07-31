@@ -16,9 +16,10 @@ require_once __DIR__ . '/../FakeFontFetcher.php';
 
 $bundleFontsProject = static function (array $familySlugs = ['inter']): Project {
     $known = [
-        'inter'    => ['name' => 'Inter', 'stack' => 'Inter, sans-serif'],
-        'lora'     => ['name' => 'Lora', 'stack' => 'Lora, serif'],
-        'made-up'  => ['name' => 'Totally Made Up Font', 'stack' => '"Totally Made Up Font", serif'],
+        'inter'            => ['name' => 'Inter', 'stack' => 'Inter, sans-serif'],
+        'lora'             => ['name' => 'Lora', 'stack' => 'Lora, serif'],
+        'playfair-display' => ['name' => 'Playfair Display', 'stack' => '"Playfair Display", serif'],
+        'made-up'          => ['name' => 'Totally Made Up Font', 'stack' => '"Totally Made Up Font", serif'],
     ];
     $families = [];
     foreach ($familySlugs as $i => $slug) {
@@ -41,7 +42,7 @@ $bundleFontsProject = static function (array $familySlugs = ['inter']): Project 
 };
 
 test('BundleFontsStep writes assets and declares fontFace with file sources', function () use ($bundleFontsProject) {
-    $project = $bundleFontsProject(['inter']);
+    $project = $bundleFontsProject(['playfair-display']);
     $fetcher = new FakeFontFetcher();
 
     try {
@@ -53,10 +54,10 @@ test('BundleFontsStep writes assets and declares fontFace with file sources', fu
         $theme = $project->readJson('theme/theme.json');
         $faces = $theme['settings']['typography']['fontFamilies'][0]['fontFace'];
         assert_eq(2, count($faces));
-        assert_eq('Inter', $faces[0]['fontFamily']);
-        assert_eq(['file:./assets/fonts/body-400.woff2'], $faces[0]['src']);
-        assert_eq(['file:./assets/fonts/body-700.woff2'], $faces[1]['src']);
-        foreach (['body-400.woff2', 'body-700.woff2'] as $file) {
+        assert_eq('Playfair Display', $faces[0]['fontFamily']);
+        assert_eq(['file:./assets/fonts/playfair-display-400.woff2'], $faces[0]['src']);
+        assert_eq(['file:./assets/fonts/playfair-display-700.woff2'], $faces[1]['src']);
+        foreach (['playfair-display-400.woff2', 'playfair-display-700.woff2'] as $file) {
             assert_true(
                 str_starts_with($project->readText('theme/assets/fonts/' . $file), 'FONTBYTES:'),
                 "{$file} carries the downloaded bytes"
@@ -167,10 +168,10 @@ test('BundleFontsStep degrades a family whose scan selects no faces', function (
     }
 });
 
-test('BundleFontsStep contains a traversal slug inside the fonts directory', function () {
-    // fontFamilies slugs are model-authored and ThemeJsonStep::repairFonts only
-    // trims them, so a slug carrying `../..` used to escape theme/assets/fonts/
-    // and write wherever the path resolved.
+test('BundleFontsStep names assets from the catalog family, not the theme role slug', function () {
+    // fontFamilies slugs are model-authored and identify theme roles. Even a
+    // traversal-shaped role must never become part of an asset filename; the
+    // resolved catalog family provides the canonical filesystem identity.
     $tmp = sys_get_temp_dir() . '/bundle-fonts-traversal-' . uniqid();
     $project = new Project($tmp);
     $project->writeJson('theme/theme.json', [
@@ -199,7 +200,7 @@ test('BundleFontsStep contains a traversal slug inside the fonts directory', fun
                 'no declared src escapes the fonts directory: ' . $face['src'][0]
             );
         }
-        assert_eq(['file:./assets/fonts/evil-400.woff2'], $faces[0]['src']);
+        assert_eq(['file:./assets/fonts/inter-400.woff2'], $faces[0]['src']);
     } finally {
         exec('rm -rf ' . escapeshellarg($project->root));
     }
