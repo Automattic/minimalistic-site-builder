@@ -357,6 +357,31 @@ test('site CSS path ignores inert page-style text inside an HTML comment', funct
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path ignores a style-like string with whitespace after the tag opener', function () {
+    [$project, $tmp] = ps_project('builder_ps_inert_spaced_tag_');
+    $base = $project->readText('theme/style.css');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText(
+        'design/home.html',
+        '< style data-page-css>body{display:none}</style><main>Home</main>'
+    );
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $base . '.site{display:grid;}',
+        $project->readText('theme/style.css'),
+        'HTML text that is not a DOM style element never becomes live CSS'
+    );
+    assert_eq([], $llm->calls);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path excludes losing tournament candidates from delivered page CSS', function () {
     [$project, $tmp] = ps_project('builder_ps_candidate_exclusion_');
     $base = $project->readText('theme/style.css');

@@ -365,15 +365,9 @@ final class PageStylesStep implements Step
     {
         $length = strlen($html);
         $cursor = $start + 1;
-        while ($cursor < $length && str_contains(" \t\n\f\r", $html[$cursor])) {
-            $cursor++;
-        }
         $closing = ($html[$cursor] ?? '') === '/';
         if ($closing) {
             $cursor++;
-            while ($cursor < $length && str_contains(" \t\n\f\r", $html[$cursor])) {
-                $cursor++;
-            }
         }
         if ($cursor >= $length || preg_match('/^[A-Za-z]$/D', $html[$cursor]) !== 1) {
             return null;
