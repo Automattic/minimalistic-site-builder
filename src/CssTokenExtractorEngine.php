@@ -226,6 +226,13 @@ final class CssTokenExtractorEngine
         for ($offset = 0; $offset < $length;) {
             $lexical = $state['quote'] === '' && !$state['comment'];
             $tokenStart = $lexical && self::isTokenStart($value, $offset);
+            if ($tokenStart && self::functionStartsAt($value, $offset, 'var')) {
+                $end = self::functionEnd($value, $offset + 3);
+                if ($end !== null) {
+                    $offset = $end;
+                    continue;
+                }
+            }
             if ($tokenStart && preg_match(
                 '/\G#[0-9A-F]{8}(?![0-9A-F])|\G#[0-9A-F]{6}(?![0-9A-F])'
                     . '|\G#[0-9A-F]{4}(?![0-9A-F])|\G#[0-9A-F]{3}(?![0-9A-F])/i',
@@ -284,13 +291,20 @@ final class CssTokenExtractorEngine
         if ($offset === 0) {
             return true;
         }
-        return preg_match('/[A-Za-z0-9_-]/', $value[$offset - 1]) !== 1;
+        return !self::isNameByte($value[$offset - 1]);
     }
 
     private static function isTokenEnd(string $value, int $offset): bool
     {
         return !isset($value[$offset])
-            || preg_match('/[A-Za-z0-9_-]/', $value[$offset]) !== 1;
+            || !self::isNameByte($value[$offset]);
+    }
+
+    private static function isNameByte(string $byte): bool
+    {
+        return ord($byte) >= 0x80
+            || $byte === '\\'
+            || preg_match('/[A-Za-z0-9_-]/', $byte) === 1;
     }
 
     private static function functionEnd(string $value, int $open): ?int
