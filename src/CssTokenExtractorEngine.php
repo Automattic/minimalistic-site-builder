@@ -25,6 +25,9 @@ final class CssTokenExtractorEngine
      */
     public static function extract(string $css): array
     {
+        if (preg_match('//u', $css) !== 1) {
+            return self::emptyResult();
+        }
         try {
             $declarations = self::declarations($css);
             $customProperties = [];
@@ -176,13 +179,41 @@ final class CssTokenExtractorEngine
      */
     private static function resolveOneLevel(string $value, array $customProperties): string
     {
-        return (string) preg_replace_callback(
-            '/var\(\s*(--[A-Za-z_][A-Za-z0-9_-]*)\s*(?:,\s*[^()]*)?\)/i',
-            static function (array $match) use ($customProperties): string {
-                return $customProperties[$match[1]] ?? $match[0];
-            },
-            $value,
-        );
+        $resolved = '';
+        $cursor = 0;
+        $state = CssSyntaxScanner::state();
+        $length = strlen($value);
+
+        for ($offset = 0; $offset < $length;) {
+            if ($state['quote'] === ''
+                && !$state['comment']
+                && self::functionStartsAt($value, $offset, 'var')) {
+                $open = $offset + 3;
+                $end = self::functionEnd($value, $open);
+                if ($end !== null) {
+                    $inner = substr($value, $open + 1, $end - $open - 2);
+                    [$name, $fallback] = self::splitFirstTopLevel($inner, ',');
+                    $name = trim($name);
+                    if (preg_match('/^--[A-Za-z_][A-Za-z0-9_-]*$/', $name) === 1) {
+                        $replacement = array_key_exists($name, $customProperties)
+                            ? $customProperties[$name]
+                            : ($fallback === null ? substr($value, $offset, $end - $offset) : trim($fallback));
+                        $resolved .= substr($value, $cursor, $offset - $cursor) . $replacement;
+                        $cursor = $end;
+                        $offset = $end;
+                        continue;
+                    }
+                }
+            }
+
+            $next = CssSyntaxScanner::consume($value, $offset, $state);
+            if ($next === null) {
+                break;
+            }
+            $offset = $next;
+        }
+
+        return $resolved . substr($value, $cursor);
     }
 
     /** @return list<string> */
@@ -194,19 +225,20 @@ final class CssTokenExtractorEngine
 
         for ($offset = 0; $offset < $length;) {
             $lexical = $state['quote'] === '' && !$state['comment'];
-            if ($lexical && preg_match(
+            $tokenStart = $lexical && self::isTokenStart($value, $offset);
+            if ($tokenStart && preg_match(
                 '/\G#[0-9A-F]{8}(?![0-9A-F])|\G#[0-9A-F]{6}(?![0-9A-F])'
                     . '|\G#[0-9A-F]{4}(?![0-9A-F])|\G#[0-9A-F]{3}(?![0-9A-F])/i',
                 $value,
                 $match,
                 0,
                 $offset,
-            ) === 1) {
+            ) === 1 && self::isTokenEnd($value, $offset + strlen($match[0]))) {
                 $colors[] = $match[0];
                 $offset += strlen($match[0]);
                 continue;
             }
-            if ($lexical && preg_match(
+            if ($tokenStart && preg_match(
                 '/\G(?:rgba?|hsla?|oklch)\s*\(/i',
                 $value,
                 $match,
@@ -238,6 +270,27 @@ final class CssTokenExtractorEngine
         }
 
         return $colors;
+    }
+
+    private static function functionStartsAt(string $value, int $offset, string $name): bool
+    {
+        return self::isTokenStart($value, $offset)
+            && strncasecmp(substr($value, $offset, strlen($name)), $name, strlen($name)) === 0
+            && ($value[$offset + strlen($name)] ?? '') === '(';
+    }
+
+    private static function isTokenStart(string $value, int $offset): bool
+    {
+        if ($offset === 0) {
+            return true;
+        }
+        return preg_match('/[A-Za-z0-9_-]/', $value[$offset - 1]) !== 1;
+    }
+
+    private static function isTokenEnd(string $value, int $offset): bool
+    {
+        return !isset($value[$offset])
+            || preg_match('/[A-Za-z0-9_-]/', $value[$offset]) !== 1;
     }
 
     private static function functionEnd(string $value, int $open): ?int
@@ -457,11 +510,60 @@ final class CssTokenExtractorEngine
 
     private static function cleanFontStack(string $value): ?string
     {
-        $parts = CssValueSplitter::splitTopLevel($value, [',']);
+        $parts = self::splitTopLevelScanner($value, ',');
         if ($parts === []) {
             return null;
         }
         return implode(', ', $parts);
+    }
+
+    /** @return array{0:string,1:string|null} */
+    private static function splitFirstTopLevel(string $value, string $delimiter): array
+    {
+        $state = CssSyntaxScanner::state();
+        $length = strlen($value);
+        for ($offset = 0; $offset < $length;) {
+            if (CssSyntaxScanner::isTopLevel($state) && $value[$offset] === $delimiter) {
+                return [substr($value, 0, $offset), substr($value, $offset + 1)];
+            }
+            $next = CssSyntaxScanner::consume($value, $offset, $state);
+            if ($next === null) {
+                break;
+            }
+            $offset = $next;
+        }
+        return [$value, null];
+    }
+
+    /** @return list<string> */
+    private static function splitTopLevelScanner(string $value, string $delimiter): array
+    {
+        $parts = [];
+        $cursor = 0;
+        $state = CssSyntaxScanner::state();
+        $length = strlen($value);
+        for ($offset = 0; $offset < $length;) {
+            if (CssSyntaxScanner::isTopLevel($state) && $value[$offset] === $delimiter) {
+                $part = trim(substr($value, $cursor, $offset - $cursor));
+                if ($part !== '') {
+                    $parts[] = $part;
+                }
+                $cursor = $offset + 1;
+            }
+            $next = CssSyntaxScanner::consume($value, $offset, $state);
+            if ($next === null) {
+                return [];
+            }
+            $offset = $next;
+        }
+        if (!CssSyntaxScanner::isComplete($state)) {
+            return [];
+        }
+        $part = trim(substr($value, $cursor));
+        if ($part !== '') {
+            $parts[] = $part;
+        }
+        return $parts;
     }
 
     private static function isSpacingProperty(string $property): bool
