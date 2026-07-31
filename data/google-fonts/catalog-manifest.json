@@ -7,7 +7,7 @@
     },
     "distiller": {
         "script": "bin/distill-google-fonts-catalog.php",
-        "sha256": "64498434e4e6bce067481c71a8d25ffb4755b21d373cf35d013bf3f03412308b"
+        "sha256": "b9c30cd991fa07389f5898500c1a0e03b655c7d53003278c6b2e7a2b087d8c23"
     },
     "catalog": {
         "sha256": "5c305bd1b7e34f7a186565f01d9c5301b72f361f5b9faa722ebd5dc1fa036d67",
