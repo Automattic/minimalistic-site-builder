@@ -899,12 +899,8 @@ final class HomepageDesignStep implements Step
                 && !$token['self_closing']
                 && in_array($name, self::RAW_TEXT_ELEMENTS, true)
             ) {
-                $rawClose = stripos($html, "</{$name}", $offset);
-                if ($rawClose === false) {
-                    return null;
-                }
-                $close = self::nextTag($html, $rawClose);
-                if ($close === null || !$close['closing'] || $close['name'] !== $name) {
+                $close = self::rawTextCloseToken($html, $name, $offset);
+                if ($close === null) {
                     return null;
                 }
                 if ($name === $targetTag) {
@@ -1001,6 +997,37 @@ final class HomepageDesignStep implements Step
                 'closing'      => $match[1] === '/',
                 'self_closing' => preg_match('/\/\s*>$/s', $raw) === 1,
             ];
+        }
+        return null;
+    }
+
+    /**
+     * @return array{start:int,end:int,name:string,closing:bool,self_closing:bool}|null
+     */
+    private static function rawTextCloseToken(
+        string $html,
+        string $name,
+        int $offset,
+    ): ?array {
+        $needle = "</{$name}";
+        while (($start = stripos($html, $needle, $offset)) !== false) {
+            $afterName = $start + strlen($needle);
+            $delimiter = $html[$afterName] ?? '';
+            if (
+                $delimiter === '>'
+                || $delimiter === '/'
+                || ($delimiter !== '' && str_contains(" \t\n\f\r", $delimiter))
+            ) {
+                $close = self::nextTag($html, $start);
+                if (
+                    $close !== null
+                    && $close['closing']
+                    && $close['name'] === $name
+                ) {
+                    return $close;
+                }
+            }
+            $offset = $afterName;
         }
         return null;
     }
@@ -1160,53 +1187,45 @@ final class HomepageDesignStep implements Step
     private static function headContentRange(string $html): ?array
     {
         $offset = 0;
-        $htmlContentStart = null;
+        $sawImplicitHeadContent = false;
         while (($token = self::nextTag($html, $offset)) !== null) {
             $offset = $token['end'];
             if (!$token['closing'] && $token['name'] === 'html') {
-                $htmlContentStart = $token['end'];
                 continue;
             }
             if (!$token['closing'] && $token['name'] === 'head') {
                 $close = self::matchingCloseToken($html, $token);
-                return [$token['end'], $close['start'] ?? strlen($html)];
+                return [
+                    $sawImplicitHeadContent ? 0 : $token['end'],
+                    $close['start'] ?? strlen($html),
+                ];
             }
-            if (
-                !$token['closing']
-                && $token['name'] === 'body'
-                && $htmlContentStart !== null
-            ) {
-                return [$htmlContentStart, $token['start']];
-            }
-            if ($htmlContentStart === null) {
+            if ($token['closing']) {
                 continue;
             }
-            if ($token['closing'] && $token['name'] === 'html') {
-                return [$htmlContentStart, $token['start']];
+            if ($token['name'] === 'body') {
+                return [0, $token['start']];
             }
-            if (
-                !$token['closing']
-                && !in_array(
-                    $token['name'],
-                    ['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title'],
-                    true,
-                )
-            ) {
-                return [$htmlContentStart, $token['start']];
+            if (!in_array(
+                $token['name'],
+                ['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title'],
+                true,
+            )) {
+                return [0, $token['start']];
             }
+            $sawImplicitHeadContent = true;
             if (
-                !$token['closing']
-                && !$token['self_closing']
+                !$token['self_closing']
                 && in_array($token['name'], self::RAW_TEXT_ELEMENTS, true)
             ) {
                 $close = self::matchingCloseToken($html, $token);
                 if ($close === null) {
-                    return [$htmlContentStart, strlen($html)];
+                    return [0, strlen($html)];
                 }
                 $offset = $close['end'];
             }
         }
-        return null;
+        return $sawImplicitHeadContent ? [0, strlen($html)] : null;
     }
 
     private static function isAllowedElement(string $name, bool $inHead): bool
@@ -1272,14 +1291,7 @@ final class HomepageDesignStep implements Step
             return null;
         }
         if (in_array($name, self::RAW_TEXT_ELEMENTS, true)) {
-            $closeStart = stripos($html, "</{$name}", $opening['end']);
-            if ($closeStart === false) {
-                return null;
-            }
-            $close = self::nextTag($html, $closeStart);
-            return $close !== null && $close['closing'] && $close['name'] === $name
-                ? $close
-                : null;
+            return self::rawTextCloseToken($html, $name, $opening['end']);
         }
         $depth = 1;
         $offset = $opening['end'];
@@ -1606,15 +1618,32 @@ final class HomepageDesignStep implements Step
 
     private static function styleContents(string $html): ?string
     {
-        $matched = preg_match_all(
-            '/<style\b[^>]*>(.*?)<\/style\s*>/is',
-            $html,
-            $matches,
-        );
-        if (!is_int($matched) || $matched < 1) {
-            return null;
+        $styles = [];
+        $offset = 0;
+        while (($token = self::nextTag($html, $offset)) !== null) {
+            $offset = $token['end'];
+            if (
+                $token['closing']
+                || $token['self_closing']
+                || !in_array($token['name'], self::RAW_TEXT_ELEMENTS, true)
+            ) {
+                continue;
+            }
+
+            $close = self::matchingCloseToken($html, $token);
+            if ($close === null) {
+                break;
+            }
+            if ($token['name'] === 'style') {
+                $styles[] = substr(
+                    $html,
+                    $token['end'],
+                    $close['start'] - $token['end'],
+                );
+            }
+            $offset = $close['end'];
         }
-        return implode('', $matches[1]);
+        return $styles === [] ? null : implode('', $styles);
     }
 
     private static function loadDocument(string $html): ?\DOMDocument
