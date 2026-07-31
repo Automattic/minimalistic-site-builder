@@ -108,6 +108,11 @@ function design_preview_review_assert_no_dependency_markup(string $html): void
         $xpath->query('//*[@popover or @popovertarget or @popovertargetaction or @command or @commandfor]')->length,
         'no declarative behavior attributes',
     );
+    assert_eq(
+        0,
+        $xpath->query('//*[@contenteditable or @draggable or @autofocus]')->length,
+        'no editing, dragging, or autofocus behavior attributes',
+    );
 }
 
 $designPreviewDependencyDefects = [
@@ -225,6 +230,21 @@ $designPreviewDependencyDefects = [
             . '<div id="preview-popover" popover>Details</div></section>',
         $html,
     ),
+    'contenteditable behavior' => static fn (string $html): string => str_replace(
+        '</section>',
+        '<p contenteditable="true">Editable preview copy</p></section>',
+        $html,
+    ),
+    'draggable behavior' => static fn (string $html): string => str_replace(
+        '</section>',
+        '<p draggable="true">Draggable preview copy</p></section>',
+        $html,
+    ),
+    'autofocus behavior' => static fn (string $html): string => str_replace(
+        '</section>',
+        '<button autofocus>Focused action</button></section>',
+        $html,
+    ),
 ];
 
 $designPreviewDeterministicDependencyRemovals = [
@@ -302,6 +322,9 @@ $designPreviewHarmlessCssControls = [
     'content string containing url token' => '.hero::before { content: "url("; color: #251d16; }',
     'content string containing image-set token' => '.hero::before { content: "image-set("; color: #251d16; }',
     'selector string containing paint token' => '[data-copy="paint("] { color: #251d16; }',
+    'content string containing comment token' => '.hero::before { content: "/* copy */"; color: #251d16; }',
+    'content string containing import token' => '.hero::before { content: "@import"; color: #251d16; }',
+    'content string containing font-face token' => '.hero::before { content: "@font-face"; color: #251d16; }',
 ];
 
 foreach ($designPreviewHarmlessCssControls as $name => $css) {
@@ -326,6 +349,51 @@ foreach ($designPreviewHarmlessCssControls as $name => $css) {
         assert_eq($authored, $delivered, "{$name} ships byte-identically");
         assert_eq('', $warnings, "{$name} needs no warning");
         design_preview_review_assert_no_dependency_markup($delivered);
+    });
+}
+
+$designPreviewWidthBypasses = [
+    'required width text hidden in inert content' => static function (string $html): string {
+        $html = str_replace(
+            ['--content-size: 800px;', '--wide-size: 1280px;'],
+            ['--content-size: 10px;', '--wide-size: 20px;'],
+            $html,
+        );
+        return design_preview_review_inject_css(
+            $html,
+            '.hero::before { content: "--content-size: 800px; --wide-size: 1280px;"; }',
+        );
+    },
+    'later root declaration overrides required widths' => static fn (string $html): string => design_preview_review_inject_css(
+        $html,
+        ':root { --content-size: 10px; --wide-size: 20px; }',
+    ),
+];
+
+foreach ($designPreviewWidthBypasses as $name => $mutate) {
+    test("design-preview repairs {$name}", function () use ($name, $mutate) {
+        [$project, $llm, $tmp] = design_preview_fixture();
+        $base = design_preview_document('AUTHORED-WIDTH-BYPASS');
+        $authored = $mutate($base);
+        $safeRepair = design_preview_document('SAFE-WIDTH-REPAIR');
+        assert_true($authored !== $base, "{$name} fixture carries bypass");
+        $llm->queueText($authored);
+        $llm->queueText($safeRepair);
+
+        design_preview_run($project, $llm);
+
+        $delivered = $project->readText('design/preview.html');
+        $warnings = design_preview_warnings($project);
+        $completeCalls = $llm->completeCalls;
+        $allCalls = count($llm->calls);
+        design_preview_cleanup($tmp);
+
+        assert_eq(2, $completeCalls, "{$name} triggers exactly one repair call");
+        assert_eq(2, $allCalls, "{$name} has generation plus repair only");
+        assert_eq($safeRepair, $delivered, "{$name} delivers exact safe repair");
+        assert_contains('disposition repaired', $warnings, "{$name} repair is recorded");
+        design_preview_review_assert_no_dependency_markup($delivered);
+        design_preview_assert_shape($delivered);
     });
 }
 
