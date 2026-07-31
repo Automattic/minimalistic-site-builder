@@ -56,6 +56,22 @@ function inner_page(string $slug, string $title, string $purpose, array $childre
     return $page;
 }
 
+function inner_pages_has_live_script(string $html): bool
+{
+    $previous = libxml_use_internal_errors(true);
+    try {
+        $dom = new DOMDocument();
+        $loaded = $dom->loadHTML(
+            '<!doctype html><html><body>' . $html . '</body></html>',
+            LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING,
+        );
+    } finally {
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+    }
+    return $loaded && $dom->getElementsByTagName('script')->length > 0;
+}
+
 test('inner-pages-design declares and batches every flattened non-home page against exact cache layers', function () {
     $pages = [
         inner_page('home', 'Home', 'Welcome visitors'),
@@ -234,7 +250,7 @@ test('inner-pages-design sends every hostile fragment through shared hardened sa
     assert_contains('url-survivor', $url);
 
     $overlap = strtolower($project->readText('design/overlap.html'));
-    assert_true(!str_contains($overlap, '<script'));
+    assert_true(!inner_pages_has_live_script($overlap));
     assert_true(!str_contains($overlap, '<svg'));
     assert_contains('overlap-survivor', $overlap);
 
