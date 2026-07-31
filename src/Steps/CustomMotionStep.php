@@ -149,7 +149,7 @@ final class CustomMotionStep implements Step
     {
         $found = [];
         $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
-        foreach (FixBlocksStep::themeFiles($project) as $rel) {
+        foreach ($project->themeFiles() as $rel) {
             $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
             foreach ($doc->indices() as $i) {
                 if (preg_match_all('/<[a-z][^>]*class="[^"]*' . $token . '[^"]*"[^>]*>/i', $doc->ownHtml($i), $m) > 0) {
