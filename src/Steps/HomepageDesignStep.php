@@ -1250,23 +1250,51 @@ final class HomepageDesignStep implements Step
                 $start++;
                 continue;
             }
-            if (substr($html, $start, 4) === '<!--') {
-                $start = min(self::commentSpan($html, $start)['end'], $end);
-                continue;
-            }
-            if (
-                strncasecmp(substr($html, $start, 9), '<!doctype', 9) === 0
-                && (($html[$start + 9] ?? '') === '>'
-                    || str_contains(" \t\n\f\r", $html[$start + 9] ?? ''))
-            ) {
-                $close = strpos($html, '>', $start + 9);
-                if ($close === false || $close >= $end) {
-                    return $start;
-                }
-                $start = $close + 1;
+            $ignoredEnd = self::ignoredPreHeadMarkupEnd($html, $start, $end);
+            if ($ignoredEnd !== null) {
+                $start = $ignoredEnd;
                 continue;
             }
             return $start;
+        }
+        return null;
+    }
+
+    private static function ignoredPreHeadMarkupEnd(
+        string $html,
+        int $start,
+        int $end,
+    ): ?int {
+        if (substr($html, $start, 4) === '<!--') {
+            return min(self::commentSpan($html, $start)['end'], $end);
+        }
+        $prefix = substr($html, $start, 2);
+        if ($prefix !== '<!' && $prefix !== '<?') {
+            return null;
+        }
+
+        $doctypeDelimiter = $html[$start + 9] ?? '';
+        $quoteAware = strncasecmp(substr($html, $start, 9), '<!doctype', 9) === 0
+            && (
+                $doctypeDelimiter === '>'
+                || str_contains(" \t\n\f\r", $doctypeDelimiter)
+            );
+        $quote = null;
+        for ($offset = $start + 2; $offset < $end; $offset++) {
+            $char = $html[$offset];
+            if ($quoteAware && $quote !== null) {
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($quoteAware && ($char === '"' || $char === "'")) {
+                $quote = $char;
+                continue;
+            }
+            if ($char === '>') {
+                return $offset + 1;
+            }
         }
         return null;
     }
