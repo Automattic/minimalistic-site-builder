@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\FooterSectionIdentity;
+use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -23,7 +25,8 @@ use Automattic\SiteBuild\StepDeclaration;
  *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
  *         content_notes, layout_archetype, background, vertical_density,
  *         handoff } ] } ] }, a FLAT list in display order, parents before
- *         children.
+ *         children; warnings.json records every generated value removed or
+ *         replaced by a deterministic fallback.
  *
  * Each page's plan enriches the spec's purpose into concrete section briefs,
  * which the sections step then generates independently and in parallel and
@@ -32,7 +35,7 @@ use Automattic\SiteBuild\StepDeclaration;
  * section a layout archetype and background treatment (validated below, with
  * an adjacency rule) so every page has a deliberate visual rhythm.
  */
-final class PagePlanStep implements ConcurrentStep
+final class PagePlanStep implements GeneratedJsonFallbackStep
 {
     use LlmOptions;
 
@@ -110,7 +113,7 @@ final class PagePlanStep implements ConcurrentStep
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
-            writes: ['pages.json'],
+            writes: ['pages.json', 'warnings.json'],
             concurrent: true,
         );
     }
@@ -185,21 +188,51 @@ final class PagePlanStep implements ConcurrentStep
 
     public function consume(Project $project, array $results): void
     {
+        $this->consumeResults($project, $results);
+    }
+
+    /**
+     * @param array<string,array<mixed>> $results
+     * @param list<string> $initialWarnings
+     */
+    private function consumeResults(Project $project, array $results, array $initialWarnings = []): void
+    {
         $pages = self::flattenPages($project->readJson('siteSpec.json'));
 
         // First pass: normalize what the model returned, collecting every page
         // that broke a rule so they can all be re-asked together below.
         $sectionsBySlug = [];
         $rejected = [];
+        $warnings = $initialWarnings;
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
             $plan = $results[$slug] ?? null;
             if (!is_array($plan)) {
-                throw new \RuntimeException("page-plan: missing model output for page '{$slug}'");
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
+                    (bool) $page['front'],
+                    $warnings,
+                    $slug,
+                    'missing generated page-plan result',
+                    'deterministic fallback substituted for the missing page result'
+                );
+                continue;
+            }
+
+            $rawSections = $plan['sections'] ?? null;
+            $sectionCount = self::sectionArrayCount($rawSections);
+            $rawSections = self::removeTemplateFooterSections($rawSections, $warnings, $slug);
+            $removedFooter = self::sectionArrayCount($rawSections) < $sectionCount;
+            if ($removedFooter && self::sectionArrayCount($rawSections) === 0) {
+                $sectionsBySlug[$slug] = self::fallbackAfterFooterRemoval(
+                    (bool) $page['front'],
+                    $warnings,
+                    $slug
+                );
+                continue;
             }
 
             try {
-                $sections = self::normalize($plan['sections'] ?? null, (bool) $page['front']);
+                $sections = self::normalize($rawSections, (bool) $page['front']);
                 if ($sections === []) {
                     throw new \RuntimeException(
                         "page-plan: page '{$slug}' has no sections — return the full JSON object with a non-empty \"sections\" array"
@@ -207,7 +240,11 @@ final class PagePlanStep implements ConcurrentStep
                 }
                 $sectionsBySlug[$slug] = $sections;
             } catch (\RuntimeException $e) {
-                $rejected[$slug] = ['plan' => $plan, 'errors' => $e->getMessage()];
+                // The repair prompt must not reintroduce a section the
+                // deterministic template-ownership guard already removed.
+                $filteredPlan = $plan;
+                $filteredPlan['sections'] = $rawSections;
+                $rejected[$slug] = ['plan' => $filteredPlan, 'errors' => $e->getMessage()];
             }
         }
 
@@ -217,46 +254,129 @@ final class PagePlanStep implements ConcurrentStep
         // instead of aborting the build. recoverSections() is the backstop:
         // field + variety coercion for every known normalize rejection, and a
         // single fallback section if a future rule slips past both passes.
-        // Only an empty section list still ends the page (nothing to coerce).
-        $warnings = [];
+        // Empty, missing, and terminally malformed repairs degrade per page;
+        // valid siblings and every already-paid-for plan still ship.
         $frontBySlug = array_column($pages, 'front', 'slug');
-        foreach ($this->repairAll($project, $rejected) as $slug => $repaired) {
+        $repairs = [];
+        $repairFailures = [];
+        try {
+            $repairs = $this->repairAll($project, $rejected);
+        } catch (GeneratedJsonException $e) {
+            $repairs = $e->partialResults;
+            $repairFailures = $e->failures;
+        }
+        if (array_intersect_key($repairs, $repairFailures) !== []) {
+            throw new \RuntimeException('page-plan: repair failure routing overlaps successful results');
+        }
+        foreach (array_keys($repairs + $repairFailures) as $slug) {
+            if (!array_key_exists($slug, $rejected)) {
+                throw new \RuntimeException("page-plan: repair returned unknown page '{$slug}'");
+            }
+        }
+        foreach ($rejected as $slug => $_rejection) {
             $slug = (string) $slug;
             $front = (bool) ($frontBySlug[$slug] ?? false);
+            if (isset($repairFailures[$slug])) {
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'unusable generated repair JSON (' . $repairFailures[$slug] . ')',
+                    'deterministic fallback substituted after the model repair remained unusable'
+                );
+                continue;
+            }
+            $repaired = $repairs[$slug] ?? null;
+            if (!is_array($repaired)) {
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'missing generated repair result',
+                    'deterministic fallback substituted for the missing repair result'
+                );
+                continue;
+            }
+            $rawSections = $repaired['sections'] ?? null;
+            $sectionCount = self::sectionArrayCount($rawSections);
+            $rawSections = self::removeTemplateFooterSections($rawSections, $warnings, $slug);
+            $removedFooter = self::sectionArrayCount($rawSections) < $sectionCount;
+            if ($removedFooter && self::sectionArrayCount($rawSections) === 0) {
+                $sectionsBySlug[$slug] = self::fallbackAfterFooterRemoval($front, $warnings, $slug);
+                continue;
+            }
             try {
-                $sections = self::normalize($repaired['sections'] ?? null, $front);
+                $sections = self::normalize($rawSections, $front);
             } catch (\RuntimeException $stillInvalid) {
                 $sections = self::recoverSections(
-                    $repaired['sections'] ?? null,
+                    $rawSections,
                     $front,
                     $warnings,
                     $slug
                 );
             }
             if ($sections === []) {
-                throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
+                $sections = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'empty repaired sections array',
+                    'deterministic fallback substituted after the repair preserved no page-owned section'
+                );
             }
             $sectionsBySlug[$slug] = $sections;
         }
 
-        // Every coercion changed delivered output, so it belongs in the durable
-        // record rather than only in the narration, which is best-effort.
-        $project->addWarnings($this->id(), $warnings);
-
         $out = [];
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
-            // A repair batch that answers fewer pages than it was asked about
-            // must fail loud: assembling the page without sections would write
-            // a null into pages.json and break far downstream instead.
             if (!isset($sectionsBySlug[$slug])) {
-                throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
+                // Defensive backstop for a future branch added above: never
+                // write null sections or abort over generated page content.
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
+                    (bool) $page['front'],
+                    $warnings,
+                    $slug,
+                    'no generated sections reached final assembly',
+                    'deterministic fallback substituted at the page-plan boundary'
+                );
             }
             $page['sections'] = $sectionsBySlug[$slug];
             $out[] = $page;
         }
 
+        // Every coercion changed delivered output, so it belongs in the durable
+        // record rather than only in the narration, which is best-effort.
+        $project->addWarnings($this->id(), $warnings);
         $project->writeJson('pages.json', ['pages' => $out]);
+    }
+
+    public function consumeGeneratedJsonFailure(
+        Project $project,
+        array $results,
+        array $failures,
+    ): void {
+        $pages = self::flattenPages($project->readJson('siteSpec.json'));
+        $frontBySlug = array_column($pages, 'front', 'slug');
+        $warnings = [];
+        foreach ($failures as $slug => $diagnostic) {
+            $slug = (string) $slug;
+            if (!array_key_exists($slug, $frontBySlug) || isset($results[$slug])) {
+                throw new \RuntimeException(
+                    "page-plan: inconsistent generated JSON failure routing for page '{$slug}'"
+                );
+            }
+            $results[$slug] = [
+                'sections' => self::fallbackAfterGeneratedPlanLoss(
+                    (bool) $frontBySlug[$slug],
+                    $warnings,
+                    $slug,
+                    'unusable generated JSON (' . $diagnostic . ')',
+                    'deterministic fallback substituted after generated JSON repair failed'
+                ),
+            ];
+        }
+        $this->consumeResults($project, $results, $warnings);
     }
 
     /**
@@ -317,7 +437,11 @@ final class PagePlanStep implements ConcurrentStep
 
     public function run(Project $project): void
     {
-        $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+        try {
+            $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+        } catch (GeneratedJsonException $e) {
+            $this->consumeGeneratedJsonFailure($project, $e->partialResults, $e->failures);
+        }
     }
 
     /**
@@ -409,6 +533,62 @@ final class PagePlanStep implements ConcurrentStep
             );
         }
         return implode("\n", $lines);
+    }
+
+    /**
+     * Remove page-planned site chrome before section generation.
+     *
+     * Every assembled page receives theme/parts/footer.html from its template,
+     * so a model-planned footer would render a second ending. Semantic labels
+     * are open-ended, therefore inspect all three identity fields rather than
+     * relying on one exact type: "footer", "footer-info", "site-footer", and
+     * equivalent word-separated labels all identify template-owned chrome.
+     *
+     * Non-footer siblings are returned unchanged and in their original order.
+     * Re-running the filter is a fixed point: once a footer is absent it
+     * changes neither the list nor the warning accumulator.
+     *
+     * @param mixed $raw
+     * @param list<string> $warnings appended to in place, one per removal
+     * @return array<mixed>
+     */
+    public static function removeTemplateFooterSections(
+        $raw,
+        array &$warnings = [],
+        string $pageSlug = ''
+    ): array {
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $sections = [];
+        foreach ($raw as $index => $section) {
+            if (!is_array($section) || !FooterSectionIdentity::matches($section)) {
+                $sections[] = $section;
+                continue;
+            }
+
+            $pagePath = $pageSlug === ''
+                ? 'pages[].sections[' . $index . ']'
+                : "pages[slug='{$pageSlug}'].sections[{$index}]";
+            $authored = json_encode(
+                [
+                    'slug'  => $section['slug'] ?? null,
+                    'title' => $section['title'] ?? null,
+                    'type'  => $section['type'] ?? null,
+                ],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
+            if (!is_string($authored)) {
+                $authored = get_debug_type($section);
+            }
+
+            $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; authored={$authored}; "
+                . "delivered=removed; disposition=template-owned site-footer section removed because "
+                . 'theme/parts/footer.html is appended by the page template';
+        }
+
+        return $sections;
     }
 
     /**
@@ -518,6 +698,52 @@ final class PagePlanStep implements ConcurrentStep
     }
 
     /**
+     * Count actual section objects while ignoring malformed scalar entries in
+     * the same way normalize() does.
+     */
+    private static function sectionArrayCount(mixed $raw): int
+    {
+        return is_array($raw) ? count(array_filter($raw, 'is_array')) : 0;
+    }
+
+    /**
+     * Keep a page buildable when its only authored section was a duplicate
+     * template footer. The loss and delivered fallback both remain explicit
+     * in warnings.json; this generated-content defect must not abort the site.
+     *
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    private static function fallbackAfterFooterRemoval(
+        bool $front,
+        array &$warnings,
+        string $pageSlug
+    ): array {
+        $pagePath = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
+        $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; "
+            . 'authored=no page-owned section survived footer removal; delivered=one synthesized content section; '
+            . 'disposition=minimal valid page plan substituted so duplicate site chrome cannot abort the build';
+        return self::fallbackSections($front);
+    }
+
+    /**
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    private static function fallbackAfterGeneratedPlanLoss(
+        bool $front,
+        array &$warnings,
+        string $pageSlug,
+        string $authored,
+        string $disposition
+    ): array {
+        $pagePath = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
+        $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; authored={$authored}; "
+            . "delivered=one synthesized content section; disposition={$disposition}";
+        return self::fallbackSections($front);
+    }
+
+    /**
      * Mechanical backstop after the LLM repair round still fails normalize().
      *
      * Runs repairFields() then repairVariety(), then normalize(). Those two
@@ -527,8 +753,9 @@ final class PagePlanStep implements ConcurrentStep
      * section instead of aborting the build — one thin page is better than no
      * site after the rest of the pipeline has already been paid for.
      *
-     * Empty input still returns [] so the caller can fail that page loud;
-     * inventing sections from nothing is not this method's job.
+     * Empty input still returns [] so the caller can record the loss and
+     * synthesize a page-boundary fallback; inventing sections from nothing is
+     * not this field-repair helper's job.
      *
      * Pure — unit-testable.
      *

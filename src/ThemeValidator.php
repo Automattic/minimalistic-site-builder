@@ -12,6 +12,18 @@ namespace Automattic\SiteBuild;
  */
 final class ThemeValidator
 {
+    private const HTML_HREF_PATTERN =
+        '/\bhref\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
+
+    private const HTML_SRC_PATTERN =
+        '/\bsrc\s*=\s*(?:(["\'])(.*?)\1|([^\s"\'=<>`]+))/is';
+
+    /** Block attributes whose `url` is a destination, not a media source. */
+    private const LINK_URL_BLOCKS = ['navigation-link', 'social-link', 'button'];
+
+    /** Footer-capable blocks whose `url` is a media source. */
+    private const MEDIA_URL_BLOCKS = ['image', 'cover', 'media-text'];
+
     /** @return string[] list of problems (empty means valid) */
     public static function validate(Project $project): array
     {
@@ -78,13 +90,17 @@ final class ThemeValidator
             }
         }
 
-        // Generated links must resolve. The section prompt promises real
-        // destinations, but only a scan of what the model actually emitted
-        // enforces it.
+        // Generated interactions must remain usable. The prompts promise real
+        // destinations and populated utility lists, but only a scan of what
+        // the model actually delivered can catch placeholder links or list
+        // content lost during normalization.
         return array_merge(
             $problems,
             self::unresolvedImageSourceProblems($project),
+            self::placeholderLinkProblems($project),
+            self::placeholderMediaSourceProblems($project),
             self::linkProblems($project),
+            self::emptyListProblems($project),
         );
     }
 
@@ -135,9 +151,10 @@ final class ThemeValidator
      * anchor that exists on the page it targets (the chrome's anchors count
      * everywhere — it renders on every page), a bare "#fragment" in the
      * chrome must resolve on EVERY page, and a button link must carry an
-     * href at all. External URLs, mailto:/tel:, the bare "#" placeholder the
-     * prompts allow for social links, and static theme asset URLs are not
-     * judged. Asset URLs include the pre-image `theme:./assets/…` form and the
+     * href at all. A bare "#" is dead UI and is reported with its file and
+     * link index; external URLs, mailto:/tel:, and static theme asset URLs are
+     * otherwise not judged. Asset URLs include the pre-image
+     * `theme:./assets/…` form and the
      * post-GenerateImagesStep rewrite `/wp-content/themes/{slug}/assets/…`
      * (also scraped from cover/image block `"url"` JSON). Fragment checks are
      * skipped for pages whose markup is not on disk (theme-only builds).
@@ -216,14 +233,14 @@ final class ThemeValidator
 
             // Destinations live both in the rendered href and in block-JSON
             // "url" attributes (wp:navigation-link has no rendered HTML).
-            $links = preg_match_all('/\bhref="([^"]*)"/i', $markup, $m) ? $m[1] : [];
+            $links = self::hrefsIn($markup);
             foreach (preg_match_all('/"url"\s*:\s*"([^"]*)"/', $markup, $m) ? $m[1] : [] as $url) {
                 $links[] = str_replace('\/', '/', $url);
             }
 
             foreach ($links as $href) {
                 if ($href === '#') {
-                    continue; // the placeholder the prompts allow for external/social links
+                    continue; // reported independently even when pages.json is unavailable
                 }
                 if ($href === '') {
                     $problems[] = "{$rel}: a link has an empty href";
@@ -265,6 +282,176 @@ final class ThemeValidator
         // href and block-JSON "url" mirror each other, so the same broken
         // destination would otherwise be reported twice.
         return array_values(array_unique($problems));
+    }
+
+    /**
+     * Bare placeholder destinations are dead regardless of the generated page
+     * map, so inspect them independently from route/fragment validation.
+     *
+     * @return string[]
+     */
+    public static function placeholderLinkProblems(Project $project): array
+    {
+        $problems = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            $hrefs = self::hrefsIn($markup);
+
+            $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
+            $rel = str_replace(DIRECTORY_SEPARATOR, '/', $rel);
+            foreach ($hrefs as $index => $href) {
+                if ($href !== '#') {
+                    continue;
+                }
+                $number = $index + 1;
+                $problems[] = "{$rel}: link[{$number}] authored href=\"#\" -> delivered href=\"#\" "
+                    . '(dead placeholder); disposition: replace it with a real destination or remove the link';
+            }
+
+            // Dynamic blocks such as navigation-link may carry no rendered
+            // anchor in the saved markup. Inspect parsed block attributes too,
+            // while suppressing the mirrored JSON url on blocks whose own HTML
+            // anchor was already reported above.
+            $blockUrl = 0;
+            $document = BlockMarkup::parse($markup);
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index);
+                if (
+                    !in_array($document->name($index), self::LINK_URL_BLOCKS, true)
+                    || !is_array($attrs)
+                    || ($attrs['url'] ?? null) !== '#'
+                ) {
+                    continue;
+                }
+                if (in_array('#', self::hrefsIn($document->ownHtml($index)), true)) {
+                    continue;
+                }
+                $number = ++$blockUrl;
+                $problems[] = "{$rel}: block-url[{$number}] authored url=\"#\" -> delivered url=\"#\" "
+                    . '(dead placeholder); disposition: replace it with a real destination or remove the link';
+            }
+        }
+
+        return $problems;
+    }
+
+    /** @return list<string> */
+    private static function hrefsIn(string $markup): array
+    {
+        return self::htmlAttributeValues(self::HTML_HREF_PATTERN, $markup);
+    }
+
+    /**
+     * Bare media placeholders render a broken image rather than a dead link.
+     * Keep their warning context separate so a repair pass changes the source
+     * (or removes the media block) instead of trying to invent navigation.
+     *
+     * @return string[]
+     */
+    public static function placeholderMediaSourceProblems(Project $project): array
+    {
+        $problems = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
+            $rel = str_replace(DIRECTORY_SEPARATOR, '/', $rel);
+
+            $sources = self::htmlAttributeValues(self::HTML_SRC_PATTERN, $markup);
+            foreach ($sources as $index => $source) {
+                if ($source !== '#') {
+                    continue;
+                }
+                $number = $index + 1;
+                $problems[] = "{$rel}: media-src[{$number}] authored src=\"#\" -> delivered src=\"#\" "
+                    . '(dead media source); disposition: replace it with a real theme asset or remove the media block';
+            }
+
+            $blockUrl = 0;
+            $document = BlockMarkup::parse($markup);
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index);
+                if (
+                    !in_array($document->name($index), self::MEDIA_URL_BLOCKS, true)
+                    || !is_array($attrs)
+                    || ($attrs['url'] ?? null) !== '#'
+                ) {
+                    continue;
+                }
+                $ownSources = self::htmlAttributeValues(self::HTML_SRC_PATTERN, $document->ownHtml($index));
+                if (in_array('#', $ownSources, true)) {
+                    continue;
+                }
+                $number = ++$blockUrl;
+                $block = $document->name($index);
+                $problems[] = "{$rel}: wp:{$block}[{$number}] authored url=\"#\" -> delivered url=\"#\" "
+                    . '(dead media source); disposition: replace it with a real theme asset or remove the media block';
+            }
+        }
+
+        return $problems;
+    }
+
+    /** @return list<string> */
+    private static function htmlAttributeValues(string $pattern, string $markup): array
+    {
+        if (!preg_match_all(
+            $pattern,
+            $markup,
+            $matches,
+            PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL
+        )) {
+            return [];
+        }
+        return array_map(
+            static fn (array $match): string => $match[2] !== null ? $match[2] : (string) $match[3],
+            $matches
+        );
+    }
+
+    /**
+     * Empty core/list blocks are visible holes in generated navigation and
+     * commonly mean a serializer had to drop malformed list items. The final
+     * validator is advisory: it leaves the usable artifact untouched and
+     * records enough file/block/value/disposition context for a repair pass.
+     *
+     * @return string[]
+     */
+    public static function emptyListProblems(Project $project): array
+    {
+        $problems = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        foreach ($project->markupFiles() as $file) {
+            $markup = (string) file_get_contents($file);
+            $rel = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
+            $rel = str_replace(DIRECTORY_SEPARATOR, '/', $rel);
+            $number = 0;
+            $document = BlockMarkup::parse($markup);
+            foreach ($document->indices() as $index) {
+                if ($document->name($index) !== 'list') {
+                    continue;
+                }
+                $number++;
+                $hasItemBlock = false;
+                foreach ($document->children($index) as $child) {
+                    if ($document->name($child) === 'list-item') {
+                        $hasItemBlock = true;
+                        break;
+                    }
+                }
+                if ($hasItemBlock || preg_match('/<li\b/i', $document->ownHtml($index))) {
+                    continue;
+                }
+                $problems[] = "{$rel}: wp:list[{$number}] authored list block -> delivered empty list (0 items); "
+                    . 'disposition: remove the empty block or restore its intended items';
+            }
+        }
+
+        return $problems;
     }
 
     /**
@@ -450,7 +637,8 @@ final class ThemeValidator
     }
 
     /**
-     * Page-plan warnings: interior pages that open at homepage-hero scale.
+     * Page-plan warnings: footer-like page sections that duplicate the
+     * template footer, plus interior pages that open at homepage-hero scale.
      * The normal build now enforces this at plan time (PagePlanStep rejects
      * an interior plan whose first section is 'full-bleed-cover', repairs it
      * once via the model, and demotes it mechanically as a last resort), so
@@ -468,7 +656,25 @@ final class ThemeValidator
         }
         $warnings = [];
         foreach (($project->readJson('pages.json')['pages'] ?? []) as $page) {
-            if (!is_array($page) || !empty($page['front'])) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $pageSlug = (string) ($page['slug'] ?? '');
+            if ($project->exists('theme/parts/footer.html')) {
+                foreach (($page['sections'] ?? []) as $section) {
+                    if (!is_array($section) || !FooterSectionIdentity::matches($section)) {
+                        continue;
+                    }
+                    $sectionSlug = (string) ($section['slug'] ?? '');
+                    $title = (string) ($section['title'] ?? '');
+                    $type = (string) ($section['type'] ?? '');
+                    $warnings[] = "pages.json: page[{$pageSlug}]/sections[{$sectionSlug}] authored "
+                        . "slug=\"{$sectionSlug}\", title=\"{$title}\", type=\"{$type}\" -> delivered alongside "
+                        . 'theme/parts/footer.html; disposition: remove the footer-like page section and keep '
+                        . 'the reusable template footer';
+                }
+            }
+            if (!empty($page['front'])) {
                 continue;
             }
             $first = $page['sections'][0] ?? null;
