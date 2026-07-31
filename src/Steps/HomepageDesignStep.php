@@ -1239,8 +1239,29 @@ final class HomepageDesignStep implements Step
 
     private static function decodedAttributeValue(string $value): string
     {
-        return html_entity_decode(
+        $numericDecoded = (string) preg_replace_callback(
+            '/&#(?:[xX]([0-9A-Fa-f]+)|([0-9]+));?/',
+            static function (array $match): string {
+                $hex = ($match[1] ?? '') !== '';
+                $digits = $hex ? $match[1] : $match[2];
+                $significant = ltrim($digits, '0');
+                if ($significant === '') {
+                    return $match[0];
+                }
+
+                $maxDigits = $hex ? 2 : 3;
+                if (strlen($significant) > $maxDigits) {
+                    return $match[0];
+                }
+                $codepoint = intval($significant, $hex ? 16 : 10);
+                return $codepoint >= 1 && $codepoint <= 0x7f
+                    ? chr($codepoint)
+                    : $match[0];
+            },
             trim($value, " \t\n\r\0\x0B\"'"),
+        );
+        return html_entity_decode(
+            $numericDecoded,
             ENT_QUOTES | ENT_HTML5,
             'UTF-8',
         );
