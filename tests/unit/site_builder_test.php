@@ -36,7 +36,7 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
 
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+page-plan', 'sections', 'section-rhythm',
+        'homepage-design', 'theme-json', 'inner-pages-design', 'transform-site', 'section-rhythm',
         // normalize-layout MUST precede contrast-fix and motion-sanity: the
         // attribute repair can activate previously-inert color/motion
         // attributes, which those policy passes must be able to see.
@@ -44,7 +44,7 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
         'fonts-php', 'finalize-theme', 'validate-theme',
     ], $builder->pipeline()->stepIds());
     assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
-    assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true), 'group member is a valid stop');
+    assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -132,7 +132,7 @@ test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
 
 test('SiteBuilder accepts partial model overrides without fatalling', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
-    $builder = make_test_builder(new FakeLlm(), $tmp, models: ['sections' => 'claude-haiku-4-5']);
-    assert_true(in_array('sections', $builder->pipeline()->stepIds(), true));
+    $builder = make_test_builder(new FakeLlm(), $tmp, models: ['homepage-design' => 'claude-haiku-4-5']);
+    assert_true(in_array('homepage-design', $builder->pipeline()->stepIds(), true));
     exec('rm -rf ' . escapeshellarg($tmp));
 });

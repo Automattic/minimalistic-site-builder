@@ -27,6 +27,19 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
     );
 }
 
+function legacy_integration_pipeline(SiteBuilder $builder): \Automattic\SiteBuild\BuildPipeline
+{
+    $previous = getenv('SITE_BUILD_LEGACY');
+    putenv('SITE_BUILD_LEGACY=1');
+    try {
+        return $builder->pipeline();
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_LEGACY')
+            : putenv('SITE_BUILD_LEGACY=' . $previous);
+    }
+}
+
 test('full pipeline produces a structurally valid theme and content plugin', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_' . uniqid();
     $llm = new FakeLlm();
@@ -161,7 +174,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     $builder = make_integration_builder($llm, $tmp);
     $project = $builder->createProject('A cozy neighborhood bakery', 'demo', multiPage: true);
-    $builder->pipeline()->runThrough($project);
+    legacy_integration_pipeline($builder)->runThrough($project);
 
     $problems = ThemeValidator::validate($project);
     assert_eq([], $problems, 'theme should validate; problems: ' . implode('; ', $problems));
@@ -274,7 +287,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
 test('pipeline step order is correct', function () {
     $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
-    $ids = make_integration_builder(new FakeLlm(), $tmp)->pipeline()->stepIds();
+    $ids = legacy_integration_pipeline(make_integration_builder(new FakeLlm(), $tmp))->stepIds();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
         'theme-json+page-plan', 'sections', 'section-rhythm',
