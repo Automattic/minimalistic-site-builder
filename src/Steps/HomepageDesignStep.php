@@ -25,6 +25,48 @@ final class HomepageDesignStep implements Step
 
     private const DEFAULT_CANDIDATES = 3;
     private const DEFAULT_CRITIQUE_ROUNDS = 2;
+    private const UNSAFE_ELEMENTS = [
+        'script',
+        'form',
+        'input',
+        'select',
+        'option',
+        'optgroup',
+        'textarea',
+        'fieldset',
+        'legend',
+        'datalist',
+        'output',
+        'svg',
+        'math',
+        'iframe',
+        'object',
+        'embed',
+    ];
+    private const VOID_ELEMENTS = [
+        'area',
+        'base',
+        'br',
+        'col',
+        'embed',
+        'hr',
+        'img',
+        'input',
+        'link',
+        'meta',
+        'param',
+        'source',
+        'track',
+        'wbr',
+    ];
+    private const URL_ATTRIBUTES = [
+        'href',
+        'src',
+        'xlink:href',
+        'action',
+        'formaction',
+        'poster',
+    ];
 
     public function __construct(
         private Llm $llm,
@@ -98,11 +140,38 @@ final class HomepageDesignStep implements Step
                 throw new \RuntimeException("homepage-design: missing candidate result {$index}");
             }
             $candidate = $batch->texts[$index];
+            $candidatePath = 'design/candidate-' . ($index + 1) . '.html';
+            if (!self::isClosedDocument($candidate)) {
+                $candidate = $this->recoverCandidate(
+                    $candidate,
+                    $index,
+                    $candidatePath,
+                    $warnings,
+                );
+            }
+            $candidate = self::sanitizeHtml(
+                $candidate,
+                $candidatePath,
+                'tournament candidate ' . ($index + 1),
+                $warnings,
+            );
+            if (!self::isClosedDocument($candidate)) {
+                $candidate = self::closeDocumentDeterministically($candidate);
+                $candidate = self::sanitizeHtml(
+                    $candidate,
+                    $candidatePath,
+                    'deterministic candidate closure',
+                    $warnings,
+                );
+                $warnings[] = "malformed_design: {$candidatePath} context tournament candidate "
+                    . ($index + 1) . '; authored unclosed regeneration delivered DOM-closed '
+                    . 'document; disposition repaired';
+            }
             $candidates[$index] = $candidate;
-            $project->writeText('design/candidate-' . ($index + 1) . '.html', $candidate);
+            $project->writeText($candidatePath, $candidate);
             foreach ($batch->notesFor($index) as $note) {
-                $warnings[] = 'candidate_generation: design/candidate-' . ($index + 1)
-                    . ".html delivered with degraded generation: {$note}";
+                $warnings[] = "candidate_generation: {$candidatePath} delivered with degraded "
+                    . "generation: {$note}";
             }
         }
 
@@ -119,14 +188,19 @@ final class HomepageDesignStep implements Step
             if ($normalized === null) {
                 $warnings[] = "malformed_critique: design/critique-{$round}.json lacks a usable "
                     . 'pass verdict or revise notes; unchanged document delivered';
-                break;
+                continue;
             }
             if ($normalized['verdict'] === 'pass') {
                 break;
             }
 
             $beforeRevision = $document;
-            $patches = $this->replacementPatches($document, $normalized['notes'], $round);
+            $patches = $this->replacementPatches(
+                $document,
+                $normalized['notes'],
+                $round,
+                $warnings,
+            );
             $spliced = self::splicePatches($document, $normalized['notes'], $patches);
             if ($spliced['document'] !== null) {
                 $document = $spliced['document'];
@@ -142,6 +216,9 @@ final class HomepageDesignStep implements Step
                     $normalized['notes'],
                     "splice failure at {$selector}",
                     "homepage-design-full-revise-{$round}",
+                    'design/home.html',
+                    "critique round {$round} full-document fallback",
+                    $warnings,
                 );
             } catch (TruncatedGenerationException $error) {
                 $document = $beforeRevision;
@@ -162,6 +239,9 @@ final class HomepageDesignStep implements Step
                     ]],
                     $issue,
                     'homepage-design-repair',
+                    'design/home.html',
+                    'final malformed-design repair',
+                    $warnings,
                 );
             } catch (TruncatedGenerationException $error) {
                 $document = $beforeRepair;
@@ -182,6 +262,12 @@ final class HomepageDesignStep implements Step
                 . 'delivered replacement markup';
         }
 
+        $document = self::sanitizeHtml(
+            $document,
+            'design/home.html',
+            'final homepage delivery',
+            $warnings,
+        );
         $style = self::styleContents($document);
         if ($style === null) {
             throw new \LogicException('homepage-design: validated document lost its style element');
@@ -232,7 +318,7 @@ final class HomepageDesignStep implements Step
                     $seeds[] = $seed;
                 }
             }
-        } catch (\Throwable $error) {
+        } catch (\RuntimeException $error) {
             $warnings[] = 'seed_generation: design-direction seed request failed; distinct '
                 . 'built-in candidate angles delivered';
         }
@@ -248,6 +334,41 @@ final class HomepageDesignStep implements Step
         }
 
         return array_slice($seeds, 0, $count);
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private function recoverCandidate(
+        string $partial,
+        int $index,
+        string $path,
+        array &$warnings,
+    ): string {
+        $prompt = "Tournament candidate {$index} is not a closed HTML document.\n\n"
+            . "<partial_document>\n{$partial}\n</partial_document>\n\n"
+            . 'Regenerate it as one complete, self-contained HTML document. Preserve usable '
+            . 'content and design intent. Return ONLY the full document from <!doctype html> '
+            . 'through </html>. Do not use Markdown fences.';
+        try {
+            $recovered = ContinuationRecovery::completeToClose(
+                $this->llm,
+                $prompt,
+                $this->withOptions(['log_label' => "homepage-design-candidate-recovery-{$index}"]),
+                static fn (string $html): bool => self::isClosedDocument($html),
+            );
+        } catch (TruncatedGenerationException $error) {
+            $recovered = $error->getPartialText();
+        }
+
+        $warnings[] = "malformed_design: {$path} context tournament candidate {$index}; "
+            . 'authored unclosed document delivered regenerated document; disposition repaired';
+        return self::sanitizeHtml(
+            $recovered,
+            $path,
+            "tournament candidate {$index} regeneration",
+            $warnings,
+        );
     }
 
     /**
@@ -283,14 +404,25 @@ final class HomepageDesignStep implements Step
     private function winnerIndex(array $judge, int $candidateCount, array &$warnings): int
     {
         $winner = $judge['winner'] ?? null;
-        if (is_int($winner) && $winner >= 0 && $winner < $candidateCount) {
+        $why = $judge['why'] ?? null;
+        $exactShape = count($judge) === 2
+            && array_key_exists('winner', $judge)
+            && array_key_exists('why', $judge);
+        if (
+            $exactShape
+            && is_int($winner)
+            && $winner >= 0
+            && $winner < $candidateCount
+            && is_string($why)
+            && trim($why) !== ''
+        ) {
             return $winner;
         }
         $authored = is_scalar($winner) || $winner === null
             ? var_export($winner, true)
             : get_debug_type($winner);
-        $warnings[] = "invalid_judge_verdict: design/judge.json winner {$authored} is outside "
-            . "candidate range 0.." . ($candidateCount - 1) . '; candidate 0 delivered';
+        $warnings[] = "invalid_judge_verdict: design/judge.json exact {winner:int, why:string} "
+            . "contract failed for winner {$authored}; candidate 0 delivered";
         return 0;
     }
 
@@ -308,9 +440,9 @@ final class HomepageDesignStep implements Step
                 $prompt,
                 $this->withOptions(['log_label' => "homepage-design-critique-{$round}"]),
             );
-        } catch (GeneratedJsonException $error) {
+        } catch (\RuntimeException $error) {
             $warnings[] = "malformed_critique: design/critique-{$round}.json remained invalid "
-                . 'after JSON repair; unchanged document delivered';
+                . 'or unavailable at advisory boundary; unchanged document delivered';
             return [];
         }
     }
@@ -321,28 +453,43 @@ final class HomepageDesignStep implements Step
      */
     private static function normalizeCritique(array $critique): ?array
     {
+        if (
+            count($critique) !== 2
+            || !array_key_exists('verdict', $critique)
+            || !array_key_exists('notes', $critique)
+            || !is_string($critique['verdict'])
+            || !is_array($critique['notes'])
+            || !array_is_list($critique['notes'])
+        ) {
+            return null;
+        }
+
         $verdict = $critique['verdict'] ?? null;
-        if ($verdict === 'pass') {
+        if ($verdict === 'pass' && $critique['notes'] === []) {
             return ['verdict' => 'pass', 'notes' => []];
         }
-        if ($verdict !== 'revise' || !is_array($critique['notes'] ?? null)) {
+        if ($verdict !== 'revise' || $critique['notes'] === []) {
             return null;
         }
 
         $notes = [];
         foreach ($critique['notes'] as $raw) {
-            if (!is_array($raw)) {
+            if (
+                !is_array($raw)
+                || count($raw) !== 2
+                || !array_key_exists('section', $raw)
+                || !array_key_exists('instruction', $raw)
+                || !is_string($raw['section'])
+                || !is_string($raw['instruction'])
+            ) {
                 return null;
             }
-            $section = trim((string) ($raw['section'] ?? ''));
-            $instruction = trim((string) ($raw['instruction'] ?? ''));
+            $section = trim($raw['section']);
+            $instruction = trim($raw['instruction']);
             if ($section === '' || $instruction === '') {
                 return null;
             }
             $notes[] = ['section' => $section, 'instruction' => $instruction];
-        }
-        if ($notes === []) {
-            return null;
         }
         return ['verdict' => 'revise', 'notes' => $notes];
     }
@@ -351,7 +498,12 @@ final class HomepageDesignStep implements Step
      * @param list<array{section:string,instruction:string}> $notes
      * @return array<string,string>
      */
-    private function replacementPatches(string $document, array $notes, int $round): array
+    private function replacementPatches(
+        string $document,
+        array $notes,
+        int $round,
+        array &$warnings,
+    ): array
     {
         $prompt = $this->renderer->render('design-revise.md', [
             'document' => $document,
@@ -361,7 +513,16 @@ final class HomepageDesignStep implements Step
             $prompt,
             $this->withOptions(['log_label' => "homepage-design-patch-{$round}"]),
         );
-        return self::parseReplacementPatches($response);
+        $patches = self::parseReplacementPatches($response);
+        foreach ($patches as $selector => $patch) {
+            $patches[$selector] = self::sanitizeHtml(
+                $patch,
+                'design/home.html',
+                "critique round {$round} patch {$selector}",
+                $warnings,
+            );
+        }
+        return $patches;
     }
 
     /**
@@ -372,6 +533,9 @@ final class HomepageDesignStep implements Step
         array $notes,
         string $reason,
         string $logLabel,
+        string $path,
+        string $context,
+        array &$warnings,
     ): string {
         $prompt = $this->renderer->render('design-revise.md', [
             'document' => $document,
@@ -382,12 +546,13 @@ final class HomepageDesignStep implements Step
             . "Return ONLY one complete revised HTML document, from <!doctype html> through "
             . '</html>. Do not use Markdown fences or section markers.';
 
-        return ContinuationRecovery::completeToClose(
+        $revised = ContinuationRecovery::completeToClose(
             $this->llm,
             $prompt,
             $this->withOptions(['log_label' => $logLabel]),
             static fn (string $html): bool => self::isClosedDocument($html),
         );
+        return self::sanitizeHtml($revised, $path, $context, $warnings);
     }
 
     /**
@@ -413,7 +578,6 @@ final class HomepageDesignStep implements Step
                 $selector === ''
                 || $fragment === ''
                 || array_key_exists($selector, $patches)
-                || !self::isSingleElementFragment($fragment)
             ) {
                 return [];
             }
@@ -437,11 +601,18 @@ final class HomepageDesignStep implements Step
                 return ['document' => null, 'selector' => $selector];
             }
 
-            $span = self::landmarkSpan($spliced, $selector);
-            if ($span === null) {
+            $landmark = self::landmarkMatch($spliced, $selector);
+            if (
+                $landmark === null
+                || !self::replacementMatchesLandmark(
+                    $replacement,
+                    $selector,
+                    $landmark['target'],
+                )
+            ) {
                 return ['document' => null, 'selector' => $selector];
             }
-            [$start, $length] = $span;
+            [$start, $length] = $landmark['span'];
             $spliced = substr($spliced, 0, $start)
                 . $replacement
                 . substr($spliced, $start + $length);
@@ -453,9 +624,9 @@ final class HomepageDesignStep implements Step
      * DOM chooses the semantic target; source scanning finds that target's
      * original byte span so untouched siblings never pass through serialization.
      *
-     * @return array{int,int}|null
+     * @return array{span:array{int,int},target:\DOMElement}|null
      */
-    private static function landmarkSpan(string $html, string $selector): ?array
+    private static function landmarkMatch(string $html, string $selector): ?array
     {
         $dom = self::loadDocument($html);
         if ($dom === null) {
@@ -469,11 +640,74 @@ final class HomepageDesignStep implements Step
         $ordinal = 0;
         foreach ($dom->getElementsByTagName($target->tagName) as $element) {
             if ($element->isSameNode($target)) {
-                return self::rawElementSpan($html, strtolower($target->tagName), $ordinal);
+                $span = self::rawElementSpan($html, strtolower($target->tagName), $ordinal);
+                return $span === null ? null : ['span' => $span, 'target' => $target];
             }
             $ordinal++;
         }
         return null;
+    }
+
+    private static function replacementMatchesLandmark(
+        string $replacement,
+        string $selector,
+        \DOMElement $target,
+    ): bool {
+        $root = self::fragmentRoot($replacement);
+        if ($root === null) {
+            return false;
+        }
+
+        if (preg_match('/^(?:([A-Za-z][A-Za-z0-9:-]*))?#([A-Za-z_][A-Za-z0-9_.:-]*)$/', $selector, $m)) {
+            return (($m[1] ?? '') === '' || strtolower($root->tagName) === strtolower($m[1]))
+                && $root->getAttribute('id') === $m[2];
+        }
+        if (preg_match('/^(?:([A-Za-z][A-Za-z0-9:-]*))?\.([A-Za-z_][A-Za-z0-9_-]*)$/', $selector, $m)) {
+            return (($m[1] ?? '') === '' || strtolower($root->tagName) === strtolower($m[1]))
+                && in_array($m[2], self::classNames($root), true);
+        }
+        if (preg_match(
+            '/^(?:([A-Za-z][A-Za-z0-9:-]*))?\[([A-Za-z_:][A-Za-z0-9_.:-]*)=(["\'])(.*?)\3\]$/',
+            $selector,
+            $m,
+        )) {
+            return (($m[1] ?? '') === '' || strtolower($root->tagName) === strtolower($m[1]))
+                && $root->hasAttribute($m[2])
+                && $root->getAttribute($m[2]) === $m[4];
+        }
+        if (preg_match('/^[A-Za-z][A-Za-z0-9:-]*$/', $selector)) {
+            return strtolower($root->tagName) === strtolower($selector);
+        }
+
+        if (strtolower($root->tagName) !== strtolower($target->tagName)) {
+            return false;
+        }
+        if ($target->hasAttribute('id')) {
+            return $root->getAttribute('id') === $target->getAttribute('id');
+        }
+        $targetClasses = self::classNames($target);
+        if ($targetClasses !== []) {
+            return array_diff($targetClasses, self::classNames($root)) === [];
+        }
+
+        $needle = self::normalizedText($selector);
+        foreach (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as $tag) {
+            foreach ($root->getElementsByTagName($tag) as $heading) {
+                if (self::normalizedText($heading->textContent) === $needle) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function classNames(\DOMElement $element): array
+    {
+        $classes = preg_split('/\s+/', trim($element->getAttribute('class'))) ?: [];
+        return array_values(array_filter($classes, static fn (string $class): bool => $class !== ''));
     }
 
     private static function selectLandmark(\DOMDocument $dom, string $selector): ?\DOMElement
@@ -663,7 +897,187 @@ final class HomepageDesignStep implements Step
         return null;
     }
 
-    private static function isSingleElementFragment(string $fragment): bool
+    /**
+     * @param list<string> $warnings
+     */
+    private static function sanitizeHtml(
+        string $html,
+        string $path,
+        string $context,
+        array &$warnings,
+    ): string {
+        $removals = [];
+        $offset = 0;
+        while (($token = self::nextTag($html, $offset)) !== null) {
+            $offset = $token['end'];
+            if ($token['closing']) {
+                continue;
+            }
+
+            $name = $token['name'];
+            $unwrap = $name === 'form' || str_contains($name, '-');
+            if ($unwrap) {
+                $removals[] = [
+                    'start'    => $token['start'],
+                    'length'   => $token['end'] - $token['start'],
+                    'authored' => substr($html, $token['start'], $token['end'] - $token['start']),
+                ];
+                $close = self::matchingCloseToken($html, $token);
+                if ($close !== null) {
+                    $removals[] = [
+                        'start'    => $close['start'],
+                        'length'   => $close['end'] - $close['start'],
+                        'authored' => substr($html, $close['start'], $close['end'] - $close['start']),
+                    ];
+                }
+                continue;
+            }
+            if (in_array($name, self::UNSAFE_ELEMENTS, true)) {
+                $end = self::unsafeElementEnd($html, $token);
+                $removals[] = [
+                    'start'    => $token['start'],
+                    'length'   => $end - $token['start'],
+                    'authored' => substr($html, $token['start'], $end - $token['start']),
+                ];
+                $offset = $end;
+                continue;
+            }
+
+            foreach (self::unsafeAttributeRanges($html, $token) as $removal) {
+                $removals[] = $removal;
+            }
+            if ($name === 'style' && !$token['self_closing']) {
+                $close = self::matchingCloseToken($html, $token);
+                if ($close !== null) {
+                    $offset = $close['end'];
+                }
+            }
+        }
+
+        if ($removals === []) {
+            return $html;
+        }
+        usort(
+            $removals,
+            static fn (array $left, array $right): int => $right['start'] <=> $left['start'],
+        );
+        foreach ($removals as $removal) {
+            $html = substr($html, 0, $removal['start'])
+                . substr($html, $removal['start'] + $removal['length']);
+            $authored = self::warningValue($removal['authored']);
+            $warnings[] = "malformed_design: {$path} context {$context}; authored {$authored}; "
+                . 'delivered removed; disposition removed';
+        }
+        return $html;
+    }
+
+    /**
+     * @param array{start:int,end:int,name:string,closing:bool,self_closing:bool} $opening
+     */
+    private static function unsafeElementEnd(string $html, array $opening): int
+    {
+        $name = $opening['name'];
+        if ($opening['self_closing'] || in_array($name, self::VOID_ELEMENTS, true)) {
+            return $opening['end'];
+        }
+        return self::matchingCloseToken($html, $opening)['end'] ?? strlen($html);
+    }
+
+    /**
+     * @param array{start:int,end:int,name:string,closing:bool,self_closing:bool} $opening
+     * @return array{start:int,end:int,name:string,closing:bool,self_closing:bool}|null
+     */
+    private static function matchingCloseToken(string $html, array $opening): ?array
+    {
+        $name = $opening['name'];
+        if ($opening['self_closing'] || in_array($name, self::VOID_ELEMENTS, true)) {
+            return null;
+        }
+        if (in_array($name, ['script', 'style'], true)) {
+            $closeStart = stripos($html, "</{$name}", $opening['end']);
+            if ($closeStart === false) {
+                return null;
+            }
+            $close = self::nextTag($html, $closeStart);
+            return $close !== null && $close['closing'] && $close['name'] === $name
+                ? $close
+                : null;
+        }
+        $depth = 1;
+        $offset = $opening['end'];
+        while (($token = self::nextTag($html, $offset)) !== null) {
+            $offset = $token['end'];
+            if ($token['name'] !== $name || $token['self_closing']) {
+                continue;
+            }
+            $depth += $token['closing'] ? -1 : 1;
+            if ($depth === 0) {
+                return $token;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array{start:int,end:int,name:string,closing:bool,self_closing:bool} $token
+     * @return list<array{start:int,length:int,authored:string}>
+     */
+    private static function unsafeAttributeRanges(string $html, array $token): array
+    {
+        $raw = substr($html, $token['start'], $token['end'] - $token['start']);
+        if (
+            preg_match('/^<\s*[A-Za-z][A-Za-z0-9:-]*/', $raw, $prefix) !== 1
+            || preg_match_all(
+                '/\s+([^\s=\/>]+)(?:\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+))?/s',
+                $raw,
+                $matches,
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE,
+                strlen($prefix[0]),
+            ) === false
+        ) {
+            return [];
+        }
+
+        $removals = [];
+        foreach ($matches as $match) {
+            $name = strtolower($match[1][0]);
+            $value = $match[2][0] ?? '';
+            $unsafe = str_starts_with($name, 'on') || $name === 'srcdoc';
+            if (!$unsafe && in_array($name, self::URL_ATTRIBUTES, true)) {
+                $decoded = html_entity_decode(
+                    trim($value, " \t\n\r\0\x0B\"'"),
+                    ENT_QUOTES | ENT_HTML5,
+                    'UTF-8',
+                );
+                $normalized = strtolower((string) preg_replace('/[\x00-\x20\x7f]+/u', '', $decoded));
+                $unsafe = str_starts_with($normalized, 'javascript:');
+            }
+            if (!$unsafe) {
+                continue;
+            }
+
+            $removals[] = [
+                'start'    => $token['start'] + $match[0][1],
+                'length'   => strlen($match[0][0]),
+                'authored' => $match[0][0],
+            ];
+        }
+        return $removals;
+    }
+
+    private static function warningValue(string $authored): string
+    {
+        $value = trim((string) preg_replace('/\s+/u', ' ', $authored));
+        if (mb_strlen($value) > 160) {
+            $value = mb_substr($value, 0, 157) . '...';
+        }
+        return json_encode(
+            $value,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+        ) ?: '"(unprintable)"';
+    }
+
+    private static function fragmentRoot(string $fragment): ?\DOMElement
     {
         $dom = self::loadDocument(
             '<!doctype html><html><body><div id="homepage-patch-root">'
@@ -671,22 +1085,25 @@ final class HomepageDesignStep implements Step
             . '</div></body></html>'
         );
         if ($dom === null) {
-            return false;
+            return null;
         }
         $root = (new \DOMXPath($dom))->query('//*[@id="homepage-patch-root"]')?->item(0);
         if (!$root instanceof \DOMElement) {
-            return false;
+            return null;
         }
 
-        $elements = 0;
+        $element = null;
         foreach ($root->childNodes as $child) {
             if ($child instanceof \DOMElement) {
-                $elements++;
+                if ($element !== null) {
+                    return null;
+                }
+                $element = $child;
             } elseif ($child instanceof \DOMText && trim($child->textContent) !== '') {
-                return false;
+                return null;
             }
         }
-        return $elements === 1;
+        return $element;
     }
 
     private static function isClosedDocument(string $html): bool
@@ -699,6 +1116,29 @@ final class HomepageDesignStep implements Step
             && $dom->documentElement instanceof \DOMElement
             && strtolower($dom->documentElement->tagName) === 'html'
             && $dom->getElementsByTagName('body')->length === 1;
+    }
+
+    private static function closeDocumentDeterministically(string $html): string
+    {
+        if (trim($html) !== '') {
+            $dom = self::loadDocument($html);
+            if ($dom !== null) {
+                $closed = $dom->saveHTML();
+                if (is_string($closed) && self::isClosedDocument($closed)) {
+                    return $closed;
+                }
+            }
+        }
+
+        $escaped = htmlspecialchars(
+            $html,
+            ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5,
+            'UTF-8',
+        );
+        return "<!doctype html>\n<html><head><style></style></head><body>"
+            . '<header></header><main><pre>'
+            . $escaped
+            . '</pre></main><footer></footer></body></html>';
     }
 
     private static function designIssue(string $html): ?string
