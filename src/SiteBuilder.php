@@ -34,6 +34,7 @@ final class SiteBuilder
         private BlockFixer $blockFixer,
         private array $models = [],
         private array $temperatures = [],
+        private ?FontFetcher $fontFetcher = null,
     ) {}
 
     /**
@@ -48,6 +49,7 @@ final class SiteBuilder
             models: $this->models,
             temperatures: $this->temperatures,
             blockFixer: $this->blockFixer,
+            fontFetcher: $this->fontFetcher,
         );
 
         return new Pipeline($composition->steps(), $composition->seeds());

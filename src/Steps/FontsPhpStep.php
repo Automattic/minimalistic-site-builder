@@ -73,6 +73,14 @@ final class FontsPhpStep implements Step
     {
         $theme = $project->readJson('theme/theme.json');
         $requirements = self::fontRequirements($theme, self::themeMarkup($project));
+        // Families BundleFontsStep already shipped as theme assets need no
+        // enqueue: their fontFace entries in theme.json are the loading
+        // mechanism. Only the families that degraded to the link path remain.
+        foreach (self::googleFamiliesBySlug($theme) as $slug => $name) {
+            if (self::hasBundledFaces($theme, $slug)) {
+                unset($requirements[$name]);
+            }
+        }
         if ($requirements === []) {
             $fontsFile = $project->themePath('fonts.php');
             if (is_file($fontsFile) && !unlink($fontsFile)) {
@@ -244,7 +252,18 @@ final class FontsPhpStep implements Step
      * @param array<mixed> $theme
      * @return array<string,string> slug => family name
      */
-    private static function googleFamiliesBySlug(array $theme): array
+    /** @param array<mixed> $theme */
+    private static function hasBundledFaces(array $theme, string $slug): bool
+    {
+        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $family) {
+            if (is_array($family) && (string) ($family['slug'] ?? '') === $slug) {
+                return ($family['fontFace'] ?? []) !== [];
+            }
+        }
+        return false;
+    }
+
+    public static function googleFamiliesBySlug(array $theme): array
     {
         $families = [];
         foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $family) {
@@ -493,7 +512,7 @@ final class FontsPhpStep implements Step
      * templates + the content plugin's pages (a font style used only in
      * seeded content must still be loaded by the theme).
      */
-    private static function themeMarkup(Project $project): string
+    public static function themeMarkup(Project $project): string
     {
         $markup = '';
         foreach ($project->markupFiles() as $file) {

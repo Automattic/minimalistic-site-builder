@@ -11,6 +11,8 @@ use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
+use Automattic\SiteBuild\FontFetcher;
+use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
@@ -60,6 +62,7 @@ final class StepComposition
         array $models = [],
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
     ): self {
         $blockFixer ??= BlockFixers::default();
         $models = array_merge(StepDefaults::models(), $models);
@@ -144,6 +147,7 @@ final class StepComposition
             // scan-built fallback otherwise).
             // Deterministic: builds fonts.php from the scanned requirements.
             // It takes no model — see BIGR-750.
+            new BundleFontsStep($fontFetcher),
             new FontsPhpStep(),
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
