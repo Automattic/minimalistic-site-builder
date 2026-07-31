@@ -113,7 +113,11 @@ final class CssScrub
             $identifier = self::identifierAt($css, $offset);
             if ($identifier !== null) {
                 $functionOpen = self::skipWhitespaceAndComments($css, $identifier['end']);
-                if ($functionOpen < $length && $css[$functionOpen] === '(') {
+                if (
+                    !self::startsHashOrAtKeyword($css, $offset)
+                    && $functionOpen < $length
+                    && $css[$functionOpen] === '('
+                ) {
                     $functionStack[] = $identifier['value'];
                     $offset = $functionOpen + 1;
                     continue;
@@ -348,6 +352,11 @@ final class CssScrub
 
         $decoded = self::decodeCssEscapes(substr($css, $start, $offset - $start));
         return $decoded === null ? null : ['end' => $offset, 'value' => $decoded];
+    }
+
+    private static function startsHashOrAtKeyword(string $css, int $offset): bool
+    {
+        return $offset > 0 && ($css[$offset - 1] === '#' || $css[$offset - 1] === '@');
     }
 
     private static function isExternalUrl(string $url): bool
