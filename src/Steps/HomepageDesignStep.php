@@ -990,12 +990,14 @@ final class HomepageDesignStep implements Step
                 $offset = $end + 1;
                 continue;
             }
+            $name = strtolower($match[2]);
             return [
                 'start'        => $start,
                 'end'          => $end + 1,
-                'name'         => strtolower($match[2]),
+                'name'         => $name,
                 'closing'      => $match[1] === '/',
-                'self_closing' => preg_match('/\/\s*>$/s', $raw) === 1,
+                'self_closing' => !in_array($name, self::RAW_TEXT_ELEMENTS, true)
+                    && preg_match('/\/\s*>$/s', $raw) === 1,
             ];
         }
         return null;
@@ -1334,20 +1336,57 @@ final class HomepageDesignStep implements Step
             return [];
         }
 
-        $dom = self::loadDocument($html);
+        $markerName = self::unusedStyleMarkerName($html);
+        $markedHtml = $html;
+        for ($ordinal = count($sourceStyles) - 1; $ordinal >= 0; $ordinal--) {
+            $sourceStyle = $sourceStyles[$ordinal];
+            $raw = substr(
+                $html,
+                $sourceStyle['start'],
+                $sourceStyle['end'] - $sourceStyle['start'],
+            );
+            if (preg_match('/^<\s*style\b/i', $raw, $match) !== 1) {
+                continue;
+            }
+            $insertAt = $sourceStyle['start'] + strlen($match[0]);
+            $marker = " {$markerName}=\"{$ordinal}\"";
+            $markedHtml = substr($markedHtml, 0, $insertAt)
+                . $marker
+                . substr($markedHtml, $insertAt);
+        }
+
+        $dom = self::loadDocument($markedHtml);
         if ($dom === null) {
             return [];
         }
-        $domStyles = $dom->getElementsByTagName('style');
-        if ($domStyles->length !== count($sourceStyles)) {
-            return [];
+
+        $markedNodes = array_fill(0, count($sourceStyles), []);
+        foreach ($dom->getElementsByTagName('*') as $element) {
+            if (
+                !$element instanceof \DOMElement
+                || !$element->hasAttribute($markerName)
+            ) {
+                continue;
+            }
+            $value = $element->getAttribute($markerName);
+            if (
+                preg_match('/^(?:0|[1-9][0-9]*)$/D', $value) !== 1
+                || (string) (int) $value !== $value
+                || !array_key_exists((int) $value, $markedNodes)
+            ) {
+                return [];
+            }
+            $markedNodes[(int) $value][] = $element;
         }
 
         $headStarts = [];
         foreach ($sourceStyles as $ordinal => $sourceStyle) {
-            $domStyle = $domStyles->item($ordinal);
-            if (!$domStyle instanceof \DOMElement) {
-                return [];
+            if (count($markedNodes[$ordinal]) !== 1) {
+                continue;
+            }
+            $domStyle = $markedNodes[$ordinal][0];
+            if (strtolower($domStyle->tagName) !== 'style') {
+                continue;
             }
             for (
                 $ancestor = $domStyle->parentNode;
@@ -1364,6 +1403,16 @@ final class HomepageDesignStep implements Step
             }
         }
         return $headStarts;
+    }
+
+    private static function unusedStyleMarkerName(string $html): string
+    {
+        $suffix = 0;
+        do {
+            $name = 'data-msb-style-source' . ($suffix === 0 ? '' : "-{$suffix}");
+            $suffix++;
+        } while (stripos($html, $name) !== false);
+        return $name;
     }
 
     private static function isAllowedElement(string $name, bool $inHead): bool
