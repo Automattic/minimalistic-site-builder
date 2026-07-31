@@ -143,7 +143,7 @@ final class CssScrub
             if (self::startsComment($css, $offset)) {
                 $commentEnd = strpos($css, '*/', $offset + 2);
                 if ($commentEnd === false) {
-                    return self::hasRuleBrace($css, $offset + 2) ? null : $length;
+                    return $length;
                 }
                 $offset = $commentEnd + 2;
                 continue;

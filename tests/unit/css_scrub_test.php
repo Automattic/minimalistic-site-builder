@@ -56,12 +56,21 @@ test('css scrub retains malformed import bytes when EOF recovery could swallow a
     foreach ([
         "@import url(https://evil.example/x.css\n.safe{display:block}",
         "@import \"https://evil.example/x.css\n.safe{display:block}",
-        "@import url(https://evil.example/x.css) /* unclosed\n.safe{display:block}",
     ] as $css) {
         $result = CssScrub::scrub($css);
         assert_eq($css, $result['css']);
         assert_eq([], $result['removals']);
     }
+});
+
+test('css scrub removes an unclosed terminal import comment including brace lookalikes', function (): void {
+    $css = "@import url(https://evil.example/x.css) /* unclosed\n.safe{display:block}";
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq('', $result['css']);
+    assert_eq($css, $result['removals'][0]['authored_value']);
+    assert_eq('import', $result['removals'][0]['kind']);
 });
 
 test('css scrub removes only declarations carrying external urls', function (): void {
