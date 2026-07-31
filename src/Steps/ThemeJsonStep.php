@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\CssTokenExtractor;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\GeneratedJsonFallbackStep;
 use Automattic\SiteBuild\Llm;
@@ -239,10 +240,37 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     public function requests(Project $project): array
     {
         $meta = $project->readJson('meta.json');
+        $designDirection = DesignDirectionStep::readFor($project);
+        if ($project->exists('design/site.css')) {
+            $tokens = CssTokenExtractor::extract($project->readText('design/site.css'));
+            if ($tokens['palette'] !== [] && $tokens['fonts'] !== []) {
+                $designDirection .= "\n\n"
+                    . "DESIGN CSS TOKENS (authoritative evidence from design/site.css):\n"
+                    . "Use these actual design colors, font stacks, and spacing values when naming "
+                    . "the required theme.json slots. Usage count ranks palette importance. Do not "
+                    . "invent replacements for representable extracted values.\n"
+                    . 'Palette: ' . implode(', ', array_map(
+                        static fn (array $entry): string => "{$entry['color']} ({$entry['count']} uses)",
+                        $tokens['palette'],
+                    )) . "\n"
+                    . "Fonts:\n- " . implode("\n- ", $tokens['fonts']) . "\n"
+                    . 'Spacing: ' . ($tokens['spacing'] === [] ? '(none)' : implode(', ', $tokens['spacing']));
+            } else {
+                $project->addWarnings($this->id(), [
+                    'design/site.css at stylesheet root: sparse_tokens; authored '
+                        . json_encode([
+                            'palette_count' => count($tokens['palette']),
+                            'font_count' => count($tokens['fonts']),
+                            'spacing_count' => count($tokens['spacing']),
+                        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+                        . '; delivered design-direction values; disposition sparse token evidence omitted',
+                ]);
+            }
+        }
         $rendered = $this->renderer->render('theme-json.md', [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
             'site_spec'        => $project->readText('siteSpec.json'),
-            'design_direction' => DesignDirectionStep::readFor($project),
+            'design_direction' => $designDirection,
         ]);
 
         return [self::REQ => $this->withOptions(['prompt' => $rendered])];
