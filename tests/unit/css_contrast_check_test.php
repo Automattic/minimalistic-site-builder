@@ -19,6 +19,11 @@ test('css contrast check returns an exact pass row for a resolved same-element c
         'ratio' => ContrastMath::ratio([17, 17, 17], [255, 255, 255]),
         'suggested' => null,
     ]], $findings);
+
+    $root = sys_get_temp_dir() . '/css-contrast-pass-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+    assert_eq($css, CssContrastAdjuster::apply($project, 'theme/style.css', $css, $findings));
+    assert_true(!$project->exists('warnings.json'), 'passing CSS stays untouched and unwarned');
 });
 
 test('css contrast check suggests the smallest passing black-or-white nudge for a failing direct child', function () {
@@ -106,4 +111,33 @@ test('complex inherited contrast stays unverified and adjustment preserves CSS b
         assert_contains('delivered=unchanged', $warning);
         assert_contains('disposition=unverified', $warning);
     }
+});
+
+test('malformed CSS degrades to an unverified row without throwing', function () {
+    $findings = CssContrastCheck::check(
+        '.copy { color: #777777; background: #ffffff;',
+        '<p class="copy">Truncated rule</p>',
+    );
+
+    assert_eq([[
+        'selector' => '.copy',
+        'status' => 'unverified',
+        'fg' => null,
+        'bg' => null,
+        'ratio' => null,
+        'suggested' => null,
+    ]], $findings);
+});
+
+test('translucent failing text still receives a passing delivered suggestion', function () {
+    $findings = CssContrastCheck::check(
+        '.copy { color: rgba(0, 0, 0, 0.1); background: #ffffff; }',
+        '<p class="copy">Faint text</p>',
+    );
+
+    assert_eq('fail', $findings[0]['status']);
+    assert_true(is_string($findings[0]['suggested']));
+    $suggested = ContrastMath::hexToRgb($findings[0]['suggested']);
+    assert_true($suggested !== null, 'fallback suggestion becomes an opaque passing color');
+    assert_true(ContrastMath::ratio($suggested, [255, 255, 255]) >= ContrastMath::NORMAL_TEXT);
 });
