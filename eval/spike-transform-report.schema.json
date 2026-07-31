@@ -6,6 +6,7 @@
     "required": [
         "fallback_count",
         "fallback_codes",
+        "dropped_elements",
         "block_histogram",
         "carried_css_bytes",
         "fixup_outcomes",
@@ -22,6 +23,27 @@
             "type": "array",
             "items": {
                 "type": "string"
+            }
+        },
+        "dropped_elements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "selector",
+                    "tag"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "tag": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                }
             }
         },
         "block_histogram": {
