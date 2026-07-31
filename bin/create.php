@@ -46,8 +46,12 @@ foreach (array_slice($argv, 1) as $a) {
         $withImages = true;
     } elseif ($a === '--multi-page') {
         $multiPage = true;
-    } elseif ($prompt === null) {
+    } elseif ($prompt === null && !str_starts_with($a, '--')) {
         $prompt = $a;
+    } else {
+        fwrite(STDERR, "Unknown argument: {$a}\n");
+        fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"]\n");
+        exit(1);
     }
 }
 
