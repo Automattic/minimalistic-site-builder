@@ -102,6 +102,12 @@ function design_preview_review_assert_no_dependency_markup(string $html): void
     );
     assert_eq(0, $xpath->query('//picture|//source')->length, 'no picture or source dependency constructs');
     assert_eq(0, $xpath->query('//*[@style]')->length, 'all CSS stays in head style element');
+    assert_eq(0, $xpath->query('//*[@background]')->length, 'no legacy background fetch attributes');
+    assert_eq(
+        0,
+        $xpath->query('//*[@popover or @popovertarget or @popovertargetaction or @command or @commandfor]')->length,
+        'no declarative behavior attributes',
+    );
 }
 
 $designPreviewDependencyDefects = [
@@ -192,6 +198,33 @@ $designPreviewDependencyDefects = [
         '<source srcset="/hero.jpg 1x"><img ',
         $html,
     ),
+    'body relative background attribute' => static fn (string $html): string => str_replace(
+        '<body>',
+        '<body background="hero.jpg">',
+        $html,
+    ),
+    'table relative background attribute' => static fn (string $html): string => str_replace(
+        '</section>',
+        '<table background="hero.jpg"><tbody><tr><td>Preview</td></tr></tbody></table></section>',
+        $html,
+    ),
+    'table cell relative background attribute' => static fn (string $html): string => str_replace(
+        '</section>',
+        '<table><tbody><tr><td background="hero.jpg">Preview</td></tr></tbody></table></section>',
+        $html,
+    ),
+    'popover target behavior' => static fn (string $html): string => str_replace(
+        '</section>',
+        '<button popovertarget="preview-popover">Open</button>'
+            . '<div id="preview-popover" popover>Details</div></section>',
+        $html,
+    ),
+    'command target behavior' => static fn (string $html): string => str_replace(
+        '</section>',
+        '<button commandfor="preview-popover" command="show-popover">Open</button>'
+            . '<div id="preview-popover" popover>Details</div></section>',
+        $html,
+    ),
 ];
 
 $designPreviewDeterministicDependencyRemovals = [
@@ -263,4 +296,145 @@ test('design-preview accepts inert URL text and a linear gradient in one call', 
     assert_eq('', $warnings, 'inert CSS needs no warning');
     design_preview_review_assert_no_dependency_markup($delivered);
     design_preview_assert_shape($delivered);
+});
+
+$designPreviewHarmlessCssControls = [
+    'content string containing url token' => '.hero::before { content: "url("; color: #251d16; }',
+    'content string containing image-set token' => '.hero::before { content: "image-set("; color: #251d16; }',
+    'selector string containing paint token' => '[data-copy="paint("] { color: #251d16; }',
+];
+
+foreach ($designPreviewHarmlessCssControls as $name => $css) {
+    test("design-preview accepts {$name} in one call", function () use ($name, $css) {
+        [$project, $llm, $tmp] = design_preview_fixture();
+        $authored = design_preview_review_inject_css(
+            design_preview_document('SAFE-INERT-CSS-TOKEN'),
+            $css,
+        );
+        $llm->queueText($authored);
+
+        design_preview_run($project, $llm);
+
+        $delivered = $project->readText('design/preview.html');
+        $warnings = design_preview_warnings($project);
+        $completeCalls = $llm->completeCalls;
+        $allCalls = count($llm->calls);
+        design_preview_cleanup($tmp);
+
+        assert_eq(1, $completeCalls, "{$name} uses generation call only");
+        assert_eq(1, $allCalls, "{$name} does not trigger repair");
+        assert_eq($authored, $delivered, "{$name} ships byte-identically");
+        assert_eq('', $warnings, "{$name} needs no warning");
+        design_preview_review_assert_no_dependency_markup($delivered);
+        design_preview_assert_shape($delivered);
+    });
+}
+
+test('design-preview records a long multibyte malformed initial response after valid repair', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $malformed = str_repeat("😀", 100);
+    $safeRepair = design_preview_document('SAFE-MULTIBYTE-REPAIR');
+    $llm->queueText($malformed);
+    $llm->queueText($safeRepair);
+
+    $caught = null;
+    try {
+        design_preview_run($project, $llm);
+    } catch (Throwable $error) {
+        $caught = $error;
+    }
+
+    $previewExists = $project->exists('design/preview.html');
+    $delivered = $previewExists ? $project->readText('design/preview.html') : '';
+    $warningsExist = $project->exists('warnings.json');
+    $warningData = null;
+    $warningReadError = null;
+    if ($warningsExist) {
+        try {
+            $warningData = $project->readJson('warnings.json');
+        } catch (Throwable $error) {
+            $warningReadError = $error;
+        }
+    }
+    design_preview_cleanup($tmp);
+
+    assert_true(
+        $caught === null,
+        'long multibyte repaired warning does not throw'
+            . ($caught === null ? '' : ': ' . $caught::class . ': ' . $caught->getMessage()),
+    );
+    assert_eq(2, $llm->completeCalls, 'multibyte malformed response gets one repair call');
+    assert_eq(2, count($llm->calls), 'multibyte repaired path caps calls at two');
+    assert_true($previewExists, 'repaired preview artifact exists');
+    assert_eq($safeRepair, $delivered, 'valid repair is delivered exactly');
+    design_preview_assert_shape($delivered);
+    assert_true($warningsExist, 'warnings.json exists after repaired multibyte defect');
+    assert_true(
+        $warningReadError === null,
+        'warnings.json remains readable JSON after repaired multibyte defect'
+            . ($warningReadError === null ? '' : ': ' . $warningReadError->getMessage()),
+    );
+    assert_true(is_array($warningData), 'warnings.json decodes to a map');
+    $warnings = $warningData['design-preview'] ?? null;
+    assert_true(is_array($warnings) && array_is_list($warnings), 'design-preview warnings are a list');
+    $warningText = implode(' ', $warnings);
+    assert_contains('file design/preview.html', $warningText);
+    assert_contains('block_path document', $warningText);
+    assert_contains('authored_value', $warningText);
+    assert_contains('delivered_value', $warningText);
+    assert_contains('disposition repaired', $warningText);
+});
+
+test('design-preview records a long multibyte malformed response before safe scaffold degradation', function () {
+    [$project, $llm, $tmp] = design_preview_fixture();
+    $malformed = str_repeat("😀", 100);
+    $llm->queueText($malformed);
+    $llm->queueText('MALFORMED-MULTIBYTE-REPAIR');
+
+    $caught = null;
+    try {
+        design_preview_run($project, $llm);
+    } catch (Throwable $error) {
+        $caught = $error;
+    }
+
+    $previewExists = $project->exists('design/preview.html');
+    $delivered = $previewExists ? $project->readText('design/preview.html') : '';
+    $warningsExist = $project->exists('warnings.json');
+    $warningData = null;
+    $warningReadError = null;
+    if ($warningsExist) {
+        try {
+            $warningData = $project->readJson('warnings.json');
+        } catch (Throwable $error) {
+            $warningReadError = $error;
+        }
+    }
+    design_preview_cleanup($tmp);
+
+    assert_true(
+        $caught === null,
+        'long multibyte degraded warning does not throw'
+            . ($caught === null ? '' : ': ' . $caught::class . ': ' . $caught->getMessage()),
+    );
+    assert_eq(2, $llm->completeCalls, 'multibyte malformed response gets one failed repair call');
+    assert_eq(2, count($llm->calls), 'multibyte degraded path caps calls at two');
+    assert_true($previewExists, 'safe scaffold artifact exists');
+    design_preview_assert_shape($delivered);
+    assert_true($warningsExist, 'warnings.json exists after degraded multibyte defect');
+    assert_true(
+        $warningReadError === null,
+        'warnings.json remains readable JSON after degraded multibyte defect'
+            . ($warningReadError === null ? '' : ': ' . $warningReadError->getMessage()),
+    );
+    assert_true(is_array($warningData), 'warnings.json decodes to a map');
+    $warnings = $warningData['design-preview'] ?? null;
+    assert_true(is_array($warnings) && array_is_list($warnings), 'design-preview warnings are a list');
+    $warningText = implode(' ', $warnings);
+    assert_contains('file design/preview.html', $warningText);
+    assert_contains('block_path document', $warningText);
+    assert_contains('authored_value', $warningText);
+    assert_contains('delivered_value', $warningText);
+    assert_contains('safe scaffold', $warningText);
+    assert_contains('disposition degraded', $warningText);
 });
