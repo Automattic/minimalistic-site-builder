@@ -3,6 +3,10 @@
 declare(strict_types=1);
 
 use Automattic\BlocksEngine\PhpTransformer\ArtifactCompiler\ArtifactCompiler;
+use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
+use Automattic\SiteBuild\ElementDropScanner;
+use Automattic\SiteBuild\InlineStyleHoister;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
@@ -19,6 +23,14 @@ const SPIKE_FIXUP_IDS = [
     'contrast-fix',
     'motion-sanity',
     'fix-blocks',
+];
+
+const SPIKE_ELEMENT_PROBES = [
+    [
+        'selector' => 'header:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1) > svg:nth-of-type(1)',
+        'tag' => 'svg',
+        'marker' => 'fallback-probe-svg',
+    ],
 ];
 
 /**
@@ -149,6 +161,32 @@ function spike_carrier_evidence(array $snapshot): array
                 }
             }
         }
+
+        $blocks = BlockMarkup::parse($markup);
+        foreach ($blocks->indices() as $index) {
+            $attrs = $blocks->attrs($index);
+            $className = is_array($attrs) && is_string($attrs['className'] ?? null)
+                ? $attrs['className']
+                : '';
+            foreach (preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                if (preg_match('/^se-[a-f0-9]{64}$/', $token) === 1) {
+                    $evidence[$file . "\0json-class\0block:" . $index . "\0" . $token] = true;
+                }
+            }
+
+            $root = HtmlFragment::parse($blocks->ownHtml($index))->root()->elementChildren()[0] ?? null;
+            if ($root === null) {
+                continue;
+            }
+            $rootClass = $root->attribute('class') ?? '';
+            foreach (preg_split('/\s+/', trim($rootClass), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                if (preg_match('/^se-[a-f0-9]{64}$/', $token) === 1) {
+                    $evidence[
+                        $file . "\0html-class\0block:" . $index . "\0root:" . $root->tagName() . "\0" . $token
+                    ] = true;
+                }
+            }
+        }
     }
     return $evidence;
 }
@@ -217,12 +255,23 @@ function spike_validate_report(array $report, string $schemaPath): void
     }
     if (!is_int($report['fallback_count'])
         || !is_array($report['fallback_codes'])
+        || !is_array($report['dropped_elements'])
         || !is_array($report['block_histogram'])
         || !is_int($report['carried_css_bytes'])
         || !is_array($report['fixup_outcomes'])
         || !is_bool($report['header_detected'])
         || !is_bool($report['footer_detected'])) {
         throw new RuntimeException('Spike report value types do not match the frozen schema.');
+    }
+    foreach ($report['dropped_elements'] as $element) {
+        if (!is_array($element)
+            || array_keys($element) !== ['selector', 'tag']
+            || !is_string($element['selector'])
+            || trim($element['selector']) === ''
+            || !is_string($element['tag'])
+            || trim($element['tag']) === '') {
+            throw new RuntimeException('Spike report dropped element rows do not match the frozen schema.');
+        }
     }
     if (array_keys($report['fixup_outcomes']) !== SPIKE_FIXUP_IDS) {
         throw new RuntimeException('Spike report fixup ids do not match the frozen schema.');
@@ -261,6 +310,33 @@ function spike_markdown(array $report, array $details, string $status, string $u
         foreach ($report['fallback_codes'] as $code) {
             $lines[] = '- `' . $code . '`';
         }
+    }
+
+    $lines[] = '';
+    $lines[] = '## Dropped elements';
+    $lines[] = '';
+    if ($report['dropped_elements'] === []) {
+        $lines[] = '- None';
+    } else {
+        foreach ($report['dropped_elements'] as $element) {
+            $lines[] = '- `' . $element['tag'] . '` at `' . $element['selector'] . '`';
+        }
+    }
+    $svgDropped = in_array(
+        [
+            'selector' => SPIKE_ELEMENT_PROBES[0]['selector'],
+            'tag' => SPIKE_ELEMENT_PROBES[0]['tag'],
+        ],
+        $report['dropped_elements'],
+        true,
+    );
+    $lines[] = '';
+    $lines[] = '## Upstream SVG behavior';
+    $lines[] = '';
+    if ($svgDropped) {
+        $lines[] = '- Source `<svg>` element is replaced by core/image `<img>` markup and a selector-bearing SVG asset. Artwork is preserved; the `dropped_elements` row records original DOM tag replacement, not content loss.';
+    } else {
+        $lines[] = '- Source `<svg>` element survives with the same tag or is surfaced by an upstream fallback; no dropped-element row is needed.';
     }
 
     $lines[] = '';
@@ -364,6 +440,22 @@ try {
         throw new RuntimeException('ArtifactCompiler emitted no serialized page blocks.');
     }
     $parts['page-home--spike.html'] = $pageMarkup;
+    $serializedMarkup = implode("\n", $parts);
+    $droppedElements = (new ElementDropScanner())->scan(
+        SPIKE_ELEMENT_PROBES,
+        $result->fallbacks,
+        $result->assets,
+        $serializedMarkup,
+    );
+    $hoisted = (new InlineStyleHoister())->hoist($parts);
+    $parts = $hoisted['parts'];
+    $carriedAssets = $result->assets;
+    if ($hoisted['css'] !== '') {
+        $carriedAssets[] = [
+            'kind' => 'css',
+            'content' => $hoisted['css'],
+        ];
+    }
 
     if (!mkdir($temporaryRoot, 0775, true) && !is_dir($temporaryRoot)) {
         throw new RuntimeException("Could not create spike project: {$temporaryRoot}");
@@ -443,8 +535,9 @@ try {
     $report = [
         'fallback_count' => count($result->fallbacks),
         'fallback_codes' => $fallbackCodes,
+        'dropped_elements' => $droppedElements,
         'block_histogram' => $histogram,
-        'carried_css_bytes' => spike_carried_css_bytes($result->assets),
+        'carried_css_bytes' => spike_carried_css_bytes($carriedAssets),
         'fixup_outcomes' => $fixupOutcomes,
         'header_detected' => in_array('header', $areas, true),
         'footer_detected' => in_array('footer', $areas, true),

@@ -3,6 +3,12 @@
     "fallback_codes": [
         "html_form_fallback"
     ],
+    "dropped_elements": [
+        {
+            "selector": "header:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1) > svg:nth-of-type(1)",
+            "tag": "svg"
+        }
+    ],
     "block_histogram": {
         "core/button": 2,
         "core/buttons": 2,
@@ -20,12 +26,12 @@
         "core/quote": 1,
         "core/table": 1
     },
-    "carried_css_bytes": 12578,
+    "carried_css_bytes": 14394,
     "fixup_outcomes": {
         "normalize-layout": "mutated",
         "contrast-fix": "noop",
         "motion-sanity": "noop",
-        "fix-blocks": "destroyed"
+        "fix-blocks": "mutated"
     },
     "header_detected": true,
     "footer_detected": true
