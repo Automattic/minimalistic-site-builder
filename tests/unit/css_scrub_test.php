@@ -39,11 +39,24 @@ test('css scrub removes a balanced terminal import without a semicolon', functio
     assert_eq('@import url(https://evil.example/x.css)', $result['removals'][0]['authored_value']);
 });
 
-test('css scrub retains lexically unbalanced terminal imports', function (): void {
+test('css scrub removes recoverably malformed terminal imports through EOF', function (): void {
     foreach ([
         '@import url(https://evil.example/x.css',
         '@import "https://evil.example/x.css',
         '@import url(https://evil.example/x.css) /* unclosed',
+    ] as $css) {
+        $result = CssScrub::scrub($css);
+        assert_eq('', $result['css']);
+        assert_eq($css, $result['removals'][0]['authored_value']);
+        assert_eq('import', $result['removals'][0]['kind']);
+    }
+});
+
+test('css scrub retains malformed import bytes when EOF recovery could swallow a later rule', function (): void {
+    foreach ([
+        "@import url(https://evil.example/x.css\n.safe{display:block}",
+        "@import \"https://evil.example/x.css\n.safe{display:block}",
+        "@import url(https://evil.example/x.css) /* unclosed\n.safe{display:block}",
     ] as $css) {
         $result = CssScrub::scrub($css);
         assert_eq($css, $result['css']);

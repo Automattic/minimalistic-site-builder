@@ -137,12 +137,13 @@ final class CssScrub
         $length = strlen($css);
         $parentheses = 0;
         $brackets = 0;
+        $braceInsideNesting = false;
 
         while ($offset < $length) {
             if (self::startsComment($css, $offset)) {
                 $commentEnd = strpos($css, '*/', $offset + 2);
                 if ($commentEnd === false) {
-                    return null;
+                    return self::hasRuleBrace($css, $offset + 2) ? null : $length;
                 }
                 $offset = $commentEnd + 2;
                 continue;
@@ -152,7 +153,7 @@ final class CssScrub
             if ($byte === '"' || $byte === "'") {
                 $stringEnd = self::completeStringEnd($css, $offset);
                 if ($stringEnd === null) {
-                    return null;
+                    return self::hasRuleBrace($css, $offset + 1) ? null : $length;
                 }
                 $offset = $stringEnd;
                 continue;
@@ -168,31 +169,30 @@ final class CssScrub
             if ($byte === '(') {
                 $parentheses++;
             } elseif ($byte === ')') {
-                if ($parentheses === 0) {
-                    return null;
+                if ($parentheses > 0) {
+                    $parentheses--;
                 }
-                $parentheses--;
             } elseif ($byte === '[') {
                 $brackets++;
             } elseif ($byte === ']') {
-                if ($brackets === 0) {
-                    return null;
+                if ($brackets > 0) {
+                    $brackets--;
                 }
-                $brackets--;
             } elseif ($parentheses === 0 && $brackets === 0 && $byte === ';') {
                 return $offset + 1;
-            } elseif (
-                $parentheses === 0
-                && $brackets === 0
-                && ($byte === '{' || $byte === '}')
-            ) {
-                return null;
+            } elseif ($byte === '{' || $byte === '}') {
+                if ($parentheses === 0 && $brackets === 0) {
+                    return null;
+                }
+                $braceInsideNesting = true;
             }
 
             $offset++;
         }
 
-        return $parentheses === 0 && $brackets === 0 ? $length : null;
+        return ($parentheses !== 0 || $brackets !== 0) && $braceInsideNesting
+            ? null
+            : $length;
     }
 
     /**
@@ -452,6 +452,11 @@ final class CssScrub
     private static function startsComment(string $css, int $offset): bool
     {
         return isset($css[$offset + 1]) && $css[$offset] === '/' && $css[$offset + 1] === '*';
+    }
+
+    private static function hasRuleBrace(string $css, int $offset): bool
+    {
+        return strpos($css, '{', $offset) !== false || strpos($css, '}', $offset) !== false;
     }
 
     private static function commentEnd(string $css, int $offset): int
