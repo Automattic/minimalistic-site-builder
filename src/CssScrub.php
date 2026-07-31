@@ -122,7 +122,9 @@ final class CssScrub
                 continue;
             }
 
-            if ($byte === '(') {
+            if ($byte === '{' || $byte === '}') {
+                $functionStack = [];
+            } elseif ($byte === '(') {
                 $functionStack[] = null;
             } elseif ($byte === ')' && $functionStack !== []) {
                 array_pop($functionStack);
@@ -351,7 +353,11 @@ final class CssScrub
     private static function isExternalUrl(string $url): bool
     {
         $decoded = self::decodeCssEscapes($url);
-        return $decoded !== null && preg_match('/^(?:https?:|\\/\\/)/i', $decoded) === 1;
+        if ($decoded === null) {
+            return false;
+        }
+        $decoded = ltrim($decoded, " \t\r\n\f");
+        return preg_match('/^(?:https?:|\\/\\/)/i', $decoded) === 1;
     }
 
     private static function stringCanBeUrlIn(string $function): bool
@@ -432,16 +438,18 @@ final class CssScrub
                 $offset = self::stringEnd($css, $offset);
                 continue;
             }
-            if ($byte === '(') {
+            if ($byte === '{') {
+                $parentheses = 0;
+                $braceDepth++;
+                $segmentStart = $offset + 1;
+            } elseif ($byte === '}') {
+                $parentheses = 0;
+                $braceDepth = max(0, $braceDepth - 1);
+                $segmentStart = $offset + 1;
+            } elseif ($byte === '(') {
                 $parentheses++;
             } elseif ($byte === ')' && $parentheses > 0) {
                 $parentheses--;
-            } elseif ($parentheses === 0 && $byte === '{') {
-                $braceDepth++;
-                $segmentStart = $offset + 1;
-            } elseif ($parentheses === 0 && $byte === '}') {
-                $braceDepth = max(0, $braceDepth - 1);
-                $segmentStart = $offset + 1;
             } elseif ($parentheses === 0 && $byte === ';') {
                 $segmentStart = $offset + 1;
             }
@@ -476,14 +484,17 @@ final class CssScrub
                 $parentheses--;
             } elseif ($parentheses === 0 && $byte === ':' && $colon === null) {
                 $colon = $offset;
-            } elseif ($parentheses === 0 && $byte === '{') {
+            } elseif ($byte === '{') {
                 return null;
             } elseif ($parentheses === 0 && $byte === ';') {
                 if ($colon === null || $colon >= $urlOffset || $urlOffset >= $offset) {
                     return null;
                 }
                 return ['start' => $start, 'end' => $offset + 1];
-            } elseif ($parentheses === 0 && $byte === '}') {
+            } elseif ($byte === '}') {
+                if ($parentheses !== 0) {
+                    return null;
+                }
                 if ($colon === null || $colon >= $urlOffset || $urlOffset >= $offset) {
                     return null;
                 }
