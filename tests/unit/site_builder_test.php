@@ -41,7 +41,7 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
         // attribute repair can activate previously-inert color/motion
         // attributes, which those policy passes must be able to see.
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
-        'fonts-php', 'finalize-theme', 'validate-theme',
+        'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
     ], $builder->pipeline()->stepIds());
     assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));
     assert_true(in_array('theme-json', $builder->pipeline()->stopIds(), true), 'group member is a valid stop');

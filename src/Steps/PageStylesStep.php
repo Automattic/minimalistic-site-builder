@@ -122,6 +122,7 @@ final class PageStylesStep implements Step
                 'designDirection.json',
                 'theme/parts/*',
                 'theme/templates/*',
+                'plugin/pages/*',
             ],
             writes: ['theme/style.css', 'warnings.json'],
             concurrent: false,
