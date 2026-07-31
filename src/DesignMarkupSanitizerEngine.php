@@ -1011,6 +1011,4 @@ final class DesignMarkupSanitizerEngine
         }
         return $loaded ? $dom : null;
     }
-
 }
-
