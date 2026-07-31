@@ -10,6 +10,7 @@ use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
+use Automattic\SiteBuild\Steps\DesignPreviewStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FixPagesStep;
@@ -98,6 +99,12 @@ final class StepComposition
                 $models['design-direction'],
                 $temps['design-direction'],
                 $models['design-direction-seeds'],
+            ),
+            new DesignPreviewStep(
+                $llm,
+                $renderer,
+                $models['design-preview'] ?? null,
+                $temps['design-preview'] ?? null,
             ),
             new HomepageDesignStep(
                 $llm,

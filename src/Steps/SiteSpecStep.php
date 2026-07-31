@@ -48,6 +48,9 @@ final class SiteSpecStep implements Step
     /** Identity keys the model may invent (and must then flag in `invented`). */
     private const IDENTITY_KEYS = ['name', 'persona_name', 'email_domain'];
 
+    /** Internal artifact basenames that generated page slugs must not claim. */
+    private const RESERVED_PAGE_SLUGS = ['preview'];
+
     /** {{page_tree_scope}} / {{page_tree_rule}} when inner pages are enabled (--multi-page). */
     private const MULTI_PAGE_SCOPE = '1-6 top-level pages; nest "children" ONLY where the site genuinely'
         . ' needs a second level (max depth 2). A one-page site (e.g. a simple landing page) is just the'
@@ -302,7 +305,7 @@ final class SiteSpecStep implements Step
      */
     public static function normalizePages($raw, array $spec, bool $multiPage = true): array
     {
-        $seen = [];
+        $seen = self::initialPageSlugSet();
         $pages = is_array($raw) ? self::normalizePageList($raw, $seen) : [];
         if (!$multiPage && $pages !== []) {
             $pages = [array_merge($pages[0], ['children' => []])];
@@ -316,6 +319,12 @@ final class SiteSpecStep implements Step
             ]];
         }
         return $pages;
+    }
+
+    /** Seed reserved slugs into the shared recursive uniqueness state. */
+    private static function initialPageSlugSet(): array
+    {
+        return array_fill_keys(self::RESERVED_PAGE_SLUGS, true);
     }
 
     /**
@@ -381,7 +390,7 @@ final class SiteSpecStep implements Step
                 $entries[] = $page;
             }
         }
-        $seen = [];
+        $seen = self::initialPageSlugSet();
         return self::normalizePageList($entries, $seen);
     }
 

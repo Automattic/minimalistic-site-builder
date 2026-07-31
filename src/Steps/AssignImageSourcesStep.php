@@ -26,6 +26,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * transformed parts, and generate-images writes the file at exactly that path
  * and rewrites the reference. The prose alt is never touched: it is the
  * generation prompt AND the accessibility text.
+ *
+ * design/preview.html is an additive, unconsumed seed in the current graph.
+ * Leave it byte-identical until a later slice explicitly owns its image path.
  */
 final class AssignImageSourcesStep implements Step
 {
@@ -60,8 +63,12 @@ final class AssignImageSourcesStep implements Step
         $assigned = 0;
         $notes = [];
         foreach (glob($project->path('design/*.html')) ?: [] as $abs) {
-            $rel = 'design/' . basename($abs);
-            $page = preg_replace('/\.html$/', '', basename($abs)) ?? 'page';
+            $name = basename($abs);
+            if ($name === 'preview.html') {
+                continue;
+            }
+            $rel = 'design/' . $name;
+            $page = preg_replace('/\.html$/', '', $name) ?? 'page';
             $content = $project->readText($rel);
             $result = self::assign($content, $page);
             if ($result['content'] !== $content) {

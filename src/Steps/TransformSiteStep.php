@@ -96,7 +96,8 @@ final class TransformSiteStep implements Step
         $allPages = PagePlanStep::flattenPages($siteSpec);
         $pages = [];
         $failedPages = [];
-        $excludedHtml = [];
+        // The additive design preview is not a page/compiler input yet.
+        $excludedHtml = ['preview.html' => true];
         foreach ($allPages as $page) {
             $slug = (string) $page['slug'];
             $failedPath = "design/{$slug}.failed";
