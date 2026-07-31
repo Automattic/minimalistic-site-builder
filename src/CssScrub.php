@@ -36,7 +36,7 @@ final class CssScrub
 
         /** @var array<string,array{start:int,end:int,kind:string}> $ranges */
         $ranges = [];
-        /** @var list<string|null> $functionStack */
+        /** @var list<array{function:string|null,closer:string}> $functionStack */
         $functionStack = [];
 
         for ($offset = 0; $offset < $length;) {
@@ -55,7 +55,7 @@ final class CssScrub
 
                 $function = $functionStack === []
                     ? null
-                    : $functionStack[array_key_last($functionStack)];
+                    : $functionStack[array_key_last($functionStack)]['function'];
                 if (
                     $function !== null
                     && self::stringCanBeUrlIn($function)
@@ -112,13 +112,16 @@ final class CssScrub
 
             $identifier = self::identifierAt($css, $offset);
             if ($identifier !== null) {
-                $functionOpen = self::skipWhitespaceAndComments($css, $identifier['end']);
+                $functionOpen = self::skipComments($css, $identifier['end']);
                 if (
                     !self::startsHashOrAtKeyword($css, $offset)
                     && $functionOpen < $length
                     && $css[$functionOpen] === '('
                 ) {
-                    $functionStack[] = $identifier['value'];
+                    $functionStack[] = [
+                        'function' => $identifier['value'],
+                        'closer'   => ')',
+                    ];
                     $offset = $functionOpen + 1;
                     continue;
                 }
@@ -128,10 +131,18 @@ final class CssScrub
 
             if ($byte === '{' || $byte === '}') {
                 $functionStack = [];
-            } elseif ($byte === '(') {
-                $functionStack[] = null;
-            } elseif ($byte === ')' && $functionStack !== []) {
-                array_pop($functionStack);
+            } elseif ($byte === '(' || $byte === '[') {
+                $functionStack[] = [
+                    'function' => null,
+                    'closer'   => $byte === '(' ? ')' : ']',
+                ];
+            } elseif (($byte === ')' || $byte === ']') && $functionStack !== []) {
+                $context = $functionStack[array_key_last($functionStack)];
+                if ($context['closer'] === $byte) {
+                    array_pop($functionStack);
+                } else {
+                    $functionStack = [];
+                }
             }
             $offset++;
         }
@@ -603,6 +614,15 @@ final class CssScrub
             if (!self::startsComment($css, $offset)) {
                 break;
             }
+            $offset = self::commentEnd($css, $offset);
+        }
+
+        return $offset;
+    }
+
+    private static function skipComments(string $css, int $offset): int
+    {
+        while (self::startsComment($css, $offset)) {
             $offset = self::commentEnd($css, $offset);
         }
 
