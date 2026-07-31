@@ -348,6 +348,24 @@ test('css scrub preserves allowed urls with embedded CSS-escaped URL whitespace'
     assert_eq([], $result['removals']);
 });
 
+test('css scrub preserves raw and CSS-escaped NUL image strings byte for byte', function (): void {
+    $nul = chr(0);
+    $rawRemote = 'http://127.0.0.1:9/raw-nul.png';
+    $rawCss = '.raw{background-image:image-set("' . $nul . $rawRemote . '" 1x);color:red}';
+    $escapedCss = '.escaped{background-image:image-set("\0 http://127.0.0.1:9/escaped-nul.png" 1x);color:blue}';
+
+    foreach ([$rawCss, $escapedCss] as $css) {
+        $result = CssScrub::scrub($css);
+
+        assert_eq(strlen($css), strlen($result['css']), 'binary length preserved');
+        assert_eq(hash('sha256', $css), hash('sha256', $result['css']), 'binary hash preserved');
+        assert_eq($css, $result['css']);
+        assert_eq([], $result['removals']);
+    }
+    assert_eq(1, substr_count($rawCss, $nul), 'probe contains one actual NUL byte');
+    assert_contains($rawRemote, CssScrub::scrub($rawCss)['css'], 'remote-like suffix remains inert');
+});
+
 test('css scrub preserves strings outside immediate image function url context', function (): void {
     $css = '.note::before{content:"https://x"}'
         . '.tokens{--asset:"https://x"}'

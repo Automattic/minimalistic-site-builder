@@ -672,6 +672,37 @@ test('site CSS path scrubs image-set remote strings with embedded URL whitespace
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path preserves raw and CSS-escaped NUL image strings without warnings', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_nul_');
+    $base = $project->readText('theme/style.css');
+    $nul = chr(0);
+    $rawRemote = 'http://127.0.0.1:9/raw-nul.png';
+    $siteCss = '.raw{background-image:image-set("' . $nul . $rawRemote . '" 1x);display:grid}'
+        . '.escaped{background-image:image-set("\0 http://127.0.0.1:9/escaped-nul.png" 2x);padding:1rem}'
+        . '.safe{position:relative}';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $expected = $base . $siteCss;
+    $style = $project->readText('theme/style.css');
+    assert_eq(strlen($expected), strlen($style), 'binary merged length preserved');
+    assert_eq(hash('sha256', $expected), hash('sha256', $style), 'binary merged hash preserved');
+    assert_eq($expected, $style, 'raw and escaped NUL declarations remain byte-identical');
+    assert_eq(1, substr_count($style, $nul), 'merged CSS contains one actual NUL byte');
+    assert_contains($rawRemote, $style, 'raw-NUL remote-like suffix remains inert');
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
+    assert_true(!$project->exists('warnings.json'), 'inert NUL strings emit zero warnings');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(
