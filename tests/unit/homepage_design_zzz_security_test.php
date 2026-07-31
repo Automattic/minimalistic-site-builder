@@ -115,6 +115,31 @@ test('homepage-design merges overlapping removals across both sanitation passes'
     homepage_cleanup($tmp);
 });
 
+test('homepage-design clips partially overlapping malformed tag and comment spans', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $survivor = '<footer>KEEP-PARTIAL-FOOTER</footer>';
+    $unsafe = str_replace(
+        '<footer><p>Footer PARTIAL-OVERLAP</p></footer>',
+        '<my_component title="<!--">HIDDEN--!>' . $survivor,
+        homepage_document('PARTIAL-OVERLAP', "\n.safe { color: red; }\n"),
+    );
+    homepage_queue_tournament($llm, [
+        $unsafe,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    $candidate = $project->readText('design/candidate-1.html');
+    assert_true(!str_contains($candidate, 'HIDDEN--!>'), 'partial overlap removes the full unsafe union');
+    assert_contains($survivor, $candidate, 'partial-overlap survivor remains byte-intact');
+    assert_contains('delivered removed', homepage_review_warnings($project));
+    homepage_cleanup($tmp);
+});
+
 test('homepage-design ends doctype declarations at the first greater-than byte', function () {
     [$project, $llm, $tmp] = homepage_fixture([
         'design_candidates' => 2,
