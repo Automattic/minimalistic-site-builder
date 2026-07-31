@@ -1187,20 +1187,34 @@ final class HomepageDesignStep implements Step
     private static function headContentRange(string $html): ?array
     {
         $offset = 0;
-        $sawImplicitHeadContent = false;
-        while (($token = self::nextTag($html, $offset)) !== null) {
+        $sawHeadContent = false;
+        $explicitHead = false;
+        while (true) {
+            $token = self::nextTag($html, $offset);
+            $textStart = self::bodyTextOffset(
+                $html,
+                $offset,
+                $token['start'] ?? strlen($html),
+            );
+            if ($textStart !== null) {
+                return [0, $textStart];
+            }
+            if ($token === null) {
+                break;
+            }
+
             $offset = $token['end'];
-            if (!$token['closing'] && $token['name'] === 'html') {
+            if ($token['closing']) {
+                if ($token['name'] === 'head' && $explicitHead) {
+                    return [0, $token['start']];
+                }
                 continue;
             }
-            if (!$token['closing'] && $token['name'] === 'head') {
-                $close = self::matchingCloseToken($html, $token);
-                return [
-                    $sawImplicitHeadContent ? 0 : $token['end'],
-                    $close['start'] ?? strlen($html),
-                ];
+            if ($token['name'] === 'html') {
+                continue;
             }
-            if ($token['closing']) {
+            if ($token['name'] === 'head') {
+                $explicitHead = true;
                 continue;
             }
             if ($token['name'] === 'body') {
@@ -1213,7 +1227,7 @@ final class HomepageDesignStep implements Step
             )) {
                 return [0, $token['start']];
             }
-            $sawImplicitHeadContent = true;
+            $sawHeadContent = true;
             if (
                 !$token['self_closing']
                 && in_array($token['name'], self::RAW_TEXT_ELEMENTS, true)
@@ -1225,7 +1239,36 @@ final class HomepageDesignStep implements Step
                 $offset = $close['end'];
             }
         }
-        return $sawImplicitHeadContent ? [0, strlen($html)] : null;
+        return ($sawHeadContent || $explicitHead) ? [0, strlen($html)] : null;
+    }
+
+    private static function bodyTextOffset(string $html, int $start, int $end): ?int
+    {
+        while ($start < $end) {
+            $char = $html[$start];
+            if (str_contains(" \t\n\f\r", $char)) {
+                $start++;
+                continue;
+            }
+            if (substr($html, $start, 4) === '<!--') {
+                $start = min(self::commentSpan($html, $start)['end'], $end);
+                continue;
+            }
+            if (
+                strncasecmp(substr($html, $start, 9), '<!doctype', 9) === 0
+                && (($html[$start + 9] ?? '') === '>'
+                    || str_contains(" \t\n\f\r", $html[$start + 9] ?? ''))
+            ) {
+                $close = strpos($html, '>', $start + 9);
+                if ($close === false || $close >= $end) {
+                    return $start;
+                }
+                $start = $close + 1;
+                continue;
+            }
+            return $start;
+        }
+        return null;
     }
 
     private static function isAllowedElement(string $name, bool $inHead): bool
