@@ -574,6 +574,80 @@ foreach (['hash' => '#', 'at-keyword' => '@'] as $label => $prefix) {
     });
 }
 
+foreach (
+    [
+        'whitespace-gap' => 'image-set ("https://evil.example/x.png")',
+        'bracket-nested' => 'image-set(["https://evil.example/x.png"])',
+    ] as $label => $value
+) {
+    test("site CSS path preserves {$label} image-set lookalikes without warnings", function () use ($label, $value) {
+        [$project, $tmp] = ps_project('builder_ps_image_set_' . $label . '_lookalike_');
+        $base = $project->readText('theme/style.css');
+        $siteCss = '.tokens{--fake:' . $value . ';color:red}';
+        $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home',
+            'front' => true,
+        ]]]);
+        $project->writeText('design/home.html', '<main>Kept</main>');
+        $llm = new FakeLlm();
+
+        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $expected = $base . $siteCss;
+        $style = $project->readText('theme/style.css');
+        assert_eq(strlen($expected), strlen($style), 'merged byte length retained');
+        assert_eq(hash('sha256', $expected), hash('sha256', $style), 'merged byte hash retained');
+        assert_eq($expected, $style, "{$label} token bytes retained exactly");
+        assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+        assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
+        assert_true(!$project->exists('warnings.json'), "{$label} lookalike emits zero warnings");
+        exec('rm -rf ' . escapeshellarg($tmp));
+    });
+}
+
+foreach (
+    [
+        'immediate' => 'image-set("https://evil.example/x.png" 1x)',
+        'comment-gap' => 'image-set/**/("https://evil.example/x.png" 1x)',
+        'bracket-nested-real' => 'image-set([image("https://evil.example/x.png")])',
+    ] as $label => $value
+) {
+    test("site CSS path removes {$label} real image function control", function () use ($label, $value) {
+        [$project, $tmp] = ps_project('builder_ps_image_set_' . $label . '_control_');
+        $base = $project->readText('theme/style.css');
+        $declaration = 'background-image:' . $value . ';';
+        $siteCss = '.actual{' . $declaration . 'color:red}';
+        $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home',
+            'front' => true,
+        ]]]);
+        $project->writeText('design/home.html', '<main>Kept</main>');
+        $llm = new FakeLlm();
+
+        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq($base . '.actual{color:red}', $project->readText('theme/style.css'), $label);
+        assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+        assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+        $authored = json_encode(
+            $declaration,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+        );
+        assert_true(is_string($authored));
+        assert_eq(
+            [
+                'source=design/site.css; authored_value=' . $authored
+                    . '; delivered_value=removed; disposition=removed_external_url',
+            ],
+            $project->readJson('warnings.json')['page-styles'] ?? [],
+            $label
+        );
+        exec('rm -rf ' . escapeshellarg($tmp));
+    });
+}
+
 test('site CSS path still scrubs a real image-set function beside token lookalikes', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_token_control_');
     $base = $project->readText('theme/style.css');

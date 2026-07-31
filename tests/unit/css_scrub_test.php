@@ -426,6 +426,44 @@ foreach (['hash' => '#', 'at-keyword' => '@'] as $label => $prefix) {
     });
 }
 
+foreach (
+    [
+        'whitespace-gap' => 'image-set ("https://evil.example/x.png")',
+        'bracket-nested' => 'image-set(["https://evil.example/x.png"])',
+    ] as $label => $value
+) {
+    test("css scrub preserves {$label} image-set lookalikes byte for byte", function () use ($value): void {
+        $css = '.tokens{--fake:' . $value . ';color:red}';
+
+        $result = CssScrub::scrub($css);
+
+        assert_eq(strlen($css), strlen($result['css']));
+        assert_eq(hash('sha256', $css), hash('sha256', $result['css']));
+        assert_eq($css, $result['css']);
+        assert_eq([], $result['removals']);
+    });
+}
+
+foreach (
+    [
+        'immediate' => 'image-set("https://evil.example/x.png" 1x)',
+        'comment-gap' => 'image-set/**/("https://evil.example/x.png" 1x)',
+        'bracket-nested-real' => 'image-set([image("https://evil.example/x.png")])',
+    ] as $label => $value
+) {
+    test("css scrub removes {$label} real image function control", function () use ($label, $value): void {
+        $declaration = 'background-image:' . $value . ';';
+        $css = '.actual{' . $declaration . 'color:red}';
+
+        $result = CssScrub::scrub($css);
+
+        assert_eq('.actual{color:red}', $result['css'], $label);
+        assert_eq(1, count($result['removals']), $label);
+        assert_eq($declaration, $result['removals'][0]['authored_value'], $label);
+        assert_eq('removed_external_url', $result['removals'][0]['disposition'], $label);
+    });
+}
+
 test('css scrub still removes a real image-set function beside token lookalikes', function (): void {
     $declaration = 'background-image:image-set("https://evil.example/not-a-function.png" 1x);';
     $css = '.actual{' . $declaration . 'color:red}';
