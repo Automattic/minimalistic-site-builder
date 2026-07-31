@@ -361,22 +361,26 @@ test('homepage-design routes final sanitation style loss as MalformedDesignExcep
         'design_candidates' => 2,
         'critique_rounds' => 1,
     ]);
+    $winner = '<!doctype html><html>'
+        . '<title id="design-title">Original title</title>'
+        . '<style>.implicit { color: blue; }</style>'
+        . '<body><header id="site-header"><p>Original header</p></header>'
+        . '<main><section id="feature"><h2>Feature</h2></section></main>'
+        . '<footer>Footer</footer></body></html>';
     homepage_queue_tournament($llm, [
-        homepage_document('FINAL-SANITIZE', "\n.original { color: red; }\n"),
+        $winner,
         homepage_document('SAFE', "\n.safe { color: blue; }\n"),
     ]);
     $llm->queueJson([
         'verdict' => 'revise',
-        'notes' => [
-            ['section' => 'head', 'instruction' => 'Remove old stylesheet'],
-            ['section' => '#feature', 'instruction' => 'Supply nested stylesheet'],
-        ],
+        'notes' => [[
+            'section' => 'title#design-title',
+            'instruction' => 'Update the authored title',
+        ]],
     ]);
     $llm->queueText(
-        "<!-- section: head -->\n```html\n<head><title>Updated</title></head>\n```\n"
-        . "<!-- section: #feature -->\n```html\n"
-        . '<section id="feature"><head><style>.nested { color: blue; }</style></head>'
-        . '<h2>Nested style</h2></section>'
+        "<!-- section: title#design-title -->\n```html\n"
+        . '<head><title id="design-title">Updated title</title></head>'
         . "\n```"
     );
 
