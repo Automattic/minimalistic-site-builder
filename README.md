@@ -52,6 +52,52 @@ php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site pl
 php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
 ```
 
+### Embedding with an existing site spec
+
+An embedding host that already owns the factual site specification can pass
+the package-canonical object to `SiteBuilder::createProject()` instead of paying
+for the `site-spec` LLM call:
+
+```php
+$project = $builder->createProject(
+    prompt: $userPrompt,
+    slug: $projectSlug,
+    siteSpec: [
+        'name' => 'Hearth & Crumb',
+        'slug' => 'hearth-crumb',
+        'description' => 'A neighborhood bakery specializing in sourdough and pastries.',
+        'site_type' => 'business storefront',
+        'topic' => 'artisan bread and pastries',
+        'area' => 'bakery',
+        'audience' => 'neighborhood residents',
+        'language' => 'en',
+        'persona_name' => '',
+        'email_domain' => 'hearthandcrumb.com',
+        'invented' => [],
+        'visual_vibe' => 'warm and rustic',
+        'animation_request' => '',
+        'sections' => ['Hero', 'Menu', 'Story', 'Visit'],
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'Show breads and pastries', 'children' => []],
+        ],
+    ],
+);
+$builder->pipeline()->runThrough($project);
+```
+
+The value crosses the portable project boundary as `meta.json.site_spec`; the
+normal `site-spec` step still canonicalizes it and writes `siteSpec.json`, but
+makes no LLM request. With `multiPage` omitted, a supplied spec keeps its page
+tree. Pass `multiPage: false` to deliberately force one homepage. A non-empty
+`pages:` list implies multi-page scope and replaces the supplied tree with an
+exact caller-owned list. The user prompt is still required because the design
+and content steps consume both inputs.
+
+The supplied object must use this package's canonical snake-case fields. A host
+with its own metadata shape (including WordPress.com) maps that payload in its
+adapter rather than adding host-specific aliases to this package.
+
 ### Choosing the model / provider
 
 `--provider=<anthropic|openai|xai|openrouter>` (or the `LLM_PROVIDER` env var) picks a whole

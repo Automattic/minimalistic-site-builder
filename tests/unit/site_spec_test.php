@@ -10,7 +10,7 @@ use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /** @return array{0:Project,1:FakeLlm,2:string} */
-function make_sitespec_fixture(bool $multiPage = false, ?array $pages = null): array
+function make_sitespec_fixture(bool $multiPage = false, ?array $pages = null, ?array $siteSpec = null): array
 {
     $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -18,9 +18,69 @@ function make_sitespec_fixture(bool $multiPage = false, ?array $pages = null): a
     if ($pages !== null) {
         $meta['pages'] = $pages;
     }
+    if ($siteSpec !== null) {
+        $meta['site_spec'] = $siteSpec;
+    }
     $project->writeJson('meta.json', $meta);
     return [$project, new FakeLlm(), $tmp];
 }
+
+test('site-spec normalizes a host-supplied spec without an LLM call', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: [
+        'name' => 'Supplied Bakery',
+        'slug' => 'Supplied Bakery',
+        'language' => 'en',
+        'email_domain' => 'SUPPLIED.EXAMPLE',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors'],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'List the baked goods'],
+        ],
+        'hours' => 'Tue-Sun 7am-3pm',
+    ]);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq(0, $llm->completeJsonCalls, 'a supplied spec must bypass candidate generation');
+    assert_eq('supplied-bakery', $spec['slug']);
+    assert_eq('supplied.example', $spec['email_domain']);
+    assert_eq(['home', 'menu'], array_column($spec['pages'], 'slug'));
+    assert_eq('Tue-Sun 7am-3pm', $spec['hours'], 'arbitrary factual fields survive normalization');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec treats an explicitly supplied empty array as input and degrades without an LLM call', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture(siteSpec: []);
+
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $spec = $project->readJson('siteSpec.json');
+    assert_eq(0, $llm->completeJsonCalls, 'an empty supplied spec must not fall through to generation');
+    assert_eq('A Cozy Neighborhood Bakery', $spec['name']);
+    assert_eq('home', $spec['pages'][0]['slug']);
+    $joined = implode(' ', $project->readJson('warnings.json')['site-spec'] ?? []);
+    assert_contains('site spec has no "name"', $joined);
+    assert_contains('site spec has no "language"', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec rejects a malformed explicit supplied input instead of invoking the LLM', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['site_spec'] = 'not an object';
+    $project->writeJson('meta.json', $meta);
+
+    assert_throws(fn () => (new SiteSpecStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+    assert_eq(0, $llm->completeJsonCalls);
+    assert_true(!$project->exists('siteSpec.json'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
 
 test('site-spec writes a factual, normalized siteSpec.json', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture();

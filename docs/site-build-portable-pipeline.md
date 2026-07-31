@@ -63,6 +63,41 @@ $builder->pipeline()->runThrough($project);
 
 Same step, same pipeline, four different transports, and only that first line moves.
 
+### A host can supply the site spec
+
+Some hosts already have the factual site spec before this package starts. They
+pass that package-canonical object as request data instead of asking the shared
+library to infer it again:
+
+```php
+$project = $builder->createProject(
+    prompt: $userPrompt,
+    slug: $projectSlug,
+    siteSpec: $canonicalSiteSpec,
+);
+$builder->pipeline()->runThrough($project);
+```
+
+`createProject()` persists the value under `meta.json.site_spec`. The existing
+`site-spec` graph node remains in place and remains the sole declared writer of
+`siteSpec.json`; it simply takes the supplied value as its candidate, applies
+the same deterministic normalization/page-scope/warning rules, and makes zero
+site-spec LLM calls. Keeping the node and artifact stable matters for graph
+validation, checkpoints, and workflows split across processes.
+
+With `multiPage` omitted, a supplied spec retains its complete page tree. An
+explicit `multiPage: false` still forces the homepage-only product. A non-empty
+`pages:` list implies multi-page scope and has highest precedence over the
+supplied tree. A missing `siteSpec` keeps the CLI/default behavior: the step
+generates the candidate from the refined prompt.
+
+The input contract is the package's `siteSpec.json` shape (`name`, `slug`,
+`description`, `site_type`, `language`, `pages`, and the other factual fields),
+not a host's similarly named metadata object. WordPress.com maps its own SiteSpec
+representation at its adapter/ability boundary and passes a decoded JSON object,
+not a double-encoded string. The shared package deliberately contains no
+WordPress.com-specific field aliases.
+
 ## The four hosts
 
 - **Command line.** Talks straight to the Anthropic API with a key from the environment. It fans section generation out concurrently, so a build finishes in about the time of its slowest call.
