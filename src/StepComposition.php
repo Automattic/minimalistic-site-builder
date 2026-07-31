@@ -146,8 +146,9 @@ final class StepComposition
             // faces fail to download, degrades to the link path below.
             new BundleFontsStep($fontFetcher),
             // Hotlinks exactly the families BundleFontsStep left unbundled.
-            // Deterministic: builds fonts.php from the scanned requirements.
-            // It takes no model — see BIGR-750.
+            // Deterministic: builds fonts.php from the committed typography floor
+            // plus final theme/markup usage — usage may add variants, never remove
+            // direction-selected ones. It takes no model — see BIGR-750.
             new FontsPhpStep(),
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.

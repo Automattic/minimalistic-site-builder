@@ -51,7 +51,7 @@ Do NOT produce a direction that feels like generic AI output:
 Besides the vivid narrative, the direction commits to explicit structured fields. Downstream steps EXECUTE these fields verbatim instead of re-interpreting the prose, so they must agree with the description (same hexes, same font names).
 
 - `palette`: the five named hexes the theme will ship. `base` = page background, `contrast` = body text on it (strong contrast required), `primary` = main brand color, `secondary` = supporting color, `accent` = for CTAs/interaction — and the direction MAY also commit accent to its `signature_device` micro-motif (say so explicitly in that field); never to body text or broad fills.
-- `type`: the heading and body families WITH weights. Both MUST be real Google Fonts families spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald") — the build enqueues them from Google Fonts by name, and a family that isn't there gets silently downgraded to a fallback. Design within that constraint: never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
+- `type`: the heading and body typography as structured objects. Each `family` MUST be a real Google Fonts family spelled exactly (e.g. "Fraunces", "Source Serif 4", "Oswald"), and `weights` MUST list every 100-step weight the direction commits to using. Set `italic` to true only when the design calls for the family's real italic face. `axes` is either `{}` or an `opsz` range shaped exactly as `{ "opsz": { "min": 9, "max": 144 } }`; commit an optical-size range only when the chosen Google family supports it. Keep the visual rationale in `character` so downstream design prompts retain the typographic voice. The build deterministically unions these commitments with observed usage and enqueues them from Google Fonts; never name Druk, Canela, GT Sectra, or other unavailable foundry fonts.
 - `image_grade`: the one-sentence photographic treatment per the Image Grade section above.
 - `motion`: how the page MOVES — one of `"calm"`, `"energetic"`, `"dramatic"`, `"minimal"`, `"none"`. The theme ships fixed, hand-tuned motion families, not one animation at different speeds: `calm` = soft fades and gentle settling; `energetic` = quick diagonal arrivals, spring overshoot, and livelier hover; `dramatic` = long directional masks, a hero focus pull, and cinematic image movement; `minimal` = hover micro-interactions only, no scroll motion; `none` = completely static. Pick the movement language that serves the concept instead of defaulting to `calm` — a contemplative portfolio may want `calm`, a kids' brand `energetic`, a theatrical launch `dramatic`, and a brutalist manifesto perhaps `none`.
 - `motion_note`: ONE short line of motion art direction refining the profile (e.g. "let the hero image breathe; cards rise one by one"), or `""` when the profile alone says enough.
@@ -74,8 +74,25 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
       "accent": "#RRGGBB"
     },
     "type": {
-      "heading": "Exact Google Fonts family + weights, e.g. 'Fraunces 700/900 — swaggering display serif'",
-      "body": "Exact Google Fonts family + weights, e.g. 'Source Sans 3 400/600'"
+      "heading": {
+        "family": "Fraunces",
+        "weights": [700, 900],
+        "italic": false,
+        "axes": {
+          "opsz": {
+            "min": 9,
+            "max": 144
+          }
+        },
+        "character": "Swaggering display serif with sharp editorial contrast"
+      },
+      "body": {
+        "family": "Source Serif 4",
+        "weights": [400, 600],
+        "italic": true,
+        "axes": {},
+        "character": "Warm, highly readable editorial text with true emphasis"
+      }
     },
     "image_grade": "One compact, concrete art-direction sentence applied to ALL of the site's imagery, per the Image Grade section above.",
     "motion": "calm",

@@ -20,6 +20,13 @@ test('fill throws on an unknown placeholder', function () {
     assert_throws(fn () => PromptRenderer::fill('Hi {{missing}}', []));
 });
 
+test('fill does not reinterpret placeholder-shaped text inside a value', function () {
+    assert_eq(
+        'Hello Acme {{PLACEHOLDER}}',
+        PromptRenderer::fill('Hello {{name}}', ['name' => 'Acme {{PLACEHOLDER}}'])
+    );
+});
+
 test('fill leaves single-brace JSON untouched', function () {
     $tpl = 'config {"sizeSlug":"large"} for {{name}}';
     assert_eq('config {"sizeSlug":"large"} for hero', PromptRenderer::fill($tpl, ['name' => 'hero']));

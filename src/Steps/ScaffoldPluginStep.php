@@ -376,7 +376,7 @@ final class ScaffoldPluginStep implements Step
 
         /** Report a seeding problem where a site owner can still find it. */
         function {{FN_PREFIX}}_content_log($message) {
-            error_log('{{THEME_NAME}} Content: ' . $message);
+            error_log('Generated Site Content: ' . $message);
         }
 
         /** Sanitize with the tree processor, falling back to the tag processor. */

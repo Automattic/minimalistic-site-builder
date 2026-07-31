@@ -23,6 +23,13 @@ function fp_project(array $fontFamilies, array $extraTheme = []): array
         'version' => 3,
         'settings' => ['typography' => ['fontFamilies' => $fontFamilies]],
     ], $extraTheme));
+    $project->writeJson('designDirection.json', [
+        'description' => 'Test direction.',
+        'type' => [
+            'heading' => ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''],
+            'body' => ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''],
+        ],
+    ]);
     return [$project, $tmp];
 }
 
@@ -64,11 +71,27 @@ test('googleFontsUrl builds the css2 axis forms', function () {
         FontsPhpStep::googleFontsUrl(['Source Serif 4' => ['weights' => [400, 700], 'italic' => true]])
     );
     assert_eq(
+        'https://fonts.googleapis.com/css2?family=123:wght@400&display=swap',
+        FontsPhpStep::googleFontsUrl(['123' => ['weights' => [400], 'italic' => false]]),
+        'numeric-looking model family names cannot become fatal integer array keys'
+    );
+    assert_eq(
         'https://fonts.googleapis.com/css2?family=Marcellus:wght@400&family=Lora:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&display=swap',
         FontsPhpStep::googleFontsUrl([
             'Marcellus' => ['weights' => [400], 'italic' => false],
             'Lora' => ['weights' => [400, 600, 700], 'italic' => true],
         ])
+    );
+    assert_eq(
+        'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700&display=swap',
+        FontsPhpStep::googleFontsUrl([
+            'Fraunces' => [
+                'weights' => [400, 700],
+                'italic' => false,
+                'axes' => ['opsz' => ['min' => 9.0, 'max' => 144.0]],
+            ],
+        ]),
+        'validated optical-size range reaches the deterministic CSS2 URL'
     );
 });
 
@@ -88,6 +111,126 @@ test('fontRequirements keeps scanned variants attached to their family', functio
         'Marcellus' => ['weights' => [400], 'italic' => false],
         'Lora' => ['weights' => [400, 600, 700], 'italic' => true],
     ], FontsPhpStep::fontRequirements($theme, $markup));
+});
+
+test('fontRequirements tolerates a numeric-looking model font slug', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => '123', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Display'],
+        ]]],
+    ];
+    $markup = '<p class="has-123-font-family" style="font-weight:500">Numeric slug</p>';
+
+    assert_eq([
+        'Oswald' => ['weights' => [400, 500], 'italic' => false],
+    ], FontsPhpStep::fontRequirements($theme, $markup));
+});
+
+test('fontRequirements resolves a literal family with a numeric-looking slug', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => '123', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Display'],
+        ]]],
+        'styles' => ['typography' => ['fontFamily' => '"Oswald", sans-serif']],
+    ];
+
+    assert_eq([
+        'Oswald' => ['weights' => [400], 'italic' => false],
+    ], FontsPhpStep::fontRequirements($theme, ''));
+});
+
+test('fontRequirements unions committed direction variants with observed usage', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Fraunces", serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Source Serif 4", serif', 'name' => 'Body'],
+        ]]],
+    ];
+    $direction = ['type' => [
+        'heading' => [
+            'family' => 'Fraunces',
+            'weights' => [600, 800],
+            'italic' => false,
+            'axes' => ['opsz' => ['min' => 9.0, 'max' => 144.0]],
+        ],
+        'body' => [
+            'family' => 'Source Serif 4',
+            'weights' => [400, 600],
+            'italic' => true,
+            'axes' => [],
+        ],
+    ]];
+
+    $requirements = FontsPhpStep::fontRequirements($theme, '', $direction);
+    assert_eq([
+        'Fraunces' => [
+            'weights' => [400, 600, 800],
+            'italic' => false,
+            'axes' => ['opsz' => ['min' => 9.0, 'max' => 144.0]],
+        ],
+        'Source Serif 4' => ['weights' => [400, 600, 700], 'italic' => true],
+    ], $requirements);
+    $url = FontsPhpStep::googleFontsUrl($requirements);
+    assert_contains(
+        'Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800',
+        $url,
+        'direction-selected optical sizes and weights reach the URL without markup usage',
+    );
+    assert_contains(
+        'Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700',
+        $url,
+        'direction-selected true italics reach the URL without markup usage',
+    );
+});
+
+test('fontRequirements attributes semantic strong and emphasis to the inherited family', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'heading', 'fontFamily' => '"Fraunces", serif', 'name' => 'Heading'],
+            ['slug' => 'body', 'fontFamily' => '"Source Serif 4", serif', 'name' => 'Body'],
+        ]]],
+    ];
+    $markup = '<h2 class="has-heading-font-family"><strong>Bold display</strong></h2>'
+        . '<p class="has-body-font-family"><em>True emphasis</em></p>';
+
+    assert_eq([
+        'Fraunces' => ['weights' => [400, 700], 'italic' => false],
+        'Source Serif 4' => ['weights' => [400, 700], 'italic' => true],
+    ], FontsPhpStep::fontRequirements($theme, $markup));
+});
+
+test('fonts-php declares and durably warns about undeliverable direction values', function () {
+    [$project, $tmp] = fp_project([
+        ['slug' => 'heading', 'fontFamily' => '"Cormorant Garamond", serif', 'name' => 'Heading'],
+        ['slug' => 'body', 'fontFamily' => '"Lora", serif', 'name' => 'Body'],
+    ]);
+    $project->writeJson('designDirection.json', ['description' => 'Editorial', 'type' => [
+        'heading' => [
+            'family' => 'Fraunces',
+            'weights' => [700],
+            'italic' => false,
+            'axes' => ['CASL' => ['min' => 0, 'max' => 1]],
+        ],
+        'body' => [
+            'family' => 'Lora',
+            'weights' => [400],
+            'italic' => false,
+            'axes' => [],
+        ],
+    ]]);
+
+    $step = new FontsPhpStep();
+    assert_true(in_array('designDirection.json', $step->declaration()->reads, true));
+    assert_true(in_array('warnings.json', $step->declaration()->writes, true));
+    $step->run($project);
+
+    $warnings = implode(' ', $project->readJson('warnings.json')['fonts-php'] ?? []);
+    assert_contains('designDirection.json: type.heading.family authored value "Fraunces"', $warnings);
+    assert_contains('delivered "Cormorant Garamond"', $warnings);
+    assert_contains('designDirection.json: type.heading.axes.CASL', $warnings);
+    assert_contains('delivered removed', $warnings);
+    assert_true(!str_contains($project->readText('theme/fonts.php'), 'CASL'), 'unsupported axis is inert');
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('build emits only program-controlled values, never model text', function () {

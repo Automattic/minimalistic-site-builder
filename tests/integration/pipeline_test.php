@@ -60,7 +60,22 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'title' => 'Hearth & Grain',
         'description' => 'Editorial-magazine warmth, 1970s print feel. Earthy neutrals, one electric accent; serif display over grotesque body. Avoid the centered all-sans hero.',
         'palette' => ['base' => '#FDF6EC', 'contrast' => '#2B2118', 'primary' => '#8A5A2B', 'secondary' => '#CC9988', 'accent' => '#E08A3C'],
-        'type' => ['heading' => 'Fraunces 700/900', 'body' => 'Source Sans 3 400/600'],
+        'type' => [
+            'heading' => [
+                'family' => 'Fraunces',
+                'weights' => [700, 900],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'warm display serif',
+            ],
+            'body' => [
+                'family' => 'Source Sans 3',
+                'weights' => [400, 600],
+                'italic' => false,
+                'axes' => [],
+                'character' => 'clear editorial sans',
+            ],
+        ],
         'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
@@ -68,7 +83,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'hero_composition' => 'full-bleed bakery photo, headline pinned lower-left',
     ]]);
     // Concurrent group, request order is [theme-json, page-plan(home), page-plan(menu)]:
-    // theme-json (json) — design decisions made inline, no design.md
+    // theme-json (json) — translates the committed design direction into tokens
     $llm->queueJson([
         'settings' => [
             'color' => ['palette' => [
@@ -153,15 +168,6 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     $llm->queueText(
         ".overlap-up {\n    margin-top: -4rem;\n    position: relative;\n    z-index: 2;\n}"
     );
-    // fonts-php (text) — the generated fonts module; must cover the scanned
-    // 400/700 floor for both theme.json families or the step falls back.
-    $llm->queueText(
-        "<?php\nadd_action('enqueue_block_assets', function () {\n"
-        . "    wp_enqueue_style('preconnect-gfonts', 'https://fonts.gstatic.com', array(), null);\n"
-        . "    wp_enqueue_style('demo-fonts', 'https://fonts.googleapis.com/css2?family=Fraunces:wght@400;700&family=Source+Sans+3:wght@400;700&display=swap', array(), null);\n"
-        . "});\n"
-    );
-
     $builder = make_integration_builder($llm, $tmp);
     $project = $builder->createProject('A cozy neighborhood bakery', 'demo', multiPage: true);
     $builder->pipeline()->runThrough($project);
@@ -278,6 +284,19 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         }
     }
     assert_true($bundledFaces !== [], 'the Google families carry bundled fontFace entries');
+    // The committed direction is a floor for bundling too: these weights appear
+    // in no markup, only in designDirection.json, yet their faces must ship.
+    $bundledSrcs = implode(' ', $bundledFaces);
+    assert_contains(
+        'fraunces-900',
+        $bundledSrcs,
+        'direction-selected heading weight is bundled without explicit markup usage',
+    );
+    assert_contains(
+        'source-sans-3-600',
+        $bundledSrcs,
+        'direction-selected body weight is bundled without explicit markup usage',
+    );
     $functions = $project->readText('theme/functions.php');
     assert_contains('get_stylesheet_uri()', $functions);
     assert_true(!str_contains($functions, 'googleapis'), 'nothing hotlinks Google');

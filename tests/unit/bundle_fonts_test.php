@@ -31,6 +31,7 @@ $bundleFontsProject = static function (array $familySlugs = ['inter']): Project 
     }
     $tmp = sys_get_temp_dir() . '/bundle-fonts-' . uniqid();
     $project = new Project($tmp);
+    $project->writeJson('designDirection.json', []);
     $project->writeJson('theme/theme.json', [
         'settings' => ['typography' => ['fontFamilies' => $families]],
     ]);
@@ -174,6 +175,7 @@ test('BundleFontsStep names assets from the catalog family, not the theme role s
     // resolved catalog family provides the canonical filesystem identity.
     $tmp = sys_get_temp_dir() . '/bundle-fonts-traversal-' . uniqid();
     $project = new Project($tmp);
+    $project->writeJson('designDirection.json', []);
     $project->writeJson('theme/theme.json', [
         'settings' => ['typography' => ['fontFamilies' => [[
             'slug'       => '../../evil',

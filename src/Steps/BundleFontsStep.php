@@ -55,7 +55,7 @@ final class BundleFontsStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
+            reads: ['designDirection.json', 'theme/theme.json', 'theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
             writes: ['theme/theme.json', 'theme/assets/fonts/*', 'warnings.json'],
             concurrent: false,
         );
@@ -64,7 +64,16 @@ final class BundleFontsStep implements Step
     public function run(Project $project): void
     {
         $theme = $project->readJson('theme/theme.json');
-        $requirements = FontsPhpStep::fontRequirements($theme, FontsPhpStep::themeMarkup($project));
+        // The committed direction is a floor for bundling too: a variant the
+        // design director selected ships as a face even when no final markup
+        // uses it (BIGR-750). FontsPhpStep reports the disposition warnings.
+        $directionWarnings = [];
+        $requirements = FontsPhpStep::fontRequirements(
+            $theme,
+            FontsPhpStep::themeMarkup($project),
+            $project->readJson('designDirection.json'),
+            $directionWarnings,
+        );
         if ($requirements === []) {
             echo "  no Google-hosted families; nothing to bundle\n";
             return;
