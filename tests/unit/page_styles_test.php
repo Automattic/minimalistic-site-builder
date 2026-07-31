@@ -703,6 +703,66 @@ test('site CSS path preserves raw and CSS-escaped NUL image strings without warn
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path scrubs every slash-backslash authority pair and keeps a single backslash path', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_authority_pairs_');
+    $base = $project->readText('theme/style.css');
+    $backslash = '\\';
+    $values = [
+        'slash-slash' => '//evil.example/slash-slash.png',
+        'backslash-backslash' => str_repeat($backslash, 4) . 'evil.example/backslash-backslash.png',
+        'slash-backslash' => '/' . str_repeat($backslash, 2) . 'evil.example/slash-backslash.png',
+        'backslash-slash' => str_repeat($backslash, 2) . '/evil.example/backslash-slash.png',
+    ];
+    $singleBackslash = str_repeat($backslash, 2) . 'assets/local.png';
+    $siteCss = '.slash-slash{background-image:image-set("' . $values['slash-slash'] . '" 1x);display:grid}'
+        . '.backslash-backslash{background-image:image-set("' . $values['backslash-backslash'] . '" 2x);padding:1rem}'
+        . '.slash-backslash{background-image:image-set("' . $values['slash-backslash'] . '" 3x);margin:2rem}'
+        . '.backslash-slash{background-image:image-set("' . $values['backslash-slash'] . '" 4x);position:relative}'
+        . '.single-backslash{background-image:image-set("' . $singleBackslash . '" 1x);color:red}';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $base
+        . '.slash-slash{display:grid}'
+        . '.backslash-backslash{padding:1rem}'
+        . '.slash-backslash{margin:2rem}'
+        . '.backslash-slash{position:relative}'
+        . '.single-backslash{background-image:image-set("' . $singleBackslash . '" 1x);color:red}',
+        $project->readText('theme/style.css'),
+        'all network authority pairs removed; single decoded backslash path preserved'
+    );
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+    $warningRows = $project->readJson('warnings.json')['page-styles'] ?? [];
+    assert_eq(4, count($warningRows), 'one warning per removed authority-pair declaration');
+    $warnings = implode("\n", $warningRows);
+    $authored = [
+        'background-image:image-set("' . $values['slash-slash'] . '" 1x);',
+        'background-image:image-set("' . $values['backslash-backslash'] . '" 2x);',
+        'background-image:image-set("' . $values['slash-backslash'] . '" 3x);',
+        'background-image:image-set("' . $values['backslash-slash'] . '" 4x);',
+    ];
+    foreach ($authored as $declaration) {
+        $encoded = json_encode(
+            $declaration,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+        );
+        assert_true(is_string($encoded));
+        assert_contains('authored_value=' . $encoded, $warnings);
+    }
+    assert_contains('delivered_value=removed', $warnings);
+    assert_contains('disposition=removed_external_url', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(

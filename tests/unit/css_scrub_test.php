@@ -366,6 +366,40 @@ test('css scrub preserves raw and CSS-escaped NUL image strings byte for byte', 
     assert_contains($rawRemote, CssScrub::scrub($rawCss)['css'], 'remote-like suffix remains inert');
 });
 
+test('css scrub removes every decoded slash-backslash authority pair', function (): void {
+    $backslash = '\\';
+    $cases = [
+        'slash slash' => '//evil.example/slash-slash.png',
+        'backslash backslash' => str_repeat($backslash, 4) . 'evil.example/backslash-backslash.png',
+        'slash backslash' => '/' . str_repeat($backslash, 2) . 'evil.example/slash-backslash.png',
+        'backslash slash' => str_repeat($backslash, 2) . '/evil.example/backslash-slash.png',
+    ];
+
+    foreach ($cases as $label => $value) {
+        $declaration = 'background-image:image-set("' . $value . '" 1x);';
+        $css = '.bad{' . $declaration . 'color:red}';
+        $result = CssScrub::scrub($css);
+
+        assert_eq('.bad{color:red}', $result['css'], $label);
+        assert_eq(1, count($result['removals']), $label);
+        assert_eq($declaration, $result['removals'][0]['authored_value'], $label);
+        assert_eq(hash('sha256', $declaration), hash('sha256', $result['removals'][0]['authored_value']), $label);
+        assert_eq('removed_external_url', $result['removals'][0]['disposition'], $label);
+    }
+});
+
+test('css scrub preserves a single decoded backslash relative path byte for byte', function (): void {
+    $value = str_repeat('\\', 2) . 'assets/local.png';
+    $css = '.safe{background-image:image-set("' . $value . '" 1x);color:red}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq(strlen($css), strlen($result['css']));
+    assert_eq(hash('sha256', $css), hash('sha256', $result['css']));
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
 test('css scrub preserves strings outside immediate image function url context', function (): void {
     $css = '.note::before{content:"https://x"}'
         . '.tokens{--asset:"https://x"}'
