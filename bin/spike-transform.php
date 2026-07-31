@@ -265,11 +265,15 @@ function spike_validate_report(array $report, string $schemaPath): void
     }
     foreach ($report['dropped_elements'] as $element) {
         if (!is_array($element)
-            || array_keys($element) !== ['selector', 'tag']
+            || array_keys($element) !== ['selector', 'tag', 'disposition', 'evidence']
             || !is_string($element['selector'])
             || trim($element['selector']) === ''
             || !is_string($element['tag'])
-            || trim($element['tag']) === '') {
+            || trim($element['tag']) === ''
+            || !in_array($element['disposition'], ['replaced', 'dropped'], true)
+            || !is_string($element['evidence'])
+            || ($element['disposition'] === 'replaced' && trim($element['evidence']) === '')
+            || ($element['disposition'] === 'dropped' && $element['evidence'] !== '')) {
             throw new RuntimeException('Spike report dropped element rows do not match the frozen schema.');
         }
     }
@@ -319,13 +323,19 @@ function spike_markdown(array $report, array $details, string $status, string $u
         $lines[] = '- None';
     } else {
         foreach ($report['dropped_elements'] as $element) {
-            $lines[] = '- `' . $element['tag'] . '` at `' . $element['selector'] . '`';
+            $evidence = $element['evidence'] === ''
+                ? 'none'
+                : '`' . str_replace('`', '\\`', $element['evidence']) . '`';
+            $lines[] = '- `' . $element['tag'] . '` at `' . $element['selector']
+                . '`: `' . $element['disposition'] . '`; evidence: ' . $evidence;
         }
     }
     $svgDropped = in_array(
         [
             'selector' => SPIKE_ELEMENT_PROBES[0]['selector'],
             'tag' => SPIKE_ELEMENT_PROBES[0]['tag'],
+            'disposition' => 'replaced',
+            'evidence' => SPIKE_ELEMENT_PROBES[0]['selector'],
         ],
         $report['dropped_elements'],
         true,

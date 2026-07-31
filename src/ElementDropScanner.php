@@ -20,7 +20,7 @@ final class ElementDropScanner
      * @param list<array{selector:string,tag:string,marker:string}> $probes
      * @param array<int,array<string,mixed>> $fallbacks
      * @param array<int,array<string,mixed>> $assets
-     * @return list<array{selector:string,tag:string}>
+     * @return list<array{selector:string,tag:string,disposition:'replaced'|'dropped',evidence:string}>
      */
     public function scan(array $probes, array $fallbacks, array $assets, string $serializedMarkup): array
     {
@@ -46,19 +46,15 @@ final class ElementDropScanner
             }
 
             $key = $selector . "\0" . $tag;
-            $row = [
+            $replacementEvidence = isset($assetSelectors[$selector])
+                ? $selector
+                : array_key_first($markerTags);
+            $dropped[$key] = [
                 'selector' => $selector,
                 'tag' => $tag,
+                'disposition' => $replacementEvidence === null ? 'dropped' : 'replaced',
+                'evidence' => $replacementEvidence ?? '',
             ];
-            if (isset($assetSelectors[$selector]) || $markerTags !== []) {
-                // Explicit replacement: artwork/behavior may survive, but the
-                // original source element and tag did not.
-                $dropped[$key] = $row;
-                continue;
-            }
-
-            // No survival, fallback, or replacement evidence.
-            $dropped[$key] = $row;
         }
 
         $dropped = array_values($dropped);
