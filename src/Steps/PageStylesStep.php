@@ -3,12 +3,15 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TransformArtifacts;
 
 /**
  * Step (LLM): generate the CSS for the layout utility classes the sections used.
@@ -130,6 +133,11 @@ final class PageStylesStep implements Step
 
     public function run(Project $project): void
     {
+        if ($project->exists(TransformArtifacts::SITE_CSS)) {
+            self::mergeDeterministicStyles($project);
+            return;
+        }
+
         $used = self::usedClasses($project);
         if ($used === []) {
             echo "  no layout utility classes referenced; nothing to style\n";
@@ -189,6 +197,94 @@ final class PageStylesStep implements Step
             rtrim($project->readText('theme/style.css')) . "\n\n" . self::MARKER . "\n" . $css . "\n"
         );
         echo '  styled: ' . implode(', ', $used) . "\n";
+    }
+
+    private static function mergeDeterministicStyles(Project $project): void
+    {
+        $chunks = [];
+        $warnings = [];
+
+        $siteCss = self::scrubChunk(
+            $project->readText(TransformArtifacts::SITE_CSS),
+            TransformArtifacts::SITE_CSS,
+            $warnings,
+        );
+        if ($siteCss !== '') {
+            $chunks[] = $siteCss;
+        }
+
+        $designFiles = glob($project->path('design/*.html')) ?: [];
+        sort($designFiles, SORT_STRING);
+        foreach ($designFiles as $file) {
+            $source = 'design/' . basename($file);
+            $html = $project->readText($source);
+            preg_match_all(
+                '~<style\b(?=[^>]*\bdata-page-css(?=\s|=|>))[^>]*>(.*?)</style\s*>~is',
+                $html,
+                $matches,
+                PREG_SET_ORDER,
+            );
+            foreach ($matches as $index => $match) {
+                $css = self::scrubChunk(
+                    $match[1],
+                    $source . ' style[data-page-css]#' . ($index + 1),
+                    $warnings,
+                );
+                if ($css !== '') {
+                    $chunks[] = $css;
+                }
+            }
+        }
+
+        if ($project->exists(TransformArtifacts::CARRIED_CSS)) {
+            $carriedCss = self::scrubChunk(
+                $project->readText(TransformArtifacts::CARRIED_CSS),
+                TransformArtifacts::CARRIED_CSS,
+                $warnings,
+            );
+            if ($carriedCss !== '') {
+                $chunks[] = $carriedCss;
+            }
+        }
+
+        $project->addWarnings('page-styles', $warnings);
+        if ($chunks === []) {
+            Narrator::write("  no safe deterministic page CSS to merge\n");
+            return;
+        }
+
+        $tail = implode("\n", $chunks);
+        $style = $project->readText('theme/style.css');
+        if (str_ends_with($style, $tail)) {
+            Narrator::write("  deterministic page CSS already merged\n");
+            return;
+        }
+
+        $separator = $style !== '' && !str_ends_with($style, "\n") ? "\n" : '';
+        $project->writeText('theme/style.css', $style . $separator . $tail);
+        Narrator::write("  merged deterministic page CSS\n");
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private static function scrubChunk(string $css, string $source, array &$warnings): string
+    {
+        $result = CssScrub::scrub($css);
+        foreach ($result['removals'] as $removal) {
+            $authored = json_encode(
+                $removal['authored_value'],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+            );
+            $warnings[] = sprintf(
+                'source=%s; authored_value=%s; delivered_value=%s; disposition=%s',
+                $source,
+                $authored,
+                $removal['delivered_value'],
+                $removal['disposition'],
+            );
+        }
+        return $result['css'];
     }
 
     /**

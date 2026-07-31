@@ -1,10 +1,12 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\TransformArtifacts;
 
 /**
  * PageStylesStep: the layout-only CSS-appendix validator (namespaced selectors
@@ -214,6 +216,193 @@ test('run skips without an LLM call when no utility class is used', function () 
 
     assert_eq([], $llm->calls, 'no LLM call made');
     assert_eq($before, $project->readText('theme/style.css'), 'style.css untouched');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('absent site CSS keeps the recorded legacy call trace and exact style bytes', function () {
+    [$project, $tmp] = ps_project('builder_ps_legacy_control_');
+    $project->writeText('theme/style.css', "/*\nTheme Name: Legacy Control\n*/\n");
+    $project->writeText(
+        'theme/parts/section-work.html',
+        '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
+    );
+    $llm = new FakeLlm();
+    $llm->queueText(
+        ".overlap-up {\n"
+        . "    margin-top: -4rem;\n"
+        . "    position: relative;\n"
+        . "    z-index: 2;\n"
+        . "}"
+    );
+
+    (new PageStylesStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        'legacy-model',
+        0.25,
+    ))->run($project);
+
+    assert_eq(1, $llm->completeCalls, 'legacy path makes one serial text call');
+    assert_eq(0, $llm->completeBatchCalls, 'legacy path makes no batch call');
+    assert_eq(1, count($llm->calls), 'legacy call trace count');
+    assert_eq(
+        '795782459c2b711fdeaf1ac2bd67fdb4e301926dd515c9f6dd6a8b8361b3d52d',
+        hash('sha256', $llm->calls[0]['prompt']),
+        'legacy prompt bytes'
+    );
+    assert_eq(
+        [
+            'log_label'   => 'page-styles',
+            'model'       => 'legacy-model',
+            'temperature' => 0.25,
+        ],
+        $llm->calls[0]['opts'],
+        'legacy call options'
+    );
+    assert_eq(
+        "/*\nTheme Name: Legacy Control\n*/\n\n"
+        . "/* Layout utilities — generated per-design by the page-styles step. */\n"
+        . ".overlap-up {\n"
+        . "    margin-top: -4rem;\n"
+        . "    position: relative;\n"
+        . "    z-index: 2;\n"
+        . "}\n",
+        $project->readText('theme/style.css'),
+        'legacy style.css bytes'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path merges exact safe bytes in deterministic source and document order', function () {
+    [$project, $tmp] = ps_project('builder_ps_deterministic_');
+    $base = "/* existing theme CSS */\n.base{display:block;}\n";
+    $siteCss = "/* site */\n.site{padding:1rem;}\n";
+    $alpha = '<main>Alpha</main>'
+        . "<style data-page-css>\n.alpha-one { margin: 1rem; }\n</style>"
+        . '<style data-page-css="page">.alpha-two{padding:2rem;}</style>';
+    $zeta = '<style class="ignored">.ignored{display:none;}</style>'
+        . '<style data-page-css>.zeta{gap:3rem;}</style>';
+    $carried = ".be-inline-geometry-1{width:42%;}\n";
+    $project->writeText('theme/style.css', $base);
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeText('design/zeta.html', $zeta);
+    $project->writeText('design/alpha.html', $alpha);
+    $project->writeText(TransformArtifacts::CARRIED_CSS, $carried);
+    $sourceBytes = [
+        TransformArtifacts::SITE_CSS    => $project->readText(TransformArtifacts::SITE_CSS),
+        'design/alpha.html'             => $project->readText('design/alpha.html'),
+        'design/zeta.html'              => $project->readText('design/zeta.html'),
+        TransformArtifacts::CARRIED_CSS => $project->readText(TransformArtifacts::CARRIED_CSS),
+    ];
+    $llm = new FakeLlm();
+    $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
+
+    $step->run($project);
+
+    $once = $project->readText('theme/style.css');
+    assert_eq(
+        $base
+        . $siteCss
+        . "\n\n.alpha-one { margin: 1rem; }\n"
+        . "\n.alpha-two{padding:2rem;}"
+        . "\n.zeta{gap:3rem;}"
+        . "\n"
+        . $carried,
+        $once,
+        'site, sorted design files, document order, then carried CSS'
+    );
+    assert_eq([], $llm->calls, 'deterministic path makes zero LLM calls');
+    assert_eq(0, $llm->completeCalls, 'deterministic path skips legacy complete');
+    assert_true(
+        !str_contains($once, 'Layout utilities — generated per-design'),
+        'deterministic path introduces no legacy marker'
+    );
+    foreach ($sourceBytes as $source => $bytes) {
+        assert_eq($bytes, $project->readText($source), "{$source} remains byte-identical");
+    }
+
+    $step->run($project);
+
+    assert_eq($once, $project->readText('theme/style.css'), 'second run is byte-identical');
+    assert_eq([], $llm->calls, 'second deterministic run still makes zero LLM calls');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path works without transformer-carried CSS', function () {
+    [$project, $tmp] = ps_project('builder_ps_no_carried_');
+    $base = $project->readText('theme/style.css');
+    $project->writeText(TransformArtifacts::SITE_CSS, ".site{display:grid;}\n");
+    $project->writeText(
+        'design/home.html',
+        '<style data-page-css>.home{grid-template-columns:1fr 1fr;}</style>'
+    );
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $base . ".site{display:grid;}\n\n.home{grid-template-columns:1fr 1fr;}",
+        $project->readText('theme/style.css')
+    );
+    assert_eq([], $llm->calls, 'absent carried CSS does not fall back to the LLM');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path routes live narration through Narrator', function () {
+    [$project, $tmp] = ps_project('builder_ps_narrator_');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
+    $llm = new FakeLlm();
+    $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
+    $stream = fopen('php://memory', 'w+');
+    assert_true(is_resource($stream), 'memory narration stream opened');
+    Narrator::setStream($stream);
+
+    try {
+        $step->run($project);
+        $step->run($project);
+        rewind($stream);
+        assert_eq(
+            "  merged deterministic page CSS\n  deterministic page CSS already merged\n",
+            stream_get_contents($stream),
+            'new deterministic narration uses Narrator'
+        );
+    } finally {
+        Narrator::reset();
+        fclose($stream);
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('site CSS path warns for every scrub removal and continues after an empty source', function () {
+    [$project, $tmp] = ps_project('builder_ps_scrub_');
+    $base = $project->readText('theme/style.css');
+    $siteCss = '@import url("https://fonts.example.invalid/font.css");';
+    $page = '<main>Kept</main><style data-page-css>'
+        . '.page{color:var(--wp--preset--color--contrast);'
+        . 'background-image:url(https://cdn.example.invalid/nope.png);padding:1rem;}'
+        . '</style>';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeText('design/about.html', $page);
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $base . ".page{color:var(--wp--preset--color--contrast);padding:1rem;}",
+        $project->readText('theme/style.css'),
+        'empty scrubbed site CSS does not block surviving page CSS'
+    );
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq($page, $project->readText('design/about.html'), 'page source unchanged');
+    assert_eq([], $llm->calls, 'scrub degradation makes zero LLM calls');
+    $warnings = implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []);
+    assert_contains('source=design/site.css', $warnings);
+    assert_contains('@import url', $warnings);
+    assert_contains('source=design/about.html style[data-page-css]#1', $warnings);
+    assert_contains('background-image:url', $warnings);
+    assert_contains('delivered_value=removed', $warnings);
+    assert_contains('disposition=removed_import', $warnings);
+    assert_contains('disposition=removed_external_url', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
