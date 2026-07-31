@@ -22,7 +22,7 @@ test('design-preview sanitizes a removable script without an LLM repair', functi
     assert_eq(1, $allCalls, 'removable script does not trigger repair');
     assert_contains('AUTHORED-SCRIPT-MARKER', $delivered, 'sanitizer preserves authored content');
     assert_true(!str_contains(strtolower($delivered), '<script'), 'script is removed');
-    assert_contains('disposition repaired', $warnings, 'sanitizer repair is recorded');
+    assert_contains('disposition removed', $warnings, 'unsafe script removal is recorded');
     assert_true(!str_contains($warnings, 'disposition degraded'), 'safe scaffold is not used');
     design_preview_assert_shape($delivered);
 });
