@@ -6,6 +6,13 @@ ASSIGNED COMPOSITION (the page plan assigned every section its composition so th
   Neighbors' assignments (design your top and bottom edges against these):
 {{neighbors}}
 
+When the below-neighbor is the assigned site footer, its ownership sentence is
+a hard boundary: keep this section's planned narrative/facts/imagery/primary
+CTA here, but do not turn it into a second site footer with copyright, legal
+links, a sitemap, or repeated site-wide identity. Hand off through the assigned
+surface and spacing; do not close with an ornamental rule/device merely for the
+footer to open with another copy of it.
+
 Execute the assigned layout archetype:
 - full-bleed-cover — a full-width wp:cover (align:"full") with a background image or gradient preset and overlaid content.
 - asymmetric-split — two columns at deliberately unequal widths (e.g. 34/66 or 40/60) — never 50/50.

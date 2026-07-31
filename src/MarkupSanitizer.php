@@ -159,6 +159,21 @@ final class MarkupSanitizer
     }
 
     /**
+     * Share the sanitizer's browser-like attribute tokenization with
+     * deterministic generated-markup repairs. Callers receive source spans
+     * into the supplied opening tag, so edits never mistake attribute-shaped
+     * text inside a quoted value for a real attribute.
+     *
+     * @return list<array{
+     *   name:string,start:int,end:int,valueStart:?int,valueEnd:?int
+     * }>
+     */
+    public static function openingTagAttributes(string $tag): array
+    {
+        return self::attributes($tag);
+    }
+
+    /**
      * Tokenize attributes from one already-bounded opening tag.
      *
      * The spans follow the HTML tokenizer closely enough for security

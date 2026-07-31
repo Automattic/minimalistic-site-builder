@@ -83,6 +83,34 @@ test('ConcurrentGroup rejects overlapping member writes', function () {
     assert_throws(fn () => new ConcurrentGroup($llm, [$directoryWriter, $fileWriter]));
 });
 
+test('ConcurrentGroup allows members to share the append-only warnings sink', function () {
+    $llm = new FakeLlm();
+    $a = new RecordingConcurrentStep('alpha', [], [], ['alpha.json', 'warnings.json']);
+    $b = new RecordingConcurrentStep('beta', [], [], ['beta.json', 'warnings.json']);
+
+    $declaration = (new ConcurrentGroup($llm, [$a, $b]))->declaration();
+
+    assert_eq(['alpha.json', 'warnings.json', 'beta.json'], $declaration->writes);
+});
+
+test('shared warnings do not mask another overlapping member write', function () {
+    $llm = new FakeLlm();
+    $directoryWriter = new RecordingConcurrentStep(
+        'directory-writer',
+        [],
+        [],
+        ['warnings.json', 'theme/parts/*']
+    );
+    $fileWriter = new RecordingConcurrentStep(
+        'file-writer',
+        [],
+        [],
+        ['warnings.json', 'theme/parts/footer.html']
+    );
+
+    assert_throws(fn () => new ConcurrentGroup($llm, [$directoryWriter, $fileWriter]));
+});
+
 test('ConcurrentGroup rejects a path alias before it can bypass overlap checks', function () {
     $llm = new FakeLlm();
     $canonical = new RecordingConcurrentStep('canonical', [], [], ['theme/parts/header.html']);

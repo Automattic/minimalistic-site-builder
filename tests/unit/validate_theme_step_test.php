@@ -129,3 +129,25 @@ test('validate-theme also runs the typography and plan validators', function () 
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
+
+test('validate-theme records footer interaction residuals and still delivers', function () {
+    [$project, $tmp] = final_validation_project();
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:paragraph --><p><a href="#">Social</a></p><!-- /wp:paragraph -->'
+        . '<!-- wp:list --><ul class="wp-block-list"></ul><!-- /wp:list -->'
+    );
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        assert_true($project->exists('theme/parts/footer.html'), 'advisory validation never removes the footer');
+        $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+        assert_contains('authored href="#" -> delivered href="#"', $joined);
+        assert_contains('wp:list[1]', $joined);
+        assert_contains('disposition:', $joined);
+        assert_contains('theme delivered anyway', $project->readText('logs/validate-theme.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
