@@ -787,6 +787,9 @@ final class HomepageDesignStep implements Step
         }
 
         $needle = self::normalizedText($selector);
+        if ($needle === null) {
+            return false;
+        }
         foreach (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as $tag) {
             foreach ($root->getElementsByTagName($tag) as $heading) {
                 if (self::normalizedText($heading->textContent) === $needle) {
@@ -837,7 +840,7 @@ final class HomepageDesignStep implements Step
         }
 
         $needle = self::normalizedText($selector);
-        if ($needle === '') {
+        if ($needle === null || $needle === '') {
             return null;
         }
         $matches = [];
@@ -875,10 +878,10 @@ final class HomepageDesignStep implements Step
         )) . ')';
     }
 
-    private static function normalizedText(string $text): string
+    private static function normalizedText(string $text): ?string
     {
         $normalized = preg_replace('/\s+/u', ' ', $text);
-        return $normalized === null ? '' : mb_strtolower(trim($normalized));
+        return $normalized === null ? null : mb_strtolower(trim($normalized));
     }
 
     /**
@@ -1237,23 +1240,10 @@ final class HomepageDesignStep implements Step
         string $context,
         array &$warnings,
     ): string {
-        $malformedTags = self::malformedTagRemovals($html);
-        $removals = $malformedTags;
-        foreach (self::malformedCommentRemovals($html) as $commentRemoval) {
-            $overlapsMalformedTag = false;
-            foreach ($malformedTags as $tagRemoval) {
-                if (
-                    $commentRemoval['start'] < $tagRemoval['start'] + $tagRemoval['length']
-                    && $tagRemoval['start'] < $commentRemoval['start'] + $commentRemoval['length']
-                ) {
-                    $overlapsMalformedTag = true;
-                    break;
-                }
-            }
-            if (!$overlapsMalformedTag) {
-                $removals[] = $commentRemoval;
-            }
-        }
+        $removals = [
+            ...self::malformedTagRemovals($html),
+            ...self::malformedCommentRemovals($html),
+        ];
         $head = self::headContentRange($html);
         $headStyleStarts = self::domHeadStyleStarts($html);
         $offset = 0;
@@ -1311,18 +1301,59 @@ final class HomepageDesignStep implements Step
         if ($removals === []) {
             return $html;
         }
+        $removalSpans = self::nonOverlappingRemovalSpans($removals);
         usort(
             $removals,
             static fn (array $left, array $right): int => $right['start'] <=> $left['start'],
         );
+        foreach (array_reverse($removalSpans) as $removalSpan) {
+            $html = substr($html, 0, $removalSpan['start'])
+                . substr($html, $removalSpan['start'] + $removalSpan['length']);
+        }
         foreach ($removals as $removal) {
-            $html = substr($html, 0, $removal['start'])
-                . substr($html, $removal['start'] + $removal['length']);
             $authored = self::warningValue($removal['authored']);
             $warnings[] = "malformed_design: {$path} context {$context}; authored {$authored}; "
                 . 'delivered removed; disposition removed';
         }
         return $html;
+    }
+
+    /**
+     * @param list<array{start:int,length:int,authored:string}> $removals
+     * @return list<array{start:int,length:int}>
+     */
+    private static function nonOverlappingRemovalSpans(array $removals): array
+    {
+        usort(
+            $removals,
+            static function (array $left, array $right): int {
+                $byStart = $left['start'] <=> $right['start'];
+                return $byStart !== 0
+                    ? $byStart
+                    : $right['length'] <=> $left['length'];
+            },
+        );
+
+        $spans = [];
+        $coveredUntil = null;
+        foreach ($removals as $removal) {
+            if ($removal['length'] <= 0) {
+                continue;
+            }
+            $end = $removal['start'] + $removal['length'];
+            if ($coveredUntil !== null && $end <= $coveredUntil) {
+                continue;
+            }
+            $start = $coveredUntil === null
+                ? $removal['start']
+                : max($removal['start'], $coveredUntil);
+            $spans[] = [
+                'start'  => $start,
+                'length' => $end - $start,
+            ];
+            $coveredUntil = $end;
+        }
+        return $spans;
     }
 
     /**
@@ -1417,26 +1448,8 @@ final class HomepageDesignStep implements Step
             return null;
         }
 
-        $doctypeDelimiter = $html[$start + 9] ?? '';
-        $quoteAware = strncasecmp(substr($html, $start, 9), '<!doctype', 9) === 0
-            && (
-                $doctypeDelimiter === '>'
-                || str_contains(" \t\n\f\r", $doctypeDelimiter)
-            );
-        $quote = null;
         for ($offset = $start + 2; $offset < $end; $offset++) {
-            $char = $html[$offset];
-            if ($quoteAware && $quote !== null) {
-                if ($char === $quote) {
-                    $quote = null;
-                }
-                continue;
-            }
-            if ($quoteAware && ($char === '"' || $char === "'")) {
-                $quote = $char;
-                continue;
-            }
-            if ($char === '>') {
+            if ($html[$offset] === '>') {
                 return $offset + 1;
             }
         }
