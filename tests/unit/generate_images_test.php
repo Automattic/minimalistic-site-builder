@@ -639,6 +639,49 @@ test('generate-images refuses completion when an uncollected AI_IMAGE source rem
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('generate-images refuses completion when a design src was never collected', function () {
+    // The HTML-first silent failure: the design invented "hero.jpg", nothing
+    // matched the AI_IMAGE marker, and the build reported success with zero
+    // images and a page of broken pictures.
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="hero.jpg" alt="A roaster tilting a cooling tray"/></figure><!-- /wp:image -->'
+    );
+    $images = new FakeImageClient();
+
+    assert_throws(
+        fn () => (new GenerateImagesStep($images))->run($project),
+        'an uncollected image source must not pass the completion gate',
+    );
+    assert_eq([], $images->calls);
+    assert_true(!$project->exists(GenerateImagesStep::COMPLETION_ARTIFACT));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images completes with a failed image still holding its placeholder', function () {
+    // A single image failing never aborts the build, so its untouched
+    // theme: placeholder must not read as a dangling source.
+    [$project, $tmp] = generate_fixture();
+    $project->writeText('theme/templates/page.html', '<p>no images here</p>');
+    $images = new FakeImageClient(fail: true);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq('failed', $project->readJson('images.json')[0]['status']);
+    assert_contains('theme:./assets/hero.jpg', $project->readText('theme/parts/hero.html'));
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('generate-images clears a stale completion artifact before a failed re-run', function () {
     $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

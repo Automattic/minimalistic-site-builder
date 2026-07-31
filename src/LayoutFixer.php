@@ -72,12 +72,23 @@ final class LayoutFixer
      * settings.layout.contentSize in px (null when unknown — the cover
      * measure rule is skipped without it).
      *
+     * $htmlFirst turns off the three width rules that assume the THEME owns
+     * page width via contentSize. On the HTML-first path the carried design
+     * CSS owns it, and the transformer deliberately emits no layout attribute
+     * on section roots — stamping one back boxes full-bleed heroes. Header and
+     * footer keep every rule: their width still comes from the theme.
+     *
      * @return array{markup:string, notes:string[]} notes are human-readable
      *         descriptions of each change; empty notes means markup is
      *         returned unchanged.
      */
-    public static function fix(string $markup, string $role, ?float $contentSize = null, array $spacingSlugs = []): array
-    {
+    public static function fix(
+        string $markup,
+        string $role,
+        ?float $contentSize = null,
+        array $spacingSlugs = [],
+        bool $htmlFirst = false,
+    ): array {
         $notes = [];
         $markup = self::repairMalformedAttributes($markup, $notes);
         $markup = self::mergeDuplicateAttributeKeys($markup, $notes);
@@ -105,14 +116,17 @@ final class LayoutFixer
         self::mirrorHtmlOnlyVerticalSpacing($markup, $all, $notes);
         self::mirrorHtmlOnlyGap($markup, $all, $htmlEdits, $notes);
         self::mirrorDynamicChromeSpacing($markup, $all, $htmlEdits, $notes);
-        self::addMissingRootLayout($roots, $notes);
+        $pageWidth = $role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE;
+        if (!$pageWidth || !$htmlFirst) {
+            self::addMissingRootLayout($roots, $notes);
+        }
         self::promoteAlignClassNames($all, $notes);
 
         if ($role === self::ROLE_FOOTER) {
             self::widenFooterColumns($roots, $all, $notes);
             self::evenOutFooterRows($all, $notes);
         }
-        if ($role === self::ROLE_SECTION || $role === self::ROLE_TEMPLATE) {
+        if ($pageWidth && !$htmlFirst) {
             self::freeGridsFromNarrowWrappers($roots, $notes);
             self::restoreCoverMeasure($all, $contentSize, $notes);
         }

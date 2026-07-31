@@ -82,8 +82,31 @@ function homepage_cleanup(string $tmp): void
     exec('rm -rf ' . escapeshellarg($tmp));
 }
 
+test('homepage-design defaults to one candidate with no judge and no critique', function () {
+    [$project, $llm, $tmp] = homepage_fixture();
+    $only = homepage_document('ONLY', "\n.only { color: red; }\n");
+    $llm->queueJson(['seeds' => homepage_seeds()]);
+    $llm->queueText($only);
+
+    homepage_run($project, $llm);
+
+    assert_eq(1, $llm->completeBatchCalls, 'one batch');
+    assert_eq(1, count(array_filter(
+        $llm->calls,
+        static fn (array $call): bool => str_contains($call['prompt'], 'Seed '),
+    )), 'exactly one candidate generated');
+    assert_eq(1, $llm->completeJsonCalls, 'seeds only — no judge and no critique call');
+    assert_eq(0, $llm->completeCalls, 'no revision call');
+    assert_eq($only, $project->readText('design/candidate-1.html'));
+    assert_eq($only, $project->readText('design/home.html'));
+    assert_true(!$project->exists('design/candidate-2.html'));
+    assert_true(!$project->exists('design/judge.json'), 'single candidate skips the judge verdict file');
+    assert_true(!$project->exists('design/critique-1.json'));
+    homepage_cleanup($tmp);
+});
+
 test('homepage-design fans out the configured tournament and judges every candidate', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 3]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 3, 'critique_rounds' => 1]);
     $documents = [
         homepage_document('A', "\n.a { color: red; }\n"),
         homepage_document('B', "\n.b { color: blue; }\n"),
@@ -119,7 +142,7 @@ test('homepage-design fans out the configured tournament and judges every candid
 });
 
 test('homepage-design defaults an invalid judge verdict to the first candidate and warns', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 1]);
     $first = homepage_document('FIRST', "\n.first { color: red; }\n");
     $second = homepage_document('SECOND', "\n.second { color: blue; }\n");
     homepage_queue_tournament($llm, [$first, $second], ['winner' => 9, 'why' => 'Out of range']);
@@ -137,7 +160,7 @@ test('homepage-design defaults an invalid judge verdict to the first candidate a
 });
 
 test('homepage-design critique pass makes no revision call', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 2]);
     homepage_queue_tournament($llm, [
         homepage_document('A', "\n.a { color: red; }\n"),
         homepage_document('B', "\n.b { color: blue; }\n"),
@@ -283,7 +306,7 @@ test('homepage-design missing style throws MalformedDesignException after one re
 });
 
 test('homepage-design extracts style contents byte-for-byte', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 1]);
     $css = "\n:root { --brand: #a00; }\n.hero > p::after { content: \"A > B\"; }\n";
     $winner = homepage_document('CSS', $css);
     homepage_queue_tournament($llm, [

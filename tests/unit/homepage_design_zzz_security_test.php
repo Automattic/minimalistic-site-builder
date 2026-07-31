@@ -174,7 +174,7 @@ test('homepage-design text normalization fails closed on invalid UTF-8', functio
 });
 
 test('homepage-design removes active head markup and unsafe URL schemes before delivery', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 1]);
     $unsafe = str_replace(
         ["<head>\n", '<section id="feature">'],
         [

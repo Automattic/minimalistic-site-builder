@@ -41,9 +41,9 @@ test('StepComposition default matches CLI step order and validates', function ()
     $steps = $c->steps();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'homepage-design', 'theme-json', 'inner-pages-design', 'transform-site', 'section-rhythm',
+        'homepage-design', 'theme-json', 'inner-pages-design', 'assign-image-sources', 'transform-site', 'section-rhythm',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-        'assemble-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
+        'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
 });
 

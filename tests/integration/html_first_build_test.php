@@ -102,7 +102,7 @@ function html_first_home_document(string $marker = 'HTML-FIRST-HOME'): string
 <body class="site-shell">
 <header class="site-shell"><p>Hearth &amp; Crumb</p></header>
 <main>
-<section id="hero" class="hero"><h1 class="has-display-font-size">HTML-FIRST-HOME</h1><p>Fresh loaves every morning.</p></section>
+<section id="hero" class="hero"><h1 class="has-display-font-size">HTML-FIRST-HOME</h1><p>Fresh loaves every morning.</p><img src="" alt="A baker sliding a peel of sourdough into a stone oven"></section>
 <section id="story" class="story"><h2>Our bakehouse</h2><p>Slow fermentation, local grain.</p></section>
 </main>
 <footer class="site-shell"><p>Visit the neighborhood oven.</p></footer>
@@ -122,7 +122,7 @@ function html_first_queue_success(FakeLlm $llm, array $siteSpec, string $home): 
     $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
     $llm->queueJson(html_first_direction());
     $llm->queueJson(['seeds' => ['Editorial bread ledger']]);
-    $llm->queueJson(['winner' => 0, 'why' => 'Clear hierarchy and strong site shell']);
+    // One design candidate, so homepage-design never calls the judge.
     $llm->queueJson(['verdict' => 'pass', 'notes' => []]);
     $llm->queueJson(html_first_theme_payload());
 }
@@ -148,7 +148,6 @@ test('HTML-first default builds and validates every single-page artifact', funct
 
         foreach ([
             'design/candidate-1.html',
-            'design/judge.json',
             'design/critique-1.json',
             'design/home.html',
             'design/site.css',
@@ -173,8 +172,26 @@ test('HTML-first default builds and validates every single-page artifact', funct
         $home = $project->readText('plugin/pages/home.html');
         assert_contains('HTML-FIRST-HOME', $home);
         assert_true(count(BlockMarkup::parse($home)->indices()) > 0, 'transformed page contains serialized blocks');
+        // The design's prose <img> reaches images.json as a generable spec at
+        // the exact theme path the delivered markup references.
+        $images = $project->readJson('images.json');
+        assert_eq(1, count($images), 'the design image was collected');
+        assert_eq('A baker sliding a peel of sourdough into a stone oven', $images[0]['subject']);
+        assert_contains('theme:./assets/', $images[0]['src']);
+        assert_contains($images[0]['src'], $home);
+
+        // Section width belongs to the carried design CSS, not the theme.
+        assert_true(
+            !str_contains($home, '"type":"constrained"'),
+            'no constrained layout is stamped onto HTML-first page sections',
+        );
+        $style = $project->readText('theme/style.css');
+        assert_contains('hyphens: none;', $style);
+        assert_eq(1, substr_count($style, 'Wrap at spaces only'), 'the wrap policy is merged exactly once');
+        assert_true(!str_contains($style, 'break-all'), 'no mid-word break rule ships');
+
         assert_eq([], ThemeValidator::validate($project));
-        assert_eq([], ThemeValidator::layoutWarnings($project));
+        assert_eq([], ThemeValidator::layoutWarnings($project, true));
         assert_eq("Final theme validation passed.\n", $project->readText('logs/validate-theme.log'));
         assert_true(!$project->exists('theme/parts/page-home--hero.html'), 'assemble removes transient section parts');
     } finally {

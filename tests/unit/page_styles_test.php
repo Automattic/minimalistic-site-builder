@@ -43,6 +43,15 @@ const PS_VALID_CSS = <<<CSS
     }
     CSS;
 
+/**
+ * Chunk one of every HTML-first merge: the deterministic wrap policy, which
+ * ships whether or not the design contributed any CSS.
+ */
+function ps_wrap(): string
+{
+    return PageStylesStep::WORD_WRAP_CSS . "\n";
+}
+
 function ps_project(string $prefix): array
 {
     $tmp = sys_get_temp_dir() . '/' . $prefix . uniqid();
@@ -363,7 +372,7 @@ test('site CSS path adjusts only the merged tail against delivered markup and re
 
 test('site CSS path skips a source HTML file when its page has a failed marker', function () {
     [$project, $tmp] = ps_project('builder_ps_failed_source_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
     $project->writeJson('pages.json', ['pages' => [
         ['slug' => 'home', 'front' => true],
@@ -424,6 +433,7 @@ test('site CSS path merges exact safe bytes in deterministic source and document
     $once = $project->readText('theme/style.css');
     assert_eq(
         $base
+        . ps_wrap()
         . $siteCss
         . "\n\n.alpha-one { margin: 1rem; }\n"
         . "\n.alpha-two{padding:2rem;}"
@@ -452,7 +462,7 @@ test('site CSS path merges exact safe bytes in deterministic source and document
 
 test('site CSS path ignores inert page-style text inside an HTML comment', function () {
     [$project, $tmp] = ps_project('builder_ps_inert_comment_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
     $project->writeJson('pages.json', ['pages' => [[
         'slug' => 'home',
@@ -477,7 +487,7 @@ test('site CSS path ignores inert page-style text inside an HTML comment', funct
 
 test('site CSS path ignores a style-like string with whitespace after the tag opener', function () {
     [$project, $tmp] = ps_project('builder_ps_inert_spaced_tag_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
     $project->writeJson('pages.json', ['pages' => [[
         'slug' => 'home',
@@ -502,7 +512,7 @@ test('site CSS path ignores a style-like string with whitespace after the tag op
 
 test('site CSS path excludes losing tournament candidates from delivered page CSS', function () {
     [$project, $tmp] = ps_project('builder_ps_candidate_exclusion_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
     $project->writeJson('pages.json', ['pages' => [[
         'slug' => 'home',
@@ -531,7 +541,7 @@ test('site CSS path excludes losing tournament candidates from delivered page CS
 
 test('site CSS path works without transformer-carried CSS', function () {
     [$project, $tmp] = ps_project('builder_ps_no_carried_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $project->writeText(TransformArtifacts::SITE_CSS, ".site{display:grid;}\n");
     $project->writeJson('pages.json', ['pages' => [[
         'slug' => 'home',
@@ -550,6 +560,50 @@ test('site CSS path works without transformer-carried CSS', function () {
         $project->readText('theme/style.css')
     );
     assert_eq([], $llm->calls, 'absent carried CSS does not fall back to the LLM');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path always merges a wrap policy that never splits words', function () {
+    [$project, $tmp] = ps_project('builder_ps_word_wrap_');
+    $scaffold = $project->readText('theme/style.css');
+    $project->writeText(TransformArtifacts::SITE_CSS, '');
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main>Home</main>');
+    $llm = new FakeLlm();
+    $step = ps_html_first_step($llm);
+
+    $step->run($project);
+
+    // Ships even when the design contributed no CSS at all.
+    $style = $project->readText('theme/style.css');
+    assert_eq($scaffold . ps_wrap(), $style, 'wrap policy is the whole tail when there is no design CSS');
+    assert_contains('hyphens: none;', $style);
+    assert_contains('-webkit-hyphens: none;', $style);
+    assert_contains('word-break: normal;', $style);
+    assert_contains('overflow-wrap: normal;', $style);
+    assert_true(!str_contains($style, 'break-all'), 'break-all is never introduced');
+    assert_true(!str_contains($style, 'hyphens: auto'), 'no automatic hyphenation');
+
+    $step->run($project);
+
+    assert_eq($style, $project->readText('theme/style.css'), 'second run is byte-identical');
+    assert_eq([], $llm->calls, 'the wrap policy is deterministic');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path lets design CSS override the wrap policy by ordering', function () {
+    [$project, $tmp] = ps_project('builder_ps_word_wrap_order_');
+    $project->writeText(TransformArtifacts::SITE_CSS, 'h1{hyphens:auto;}');
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main>Home</main>');
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(
+        strpos($style, 'hyphens: none;') < strpos($style, 'hyphens:auto;'),
+        'the policy is a default the design can still override',
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -585,7 +639,7 @@ test('site CSS path routes live narration through Narrator', function () {
 
 test('site CSS path warns for every scrub removal and continues after an empty source', function () {
     [$project, $tmp] = ps_project('builder_ps_scrub_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $siteCss = '@import url("https://fonts.example.invalid/font.css");';
     $page = '<main>Kept</main><style data-page-css>'
         . '.page{color:var(--wp--preset--color--contrast);'
@@ -622,7 +676,7 @@ test('site CSS path warns for every scrub removal and continues after an empty s
 
 test('site CSS path scrubs image-set bare remote strings before deterministic merge', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_scrub_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $remote = 'https://evil.example/tracker.png';
     $siteCss = '.hero{color:var(--wp--preset--color--contrast);'
         . 'background-image:image-set("' . $remote . '" 1x);padding:1rem;}'
@@ -667,7 +721,7 @@ test('site CSS path scrubs image-set bare remote strings before deterministic me
 foreach (['hash' => '#', 'at-keyword' => '@'] as $label => $prefix) {
     test("site CSS path preserves {$label} image-set lookalikes without warnings", function () use ($label, $prefix) {
         [$project, $tmp] = ps_project('builder_ps_image_set_' . $label . '_lookalike_');
-        $base = $project->readText('theme/style.css');
+        $base = $project->readText('theme/style.css') . ps_wrap();
         $siteCss = '.tokens{--' . $label . ':' . $prefix
             . 'image-set("https://evil.example/not-a-function.png");color:red}';
         $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
@@ -700,7 +754,7 @@ foreach (
 ) {
     test("site CSS path preserves {$label} image-set lookalikes without warnings", function () use ($label, $value) {
         [$project, $tmp] = ps_project('builder_ps_image_set_' . $label . '_lookalike_');
-        $base = $project->readText('theme/style.css');
+        $base = $project->readText('theme/style.css') . ps_wrap();
         $siteCss = '.tokens{--fake:' . $value . ';color:red}';
         $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
         $project->writeJson('pages.json', ['pages' => [[
@@ -733,7 +787,7 @@ foreach (
 ) {
     test("site CSS path removes {$label} real image function control", function () use ($label, $value) {
         [$project, $tmp] = ps_project('builder_ps_image_set_' . $label . '_control_');
-        $base = $project->readText('theme/style.css');
+        $base = $project->readText('theme/style.css') . ps_wrap();
         $declaration = 'background-image:' . $value . ';';
         $siteCss = '.actual{' . $declaration . 'color:red}';
         $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
@@ -768,7 +822,7 @@ foreach (
 
 test('site CSS path still scrubs a real image-set function beside token lookalikes', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_token_control_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $declaration = 'background-image:image-set("https://evil.example/not-a-function.png" 1x);';
     $siteCss = '.actual{' . $declaration . 'color:red}';
     $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
@@ -801,7 +855,7 @@ test('site CSS path still scrubs a real image-set function beside token lookalik
 
 test('site CSS path scrubs image-set remote strings after leading whitespace normalization', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_space_scrub_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $remote = 'http://127.0.0.1:9/px.png';
     $siteCss = '.hero{background-image:image-set(" ' . $remote . '" 1x);display:grid}'
         . '.safe{padding:1rem}';
@@ -837,7 +891,7 @@ test('site CSS path scrubs image-set remote strings after leading whitespace nor
 
 test('site CSS path scrubs image-set remote strings after leading C0 control normalization', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_c0_scrub_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $vtabRemote = 'http://127.0.0.1:9/vtab.png';
     $unitRemote = 'https://evil.example/unit-separator.png';
     $siteCss = '.vtab{background-image:image-set("\b ' . $vtabRemote . '" 1x);display:grid}'
@@ -882,7 +936,7 @@ test('site CSS path scrubs image-set remote strings after leading C0 control nor
 
 test('site CSS path scrubs image-set remote strings with embedded URL whitespace', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_embedded_space_scrub_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $siteCss = '.tab{background-image:image-set("h\9 ttp://127.0.0.1:9/tab.png" 1x);display:grid}'
         . '.lf{background-image:image-set("h\a ttp://evil.example/line-feed.png" 2x);padding:1rem}'
         . '.cr{background-image:image-set("h\d ttp://evil.example/carriage-return.png" 3x);margin:2rem}'
@@ -927,7 +981,7 @@ test('site CSS path scrubs image-set remote strings with embedded URL whitespace
 
 test('site CSS path preserves raw and CSS-escaped NUL image strings without warnings', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_nul_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $nul = chr(0);
     $rawRemote = 'http://127.0.0.1:9/raw-nul.png';
     $siteCss = '.raw{background-image:image-set("' . $nul . $rawRemote . '" 1x);display:grid}'
@@ -958,7 +1012,7 @@ test('site CSS path preserves raw and CSS-escaped NUL image strings without warn
 
 test('site CSS path scrubs every slash-backslash authority pair and keeps a single backslash path', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_authority_pairs_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $backslash = '\\';
     $values = [
         'slash-slash' => '//evil.example/slash-slash.png',
@@ -1018,7 +1072,7 @@ test('site CSS path scrubs every slash-backslash authority pair and keeps a sing
 
 test('site CSS path recovers after a malformed string before a later remote image string', function () {
     [$project, $tmp] = ps_project('builder_ps_bad_string_recovery_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $malformed = '.broken{--token:"unterminated' . "\n" . ';color:red}';
     $declaration = 'background-image:image-set("https://evil.example/after-bad-string.png" 1x);';
     $safe = '.note::before{content:"https://x";display:block}';
@@ -1062,7 +1116,7 @@ test('site CSS path recovers after a malformed string before a later remote imag
 
 test('site CSS path removes an external image string in an EOF-truncated final declaration', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_eof_remote_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $prefix = '.x{color:red;';
     $declaration = 'background-image:image-set("http://127.0.0.1:9/eof.png" 1x';
     $siteCss = $prefix . $declaration;
@@ -1101,7 +1155,7 @@ test('site CSS path removes an external image string in an EOF-truncated final d
 
 test('site CSS path preserves a closed rule with an unmatched image function without warnings', function () {
     [$project, $tmp] = ps_project('builder_ps_image_set_closed_unmatched_');
-    $base = $project->readText('theme/style.css');
+    $base = $project->readText('theme/style.css') . ps_wrap();
     $siteCss = '.x{background-image:image-set("https://evil.example/x.png" 1x}';
     $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
     $project->writeJson('pages.json', ['pages' => [[
@@ -1133,7 +1187,7 @@ foreach (
 ) {
     test("site CSS path preserves an allowed {$label} image string through EOF", function () use ($label, $value) {
         [$project, $tmp] = ps_project('builder_ps_image_set_eof_' . $label . '_');
-        $base = $project->readText('theme/style.css');
+        $base = $project->readText('theme/style.css') . ps_wrap();
         $siteCss = '.x{color:red;background-image:image-set("' . $value . '" 1x';
         $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
         $project->writeJson('pages.json', ['pages' => [[

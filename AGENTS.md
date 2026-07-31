@@ -18,9 +18,9 @@ We don't need to plan for backwards compatibility. This is a green field project
 
 Default HTML-first graph:
 
-`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> homepage-design -> theme-json -> inner-pages-design -> transform-site -> section-rhythm -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> homepage-design -> theme-json -> inner-pages-design -> assign-image-sources -> transform-site -> section-rhythm -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
 
-`theme-json` reads CSS-derived design tokens. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
+`theme-json` reads CSS-derived design tokens. `assign-image-sources` gives every design `<img>` the theme asset path the rest of the image pipeline generates into. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `normalize-layout`, `fix-blocks`, and `validate-theme` skip the width rules that assume the theme owns page width — on this path the carried design CSS does. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
 
 Set `SITE_BUILD_LEGACY=1` for the unchanged legacy graph:
 

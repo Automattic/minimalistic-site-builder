@@ -239,16 +239,17 @@ final class GenerateImagesStep implements Step
 
     /**
      * Publish the dependency stamp only after every required operation succeeds.
-     * A raw AI_IMAGE spec in a final URL/source is a hard postcondition failure:
-     * without this gate an unrecognized placeholder shape can silently ship as
-     * a blank image even when the manifest was absent or empty.
+     * An image source that cannot resolve is a hard postcondition failure:
+     * without this gate an unrecognized placeholder shape — a raw AI_IMAGE spec,
+     * or a src the collector never saw — silently ships as a blank image even
+     * when the manifest was absent or empty.
      */
     private function markComplete(Project $project): void
     {
         $problems = ThemeValidator::unresolvedImageSourceProblems($project);
         if ($problems !== []) {
             throw new \RuntimeException(
-                "generate-images: unresolved AI_IMAGE source(s) remain after generation:\n- "
+                "generate-images: unresolved image source(s) remain after generation:\n- "
                 . implode("\n- ", $problems)
             );
         }

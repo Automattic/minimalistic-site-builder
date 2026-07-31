@@ -29,7 +29,7 @@ final class FixBlocksStep implements Step
 {
     private const LOG_FILE = 'fix-blocks.log';
 
-    public function __construct(private BlockFixer $fixer) {}
+    public function __construct(private BlockFixer $fixer, private bool $htmlFirst = false) {}
 
     public function id(): string
     {
@@ -61,7 +61,7 @@ final class FixBlocksStep implements Step
         $outcomes = [];
         $failedFiles = [];
         try {
-            $layoutNotes = self::normalizeLayouts($project);
+            $layoutNotes = self::normalizeLayouts($project, [], $this->htmlFirst);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
             $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
             $outcomes[] = $initialOutcome;
@@ -81,7 +81,11 @@ final class FixBlocksStep implements Step
         // actually changed comment attributes so the authored HTML stays in
         // sync with them.
         try {
-            $postRepairLayoutNotes = self::normalizeLayouts($project, self::failurePaths($failedFiles));
+            $postRepairLayoutNotes = self::normalizeLayouts(
+                $project,
+                self::failurePaths($failedFiles),
+                $this->htmlFirst,
+            );
             $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
             if ($postRepairLayoutNotes !== []) {
                 $alignmentBaselines[] = self::snapshotThemeFiles($project);
@@ -218,9 +222,11 @@ final class FixBlocksStep implements Step
      *
      * @param list<string> $excluded fixer-relative paths that have already
      *        failed this step and must remain at their step-entry bytes
+     * @param bool $htmlFirst carried design CSS owns section width — see
+     *        LayoutFixer::fix()
      * @return string[]
      */
-    public static function normalizeLayouts(Project $project, array $excluded = []): array
+    public static function normalizeLayouts(Project $project, array $excluded = [], bool $htmlFirst = false): array
     {
         $notes = [];
         $excluded = array_fill_keys($excluded, true);
@@ -231,7 +237,13 @@ final class FixBlocksStep implements Step
                 continue;
             }
             $markup = $project->readText('theme/' . $rel);
-            $result = LayoutFixer::fix($markup, LayoutFixer::roleFor($rel), $contentSize, $spacingSlugs);
+            $result = LayoutFixer::fix(
+                $markup,
+                LayoutFixer::roleFor($rel),
+                $contentSize,
+                $spacingSlugs,
+                $htmlFirst,
+            );
             if ($result['markup'] !== $markup) {
                 $project->writeText('theme/' . $rel, $result['markup']);
             }

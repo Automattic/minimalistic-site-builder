@@ -36,11 +36,11 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
 
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'homepage-design', 'theme-json', 'inner-pages-design', 'transform-site', 'section-rhythm',
+        'homepage-design', 'theme-json', 'inner-pages-design', 'assign-image-sources', 'transform-site', 'section-rhythm',
         // normalize-layout MUST precede contrast-fix and motion-sanity: the
         // attribute repair can activate previously-inert color/motion
         // attributes, which those policy passes must be able to see.
-        'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
+        'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion',
         'fonts-php', 'finalize-theme', 'validate-theme',
     ], $builder->pipeline()->stepIds());
     assert_true(in_array('site-spec', $builder->pipeline()->stopIds(), true));

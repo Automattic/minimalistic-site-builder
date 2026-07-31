@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 test('homepage-design removes unsafe URL schemes hidden by semicolonless numeric entities', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 1]);
     $unsafe = str_replace(
         '<section id="feature">',
         '<section id="feature"><a href="&#106avascript:alert(1)">Unsafe link</a>',

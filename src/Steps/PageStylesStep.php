@@ -71,6 +71,36 @@ final class PageStylesStep implements Step
         'sticky-side'  => 'position:sticky with a top offset, applied only at desktop widths (@media (min-width: 782px)); align-self:flex-start so the column can stick',
     ];
 
+    /**
+     * Deterministic wrap policy for the HTML-first path. Display headlines set
+     * at hero scale are where a browser's hyphenation or an inherited
+     * word-break splits a word across lines ("SQUIRR·EL"); headings wrap only
+     * at spaces and never split a token. overflow-wrap:break-word is the
+     * last-resort escape hatch for body copy only (p, li), where a single
+     * unbreakable token like a URL would otherwise overflow its container.
+     * word-break:break-all is deliberately absent everywhere.
+     */
+    public const WORD_WRAP_CSS = <<<'CSS'
+/* Wrap at spaces only — never split a word mid-token. */
+body,
+h1, h2, h3, h4, h5, h6,
+p, li, dt, dd, blockquote, figcaption, caption, th, td,
+.wp-block-heading,
+.wp-block-post-title,
+.wp-block-button__link {
+  hyphens: none;
+  -webkit-hyphens: none;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Body copy may break a lone overlong token (a URL); headings never do. */
+p, li {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+CSS;
+
     /** Hard ceiling on the appendix size; the prompt asks for under 80 lines. */
     private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
@@ -258,20 +288,20 @@ final class PageStylesStep implements Step
         }
 
         $project->addWarnings('page-styles', $warnings);
-        if ($chunks === []) {
-            Narrator::write("  no safe deterministic page CSS to merge\n");
-            return;
-        }
-
-        $tail = implode("\n", $chunks);
+        $design = implode("\n", $chunks);
         $markup = self::deliveredMarkup($project);
-        $tail = CssContrastAdjuster::apply(
+        // Contrast is a judgment on the DESIGN's colors: the wrap policy has
+        // none, and including it would only add unverified-selector findings.
+        $design = CssContrastAdjuster::apply(
             $project,
             'theme/style.css',
-            $tail,
+            $design,
             $markup,
-            CssContrastCheck::check($tail, $markup),
+            CssContrastCheck::check($design, $markup),
         );
+        // Wrap policy first, so a design that deliberately hyphenates still
+        // wins; it ships even when the design contributed no CSS at all.
+        $tail = self::WORD_WRAP_CSS . "\n" . $design;
         $style = $project->readText('theme/style.css');
         if (str_ends_with($style, $tail)) {
             Narrator::write("  deterministic page CSS already merged\n");

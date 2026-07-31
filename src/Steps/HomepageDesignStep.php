@@ -15,16 +15,17 @@ use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TruncatedGenerationException;
 
 /**
- * Designs one complete homepage through a seeded tournament and bounded
- * source-critique loop. Candidate fan-out is the only concurrent call; all
- * critique and whole-document recovery calls stay serial on the shared client.
+ * Designs one complete homepage from the computed design direction. Single-shot
+ * by default; the seeded tournament and the source-critique loop only run when a
+ * caller raises design_candidates or critique_rounds. Candidate fan-out is the
+ * only concurrent call; critique and whole-document recovery calls stay serial.
  */
 final class HomepageDesignStep implements Step
 {
     use LlmOptions;
 
-    private const DEFAULT_CANDIDATES = 3;
-    private const DEFAULT_CRITIQUE_ROUNDS = 2;
+    private const DEFAULT_CANDIDATES = 1;
+    private const DEFAULT_CRITIQUE_ROUNDS = 0;
     private const VOID_ELEMENTS = [
         'area',
         'base',
@@ -155,9 +156,15 @@ final class HomepageDesignStep implements Step
                 }
             }
 
-            $judge = $this->judge($candidates, $warnings);
-            $project->writeJson('design/judge.json', $judge);
-            $winner = $this->winnerIndex($judge, count($candidates), $warnings);
+            // A single candidate has nothing to compare, so the judge call and its
+            // verdict file are skipped rather than paid for.
+            if (count($candidates) > 1) {
+                $judge = $this->judge($candidates, $warnings);
+                $project->writeJson('design/judge.json', $judge);
+                $winner = $this->winnerIndex($judge, count($candidates), $warnings);
+            } else {
+                $winner = array_key_first($candidates);
+            }
             $document = $candidates[$winner];
 
             for ($round = 1; $round <= $critiqueRounds; $round++) {
@@ -1281,15 +1288,8 @@ final class HomepageDesignStep implements Step
 
     private static function loadDocument(string $html): ?\DOMDocument
     {
-        $previous = libxml_use_internal_errors(true);
-        try {
-            $dom = new \DOMDocument();
-            $loaded = $dom->loadHTML($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($previous);
-        }
-        return $loaded ? $dom : null;
+        // UTF-8 hint so libxml doesn't guess ISO-8859-1 and double-encode.
+        return \Automattic\SiteBuild\Html::loadUtf8Html($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
     }
 
     /**

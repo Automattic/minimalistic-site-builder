@@ -60,7 +60,7 @@ function homepage_review_call(FakeLlm $llm, string $needle): array
 }
 
 test('homepage-design removes unsafe unsupported candidate HTML before artifacts and judging', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 1]);
     $unsafe = str_replace(
         '<section id="feature">',
         '<section id="feature" onclick="steal()">'
@@ -135,7 +135,7 @@ test('homepage-design sanitizes unsafe patch fragments before splicing', functio
 });
 
 test('homepage-design rejects judge JSON missing the exact why contract', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 1]);
     $first = homepage_document('FIRST', "\n.first { color: red; }\n");
     homepage_queue_tournament(
         $llm,
@@ -205,7 +205,7 @@ test('homepage-design rejects a patch root that does not match its requested lan
 });
 
 test('homepage-design serially closes a truncated batch candidate before artifact and judge', function () {
-    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2]);
+    [$project, $llm, $tmp] = homepage_fixture(['design_candidates' => 2, 'critique_rounds' => 1]);
     $partial = str_replace(
         "</body>\n</html>",
         '',

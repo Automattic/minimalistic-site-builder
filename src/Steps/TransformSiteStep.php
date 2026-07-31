@@ -631,15 +631,9 @@ final class TransformSiteStep implements Step
      */
     private static function extractPage(string $html, string $source): array
     {
-        $previous = libxml_use_internal_errors(true);
-        $dom = new DOMDocument();
-        try {
-            $loaded = $dom->loadHTML($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($previous);
-        }
-        if (!$loaded) {
+        // UTF-8 hint so libxml doesn't guess ISO-8859-1 and double-encode.
+        $dom = \Automattic\SiteBuild\Html::loadUtf8Html($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        if ($dom === null) {
             throw new \RuntimeException("transform-site: {$source} is not parseable HTML");
         }
         $xpath = new DOMXPath($dom);

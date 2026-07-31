@@ -32,6 +32,54 @@ test('layout fixer adds constrained layout to a top-level group without one', fu
     assert_true($r['notes'] !== [], 'expected a note');
 });
 
+test('layout fixer leaves an HTML-first section root layout-less', function () {
+    // HTML-first: the transformer emits no layout so the carried design CSS
+    // owns width; stamping constrained back boxes every full-bleed hero.
+    $markup = '<!-- wp:group {"align":"full"} --><div class="wp-block-group alignfull">'
+        . lf_columns(2, '{"align":"wide"}')
+        . '</div><!-- /wp:group -->';
+    foreach ([LayoutFixer::ROLE_SECTION, LayoutFixer::ROLE_TEMPLATE] as $role) {
+        $r = LayoutFixer::fix($markup, $role, 840.0, [], true);
+        assert_true(!str_contains($r['markup'], '"constrained"'), "{$role} stays layout-less on HTML-first");
+        assert_eq($markup, $r['markup'], "{$role} markup is untouched on HTML-first");
+
+        $legacy = LayoutFixer::fix($markup, $role, 840.0);
+        assert_contains('"layout":{"type":"constrained"}', $legacy['markup']);
+    }
+});
+
+test('layout fixer still constrains HTML-first header and footer roots', function () {
+    // Header/footer width still comes from the theme on both paths.
+    $markup = '<!-- wp:group {"align":"full"} --><div class="wp-block-group alignfull">'
+        . '</div><!-- /wp:group -->';
+    foreach ([LayoutFixer::ROLE_HEADER, LayoutFixer::ROLE_FOOTER] as $role) {
+        foreach ([true, false] as $htmlFirst) {
+            $r = LayoutFixer::fix($markup, $role, 840.0, [], $htmlFirst);
+            assert_contains('"layout":{"type":"constrained"}', $r['markup']);
+        }
+    }
+});
+
+test('layout fixer skips the HTML-first section width heuristics that assume theme width', function () {
+    // freeGridsFromNarrowWrappers would force align:wide onto the grid; the
+    // carried design CSS already sized it.
+    $grid = '<!-- wp:group {"align":"wide","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group alignwide">' . lf_columns(2) . '</div><!-- /wp:group -->';
+    assert_eq($grid, LayoutFixer::fix($grid, LayoutFixer::ROLE_SECTION, 860.0, [], true)['markup']);
+    assert_contains('"align":"wide"', LayoutFixer::fix($grid, LayoutFixer::ROLE_SECTION, 860.0)['markup']);
+
+    // restoreCoverMeasure would drop the design's deliberate narrow measure.
+    $cover = '<!-- wp:cover --><div class="wp-block-cover">'
+        . '<!-- wp:group {"layout":{"type":"constrained","contentSize":"420px"}} -->'
+        . '<div class="wp-block-group"></div><!-- /wp:group -->'
+        . '</div><!-- /wp:cover -->';
+    assert_contains('"contentSize":"420px"', LayoutFixer::fix($cover, LayoutFixer::ROLE_SECTION, 860.0, [], true)['markup']);
+    assert_true(
+        !str_contains(LayoutFixer::fix($cover, LayoutFixer::ROLE_SECTION, 860.0)['markup'], '420px'),
+        'legacy still restores the theme measure',
+    );
+});
+
 test('layout fixer leaves an explicit non-constrained layout alone', function () {
     $markup = '<!-- wp:group {"layout":{"type":"flex"}} --><div class="wp-block-group"></div><!-- /wp:group -->';
     $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 840.0);

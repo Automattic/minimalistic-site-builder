@@ -100,6 +100,7 @@ final class CssContrastCheckEngine
     {
         $prepared = [];
         $entries = [];
+        $customProperties = self::customProperties($css);
         foreach (self::rules($css) as $rule) {
             $parsed = CssSelectorMatcher::parse($rule['selector']);
             $supported = $rule['complete'] && self::isSupportedSelector($parsed);
@@ -136,8 +137,8 @@ final class CssContrastCheckEngine
                 continue;
             }
 
-            $fgDeclaration = self::winningDeclaration($matching, ['color']);
-            $bgDeclaration = self::winningDeclaration($matching, ['background', 'background-color']);
+            $fgDeclaration = self::winningDeclaration($matching, ['color'], $customProperties);
+            $bgDeclaration = self::winningDeclaration($matching, ['background', 'background-color'], $customProperties);
             $selector = $fgDeclaration['selector']
                 ?? $bgDeclaration['selector']
                 ?? $matching[count($matching) - 1]['rule']['selector'];
@@ -211,13 +212,14 @@ final class CssContrastCheckEngine
     /**
      * @param list<array{rule:array<string,mixed>,parsed:array<string,mixed>,supported:bool,specificity:int,matched:bool}> $matching
      * @param list<string> $properties
+     * @param array<string,string> $customProperties
      * @return array{
      *   selector:string,state:string,color:?array{rgb:array{0:int,1:int,2:int},alpha:float},
      *   value:string,declaration:array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool},
      *   important:bool,specificity:int,source_order:int
      * }|null
      */
-    private static function winningDeclaration(array $matching, array $properties): ?array
+    private static function winningDeclaration(array $matching, array $properties, array $customProperties): ?array
     {
         $winner = null;
         foreach ($matching as $item) {
@@ -228,6 +230,7 @@ final class CssContrastCheckEngine
                 [$state, $color] = self::declarationColor(
                     $declaration['evaluation'],
                     $declaration['property'],
+                    $customProperties,
                 );
                 if ($state === 'invalid') {
                     continue;
@@ -250,10 +253,15 @@ final class CssContrastCheckEngine
         return $winner;
     }
 
-    /** @return array{0:string,1:?array{rgb:array{0:int,1:int,2:int},alpha:float}} */
-    private static function declarationColor(string $value, string $property): array
+    /**
+     * @param array<string,string> $customProperties
+     * @return array{0:string,1:?array{rgb:array{0:int,1:int,2:int},alpha:float}}
+     */
+    private static function declarationColor(string $value, string $property, array $customProperties): array
     {
-        $color = self::color($value);
+        // Token-based designs express every color as var(--x); resolve it to a
+        // literal first so real low-contrast pairs are linted, not skipped.
+        $color = self::color(self::resolveVars($value, $customProperties));
         if ($color !== null) {
             return ['resolved', $color];
         }
@@ -597,15 +605,29 @@ final class CssContrastCheckEngine
     private static function declarations(string $css, int $start, int $end): array
     {
         $declarations = [];
+        foreach (self::segments($css, $start, $end) as $segment) {
+            $declaration = self::parseDeclaration($css, $segment['start'], $segment['end']);
+            if ($declaration !== null) {
+                $declarations[] = $declaration;
+            }
+        }
+        return $declarations;
+    }
+
+    /**
+     * Split a rule body into top-level ";"-delimited declaration ranges,
+     * honoring strings/comments/nesting via the shared syntax scanner.
+     *
+     * @return list<array{start:int,end:int}>
+     */
+    private static function segments(string $css, int $start, int $end): array
+    {
+        $segments = [];
         $segmentStart = $start;
         $state = CssSyntaxScanner::state();
         for ($offset = $start; $offset <= $end;) {
-            $atEnd = $offset === $end;
-            if ($atEnd || (CssSyntaxScanner::isTopLevel($state) && $css[$offset] === ';')) {
-                $declaration = self::parseDeclaration($css, $segmentStart, $offset);
-                if ($declaration !== null) {
-                    $declarations[] = $declaration;
-                }
+            if ($offset === $end || (CssSyntaxScanner::isTopLevel($state) && $css[$offset] === ';')) {
+                $segments[] = ['start' => $segmentStart, 'end' => $offset];
                 $segmentStart = $offset + 1;
                 $offset++;
                 continue;
@@ -616,7 +638,106 @@ final class CssContrastCheckEngine
             }
             $offset = $next;
         }
-        return $declarations;
+        return $segments;
+    }
+
+    /**
+     * Custom-property name -> raw value across every top-level rule, source
+     * order so later definitions win. Names stay case-sensitive; only var()
+     * resolution consults this, so non-color values simply never resolve.
+     *
+     * @return array<string,string>
+     */
+    private static function customProperties(string $css): array
+    {
+        $map = [];
+        $offset = 0;
+        $length = strlen($css);
+        while ($offset < $length) {
+            $open = self::nextTopLevel($css, $offset, '{');
+            if ($open === null) {
+                break;
+            }
+            $close = self::closingBrace($css, $open + 1);
+            if ($close === null) {
+                break;
+            }
+            $selector = self::cleanSelector(substr($css, $offset, $open - $offset));
+            if ($selector !== '' && !str_starts_with($selector, '@')) {
+                foreach (self::segments($css, $open + 1, $close) as $segment) {
+                    self::parseCustomProperty($css, $segment['start'], $segment['end'], $map);
+                }
+            }
+            $offset = $close + 1;
+        }
+        return $map;
+    }
+
+    /** @param array<string,string> $map */
+    private static function parseCustomProperty(string $css, int $start, int $end, array &$map): void
+    {
+        $state = CssSyntaxScanner::state();
+        $colon = null;
+        for ($offset = $start; $offset < $end;) {
+            if (CssSyntaxScanner::isTopLevel($state) && $css[$offset] === ':') {
+                $colon = $offset;
+                break;
+            }
+            $next = CssSyntaxScanner::consume($css, $offset, $state);
+            if ($next === null) {
+                return;
+            }
+            $offset = $next;
+        }
+        if ($colon === null) {
+            return;
+        }
+        $property = self::commentsMasked(substr($css, $start, $colon - $start));
+        if ($property === null) {
+            return;
+        }
+        $property = trim($property);
+        if (!str_starts_with($property, '--') || $property === '--') {
+            return;
+        }
+        $masked = self::commentsMasked(substr($css, $colon + 1, $end - $colon - 1));
+        if ($masked === null) {
+            return;
+        }
+        $value = trim($masked);
+        if ($value !== '') {
+            $map[$property] = $value;
+        }
+    }
+
+    /**
+     * Substitute a whole-value var(--name[, fallback]) reference with its
+     * resolved literal: the custom-property map, else the fallback, else left
+     * intact (so it stays unresolved). Resolves transitively; a visited set
+     * breaks cycles. Anything not a lone var() passes through unchanged, so
+     * literal-color CSS is byte-identical.
+     *
+     * @param array<string,string> $map
+     * @param array<string,bool> $visited
+     */
+    private static function resolveVars(string $value, array $map, array $visited = []): string
+    {
+        $value = trim($value);
+        if (preg_match('/^var\(\s*(--[A-Za-z0-9_-]+)\s*(?:,\s*(.*?))?\s*\)$/is', $value, $match) !== 1) {
+            return $value;
+        }
+        $name = $match[1];
+        if (isset($map[$name])) {
+            if (isset($visited[$name])) {
+                return $value;
+            }
+            $visited[$name] = true;
+            return self::resolveVars($map[$name], $map, $visited);
+        }
+        if (($match[2] ?? '') !== '') {
+            return self::resolveVars($match[2], $map, $visited);
+        }
+        return $value;
     }
 
     /** @return array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool}|null */

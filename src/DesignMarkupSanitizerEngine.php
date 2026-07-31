@@ -1001,14 +1001,7 @@ final class DesignMarkupSanitizerEngine
 
     private static function loadDocument(string $html): ?\DOMDocument
     {
-        $previous = libxml_use_internal_errors(true);
-        try {
-            $dom = new \DOMDocument();
-            $loaded = $dom->loadHTML($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($previous);
-        }
-        return $loaded ? $dom : null;
+        // UTF-8 hint so libxml doesn't guess ISO-8859-1 and double-encode.
+        return Html::loadUtf8Html($html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
     }
 }

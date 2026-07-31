@@ -5,12 +5,14 @@ namespace Automattic\SiteBuild;
 
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
+use Automattic\SiteBuild\Steps\AssignImageSourcesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
+use Automattic\SiteBuild\Steps\FixPagesStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Steps\HomepageDesignStep;
@@ -116,6 +118,10 @@ final class StepComposition
                 $models['inner-pages-design'] ?? null,
                 $temps['inner-pages-design'] ?? null,
             ),
+            // Right before transform-site: the design <img> tags need a real
+            // theme asset path or the transformer drops them, and the path has
+            // to be the one collect-images/generate-images will use later.
+            new AssignImageSourcesStep(),
             new TransformSiteStep(
                 llm: $llm,
                 renderer: $renderer,
@@ -135,13 +141,17 @@ final class StepComposition
                 ),
             ),
             new SectionRhythmStep(),
-            new CollectImagesStep(),
-            new NormalizeLayoutStep(),
+            new CollectImagesStep(htmlFirst: true),
+            new NormalizeLayoutStep(htmlFirst: true),
             new HeaderHeroStep(),
             new ContrastFixStep(htmlFirst: true),
             new MotionSanityStep(htmlFirst: true),
-            new FixBlocksStep($blockFixer),
+            new FixBlocksStep($blockFixer, htmlFirst: true),
             new AssemblePagesStep(),
+            // Re-run the block fixer over the assembled pages: fix-blocks only
+            // saw the isolated section parts, so document-scope issues that
+            // emerge after concatenation ship unrepaired without this pass.
+            new FixPagesStep($blockFixer),
             new PageStylesStep(
                 llm: $llm,
                 renderer: $renderer,
@@ -152,7 +162,7 @@ final class StepComposition
             new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
             new FontsPhpStep(),
             new FinalizeThemeStep(),
-            new ValidateThemeStep(),
+            new ValidateThemeStep(htmlFirst: true),
         ]);
     }
 

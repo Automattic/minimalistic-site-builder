@@ -19,6 +19,11 @@ use Automattic\SiteBuild\StepDeclaration;
  *         plus in-place normalization of malformed AI_IMAGE url/src values to
  *         canonical theme asset paths.
  *
+ * On the HTML-first path the design prompts never learned that convention, so
+ * a second form is collected too (see parseAssignedImages): an <img> carrying
+ * the theme asset path assign-image-sources gave it and the design's prose
+ * alt, which is the generation subject as-is.
+ *
  * Placeholders follow the telex convention: an <img> whose src is a theme-relative
  * "theme:./assets/<name>.jpg" path (".png" for transparent-background assets)
  * and whose alt is "AI_IMAGE: subject | page-context
@@ -41,6 +46,15 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class CollectImagesStep implements Step
 {
+    /**
+     * @param bool $htmlFirst also collect the plain "<img src=theme:./assets/…
+     *        alt=prose>" form assign-image-sources produces. The HTML-first
+     *        design prompts never learned the AI_IMAGE alt convention — the
+     *        prose alt IS the subject. The AI_IMAGE parse stays on because the
+     *        legacy chrome/page prompts still run as that path's fallbacks.
+     */
+    public function __construct(private bool $htmlFirst = false) {}
+
     public function id(): string
     {
         return 'collect-images';
@@ -76,7 +90,11 @@ final class CollectImagesStep implements Step
             if ($parsed['content'] !== $content) {
                 $project->writeText('theme/' . $rel, $parsed['content']);
             }
-            foreach ($parsed['images'] as $img) {
+            $images = $parsed['images'];
+            if ($this->htmlFirst) {
+                array_push($images, ...self::parseAssignedImages($parsed['content'], $rel));
+            }
+            foreach ($images as $img) {
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
                     // Same asset referenced from another file — just record the source.
@@ -92,14 +110,95 @@ final class CollectImagesStep implements Step
         $project->writeJson('images.json', array_values($byFilename));
     }
 
-    /** Theme-relative paths of every markup file that may hold image placeholders. */
+    /**
+     * Theme-relative paths of every markup file that may hold image
+     * placeholders. Templates are scanned only when they already exist: in
+     * the default graph assemble-pages writes them after this step, so on a
+     * normal build the section parts are the whole story.
+     */
     private function themeHtmlFiles(Project $project): array
     {
         $files = [];
         foreach (glob($project->themePath('parts/*.html')) ?: [] as $abs) {
             $files[] = 'parts/' . basename($abs);
         }
+        if (!$this->htmlFirst) {
+            return $files;
+        }
+        foreach (glob($project->themePath('templates/*.html')) ?: [] as $abs) {
+            $files[] = 'templates/' . basename($abs);
+        }
         return $files;
+    }
+
+    /**
+     * Parse the HTML-first form: an <img> whose src is the theme asset path
+     * assign-image-sources gave it and whose alt is the design's prose
+     * description. That alt is the whole generation brief, so it becomes the
+     * subject verbatim; the page-context comes from the part path and style
+     * stays empty (the composer already folds in the design's image grade).
+     * The ratio defaults to landscape like every other recovered placeholder —
+     * the design markup carries no reliable shape hint.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function parseAssignedImages(string $content, string $source = ''): array
+    {
+        preg_match_all('/<img\b[^>]*>/i', $content, $matches);
+
+        $images = [];
+        foreach ($matches[0] as $tag) {
+            // The lookbehind keeps data-src/data-alt from standing in for the
+            // real attributes.
+            if (!preg_match('/(?<![-\w])src=(["\'])(theme:\.\/assets\/([a-z0-9-]+\.(?:jpe?g|png)))\1/i', $tag, $src)) {
+                continue;
+            }
+            if (!preg_match('/(?<![-\w])alt=(["\'])(.*?)\1/is', $tag, $alt)) {
+                continue;
+            }
+            $subject = trim((string) preg_replace(
+                '/\s+/',
+                ' ',
+                html_entity_decode($alt[2], ENT_QUOTES | ENT_HTML5),
+            ));
+            // An AI_IMAGE alt belongs to the canonical parser above, which
+            // splits its four fields instead of taking the whole line.
+            if (str_starts_with($subject, 'AI_IMAGE:')) {
+                continue;
+            }
+            $context = self::pageContextFor($source);
+            // A decorative image the design left undescribed still has an
+            // assigned path: generate something on-brand for its slot rather
+            // than ship a reference nothing ever writes a file for.
+            $subject = $subject !== '' ? $subject : $context;
+            if ($subject === '') {
+                continue;
+            }
+
+            $images[] = [
+                'filename'    => $src[3],
+                'src'         => $src[2],
+                'subject'     => $subject,
+                'pageContext' => $context,
+                'style'       => '',
+                'aspectRatio' => 'landscape',
+            ];
+        }
+
+        return $images;
+    }
+
+    /** Where an image is used, read off the part path assemble-pages keys on. */
+    private static function pageContextFor(string $source): string
+    {
+        $base = preg_replace('/\.html$/', '', basename($source)) ?? '';
+        if ($base === 'header' || $base === 'footer') {
+            return "site {$base}";
+        }
+        if (preg_match('/^page-(.+?)--(.+)$/', $base, $m) !== 1) {
+            return '';
+        }
+        return str_replace('-', ' ', $m[2]) . ' section of the ' . str_replace('-', ' ', $m[1]) . ' page';
     }
 
     /**

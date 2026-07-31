@@ -155,6 +155,53 @@ test('image source validator ignores the documented AI_IMAGE alt after generatio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('image source validator flags references collect-images never recorded', function () {
+    // The silent failure this exists to stop: a page full of invented srcs let
+    // generate-images report "completed" with zero images.
+    [$project, $tmp] = validator_project();
+    $project->writeJson('images.json', []);
+    $project->writeText('plugin/pages/home.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="hero.jpg" alt="A hero"/></figure><!-- /wp:image -->'
+        . '<!-- wp:cover {"url":"bg.png"} --><div class="wp-block-cover"></div><!-- /wp:cover -->'
+    );
+
+    $joined = implode(' ', ThemeValidator::unresolvedImageSourceProblems($project));
+    assert_contains('hero.jpg', $joined);
+    assert_contains('bg.png', $joined);
+    assert_contains('never collected for generation', $joined);
+    assert_contains('plugin/pages/home.html', implode(' ', ThemeValidator::validate($project)));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('image source validator judges only unresolvable image references', function () {
+    [$project, $tmp] = validator_project();
+    // A collected image keeps its placeholder whatever its status — generation
+    // leaves a failed image in place rather than abort the build.
+    $project->writeJson('images.json', [
+        ['filename' => 'known.jpg', 'src' => 'theme:./assets/known.jpg', 'status' => 'failed'],
+    ]);
+    $project->writeText('plugin/pages/home.html',
+        '<img src="theme:./assets/known.jpg" alt="Collected but not generated"/>'
+        . '<img src="/wp-content/themes/demo/assets/done.jpg" alt="Generated"/>'
+        . '<img src="https://cdn.example.com/remote.jpg" alt="Remote"/>'
+        . '<img src="data:image/svg+xml,%3Csvg%3E" alt="Inline"/>'
+        . '<!-- wp:social-link {"url":"#","service":"x"} /-->'
+    );
+
+    assert_eq([], ThemeValidator::unresolvedImageSourceProblems($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('image source validator stays quiet when collection never ran', function () {
+    // Theme-only fixtures and hosts with their own image pipeline write no
+    // images.json, so nothing can be called dangling.
+    [$project, $tmp] = validator_project();
+    $project->writeText('plugin/pages/home.html', '<img src="hero.jpg" alt="A hero"/>');
+
+    assert_eq([], ThemeValidator::unresolvedImageSourceProblems($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('validator checks the content plugin pages for balance and placeholders', function () {
     [$project, $tmp] = validator_project();
     $project->writeText('plugin/pages/home.html', '<!-- wp:group --><div>oops, never closed</div>');

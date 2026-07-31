@@ -39,19 +39,24 @@ $out = null;
 $timeout = 240;
 $keepAlive = false;
 $workers = null;
+$route = '/';
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
     elseif (str_starts_with($a, '--out=')) { $out = substr($a, 6); }
     elseif (str_starts_with($a, '--timeout=')) { $timeout = (int) substr($a, 10); }
     elseif (str_starts_with($a, '--workers=')) { $workers = substr($a, 10); }
+    elseif (str_starts_with($a, '--route=')) { $route = substr($a, 8); }
     elseif ($a === '--keep-alive') { $keepAlive = true; }
     elseif ($slug === null && !str_starts_with($a, '--')) { $slug = $a; }
     else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
+        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--route=/about] [--timeout=240] [--workers=N] [--keep-alive]\n");
         exit(1);
     }
 }
+// Normalize the route to a single leading slash so it appends cleanly to the
+// Playground base URL (which already ends in "/"). Default "/" captures home.
+$route = '/' . ltrim($route, '/');
 
 if ($slug === null) {
     fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
@@ -133,7 +138,9 @@ while (time() < $deadline) {
     $log = is_file($serverLog) ? (string) file_get_contents($serverLog) : '';
     $log = preg_replace('~\x1b\[[0-9;]*m~', '', $log) ?? $log;
     if (preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $log, $m)) {
-        $baseUrl = $m[1] . '/';
+        // Append the requested route (default "/") so inner pages can be
+        // captured, not just the homepage.
+        $baseUrl = $m[1] . $route;
         break;
     }
     usleep(500_000);

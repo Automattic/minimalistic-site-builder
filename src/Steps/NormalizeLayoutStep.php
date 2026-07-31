@@ -27,6 +27,8 @@ final class NormalizeLayoutStep implements Step
 {
     private const LOG_FILE = 'normalize-layout.log';
 
+    public function __construct(private bool $htmlFirst = false) {}
+
     public function id(): string
     {
         return 'normalize-layout';
@@ -52,7 +54,7 @@ final class NormalizeLayoutStep implements Step
 
     public function run(Project $project): void
     {
-        $notes = FixBlocksStep::normalizeLayouts($project);
+        $notes = FixBlocksStep::normalizeLayouts($project, [], $this->htmlFirst);
         $report = $notes === []
             ? "No layout/rhythm normalization needed.\n"
             : '- ' . implode("\n- ", $notes) . "\n";
