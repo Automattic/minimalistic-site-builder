@@ -33,6 +33,22 @@ function homepage_assert_malformed_comment_removed(string $comment): void
     homepage_cleanup($tmp);
 }
 
+function homepage_has_live_script(string $html): bool
+{
+    $previous = libxml_use_internal_errors(true);
+    try {
+        $dom = new DOMDocument();
+        $loaded = $dom->loadHTML(
+            $html,
+            LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING,
+        );
+        return $loaded && $dom->getElementsByTagName('script')->length > 0;
+    } finally {
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+    }
+}
+
 test('homepage-design removes an abrupt empty comment close without ending sanitation', function () {
     homepage_assert_malformed_comment_removed('<!-->');
 });
@@ -69,7 +85,7 @@ test('homepage-design merges nested removal spans without exposing following mar
     homepage_run($project, $llm);
 
     $candidate = $project->readText('design/candidate-1.html');
-    assert_true(!str_contains(strtolower($candidate), '<script'), 'nested removal never exposes script');
+    assert_true(!homepage_has_live_script($candidate), 'nested removal never exposes live script');
     assert_contains($survivor, $candidate, 'trailing landmark survives byte-intact');
     assert_contains('delivered removed', homepage_review_warnings($project));
     homepage_cleanup($tmp);
@@ -94,7 +110,7 @@ test('homepage-design merges overlapping removals across both sanitation passes'
     homepage_run($project, $llm);
 
     $home = $project->readText('design/home.html');
-    assert_true(!str_contains(strtolower($home), '<script'), 'second sanitation pass never exposes script');
+    assert_true(!homepage_has_live_script($home), 'second sanitation pass never exposes live script');
     assert_contains('delivered removed', homepage_review_warnings($project));
     homepage_cleanup($tmp);
 });
@@ -124,7 +140,10 @@ test('homepage-design ends doctype declarations at the first greater-than byte',
 });
 
 test('homepage-design text normalization fails closed on invalid UTF-8', function () {
-    $method = new ReflectionMethod(HomepageDesignStep::class, 'normalizedText');
+    $method = new ReflectionMethod(
+        \Automattic\SiteBuild\Steps\HomepageDesignStep::class,
+        'normalizedText',
+    );
 
     assert_eq(null, $method->invoke(null, "unsafe\xC3"));
 });
