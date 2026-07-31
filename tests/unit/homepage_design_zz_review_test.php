@@ -426,3 +426,72 @@ test('homepage-design reports candidate recovery indexes as one-based', function
     assert_true(!str_contains($warnings, 'tournament candidate 0'));
     homepage_cleanup($tmp);
 });
+
+test('homepage-design keeps raw-text closer prefixes inside style content', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $css = "\n.prefix::after { content: \"</stylex><script>css-token</script>\"; }\n"
+        . ".later { color: green; }\n";
+    $winner = homepage_document('RAW-PREFIX', $css);
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    assert_eq($winner, $project->readText('design/home.html'));
+    assert_eq($css, $project->readText('design/site.css'));
+    assert_contains(
+        '<section id="untouched" data-tone="quiet"><h2>Untouched RAW-PREFIX</h2></section>',
+        $project->readText('design/home.html'),
+    );
+    assert_eq('', homepage_review_warnings($project));
+    homepage_cleanup($tmp);
+});
+
+test('homepage-design keeps a DOM-head style before the literal html element', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $css = "\n.before-html { color: green; }\n";
+    $winner = "<!doctype html><style>{$css}</style><html><body>"
+        . '<header>Before-html header</header><main><section>Content</section></main>'
+        . '<footer>Before-html footer</footer></body></html>';
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    assert_eq($winner, $project->readText('design/home.html'));
+    assert_eq($css, $project->readText('design/site.css'));
+    homepage_cleanup($tmp);
+});
+
+test('homepage-design extracts style content after a quoted greater-than attribute', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $css = '.quoted-start { color: red; }';
+    $winner = str_replace(
+        '<style>',
+        '<style title=">">',
+        homepage_document('QUOTED-STYLE', $css),
+    );
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+
+    homepage_run($project, $llm);
+
+    assert_eq($winner, $project->readText('design/home.html'));
+    assert_eq($css, $project->readText('design/site.css'));
+    homepage_cleanup($tmp);
+});
