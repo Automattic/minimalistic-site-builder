@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../FakeFontFetcher.php';
+
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Package;
@@ -16,14 +18,6 @@ use Automattic\SiteBuild\ThemeValidator;
  * plugin pass structural validation.
  */
 
-final class IntegrationFontFetcher implements \Automattic\SiteBuild\FontFetcher
-{
-    public function fetch(string $url): string
-    {
-        return 'FONTBYTES';
-    }
-}
-
 function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
 {
     return new SiteBuilder(
@@ -32,7 +26,7 @@ function make_integration_builder(FakeLlm $llm, string $outputRoot): SiteBuilder
         outputRoot: $outputRoot,
         blockFixer: BlockFixers::default(),
         models: [],
-        fontFetcher: new IntegrationFontFetcher(),
+        fontFetcher: new \Automattic\SiteBuild\Tests\FakeFontFetcher(),
     );
 }
 
@@ -278,9 +272,9 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     foreach ($bundledTheme['settings']['typography']['fontFamilies'] as $bundledFamily) {
         foreach ($bundledFamily['fontFace'] ?? [] as $bundledFace) {
             $bundledFaces[] = $bundledFace['src'][0];
-            assert_eq('FONTBYTES', $project->readText(
+            assert_true(str_starts_with($project->readText(
                 'theme/' . str_replace('file:./', '', $bundledFace['src'][0])
-            ));
+            ), 'FONTBYTES:'));
         }
     }
     assert_true($bundledFaces !== [], 'the Google families carry bundled fontFace entries');

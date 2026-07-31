@@ -5,14 +5,13 @@ namespace Automattic\SiteBuild;
 
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
+use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
 use Automattic\SiteBuild\Steps\DesignDirectionStep;
 use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
-use Automattic\SiteBuild\FontFetcher;
-use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;

@@ -1,37 +1,18 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\FontFetcher;
+use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\Tests\FakeFontFetcher;
 use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
+
+require_once __DIR__ . '/../FakeFontFetcher.php';
 
 /**
  * BundleFontsStep: fonts ship as theme assets declared in theme.json, and every
  * failure degrades one family to the fonts.php link path — never the build.
  */
-
-final class BundleFontsRecordingFetcher implements FontFetcher
-{
-    /** @var string[] */
-    public array $fetched = [];
-
-    /** @param string[] $failing substrings of URLs that must throw */
-    public function __construct(private array $failing = [])
-    {
-    }
-
-    public function fetch(string $url): string
-    {
-        foreach ($this->failing as $needle) {
-            if (str_contains($url, $needle)) {
-                throw new \RuntimeException('simulated download failure');
-            }
-        }
-        $this->fetched[] = $url;
-        return 'FONTBYTES:' . basename((string) parse_url($url, PHP_URL_PATH));
-    }
-}
 
 $bundleFontsProject = static function (array $familySlugs = ['inter']): Project {
     $known = [
@@ -61,13 +42,13 @@ $bundleFontsProject = static function (array $familySlugs = ['inter']): Project 
 
 test('BundleFontsStep writes assets and declares fontFace with file sources', function () use ($bundleFontsProject) {
     $project = $bundleFontsProject(['inter']);
-    $fetcher = new BundleFontsRecordingFetcher();
+    $fetcher = new FakeFontFetcher();
 
     try {
         (new BundleFontsStep($fetcher))->run($project);
 
         // The scan floor is 400+700 for the body family; only those download.
-        assert_eq(2, count($fetcher->fetched));
+        assert_eq(2, count($fetcher->calls));
 
         $theme = $project->readJson('theme/theme.json');
         $faces = $theme['settings']['typography']['fontFamilies'][0]['fontFace'];
@@ -89,12 +70,12 @@ test('BundleFontsStep writes assets and declares fontFace with file sources', fu
 
 test('BundleFontsStep degrades a family the catalog does not know', function () use ($bundleFontsProject) {
     $project = $bundleFontsProject(['made-up']);
-    $fetcher = new BundleFontsRecordingFetcher();
+    $fetcher = new FakeFontFetcher();
 
     try {
         (new BundleFontsStep($fetcher))->run($project);
 
-        assert_eq([], $fetcher->fetched, 'nothing downloads for an unknown family');
+        assert_eq([], $fetcher->calls, 'nothing downloads for an unknown family');
         $theme = $project->readJson('theme/theme.json');
         assert_true(
             !isset($theme['settings']['typography']['fontFamilies'][0]['fontFace']),
@@ -115,7 +96,7 @@ test('BundleFontsStep degrades a family the catalog does not know', function () 
 test('BundleFontsStep is all-or-nothing per family and independent across families', function () use ($bundleFontsProject) {
     $project = $bundleFontsProject(['inter', 'lora']);
     // Every Lora face fails; Inter downloads normally.
-    $fetcher = new BundleFontsRecordingFetcher(['/lora/']);
+    $fetcher = new FakeFontFetcher(['/lora/']);
 
     try {
         (new BundleFontsStep($fetcher))->run($project);
@@ -142,10 +123,46 @@ test('FontsPhpStep skips fonts.php entirely when every family is bundled', funct
     $project = $bundleFontsProject(['inter']);
 
     try {
-        (new BundleFontsStep(new BundleFontsRecordingFetcher()))->run($project);
+        (new BundleFontsStep(new FakeFontFetcher()))->run($project);
         (new FontsPhpStep())->run($project);
         assert_true(!$project->exists('theme/fonts.php'), 'nothing left to enqueue');
     } finally {
+        exec('rm -rf ' . escapeshellarg($project->root));
+    }
+});
+
+test('BundleFontsStep degrades a family whose scan selects no faces', function () use ($bundleFontsProject) {
+    $project = $bundleFontsProject(['inter']);
+    $catalogPath = sys_get_temp_dir() . '/font-catalog-italic-only-' . uniqid() . '.json';
+    file_put_contents($catalogPath, json_encode([
+        'font_families' => [[
+            'name'       => 'Inter',
+            'slug'       => 'inter',
+            'fontFamily' => 'Inter, sans-serif',
+            'fontFace'   => [
+                ['fontWeight' => '400', 'fontStyle' => 'italic', 'src' => 'https://fonts.gstatic.com/s/inter/400i.woff2'],
+            ],
+        ]],
+    ]));
+    $fetcher = new FakeFontFetcher();
+
+    try {
+        (new BundleFontsStep($fetcher, FontCatalog::load($catalogPath)))->run($project);
+
+        assert_eq([], $fetcher->calls, 'nothing downloads when no face matches the scan');
+        $theme = $project->readJson('theme/theme.json');
+        assert_true(
+            !isset($theme['settings']['typography']['fontFamilies'][0]['fontFace']),
+            'no empty fontFace is written — that would read as bundled'
+        );
+        $warnings = $project->readJson('warnings.json')['bundle-fonts'];
+        assert_contains('no faces for the scanned use', implode("\n", $warnings));
+
+        // The family stays on the link path.
+        (new FontsPhpStep())->run($project);
+        assert_contains('Inter', $project->readText('theme/fonts.php'));
+    } finally {
+        unlink($catalogPath);
         exec('rm -rf ' . escapeshellarg($project->root));
     }
 });

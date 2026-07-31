@@ -246,23 +246,35 @@ final class FontsPhpStep implements Step
         return array_values(self::googleFamiliesBySlug($theme));
     }
 
+    /** True when BundleFontsStep already shipped fontFace entries for this slug. */
+    private static function hasBundledFaces(array $theme, string $slug): bool
+    {
+        $i = self::familyIndexBySlug($theme, $slug);
+        return $i !== null
+            && ($theme['settings']['typography']['fontFamilies'][$i]['fontFace'] ?? []) !== [];
+    }
+
+    /**
+     * Index of the fontFamilies entry carrying this slug, or null.
+     *
+     * @param array<mixed> $theme
+     */
+    public static function familyIndexBySlug(array $theme, string $slug): ?int
+    {
+        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $i => $family) {
+            if (is_array($family) && (string) ($family['slug'] ?? '') === $slug) {
+                return $i;
+            }
+        }
+        return null;
+    }
+
     /**
      * Google-hostable families keyed by their theme.json slug, first-seen order.
      *
      * @param array<mixed> $theme
      * @return array<string,string> slug => family name
      */
-    /** @param array<mixed> $theme */
-    private static function hasBundledFaces(array $theme, string $slug): bool
-    {
-        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $family) {
-            if (is_array($family) && (string) ($family['slug'] ?? '') === $slug) {
-                return ($family['fontFace'] ?? []) !== [];
-            }
-        }
-        return false;
-    }
-
     public static function googleFamiliesBySlug(array $theme): array
     {
         $families = [];
@@ -524,9 +536,7 @@ final class FontsPhpStep implements Step
     /** Extract the first font name from a CSS font-family stack, unquoted. */
     private static function primaryFamily(string $stack): ?string
     {
-        $first = trim(explode(',', $stack)[0]);
-        $first = trim($first, "\"'");
-        return $first === '' ? null : $first;
+        return \Automattic\SiteBuild\FontCatalog::primaryFamily($stack);
     }
 
 

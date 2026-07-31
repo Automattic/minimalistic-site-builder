@@ -72,9 +72,6 @@ final class BundleFontsStep implements Step
         $bundled = 0;
 
         foreach (FontsPhpStep::googleFamiliesBySlug($theme) as $slug => $name) {
-            if (!isset($requirements[$name])) {
-                continue;
-            }
             $family = $catalog->resolve($name);
             if ($family === null) {
                 $warnings[] = "font family '{$name}' is not in the Google Fonts catalog; "
@@ -83,6 +80,14 @@ final class BundleFontsStep implements Step
             }
 
             $faces = $catalog->faces($family, $requirements[$name]['weights'], $requirements[$name]['italic']);
+            // A resolvable family can still select nothing (e.g. no normal-style
+            // face). Writing fontFace: [] would count it bundled while shipping
+            // no fonts — degrade it like a catalog miss instead.
+            if ($faces === []) {
+                $warnings[] = "font family '{$name}' has no faces for the scanned use; "
+                    . 'left on the fonts.php link path';
+                continue;
+            }
 
             // Download every face before writing any, so a mid-family failure
             // cannot leave a half-bundled family behind.
@@ -113,7 +118,7 @@ final class BundleFontsStep implements Step
         }
 
         if ($bundled > 0) {
-            $project->writeJsonAtomic('theme/theme.json', $theme);
+            $project->writeJson('theme/theme.json', $theme);
         }
         $project->addWarnings($this->id(), $warnings);
         echo "  bundle-fonts: {$bundled} family/families bundled"
@@ -137,11 +142,9 @@ final class BundleFontsStep implements Step
      */
     private static function withFontFace(array $theme, string $slug, array $fontFace): array
     {
-        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $i => $family) {
-            if (is_array($family) && (string) ($family['slug'] ?? '') === $slug) {
-                $theme['settings']['typography']['fontFamilies'][$i]['fontFace'] = $fontFace;
-                break;
-            }
+        $i = FontsPhpStep::familyIndexBySlug($theme, $slug);
+        if ($i !== null) {
+            $theme['settings']['typography']['fontFamilies'][$i]['fontFace'] = $fontFace;
         }
         return $theme;
     }
