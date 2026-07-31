@@ -22,18 +22,28 @@ final class InlineStyleHoister
 
     /**
      * @param array<string,string> $parts filename => block markup
-     * @return array{parts:array<string,string>,css:string,style_count:int}
+     * @return array{
+     *     parts:array<string,string>,
+     *     css:string,
+     *     style_count:int,
+     *     dropped_declarations:int,
+     *     unhoistable:int
+     * }
      */
     public function hoist(array $parts): array
     {
         $rules = [];
         $styleCount = 0;
+        $droppedDeclarations = 0;
+        $unhoistable = 0;
         $hoisted = [];
 
         foreach ($parts as $filename => $markup) {
             $result = $this->hoistMarkup($markup);
             $hoisted[$filename] = $result['markup'];
             $styleCount += $result['style_count'];
+            $droppedDeclarations += $result['dropped_declarations'];
+            $unhoistable += $result['unhoistable'];
             foreach ($result['rules'] as $selector => $declarations) {
                 $rules[$selector] = $declarations;
             }
@@ -49,16 +59,30 @@ final class InlineStyleHoister
             'parts' => $hoisted,
             'css' => $css,
             'style_count' => $styleCount,
+            'dropped_declarations' => $droppedDeclarations,
+            'unhoistable' => $unhoistable,
         ];
     }
 
     /**
-     * @return array{markup:string,rules:array<string,string>,style_count:int}
+     * @return array{
+     *     markup:string,
+     *     rules:array<string,string>,
+     *     style_count:int,
+     *     dropped_declarations:int,
+     *     unhoistable:int
+     * }
      */
     private function hoistMarkup(string $markup): array
     {
         if (!preg_match_all(self::START_TAG, $markup, $matches, PREG_OFFSET_CAPTURE)) {
-            return ['markup' => $markup, 'rules' => [], 'style_count' => 0];
+            return [
+                'markup' => $markup,
+                'rules' => [],
+                'style_count' => 0,
+                'dropped_declarations' => 0,
+                'unhoistable' => 0,
+            ];
         }
 
         /** @var array<int,string> $tags */
@@ -70,17 +94,19 @@ final class InlineStyleHoister
         $blocks = BlockMarkup::parse($markup);
         $blockClasses = [];
         $tagClasses = [];
-        $styledTags = [];
+        $removeStyleTags = [];
         $rules = [];
         $styleCount = 0;
+        $droppedDeclarations = 0;
+        $unhoistable = 0;
 
         foreach ($tags as $tagOffset => $tag) {
             if (!preg_match('/\s+style\s*=\s*(["\'])(.*?)\1/is', $tag, $styleMatch)) {
                 continue;
             }
 
-            $declarations = trim(html_entity_decode($styleMatch[2], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-            if ($declarations === '') {
+            $rawDeclarations = html_entity_decode($styleMatch[2], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($rawDeclarations === '' || trim($rawDeclarations, ' ') === '') {
                 continue;
             }
 
@@ -88,6 +114,19 @@ final class InlineStyleHoister
             $target = $owner === null
                 ? ['root_offset' => $tagOffset, 'descendant_selector' => null]
                 : $this->target($blocks, $owner, $tagOffset, $tag);
+            if ($target === null) {
+                $unhoistable++;
+                continue;
+            }
+
+            $sanitized = $this->sanitizeDeclarations($rawDeclarations);
+            $droppedDeclarations += $sanitized['dropped'];
+            $removeStyleTags[$tagOffset] = true;
+            $declarations = $sanitized['declarations'];
+            if ($declarations === '') {
+                continue;
+            }
+
             $descendantSelector = $target['descendant_selector'];
             $signature = $declarations . ($descendantSelector === null ? '' : "\0" . $descendantSelector);
             $className = 'se-' . hash('sha256', $signature);
@@ -95,7 +134,6 @@ final class InlineStyleHoister
                 . ($descendantSelector === null ? '' : ' ' . $descendantSelector);
 
             $rules[$selector] = $declarations;
-            $styledTags[$tagOffset] = true;
             $tagClasses[$target['root_offset']][$className] = true;
             $styleCount++;
 
@@ -104,17 +142,23 @@ final class InlineStyleHoister
             }
         }
 
-        if ($styledTags === []) {
-            return ['markup' => $markup, 'rules' => [], 'style_count' => 0];
+        if ($removeStyleTags === []) {
+            return [
+                'markup' => $markup,
+                'rules' => [],
+                'style_count' => 0,
+                'dropped_declarations' => $droppedDeclarations,
+                'unhoistable' => $unhoistable,
+            ];
         }
 
         $operations = [];
-        foreach (array_unique(array_merge(array_keys($styledTags), array_keys($tagClasses))) as $tagOffset) {
+        foreach (array_unique(array_merge(array_keys($removeStyleTags), array_keys($tagClasses))) as $tagOffset) {
             $tag = $tags[$tagOffset] ?? null;
             if (!is_string($tag)) {
                 continue;
             }
-            $rewritten = isset($styledTags[$tagOffset]) ? $this->removeStyle($tag) : $tag;
+            $rewritten = isset($removeStyleTags[$tagOffset]) ? $this->removeStyle($tag) : $tag;
             $classes = array_keys($tagClasses[$tagOffset] ?? []);
             sort($classes);
             foreach ($classes as $className) {
@@ -164,7 +208,118 @@ final class InlineStyleHoister
             'markup' => $rewrittenBlocks->render(),
             'rules' => $rules,
             'style_count' => $styleCount,
+            'dropped_declarations' => $droppedDeclarations,
+            'unhoistable' => $unhoistable,
         ];
+    }
+
+    /**
+     * @return array{declarations:string,dropped:int}
+     */
+    private function sanitizeDeclarations(string $declarations): array
+    {
+        $valid = [];
+        $dropped = 0;
+
+        foreach ($this->splitDeclarations(trim($declarations, ' ')) as $candidate) {
+            $declaration = $candidate['declaration'];
+            if (trim($declaration, ' ') === '') {
+                continue;
+            }
+            if ($candidate['malformed']) {
+                $dropped++;
+                continue;
+            }
+
+            $colon = strpos($declaration, ':');
+            if ($colon === false) {
+                $dropped++;
+                continue;
+            }
+
+            $property = trim(substr($declaration, 0, $colon), ' ');
+            $value = substr($declaration, $colon + 1);
+            if (
+                preg_match('/^-?[a-zA-Z][a-zA-Z0-9-]*$/', $property) !== 1
+                || trim($value, ' ') === ''
+                || preg_match(
+                    '/[{}<>]|[\x{0000}-\x{001F}\x{007F}-\x{009F}]/u',
+                    $value,
+                ) !== 0
+            ) {
+                $dropped++;
+                continue;
+            }
+
+            $valid[] = $declaration;
+        }
+
+        return [
+            'declarations' => implode(';', $valid),
+            'dropped' => $dropped,
+        ];
+    }
+
+    /**
+     * @return list<array{declaration:string,malformed:bool}>
+     */
+    private function splitDeclarations(string $declarations): array
+    {
+        $parts = [];
+        $start = 0;
+        $quote = null;
+        $escaped = false;
+        $parenthesisDepth = 0;
+        $malformed = false;
+        $length = strlen($declarations);
+
+        for ($offset = 0; $offset < $length; $offset++) {
+            $character = $declarations[$offset];
+            if ($quote !== null) {
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ($character === '\\') {
+                    $escaped = true;
+                } elseif ($character === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+
+            if ($character === '"' || $character === "'") {
+                $quote = $character;
+                continue;
+            }
+            if ($character === '(') {
+                $parenthesisDepth++;
+                continue;
+            }
+            if ($character === ')') {
+                if ($parenthesisDepth === 0) {
+                    $malformed = true;
+                } else {
+                    $parenthesisDepth--;
+                }
+                continue;
+            }
+            if ($character !== ';' || $parenthesisDepth !== 0) {
+                continue;
+            }
+
+            $parts[] = [
+                'declaration' => substr($declarations, $start, $offset - $start),
+                'malformed' => $malformed,
+            ];
+            $start = $offset + 1;
+            $malformed = false;
+        }
+
+        $parts[] = [
+            'declaration' => substr($declarations, $start),
+            'malformed' => $malformed || $quote !== null || $parenthesisDepth !== 0,
+        ];
+
+        return $parts;
     }
 
     private function removeStyle(string $tag): string
@@ -197,20 +352,23 @@ final class InlineStyleHoister
     }
 
     /**
-     * @return array{root_offset:int,descendant_selector:?string}
+     * @return array{root_offset:int,descendant_selector:?string}|null
      */
-    private function target(BlockMarkup $blocks, int $owner, int $tagOffset, string $tag): array
+    private function target(BlockMarkup $blocks, int $owner, int $tagOffset, string $tag): ?array
     {
         $innerStart = $blocks->openingOffset($owner) + $blocks->openingLength($owner);
         $fragment = HtmlFragment::parse($blocks->ownHtml($owner));
         $root = $fragment->root()->elementChildren()[0] ?? null;
         if (!$root instanceof HtmlNode) {
-            return ['root_offset' => $tagOffset, 'descendant_selector' => null];
+            return null;
         }
 
         $rootOffset = $innerStart + $root->startOffset();
         $styled = $this->elementAtOffset($root, $tagOffset - $innerStart);
-        if (!$styled instanceof HtmlNode || $styled === $root) {
+        if (!$styled instanceof HtmlNode) {
+            return null;
+        }
+        if ($styled === $root) {
             return ['root_offset' => $rootOffset, 'descendant_selector' => null];
         }
 
