@@ -66,6 +66,14 @@ final class ContrastFixStep implements Step
 
     public function run(Project $project): void
     {
+        if ($project->exists('design/site.css')) {
+            $project->addWarnings('fixup_skipped', [
+                'step=contrast-fix; signal=design/site.css; disposition=skipped; '
+                    . 'reason=new CSS path uses CSS-aware contrast handling',
+            ]);
+            return;
+        }
+
         $themeJson = $project->readJson('theme/theme.json');
         $palette = self::paletteMap($themeJson);
         $gradients = self::gradientMap($themeJson);

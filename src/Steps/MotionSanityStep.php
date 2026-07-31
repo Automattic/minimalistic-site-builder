@@ -75,6 +75,14 @@ final class MotionSanityStep implements Step
 
     public function run(Project $project): void
     {
+        if ($project->exists('design/site.css')) {
+            $project->addWarnings('fixup_skipped', [
+                'step=motion-sanity; signal=design/site.css; disposition=skipped; '
+                    . 'reason=new CSS path does not use legacy motion fixup',
+            ]);
+            return;
+        }
+
         $profile = DesignDirectionStep::motionProfileFor($project);
         $report = [];
 
