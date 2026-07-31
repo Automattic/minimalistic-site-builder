@@ -4,6 +4,8 @@ declare(strict_types=1);
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
@@ -306,4 +308,107 @@ test('inner-page prompt freezes supported slice responsive and small-CSS contrac
     ] as $required) {
         assert_contains($required, $prompt);
     }
+});
+
+test('inner-pages-design rejects safe-tag structural damage and document-wrapped repairs per page', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('repairable', 'Repairable', 'Repair crossed safe tags'),
+        inner_page('wrapped-repair', 'Wrapped repair', 'Reject document wrapper'),
+        inner_page('stray-closer', 'Stray closer', 'Reject stray closing tag'),
+        inner_page('nested-document', 'Nested document', 'Reject nested document tags'),
+        inner_page('sibling', 'Sibling', 'Land valid sibling'),
+    ]);
+
+    // One batch response per non-front page.
+    $llm->queueText('<main><section><h1>A</h1></main>');
+    $llm->queueText('<section>Missing main before wrapped repair</section>');
+    $llm->queueText('<main><h1>Stray</h1></section></main>');
+    $llm->queueText(
+        '<main><!doctype html><head><title>Nested</title></head>'
+        . '<body><p>Nested body</p></body></main>',
+    );
+    $sibling = '<main id="sibling-main"><h1>Valid sibling</h1></main>';
+    $llm->queueText($sibling);
+
+    // One serial semantic repair for each malformed page, in page order.
+    $repairable = '<main><section><h1>A repaired</h1></section></main>';
+    $llm->queueText($repairable);
+    $llm->queueText('<html><body><main><h1>Still wrapped</h1></main></body></html>');
+    $llm->queueText('<main><article><h1>Still crossed</h1></section></main>');
+    $llm->queueText(
+        '<main><head><title>Still nested</title></head>'
+        . '<body><p>Still nested body</p></body></main>',
+    );
+
+    inner_pages_run($project, $llm);
+
+    assert_eq(1, $llm->completeBatchCalls);
+    assert_eq(4, $llm->completeCalls, 'every malformed safe-tag envelope gets one serial repair');
+    assert_eq($repairable, $project->readText('design/repairable.html'));
+    assert_eq($sibling, $project->readText('design/sibling.html'));
+    foreach (['wrapped-repair', 'stray-closer', 'nested-document'] as $failed) {
+        assert_true(!$project->exists("design/{$failed}.html"));
+        assert_true($project->exists("design/{$failed}.failed"));
+    }
+    inner_pages_cleanup($tmp);
+});
+
+test('inner-pages-design caches real homepage main despite fake main text in head style and comment', function () {
+    $realMain = '<main id="real-home-main"><section><h1>REAL-MAIN-721B</h1></section></main>';
+    $home = '<!doctype html><html><head>'
+        . '<style>.bait::before{content:"<main id=\'fake-style-main\'>FAKE STYLE</main>"}</style>'
+        . '<!-- <main id="fake-comment-main">FAKE COMMENT</main> -->'
+        . '</head><body><header>Header</header>'
+        . $realMain
+        . '<footer>HEAD-TAIL-MUST-NOT-CACHE</footer></body></html>';
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('about', 'About', 'Explain the studio'),
+    ], $home);
+    $llm->queueText('<main><h1>About</h1></main>');
+
+    inner_pages_run($project, $llm);
+
+    $homePrefix = $llm->calls[0]['opts']['cached_prefixes'][1] ?? '';
+    assert_eq($realMain . "\n\n", $homePrefix);
+    assert_true(!str_contains($homePrefix, 'fake-style-main'));
+    assert_true(!str_contains($homePrefix, 'fake-comment-main'));
+    assert_true(!str_contains($homePrefix, 'HEAD-TAIL-MUST-NOT-CACHE'));
+    inner_pages_cleanup($tmp);
+});
+
+test('inner-pages-design cache separators assemble byte-identically across providers', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('about', 'About', 'Explain the studio'),
+    ]);
+    $llm->queueText('<main><h1>About</h1></main>');
+
+    inner_pages_run($project, $llm);
+
+    $call = $llm->calls[0];
+    $prefixes = $call['opts']['cached_prefixes'] ?? [];
+    assert_eq(2, count($prefixes));
+    foreach ($prefixes as $prefix) {
+        assert_true(str_ends_with($prefix, "\n\n"), 'cache layer ends with one blank-line separator');
+        assert_true(!str_ends_with($prefix, "\n\n\n"), 'cache layer has no third trailing newline');
+    }
+
+    $request = ['prompt' => $call['prompt']] + $call['opts'];
+    $anthropic = AnthropicClient::bodyFor($request, 'claude-sonnet-4-6', 16000);
+    $anthropicContent = $anthropic['messages'][0]['content'];
+    assert_true(is_array($anthropicContent));
+    $anthropicUser = implode('', array_map(
+        static fn (array $block): string => (string) ($block['text'] ?? ''),
+        $anthropicContent,
+    ));
+    $openAi = OpenAiCompatibleClient::bodyFor(
+        $request,
+        'gpt-5.2',
+        16000,
+        'openai',
+    );
+    assert_eq($anthropicUser, $openAi['messages'][1]['content']);
+    inner_pages_cleanup($tmp);
 });
