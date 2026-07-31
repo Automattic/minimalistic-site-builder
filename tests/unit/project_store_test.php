@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 
 test('slugify lowercases, hyphenates and trims', function () {
@@ -91,4 +92,40 @@ test('markupFiles collects theme parts, templates, and plugin pages', function (
     assert_eq(['header.html', 'home.html', 'page.html'], $names);
 
     exec('rm -rf ' . escapeshellarg($base));
+});
+
+test('Project::path refuses to resolve outside the project', function () {
+    $project = new Project(sys_get_temp_dir() . '/project-containment-' . getmypid());
+
+    foreach (['../evil', 'theme/assets/fonts/../../../evil', "theme/x\0.php"] as $rel) {
+        assert_throws(
+            static fn () => $project->path($rel),
+            'escaping path rejected: ' . $rel
+        );
+    }
+
+    // Ordinary paths — including the leading slash callers sometimes pass and
+    // the dots inside a filename — keep working.
+    assert_eq($project->root, $project->path());
+    assert_eq($project->root . '/theme/style.css', $project->path('theme/style.css'));
+    assert_eq($project->root . '/theme/style.css', $project->path('/theme/style.css'));
+    assert_eq($project->root . '/theme/assets/fonts/inter-400.woff2', $project->themePath('assets/fonts/inter-400.woff2'));
+    assert_eq($project->root . '/plugin/pages/home.html', $project->pluginPath('pages/home.html'));
+    // Dots inside a filename are not a traversal — this is what segment-wise
+    // checking buys over a naive str_contains($rel, '..').
+    assert_eq($project->root . '/theme/re..entry.css', $project->path('theme/re..entry.css'));
+
+    // exists() is a predicate its callers use to skip work, so an uncontained
+    // path answers false instead of aborting their step.
+    assert_true(!$project->exists('../outside.txt'), 'exists() degrades to false');
+
+    // logPath() builds its own path after creating logs/, so it has to route
+    // through the same guard rather than concatenating past it.
+    $logged = new Project(sys_get_temp_dir() . '/project-containment-logs-' . getmypid());
+    try {
+        assert_throws(static fn () => $logged->logPath('../escaped.log'), 'logPath is contained too');
+        assert_eq($logged->root . '/logs/fix-blocks.log', $logged->logPath('fix-blocks.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($logged->root));
+    }
 });

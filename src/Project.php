@@ -19,10 +19,25 @@ final class Project
         return basename($this->root);
     }
 
-    /** Absolute path to a file relative to the project root. */
+    /**
+     * Absolute path to a file relative to the project root.
+     *
+     * Project paths are assembled from step output, and step output is
+     * model-authored: a `..` segment resolves outside the project and the
+     * write lands wherever the path points. Containment belongs here because
+     * every other path builder on this class delegates here, so one check
+     * covers them all. It is a backstop, not the primary control — steps
+     * slugify the names they derive from model output (see
+     * BundleFontsStep::faceFilename), which also catches the separators and
+     * spaces a project-relative path is right to allow.
+     */
     public function path(string $rel = ''): string
     {
-        return $rel === '' ? $this->root : $this->root . '/' . ltrim($rel, '/');
+        $rel = ltrim($rel, '/');
+        if (str_contains($rel, "\0") || in_array('..', explode('/', $rel), true)) {
+            throw new \RuntimeException("Project path must be a canonical path inside the project: {$rel}");
+        }
+        return $rel === '' ? $this->root : $this->root . '/' . $rel;
     }
 
     /** Absolute path under the theme directory. */
@@ -68,12 +83,22 @@ final class Project
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             throw new \RuntimeException("Could not create logs directory: {$dir}");
         }
-        return $rel === '' ? $dir : $dir . '/' . ltrim($rel, '/');
+        return $this->path('logs' . ($rel === '' ? '' : '/' . ltrim($rel, '/')));
     }
 
+    /**
+     * Callers use this to decide whether to skip work — GenerateImagesStep to
+     * drop a junk manifest entry, ThemeValidator to record "not on disk" as a
+     * warning rather than a failure. An uncontained path is unreachable, which
+     * is what those callers are asking; answering it must not abort their step.
+     */
     public function exists(string $rel): bool
     {
-        return file_exists($this->path($rel));
+        try {
+            return file_exists($this->path($rel));
+        } catch (\RuntimeException) {
+            return false;
+        }
     }
 
     public function writeText(string $rel, string $content): void
