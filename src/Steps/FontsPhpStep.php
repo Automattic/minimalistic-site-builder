@@ -63,7 +63,7 @@ final class FontsPhpStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/theme.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*'],
+            reads: ['theme/theme.json', 'designDirection.json', 'theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
             writes: ['theme/fonts.php'],
             concurrent: false,
         );
@@ -76,9 +76,11 @@ final class FontsPhpStep implements Step
         // Families BundleFontsStep already shipped as theme assets need no
         // enqueue: their fontFace entries in theme.json are the loading
         // mechanism. Only the families that degraded to the link path remain.
+        $bundled = 0;
         foreach (self::googleFamiliesBySlug($theme) as $slug => $name) {
             if (self::hasBundledFaces($theme, $slug)) {
                 unset($requirements[$name]);
+                ++$bundled;
             }
         }
         if ($requirements === []) {
@@ -86,7 +88,9 @@ final class FontsPhpStep implements Step
             if (is_file($fontsFile) && !unlink($fontsFile)) {
                 throw new \RuntimeException("Could not remove stale file: {$fontsFile}");
             }
-            echo "  no Google-hosted families; fonts.php not needed\n";
+            echo $bundled > 0
+                ? "  all {$bundled} Google family/families bundled as theme assets; fonts.php not needed\n"
+                : "  no Google-hosted families; fonts.php not needed\n";
             return;
         }
 
