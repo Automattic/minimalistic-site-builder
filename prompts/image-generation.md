@@ -84,10 +84,10 @@ For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOT
     <div>
         <img alt="AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | full-bleed hero section with the headline overlaid on top | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
         <div>
-            <!-- wp:heading {"level":1,"textAlign":"center","textColor":"base","fontFamily":"heading","fontSize":"display"} -->
+            <!-- wp:heading {"level":1,"style":{"typography":{"textAlign":"center"}},"textColor":"base","fontFamily":"heading","fontSize":"display"} -->
             <h1>Into the High Country</h1>
             <!-- /wp:heading -->
-            <!-- wp:paragraph {"align":"center","textColor":"base","fontSize":"lead"} -->
+            <!-- wp:paragraph {"style":{"typography":{"textAlign":"center"}},"textColor":"base","fontSize":"lead"} -->
             <p>Guided treks through the alpine wilderness.</p>
             <!-- /wp:paragraph -->
         </div>

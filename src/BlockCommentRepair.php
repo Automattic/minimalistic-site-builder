@@ -19,11 +19,16 @@ final class BlockCommentRepair
 {
     /**
      * One block-comment delimiter: closer flag, name, attrs JSON, void flag.
-     * The attrs scan must not cross a `-->` boundary.
+     * The attrs scan must not cross a `-->` boundary. The payload need not
+     * end in `}`: a flat/array/scalar-ended payload missing only its root
+     * closer must still be captured so it can be repaired.
      */
     private const TOKEN_RE =
         '/<!--\s*(\/)?wp:([a-z][a-z0-9_\/-]*)\s*'
-        . '(\{(?:(?!-->).)*?\})?\s*(\/)?-->/s';
+        . '(\{(?:(?!-->).)*?)?\s*(\/)?-->/s';
+
+    /** Hard cap on candidate payloads evaluated per premature-closer search. */
+    private const MAX_CANDIDATE_ATTEMPTS = 1024;
 
     /**
      * @return array{markup:string,notes:list<string>}
@@ -200,12 +205,20 @@ final class BlockCommentRepair
      */
     private static function withoutPrematureClosers(string $json): ?string
     {
+        // The attempt budget is enforced per candidate, inside the loops: a
+        // second-round sweep is quadratic (payloads x closers, each candidate
+        // a full payload copy), so checking only between rounds would
+        // materialize the whole round in memory before any limit applied.
+        $attempts = 0;
         $payloads = [$json];
         for ($deletions = 0; $deletions < 2; $deletions++) {
             $results = [];
             $stillInvalid = [];
             foreach ($payloads as $payload) {
                 foreach (self::closerOffsets($payload) as $offset) {
+                    if (++$attempts > self::MAX_CANDIDATE_ATTEMPTS) {
+                        return null;
+                    }
                     $candidate = substr_replace($payload, '', $offset, 1);
                     $decoded = json_decode($candidate);
                     if (!$decoded instanceof \stdClass) {
@@ -214,16 +227,16 @@ final class BlockCommentRepair
                     }
                     if (!self::hasSameDepthDuplicateKeys($candidate)) {
                         $results[json_encode($decoded)] = $candidate;
+                        if (count($results) > 1) {
+                            return null;
+                        }
                     }
                 }
             }
             if ($results !== []) {
-                return count($results) === 1 ? reset($results) : null;
+                return reset($results);
             }
             $payloads = array_keys($stillInvalid);
-            if (count($payloads) > 1024) {
-                return null;
-            }
         }
         return null;
     }

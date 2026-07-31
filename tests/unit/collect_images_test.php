@@ -230,3 +230,43 @@ test('collect-images keeps subject pipes and parses the three trailing fields', 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('collect-images warns when a referenced theme asset has no AI_IMAGE placeholder', function () {
+    // A dropped or malformed alt means the asset is never collected, never
+    // generated, and renders blank. Prompt compliance is not machine-checked
+    // anywhere else, so the miss must at least leave a durable warning.
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--gallery.html',
+        '<!-- wp:gallery --><figure>'
+        . '<img src="theme:./assets/dining-room.jpg" alt="A softly lit dining room"/>'
+        . '<img src="theme:./assets/wood-oven.jpg" alt="AI_IMAGE: A glowing wood-fired oven | gallery card | photorealistic | square"/>'
+        . '</figure><!-- /wp:gallery -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    assert_eq(1, count($project->readJson('images.json')), 'only the declared placeholder is collected');
+    $warnings = $project->readJson('warnings.json')['collect-images'] ?? [];
+    assert_eq(1, count($warnings));
+    assert_contains('dining-room.jpg', $warnings[0]);
+    assert_contains('no AI_IMAGE placeholder', $warnings[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images stays quiet when a shared asset is declared in another file', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/header.html',
+        '<img src="theme:./assets/logo.jpg" alt="AI_IMAGE: A clean wordmark | header logo | minimalist | square"/>'
+    );
+    $project->writeText('theme/parts/footer.html',
+        '<img src="theme:./assets/logo.jpg" alt="Wordmark"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $warnings = $project->exists('warnings.json') ? $project->readJson('warnings.json') : [];
+    assert_eq([], $warnings['collect-images'] ?? []);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

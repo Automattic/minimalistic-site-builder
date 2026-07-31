@@ -67,6 +67,8 @@ foreach (SITES as $slug => $prompt) {
     $previousUsage = $llm->usageTotals();
     $error = null;
     $total = 0.0;
+    $runningStep = null;
+    $runningStart = 0.0;
     try {
         $builder->pipeline()->runThrough($project, null, function (Step $s, float $secs) use (
             $llm,
@@ -74,7 +76,9 @@ foreach (SITES as $slug => $prompt) {
             &$usage,
             &$previousUsage,
             &$total,
+            &$runningStep,
         ) {
+            $runningStep = null;
             $timings[$s->id()] = round($secs, 1);
             $total += $secs;
             $currentUsage = $llm->usageTotals();
@@ -87,10 +91,28 @@ foreach (SITES as $slug => $prompt) {
             ];
             $previousUsage = $currentUsage;
             printf("  %-22s %6.1fs %10d out\n", $s->id(), $secs, $outputTokens);
+        }, function (Step $s) use (&$runningStep, &$runningStart) {
+            $runningStep = $s->id();
+            $runningStart = microtime(true);
         });
     } catch (Throwable $e) {
         $error = $e->getMessage();
         echo "  ERROR: {$error}\n";
+        // A throwing step never reaches the reporter, but its requests were
+        // still billed — attribute the unreported delta to the failed step.
+        if ($runningStep !== null) {
+            $secs = microtime(true) - $runningStart;
+            $timings[$runningStep] = round($secs, 1);
+            $total += $secs;
+            $currentUsage = $llm->usageTotals();
+            $inputTokens = $currentUsage['input_tokens'] - $previousUsage['input_tokens'];
+            $outputTokens = $currentUsage['output_tokens'] - $previousUsage['output_tokens'];
+            $usage[$runningStep] = [
+                'input_tokens' => $inputTokens,
+                'output_tokens' => $outputTokens,
+                'total_tokens' => $inputTokens + $outputTokens,
+            ];
+        }
     }
 
     $problems = $error === null ? ThemeValidator::validate($project) : ['build failed before validation'];
@@ -199,7 +221,19 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    $stepIds = ['scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction', 'theme-json+page-plan', 'sections', 'collect-images', 'fix-blocks', 'assemble-pages', 'finalize-theme'];
+    // Derive the columns from what actually ran: a hardcoded list silently
+    // drops steps (and their real token spend) from the totals the day the
+    // pipeline gains one.
+    $stepIds = [];
+    foreach ($results as $r) {
+        foreach ([array_keys($r['timings'] ?? []), array_keys($r['usage'] ?? [])] as $ids) {
+            foreach ($ids as $sid) {
+                if (!in_array($sid, $stepIds, true)) {
+                    $stepIds[] = $sid;
+                }
+            }
+        }
+    }
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
     // Resolve the large tier the run actually used rather than naming a model

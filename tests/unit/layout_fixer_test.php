@@ -682,12 +682,14 @@ test('layout fixer rejects stray-closer repairs that create duplicate keys', fun
 test('layout fixer repairs an opener independently of an earlier unterminated one', function () {
     // The attrs scan is bounded at "-->": an unterminated attrs object no
     // longer swallows the following comments, so the later opener repairs on
-    // its own (PR #109 review, finding 6).
+    // its own (PR #109 review, finding 6). The unterminated payload itself
+    // is also captured and gets its missing root closer restored (PR #170
+    // review, finding 4).
     $markup = '<!-- wp:paragraph {"align":"left" --><p>x</p><!-- /wp:paragraph -->'
         . '<!-- wp:group {"align":"full"}} --><div class="wp-block-group alignfull"></div><!-- /wp:group -->';
     $r = LayoutFixer::fix($markup, LayoutFixer::ROLE_SECTION, 860.0);
-    assert_contains('wp:group {"align":"full"} -->', $r['markup']);
-    assert_contains('wp:paragraph {"align":"left" -->', $r['markup']);
+    assert_contains('wp:group {"align":"full","layout":{"type":"constrained"}} -->', $r['markup']);
+    assert_contains('wp:paragraph {"align":"left"} -->', $r['markup']);
 });
 
 test('layout fixer does not mirror spacing from a bare child of a wrapperless block', function () {

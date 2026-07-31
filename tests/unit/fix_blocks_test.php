@@ -960,7 +960,7 @@ test('attribute-light cover markup remains collectable before canonical serializ
 <div>
 <img alt="AI_IMAGE: A misty mountain range at dawn with calm sky behind the headline | full-bleed hero section | photorealistic | landscape" src="theme:./assets/hero-mountain-dawn.jpg"/>
 <div>
-<!-- wp:heading {"level":1,"textAlign":"center","textColor":"base","fontFamily":"heading","fontSize":"display"} -->
+<!-- wp:heading {"level":1,"style":{"typography":{"textAlign":"center"}},"textColor":"base","fontFamily":"heading","fontSize":"display"} -->
 <h1>Into the High Country</h1>
 <!-- /wp:heading -->
 </div>
@@ -982,6 +982,7 @@ HTML;
         assert_contains('class="wp-block-cover alignfull"', $fixed, 'cover save classes are regenerated');
         assert_contains('style="min-height:80vh"', $fixed, 'cover dimensions are regenerated');
         assert_contains('Into the High Country', $fixed, 'nested RichText content survives');
+        assert_contains('has-text-align-center', $fixed, 'current-schema textAlign regenerates centering');
         assert_contains('theme:./assets/hero-mountain-dawn.jpg', $fixed, 'cover URL survives');
         assert_contains('0 style/class value(s) dropped', $report);
     } finally {

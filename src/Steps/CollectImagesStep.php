@@ -69,6 +69,7 @@ final class CollectImagesStep implements Step
     {
         /** @var array<string,array<string,mixed>> $byFilename keyed by filename, deduped */
         $byFilename = [];
+        $contents = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
@@ -76,6 +77,7 @@ final class CollectImagesStep implements Step
             if ($parsed['content'] !== $content) {
                 $project->writeText('theme/' . $rel, $parsed['content']);
             }
+            $contents[$rel] = $parsed['content'];
             foreach ($parsed['images'] as $img) {
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
@@ -90,6 +92,39 @@ final class CollectImagesStep implements Step
         }
 
         $project->writeJson('images.json', array_values($byFilename));
+
+        // A theme asset referenced without a matching collected spec means its
+        // AI_IMAGE alt was dropped or malformed: it will never be generated
+        // and renders blank. Degrade with a durable warning, not a failure.
+        $warnings = [];
+        foreach ($contents as $rel => $content) {
+            foreach (self::uncollectedAssetReferences($content, $byFilename) as $filename) {
+                $warnings[] = "{$rel} references theme:./assets/{$filename} but no AI_IMAGE placeholder"
+                    . ' declares it — the asset will not be generated and renders blank';
+            }
+        }
+        $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * Filenames of theme assets referenced by this markup that no collected
+     * spec covers. Pure — unit-testable.
+     *
+     * @param array<string,mixed> $collected keyed by filename
+     * @return list<string>
+     */
+    public static function uncollectedAssetReferences(string $content, array $collected): array
+    {
+        if (!preg_match_all('/theme:\.\/assets\/([a-z0-9-]+\.(?:jpe?g|png))/i', $content, $m)) {
+            return [];
+        }
+        $missing = [];
+        foreach ($m[1] as $filename) {
+            if (!isset($collected[$filename]) && !isset($missing[$filename])) {
+                $missing[$filename] = true;
+            }
+        }
+        return array_keys($missing);
     }
 
     /** Theme-relative paths of every markup file that may hold image placeholders. */
