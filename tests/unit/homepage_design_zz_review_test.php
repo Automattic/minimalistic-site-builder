@@ -473,6 +473,40 @@ test('homepage-design keeps a DOM-head style before the literal html element', f
     homepage_cleanup($tmp);
 });
 
+function homepage_assert_pre_head_declaration_is_ignored(string $prefix, string $id): void
+{
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $css = "\n.pre-head-{$id} { color: green; }\n";
+    $winner = "{$prefix}<html><style>{$css}</style><body>"
+        . "<header>Pre-head {$id} header</header><main><section>Content</section></main>"
+        . "<footer>Pre-head {$id} footer</footer></body></html>";
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+    $llm->queueText(homepage_document('REPAIRED', "\n.repaired { color: purple; }\n"));
+
+    homepage_run($project, $llm);
+
+    assert_eq($winner, $project->readText('design/home.html'));
+    assert_eq($css, $project->readText('design/site.css'));
+    homepage_cleanup($tmp);
+}
+
+test('homepage-design ignores a bogus doctype before DOM-head style content', function () {
+    homepage_assert_pre_head_declaration_is_ignored('<!doctypehtml>', 'bogus-doctype');
+});
+
+test('homepage-design ignores an XML processing instruction before DOM-head style content', function () {
+    homepage_assert_pre_head_declaration_is_ignored(
+        '<?xml version="1.0"?>',
+        'xml-instruction',
+    );
+});
+
 test('homepage-design does not treat a style after body text as head content', function () {
     [$project, $llm, $tmp] = homepage_fixture([
         'design_candidates' => 2,
