@@ -604,6 +604,23 @@ final class DesignDirectionStep implements Step
     }
 
     /**
+     * The whole committed direction, or none. The accessors below answer one
+     * field each; callers needing a whole block read through this.
+     *
+     * The full graph cannot reach these callers without a direction —
+     * StepGraph::validate() rejects a composition that drops the writer. The
+     * tolerance is for steps run on their own, where the file is simply not
+     * there: unit tests, and any host that runs a span of the graph rather
+     * than the whole of it.
+     *
+     * @return array<mixed>
+     */
+    public static function dataFor(Project $project): array
+    {
+        return $project->exists(self::FILE) ? $project->readJson(self::FILE) : [];
+    }
+
+    /**
      * The committed direction's image grade — the one-sentence photographic
      * treatment shared by ALL of the site's imagery, consumed verbatim by
      * GenerateImagesStep. Returns '' when no direction (or no grade) was

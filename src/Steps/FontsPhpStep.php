@@ -74,7 +74,7 @@ final class FontsPhpStep implements Step
     public function run(Project $project): void
     {
         $theme = $project->readJson('theme/theme.json');
-        $direction = $project->readJson('designDirection.json');
+        $direction = DesignDirectionStep::dataFor($project);
         $warnings = [];
         $requirements = self::fontRequirements(
             $theme,

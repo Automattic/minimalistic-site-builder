@@ -207,3 +207,20 @@ test('BundleFontsStep names assets from the catalog family, not the theme role s
         exec('rm -rf ' . escapeshellarg($project->root));
     }
 });
+
+test('font steps run on their own without a design direction', function () use ($bundleFontsProject) {
+    // Run on their own, outside the full graph, neither step finds a
+    // designDirection.json — both threw "Missing file" before dataFor().
+    $project = $bundleFontsProject(['inter']);
+    unlink($project->path('designDirection.json'));
+
+    try {
+        (new BundleFontsStep(new FakeFontFetcher()))->run($project);
+        (new FontsPhpStep())->run($project);
+
+        $faces = $project->readJson('theme/theme.json')['settings']['typography']['fontFamilies'][0]['fontFace'];
+        assert_true($faces !== [], 'the family still bundles from scanned usage alone');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($project->root));
+    }
+});

@@ -71,7 +71,7 @@ final class BundleFontsStep implements Step
         $requirements = FontsPhpStep::fontRequirements(
             $theme,
             FontsPhpStep::themeMarkup($project),
-            $project->readJson('designDirection.json'),
+            DesignDirectionStep::dataFor($project),
             $directionWarnings,
         );
         if ($requirements === []) {
