@@ -627,6 +627,51 @@ test('site CSS path scrubs image-set remote strings after leading C0 control nor
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path scrubs image-set remote strings with embedded URL whitespace', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_embedded_space_scrub_');
+    $base = $project->readText('theme/style.css');
+    $siteCss = '.tab{background-image:image-set("h\9 ttp://127.0.0.1:9/tab.png" 1x);display:grid}'
+        . '.lf{background-image:image-set("h\a ttp://evil.example/line-feed.png" 2x);padding:1rem}'
+        . '.cr{background-image:image-set("h\d ttp://evil.example/carriage-return.png" 3x);margin:2rem}'
+        . '.safe{position:relative}';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $base . '.tab{display:grid}.lf{padding:1rem}.cr{margin:2rem}.safe{position:relative}',
+        $project->readText('theme/style.css'),
+        'deterministic merge removes all embedded-whitespace remotes and keeps siblings'
+    );
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+    $warningRows = $project->readJson('warnings.json')['page-styles'] ?? [];
+    assert_eq(3, count($warningRows), 'one warning per removed declaration');
+    $warnings = implode("\n", $warningRows);
+    assert_contains('source=design/site.css', $warnings);
+    assert_contains(
+        'authored_value="background-image:image-set(\\"h\\\\9 ttp://127.0.0.1:9/tab.png\\" 1x);"',
+        $warnings
+    );
+    assert_contains(
+        'authored_value="background-image:image-set(\\"h\\\\a ttp://evil.example/line-feed.png\\" 2x);"',
+        $warnings
+    );
+    assert_contains(
+        'authored_value="background-image:image-set(\\"h\\\\d ttp://evil.example/carriage-return.png\\" 3x);"',
+        $warnings
+    );
+    assert_contains('delivered_value=removed', $warnings);
+    assert_contains('disposition=removed_external_url', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(

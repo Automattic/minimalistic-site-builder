@@ -293,6 +293,28 @@ test('css scrub removes bare remote strings after CSS-escaped leading C0 control
     }
 });
 
+test('css scrub removes bare remote strings with embedded CSS-escaped URL whitespace', function (): void {
+    $cases = [
+        'tab' => 'h\9 ttp://127.0.0.1:9/tab.png',
+        'line feed' => 'h\a ttp://evil.example/line-feed.png',
+        'carriage return' => 'h\d ttp://evil.example/carriage-return.png',
+    ];
+
+    foreach ($cases as $label => $value) {
+        $css = '.bad{background-image:image-set("' . $value . '" 1x);color:red}';
+        $result = CssScrub::scrub($css);
+
+        assert_eq('.bad{color:red}', $result['css'], $label);
+        assert_eq(1, count($result['removals']), $label);
+        assert_eq(
+            'background-image:image-set("' . $value . '" 1x);',
+            $result['removals'][0]['authored_value'],
+            $label
+        );
+        assert_eq('removed_external_url', $result['removals'][0]['disposition'], $label);
+    }
+});
+
 test('css scrub preserves allowed bare string urls in image functions byte for byte on one line', function (): void {
     $css = '.relative{background-image:image-set("./asset.png" 1x)}'
         . '.data{background-image:-webkit-image-set("data:image/png;base64,AAAA" 2x)}'
@@ -308,6 +330,17 @@ test('css scrub preserves allowed bare string urls after CSS-escaped leading C0 
     $css = '.relative{background-image:image-set("\b ./asset.png" 1x)}'
         . '.data{background-image:image-set("\1f data:image/png;base64,AAAA" 2x)}'
         . '.fragment{background-image:image("\b #local-paint")}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
+test('css scrub preserves allowed urls with embedded CSS-escaped URL whitespace', function (): void {
+    $css = '.relative{background-image:image-set("./as\9 set.png" 1x)}'
+        . '.data{background-image:image-set("da\a ta:image/png;base64,AAAA" 2x)}'
+        . '.fragment{background-image:image("#lo\d cal-paint")}';
 
     $result = CssScrub::scrub($css);
 
