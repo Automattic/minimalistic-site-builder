@@ -391,3 +391,46 @@ test('valid unresolved background shorthand wins cascade and stays untouched wit
     assert_contains('disposition=unverified', $warnings[0]);
     assert_contains('delivered=unchanged', $warnings[0]);
 });
+
+test('position-only background shorthands win over stale background colors as unverified', function () {
+    $markup = '<p class="copy">Position shorthand</p>';
+    foreach (['center center', 'left top', '0 0'] as $shorthand) {
+        $findings = CssContrastCheck::check(
+            ".copy{color:#777777;background-color:#000000;background:{$shorthand}}",
+            $markup,
+        );
+
+        assert_eq([[
+            'selector' => '.copy',
+            'status' => 'unverified',
+            'fg' => null,
+            'bg' => null,
+            'ratio' => null,
+            'suggested' => null,
+        ]], $findings, $shorthand);
+    }
+});
+
+test('later resolved background longhand wins over an earlier unresolved shorthand', function () {
+    $findings = CssContrastCheck::check(
+        '.copy{color:#777777;background:center center;background-color:#ffffff}',
+        '<p class="copy">Later longhand</p>',
+    );
+
+    assert_eq(1, count($findings));
+    assert_eq('fail', $findings[0]['status']);
+    assert_eq('#777777', $findings[0]['fg']);
+    assert_eq('#ffffff', $findings[0]['bg']);
+});
+
+test('invalid atomic color declarations still fall back to earlier valid declarations', function () {
+    $findings = CssContrastCheck::check(
+        '.copy{color:#777777;color:not-a-color;background-color:#ffffff;background-color:not-a-color}',
+        '<p class="copy">Invalid atomic fallback</p>',
+    );
+
+    assert_eq(1, count($findings));
+    assert_eq('fail', $findings[0]['status']);
+    assert_eq('#777777', $findings[0]['fg']);
+    assert_eq('#ffffff', $findings[0]['bg']);
+});
