@@ -186,7 +186,12 @@ test('HTML-first default builds and validates every single-page artifact', funct
         }
 
         assert_eq(html_first_preview_document(), $project->readText('design/preview.html'));
-        assert_eq($homeDocument, $project->readText('design/home.html'), 'homepage output stays unchanged');
+        assert_true($project->exists('design/home.html'), 'homepage design output exists');
+        assert_contains(
+            'HTML-FIRST-HOME',
+            $project->readText('design/home.html'),
+            'homepage content survives downstream image-source assignment',
+        );
 
         $home = $project->readText('plugin/pages/home.html');
         assert_contains('HTML-FIRST-HOME', $home);
