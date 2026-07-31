@@ -933,6 +933,89 @@ test('theme-json sends no json_schema', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json prompt carries authoritative tokens extracted from design CSS', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_css_tokens_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    $project->writeText(
+        'design/site.css',
+        file_get_contents(repo_path('tests/fixtures/design/tokens-rich.css')) ?: '',
+    );
+
+    $request = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json'];
+
+    assert_contains('#123456', $request['prompt']);
+    assert_contains('"Source Sans 3", Arial, sans-serif', $request['prompt']);
+    assert_contains('2rem', $request['prompt']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json absent CSS prompt matches the recorded legacy bytes', function () {
+    $expectation = json_decode(
+        file_get_contents(repo_path('tests/fixtures/theme-json/legacy-prompt-expectation.json')) ?: '',
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $tmp = sys_get_temp_dir() . '/builder_tj_legacy_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', $expectation['meta']);
+    $project->writeJson('siteSpec.json', $expectation['siteSpec']);
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_eq($expectation['bytes'], strlen($prompt));
+    assert_eq($expectation['sha256'], hash('sha256', $prompt));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json sparse CSS keeps direction prompt and writes actionable warning', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_sparse_tokens_' . uniqid();
+    $store = new ProjectStore($tmp);
+    $legacy = $store->create('legacy');
+    $sparse = $store->create('sparse');
+    $direction = [
+        'concept' => 'Polar editorial',
+        'palette' => [
+            'base' => '#F5FBFF',
+            'contrast' => '#061A24',
+            'primary' => '#0C5B78',
+            'secondary' => '#315D6D',
+            'accent' => '#B63A1E',
+        ],
+        'type_pairing' => 'Fraunces with Source Sans 3',
+    ];
+    foreach ([$legacy, $sparse] as $project) {
+        $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+        $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        $project->writeJson('designDirection.json', $direction);
+    }
+    $sparse->writeText(
+        'design/site.css',
+        file_get_contents(repo_path('tests/fixtures/design/tokens-sparse.css')) ?: '',
+    );
+    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    $legacyPrompt = $step->requests($legacy)['theme-json']['prompt'];
+    $sparsePrompt = $step->requests($sparse)['theme-json']['prompt'];
+
+    assert_eq($legacyPrompt, $sparsePrompt, 'sparse extraction uses unchanged design-direction prompt');
+    $warnings = implode(' ', $sparse->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('sparse_tokens', $warnings);
+    assert_contains('design/site.css', $warnings);
+    assert_contains('authored', $warnings);
+    assert_contains('delivered design-direction values', $warnings);
+    assert_contains('disposition', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json run wires the scaffold into the written theme', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_scaffold_run_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

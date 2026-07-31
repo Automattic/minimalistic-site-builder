@@ -1,0 +1,9 @@
+:root {
+    --brand: #123456;
+    --space: 2rem;
+}
+
+main {
+    color: var(--brand);
+    padding: var(--space);
+}
