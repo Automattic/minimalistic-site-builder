@@ -33,6 +33,17 @@ namespace Automattic\SiteBuild;
 final class TextBatchRecovery
 {
     /**
+     * Shared provider-neutral output-limit classifier for raw-text recovery.
+     *
+     * Single-completion recovery uses this same entry point so batch and single
+     * paths cannot drift onto different finish-reason vocabularies.
+     */
+    public static function isTruncation(mixed $reason): bool
+    {
+        return JsonBatchRecovery::isTruncation($reason);
+    }
+
+    /**
      * @param array<array-key,array<string,mixed>> $requests
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>|string> $send
      * @return TextBatchResult raw text and keyed degradation notes, ordered as the input
@@ -190,7 +201,7 @@ final class TextBatchRecovery
         $retry['log_label'] = $label . '-regenerate';
         $prompt = (string) ($request['prompt'] ?? '');
 
-        if (JsonBatchRecovery::isTruncation($response['stop_reason'] ?? null)) {
+        if (self::isTruncation($response['stop_reason'] ?? null)) {
             // Twice the explicit budget, or twice the calling client's
             // effective configurable default when the request relied on it.
             $retry['max_tokens'] = isset($request['max_tokens'])
@@ -239,8 +250,8 @@ final class TextBatchRecovery
         if (trim((string) $current['text']) === '') {
             return true;
         }
-        return JsonBatchRecovery::isTruncation($candidate['stop_reason'] ?? null)
-            && !JsonBatchRecovery::isTruncation($current['stop_reason'] ?? null);
+        return self::isTruncation($candidate['stop_reason'] ?? null)
+            && !self::isTruncation($current['stop_reason'] ?? null);
     }
 
     /**
