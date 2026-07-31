@@ -3,11 +3,18 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ConcurrentGroup;
 use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\BuildPipeline;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Tests\FakeLlm;
+
+test('Pipeline implements the frozen build runner contract', function () {
+    $pipeline = new Pipeline([new RecorderStep('contract')]);
+
+    assert_true($pipeline instanceof BuildPipeline);
+});
 
 /**
  * Unit tests for Pipeline stop semantics: `--until` accepts a concurrent

@@ -8,7 +8,7 @@ namespace Automattic\SiteBuild;
  * each step is one shot. Callers can stop after a given step id and observe
  * per-step timing via the optional reporter.
  */
-final class Pipeline
+final class Pipeline implements BuildPipeline
 {
     /**
      * @param Step[]       $steps Validated immediately via StepGraph.

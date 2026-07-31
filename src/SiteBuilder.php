@@ -40,7 +40,7 @@ final class SiteBuilder
      * Assemble the full site-creation pipeline in order. Fresh Pipeline each
      * call. Pass a custom StepComposition to use a host-tuned graph.
      */
-    public function pipeline(?StepComposition $composition = null): Pipeline
+    public function pipeline(?StepComposition $composition = null): BuildPipeline
     {
         $composition ??= StepComposition::default(
             llm: $this->llm,
