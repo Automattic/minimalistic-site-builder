@@ -246,3 +246,28 @@ test('SiteBuilder accepts partial model overrides without fatalling', function (
     assert_true(in_array('sections', $builder->pipeline()->stepIds(), true));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('createProject rejects pages when multiPage is explicitly false', function () {
+    $tmp = sys_get_temp_dir() . '/builder_guard_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    assert_throws(static fn () => $builder->createProject(
+        prompt: 'A bakery',
+        multiPage: false,
+        pages: [['title' => 'About', 'slug' => 'about', 'purpose' => 'About us']],
+    ));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('createProject rejects a site spec that cannot serialize to JSON', function () {
+    $tmp = sys_get_temp_dir() . '/builder_guard_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    assert_throws(static fn () => $builder->createProject(
+        prompt: 'A bakery',
+        siteSpec: ['bytes' => "\xB1\x31"],
+    ));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

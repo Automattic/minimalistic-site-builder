@@ -1,11 +1,8 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Package;
-use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
-use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
@@ -150,18 +147,7 @@ test('siteSpec schema and example publish the canonical package contract', funct
 test('siteSpec example is a warning-free normalization fixed point', function () {
     $tmp = sys_get_temp_dir() . '/builder_sitespec_contract_' . uniqid();
     $llm = new FakeLlm();
-    $fixer = new class implements BlockFixer {
-        public function fix(string $themeDir): string
-        {
-            return '[fix-blocks] noop';
-        }
-    };
-    $builder = new SiteBuilder(
-        llm: $llm,
-        promptsDir: Package::promptsDir(),
-        outputRoot: $tmp,
-        blockFixer: $fixer,
-    );
+    $builder = make_test_builder($llm, $tmp);
     $example = site_spec_contract_object(Package::siteSpecExamplePath());
     $project = $builder->createProject(
         prompt: 'Use the complete canonical bakery facts supplied by the host.',
@@ -179,14 +165,7 @@ test('siteSpec example is a warning-free normalization fixed point', function ()
 });
 
 test('siteSpec schema required fields match exhaustive normalization', function () {
-    $tmp = sys_get_temp_dir() . '/builder_sitespec_contract_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('required-fields');
-    $project->writeJson('meta.json', [
-        'prompt' => 'A sparse host-provided site spec.',
-        'multi_page' => true,
-        'site_spec' => [],
-    ]);
-    $llm = new FakeLlm();
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: []);
     (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
 
     $normalizedKeys = array_keys($project->readJson('siteSpec.json'));
@@ -196,4 +175,55 @@ test('siteSpec schema required fields match exhaustive normalization', function 
     assert_eq($schemaKeys, $normalizedKeys, 'schema required fields must match an exhaustively normalized spec');
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('siteSpec schema invented enum matches the identities normalization can invent', function () {
+    // The schema's invented.items.enum and SiteSpecStep's identity handling are
+    // written by hand in two places. Same tripwire style as the required-fields
+    // test above: force every invention from an empty spec and check the schema
+    // admits exactly what normalization produced.
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: false, siteSpec: []);
+    (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
+
+    $invented = $project->readJson('siteSpec.json')['invented'];
+    $schema = site_spec_contract_object(Package::siteSpecSchemaPath());
+    $allowed = $schema['properties']['invented']['items']['enum'];
+
+    assert_true($invented !== [], 'an empty spec must invent identity fields');
+    foreach ($invented as $key) {
+        assert_true(in_array($key, $allowed, true), "schema enum is missing invented key '{$key}'");
+    }
+    sort($allowed);
+    $normalizable = $allowed;
+    sort($normalizable);
+    assert_eq($allowed, $normalizable);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('siteSpec schema email_domain pattern agrees with normalization', function () {
+    // The domain rule exists twice — a pattern string in the schema and a
+    // preg_match in SiteSpecStep. Behavioral parity: for each sample, the
+    // schema pattern accepts exactly the domains normalization preserves.
+    $schema = site_spec_contract_object(Package::siteSpecSchemaPath());
+    $pattern = '/' . str_replace('/', '\\/', $schema['properties']['email_domain']['pattern']) . '/';
+
+    $samples = [
+        'valid-domain.com'   => true,
+        'sub.valid.org'      => true,
+        'Bad_Domain!'        => false,
+        'nodots'             => false,
+        '-leading.com'       => false,
+    ];
+    foreach ($samples as $domain => $valid) {
+        assert_eq($valid, preg_match($pattern, $domain) === 1, "schema pattern disagrees on '{$domain}'");
+
+        [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: false, siteSpec: ['email_domain' => $domain]);
+        (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
+        $spec = $project->readJson('siteSpec.json');
+        $preserved = strtolower($domain) === ($spec['email_domain'] ?? null)
+            && !in_array('email_domain', $spec['invented'] ?? [], true);
+        assert_eq($valid, $preserved, "normalization disagrees with the schema on '{$domain}'");
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
 });
