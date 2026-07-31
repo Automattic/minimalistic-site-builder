@@ -35,6 +35,9 @@ final class HeaderUnit extends AbstractMarkupUnit
 
     public function finish(string $raw, array $input, array &$notes = []): string
     {
-        return GeneratedMarkup::constrainedPart(GeneratedMarkup::normalize($raw, $this->key($input), $notes));
+        $markup = GeneratedMarkup::normalize($raw, $this->key($input), $notes);
+        $markup = GeneratedMarkup::withoutRedundantLandmark($markup, 'header');
+        GeneratedMarkup::assertNoRedundantLandmark($markup, 'header');
+        return GeneratedMarkup::constrainedPart($markup);
     }
 }

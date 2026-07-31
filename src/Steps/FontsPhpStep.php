@@ -83,12 +83,24 @@ final class FontsPhpStep implements Step
             $warnings,
         );
         $project->addWarnings($this->id(), $warnings);
+        // Families BundleFontsStep already shipped as theme assets need no
+        // enqueue: their fontFace entries in theme.json are the loading
+        // mechanism. Only the families that degraded to the link path remain.
+        $bundled = 0;
+        foreach (self::googleFamiliesBySlug($theme) as $slug => $name) {
+            if (self::hasBundledFaces($theme, $slug)) {
+                unset($requirements[$name]);
+                ++$bundled;
+            }
+        }
         if ($requirements === []) {
             $fontsFile = $project->themePath('fonts.php');
             if (is_file($fontsFile) && !unlink($fontsFile)) {
                 throw new \RuntimeException("Could not remove stale file: {$fontsFile}");
             }
-            echo "  no Google-hosted families; fonts.php not needed\n";
+            echo $bundled > 0
+                ? "  all {$bundled} Google family/families bundled as theme assets; fonts.php not needed\n"
+                : "  no Google-hosted families; fonts.php not needed\n";
             return;
         }
 
@@ -281,13 +293,36 @@ final class FontsPhpStep implements Step
         return array_values(self::googleFamiliesBySlug($theme));
     }
 
+    /** True when BundleFontsStep already shipped fontFace entries for this slug. */
+    private static function hasBundledFaces(array $theme, string $slug): bool
+    {
+        $i = self::familyIndexBySlug($theme, $slug);
+        return $i !== null
+            && ($theme['settings']['typography']['fontFamilies'][$i]['fontFace'] ?? []) !== [];
+    }
+
+    /**
+     * Index of the fontFamilies entry carrying this slug, or null.
+     *
+     * @param array<mixed> $theme
+     */
+    public static function familyIndexBySlug(array $theme, string $slug): ?int
+    {
+        foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $i => $family) {
+            if (is_array($family) && (string) ($family['slug'] ?? '') === $slug) {
+                return $i;
+            }
+        }
+        return null;
+    }
+
     /**
      * Google-hostable families keyed by their theme.json slug, first-seen order.
      *
      * @param array<mixed> $theme
      * @return array<string,string> slug => family name
      */
-    private static function googleFamiliesBySlug(array $theme): array
+    public static function googleFamiliesBySlug(array $theme): array
     {
         $families = [];
         foreach ($theme['settings']['typography']['fontFamilies'] ?? [] as $family) {
@@ -746,7 +781,7 @@ final class FontsPhpStep implements Step
      * templates + the content plugin's pages (a font style used only in
      * seeded content must still be loaded by the theme).
      */
-    private static function themeMarkup(Project $project): string
+    public static function themeMarkup(Project $project): string
     {
         $markup = '';
         foreach ($project->markupFiles() as $file) {
@@ -758,8 +793,6 @@ final class FontsPhpStep implements Step
     /** Extract the first font name from a CSS font-family stack, unquoted. */
     private static function primaryFamily(string $stack): ?string
     {
-        $first = trim(explode(',', $stack)[0]);
-        $first = trim($first, "\"'");
-        return $first === '' ? null : $first;
+        return \Automattic\SiteBuild\FontCatalog::primaryFamily($stack);
     }
 }

@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -13,7 +14,8 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 
 /**
- * Step 2 (LLM): produce the site spec from the user's creation prompt.
+ * Step 2: produce the canonical site spec from either a host-supplied
+ * `meta.json.site_spec` value or an LLM reading the user's creation prompt.
  *
  * Input:  meta.json (the user prompt, seeded by the runner)
  * Output: siteSpec.json — FACTUAL site information only (name, slug, title,
@@ -31,12 +33,16 @@ use Automattic\SiteBuild\StepDeclaration;
  * The user prompt and this spec are the inputs the theme-json and landing-page
  * steps build the design from.
  *
- * The page tree is normally the model's decision (scoped by the multi_page
- * flag), but a caller can fix it: meta.json `pages` (--pages on the runners,
- * or pre-seeded by a host whose site spec already names its pages) makes the
- * prompt echo that exact list — the model contributes only per-page purposes —
- * and normalize() enforces it. Only the ABSENCE of the list lets the model
- * invent pages.
+ * A supplied spec replaces only candidate generation: it goes through the same
+ * deterministic normalization, page-scope rules, and warning path as model
+ * output. This keeps siteSpec.json as the declared step artifact and lets hosts
+ * carry the input through the portable meta.json boundary without an LLM call.
+ *
+ * The page tree is normally the candidate spec's decision (scoped by the
+ * multi_page flag), but a caller can fix it: meta.json `pages` (--pages on the
+ * runners, or pre-seeded by a host that already names its pages) makes the
+ * final spec reproduce exactly that tree and take only matching per-page
+ * purposes from the candidate.
  */
 final class SiteSpecStep implements Step
 {
@@ -106,40 +112,48 @@ final class SiteSpecStep implements Step
             throw new \RuntimeException('meta.json has no "prompt"');
         }
 
-        // Inner pages are opt-in: the runner records the --multi-page flag in
-        // meta.json; without it the spec plans (and normalize() enforces) a
-        // landing page only.
+        // Inner pages are opt-in: runners record --multi-page, while the facade
+        // resolves an omitted scope to true for a supplied spec. Without either,
+        // normalize() enforces a landing page only.
         $multiPage = (bool) ($meta['multi_page'] ?? false);
 
         // A caller-fixed page list takes the page-tree decision away from the
-        // model: the prompt asks it to echo the list and write purposes, and
-        // normalize() enforces it. Only honored on multi-page builds — the
-        // flag owns WHETHER inner pages exist; the list only says WHICH.
+        // candidate: the LLM prompt echoes it on the generated path, and
+        // normalize() enforces it on both paths. Only honored on multi-page
+        // builds — the flag owns WHETHER inner pages exist; the list says WHICH.
         $requested = $multiPage ? self::requestedPages($meta['pages'] ?? null) : [];
 
-        $rendered = $this->renderer->render('site-spec.md', [
-            'user_prompt'     => $prompt,
-            'page_tree_scope' => $requested !== [] ? self::REQUESTED_SCOPE
-                : ($multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE),
-            'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
-                : ($multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE),
-        ]);
         $warnings = [];
-        try {
-            $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
-        } catch (GeneratedJsonException $e) {
-            // Only terminal generated-content failures degrade. Transport,
-            // sender-contract, and programming exceptions remain fatal.
-            $spec = [];
-            $warnings[] = 'siteSpec.json: generated JSON remained unusable after its repair attempt ('
-                . $e->getMessage() . '); deterministic prompt-derived site spec delivered';
+        if (array_key_exists('site_spec', $meta)) {
+            if (!is_array($meta['site_spec'])) {
+                throw new \RuntimeException('meta.json "site_spec" must be a JSON object');
+            }
+            $spec = $meta['site_spec'];
+            Narrator::write("  using host-supplied site spec (no site-spec LLM call)\n");
+        } else {
+            $rendered = $this->renderer->render('site-spec.md', [
+                'user_prompt'     => $prompt,
+                'page_tree_scope' => $requested !== [] ? self::REQUESTED_SCOPE
+                    : ($multiPage ? self::MULTI_PAGE_SCOPE : self::SINGLE_PAGE_SCOPE),
+                'page_tree_rule'  => $requested !== [] ? self::requestedRule($requested)
+                    : ($multiPage ? self::MULTI_PAGE_RULE : self::SINGLE_PAGE_RULE),
+            ]);
+            try {
+                $spec = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
+            } catch (GeneratedJsonException $e) {
+                // Only terminal generated-content failures degrade. Transport,
+                // sender-contract, and programming exceptions remain fatal.
+                $spec = [];
+                $warnings[] = 'siteSpec.json: generated JSON remained unusable after its repair attempt ('
+                    . $e->getMessage() . '); deterministic prompt-derived site spec delivered';
+            }
         }
 
         $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
-            echo '  [site-spec] warning: ' . count($warnings)
-                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n";
+            Narrator::write('  [site-spec] warning: ' . count($warnings)
+                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n");
         }
         $project->writeJson('siteSpec.json', $spec);
     }

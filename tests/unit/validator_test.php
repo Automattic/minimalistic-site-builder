@@ -196,7 +196,7 @@ function validator_linked_project(): array
     $project->writeText('plugin/pages/visit.html',
         '<!-- wp:group {"anchor":"directions"} --><div class="wp-block-group" id="directions">'
         . '<!-- wp:paragraph --><p><a href="/">Home</a> · <a href="#directions">Top</a> · '
-        . '<a href="https://example.com">Ext</a> · <a href="mailto:a@b.c">Mail</a> · <a href="#">Social</a></p><!-- /wp:paragraph -->'
+        . '<a href="https://example.com">Ext</a> · <a href="mailto:a@b.c">Mail</a></p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->');
     return [$project, $tmp];
 }
@@ -284,6 +284,73 @@ test('validator flags button links without an href', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator reports placeholder links with actionable delivery context', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:button {"url":"#"} --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="#">Instagram</a></div><!-- /wp:button -->'
+        . '<!-- wp:navigation-link {"label":"Social","url":"#"} --><!-- /wp:navigation-link -->'
+        . "<!-- wp:paragraph --><p><a href='#'>Legal</a></p><!-- /wp:paragraph -->"
+        . '<!-- wp:paragraph --><p><a href=#>Privacy</a></p><!-- /wp:paragraph -->'
+        . '<!-- wp:cover {"url":"#"} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src=# alt=""/></div><!-- /wp:cover -->'
+    );
+
+    $problems = ThemeValidator::placeholderLinkProblems($project);
+    assert_eq(4, count($problems), 'rendered and mirrored block URLs are reported once per dead interaction');
+    $joined = implode("\n", $problems);
+    assert_contains('theme/parts/footer.html', $joined);
+    assert_contains('link[1]', $joined);
+    assert_contains('link[2]', $joined);
+    assert_contains('link[3]', $joined);
+    assert_contains('authored href="#" -> delivered href="#"', $joined);
+    assert_contains('block-url[1]', $joined);
+    assert_contains('authored url="#" -> delivered url="#"', $joined);
+    assert_contains('disposition:', $joined);
+
+    $media = ThemeValidator::placeholderMediaSourceProblems($project);
+    assert_eq(1, count($media), 'mirrored block and HTML media sources describe one broken image');
+    assert_contains('media-src[1]', $media[0]);
+    assert_contains('authored src="#" -> delivered src="#"', $media[0]);
+    assert_contains('dead media source', $media[0]);
+    assert_contains('disposition:', $media[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator reports empty list blocks and leaves populated siblings alone', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:list --><ul class="wp-block-list"></ul><!-- /wp:list -->'
+        . '<!-- wp:list --><ul class="wp-block-list"><!-- wp:list-item -->'
+        . '<li>Kept</li><!-- /wp:list-item --></ul><!-- /wp:list -->'
+    );
+
+    $problems = ThemeValidator::emptyListProblems($project);
+    assert_eq(1, count($problems));
+    assert_contains('theme/parts/footer.html', $problems[0]);
+    assert_contains('wp:list[1]', $problems[0]);
+    assert_contains('authored list block -> delivered empty list (0 items)', $problems[0]);
+    assert_contains('disposition:', $problems[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator reports an empty nested list without flagging its populated parent', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:list --><ul class="wp-block-list"><!-- wp:list-item -->'
+        . '<li>Parent<!-- wp:list --><ul class="wp-block-list"></ul><!-- /wp:list --></li>'
+        . '<!-- /wp:list-item --></ul><!-- /wp:list -->'
+    );
+
+    $problems = ThemeValidator::emptyListProblems($project);
+    assert_eq(1, count($problems));
+    assert_contains('wp:list[2]', $problems[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('link checks stay quiet without pages.json', function () {
     [$project, $tmp] = validator_project();
     $project->writeText('theme/parts/header.html', '<!-- wp:navigation-link {"label":"X","url":"/nowhere/"} /-->');
@@ -311,6 +378,23 @@ test('plan warnings flag interior pages opening with a full-bleed cover', functi
     assert_contains("interior page 'menu'", $warnings[0]);
     assert_contains('full-bleed-cover', $warnings[0]);
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('plan warnings report a footer-like page section without hiding valid siblings', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover'],
+            ['slug' => 'legal', 'title' => 'Legal', 'type' => 'footerInfo', 'layout_archetype' => 'centered-stack'],
+        ]],
+    ]]);
+
+    $warnings = ThemeValidator::planWarnings($project);
+    assert_eq(1, count($warnings));
+    assert_contains('pages.json: page[home]/sections[legal]', $warnings[0]);
+    assert_contains('delivered alongside theme/parts/footer.html', $warnings[0]);
+    assert_contains('disposition:', $warnings[0]);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

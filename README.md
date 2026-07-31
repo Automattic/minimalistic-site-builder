@@ -52,6 +52,50 @@ php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site pl
 php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
 ```
 
+### Embedding with an existing site spec
+
+An embedding host that already owns the factual site specification can pass
+the package-canonical decoded object to `SiteBuilder::createProject()` instead
+of paying for the `site-spec` LLM call:
+
+```php
+$project = $builder->createProject(
+    prompt: $userPrompt,
+    slug: $projectSlug,
+    siteSpec: $canonicalSiteSpec,
+);
+$builder->pipeline()->runThrough($project);
+```
+
+The consumer contract ships with the package in two forms:
+
+- [`schemas/site-spec.schema.json`](schemas/site-spec.schema.json) — JSON
+  Schema Draft 2020-12 for the complete canonical object.
+- [`examples/site-spec.json`](examples/site-spec.json) — a complete payload,
+  including nested pages and host-defined factual fields.
+
+Vendored consumers can resolve those files without assuming an installation
+path through `Package::siteSpecSchemaPath()` and
+`Package::siteSpecExamplePath()`. The schema describes the recommended input
+and normalized `siteSpec.json` artifact. Runtime intake remains deliberately
+forgiving: missing or malformed candidate fields are normalized, repaired, or
+warned about rather than becoming a new build-stopping validation gate.
+
+The value crosses the portable project boundary as `meta.json.site_spec`; the
+normal `site-spec` step still canonicalizes it and writes `siteSpec.json`, but
+makes no LLM request. With `multiPage` omitted, a supplied spec keeps its page
+tree. Pass `multiPage: false` to deliberately force one homepage. A non-empty
+`pages:` list implies multi-page scope and replaces the supplied tree with an
+exact caller-owned list. The user prompt is still required because the design
+and content steps consume both inputs.
+
+The fixed properties use this package's canonical snake-case fields. Additional
+top-level properties may carry grounded facts such as hours, location, or
+services; page objects have the exact recursive `title` / `slug` / `purpose` /
+`children` shape shown in the schema. A host with its own metadata shape
+(including WordPress.com) maps that payload in its adapter rather than adding
+host-specific aliases to this package.
+
 ### Choosing the model / provider
 
 `--provider=<anthropic|openai|xai|openrouter>` (or the `LLM_PROVIDER` env var) picks a whole
@@ -117,6 +161,11 @@ in one command — useful as testing evidence for pipeline/theme changes:
 ```bash
 php bin/build-demos.php --with-images   # build every demo, with generated images
 ```
+
+An entry may carry a canonical `site_spec` object (the `hearth` demo does): it
+is pre-seeded into the project's `meta.json`, so the site-spec step normalizes
+it deterministically instead of generating one via LLM — a fixed, reproducible
+probe of the host-supplied-spec path described above.
 
 The demos build **in parallel** by default (up to three at once for OpenRouter) —
 one `bin/build.php` child process per entry, output streamed with a `[slug]`

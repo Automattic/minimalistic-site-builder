@@ -63,6 +63,50 @@ $builder->pipeline()->runThrough($project);
 
 Same step, same pipeline, four different transports, and only that first line moves.
 
+### A host can supply the site spec
+
+Some hosts already have the factual site spec before this package starts. They
+pass that package-canonical decoded object as request data instead of asking the
+shared library to infer it again:
+
+```php
+$project = $builder->createProject(
+    prompt: $userPrompt,
+    slug: $projectSlug,
+    siteSpec: $canonicalSiteSpec,
+);
+$builder->pipeline()->runThrough($project);
+```
+
+`createProject()` persists the value under `meta.json.site_spec`. The existing
+`site-spec` graph node remains in place and remains the sole declared writer of
+`siteSpec.json`; it simply takes the supplied value as its candidate, applies
+the same deterministic normalization/page-scope/warning rules, and makes zero
+site-spec LLM calls. Keeping the node and artifact stable matters for graph
+validation, checkpoints, and workflows split across processes.
+
+With `multiPage` omitted, a supplied spec retains its complete page tree. An
+explicit `multiPage: false` still forces the homepage-only product. A non-empty
+`pages:` list implies multi-page scope and has highest precedence over the
+supplied tree. A missing `siteSpec` keeps the CLI/default behavior: the step
+generates the candidate from the refined prompt.
+
+The machine-readable input contract is
+[`schemas/site-spec.schema.json`](../schemas/site-spec.schema.json), with a
+complete payload at [`examples/site-spec.json`](../examples/site-spec.json).
+Both ship with the package and are available programmatically through
+`Package::siteSpecSchemaPath()` and `Package::siteSpecExamplePath()`. The schema
+requires all 16 canonical fixed fields, permits additional grounded factual
+properties at the top level, and defines strict recursive page objects. It
+describes the recommended input and normalized artifact; intake remains
+repair-oriented rather than adding a fatal schema-validation boundary.
+
+That contract is the package's `siteSpec.json` shape, not a host's similarly
+named metadata object. WordPress.com maps its own SiteSpec representation at its
+adapter/ability boundary and passes a decoded JSON object, not a double-encoded
+string. The shared package deliberately contains no WordPress.com-specific
+field aliases.
+
 ## The four hosts
 
 - **Command line.** Talks straight to the Anthropic API with a key from the environment. It fans section generation out concurrently, so a build finishes in about the time of its slowest call.
@@ -96,7 +140,7 @@ Four abilities do it. The first is a workflow-ability, `generate_block_theme`: y
 },
 ```
 
-The section input carries `site_spec` and `theme_json` (either decoded arrays or JSON text), `language`, the formatted `design_direction`, the shared `outline`, a nested `section` brief (`slug`, its required structural `role` of `hero` / `content` / `closing`, copy fields, and its assigned `layout_archetype` / `background` / `vertical_density` / `handoff`), and the precomputed `neighbors` summary. Header uses the common context plus `hero_brief`; footer uses only the common context. All values are ordinary JSON-serializable HTTP arguments. Each analogous ability constructs its matching unit and returns `generate( $input )`.
+The section input carries `site_spec` and `theme_json` (either decoded arrays or JSON text), `language`, the formatted `design_direction`, the shared `outline` and `site_pages`, a nested `section` brief (`slug`, its required structural `role` of `hero` / `content` / `closing`, copy fields, and its assigned `layout_archetype` / `background` / `vertical_density` / `handoff`), and the precomputed `neighbors` summary. Header uses the common context plus `hero_brief`, `nav_rule`, and its `archetype_assignment`. Footer uses the common context plus `site_pages`, the front page's positional `final_section_brief`, its validated deterministic `composition_archetype`, and the integer `page_count`; `FooterUnit` derives the reviewed recipe, concrete surface, and page-shape navigation rule, and renders the shared AI-image convention only for image-led assignments. All values are ordinary JSON-serializable HTTP arguments. Each analogous ability constructs its matching unit and returns `generate( $input )`.
 
 Then two moves make it live: register all four abilities on `wp_abilities_api_init`, and grant the workflow entry point to the orchestrator by adding `generate_block_theme` to the `wp-orchestrator` route's abilities list, right next to `add_page`. Nothing in wpcom's `ai-agent.php` changes - it already authenticates, streams, and dispatches any registered ability by name. The orchestrator turns each granted ability into a tool signature from its name, description, and input schema, so a clear description is what makes the capability discoverable.
 

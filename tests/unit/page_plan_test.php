@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
@@ -42,6 +44,12 @@ function plan_spec(array $overrides = []): array
         ],
     ], $overrides);
 }
+
+test('PagePlanStep declares its durable warning sink', function () {
+    $step = new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    assert_eq(['pages.json', 'warnings.json'], $step->declaration()->writes);
+});
 
 test('PagePlanStep::jsonSchema constrains the complete section shape', function () {
     $schema = PagePlanStep::jsonSchema();
@@ -115,6 +123,109 @@ test('PagePlanStep::normalize stamps a singleton as hero', function () {
     $sections = PagePlanStep::normalize([plan_section(['role' => 'closing'])]);
 
     assert_eq('hero', $sections[0]['role']);
+});
+
+test('PagePlanStep removes template-owned footer identities without touching siblings and reaches a fixed point', function () {
+    $hero = plan_section(['slug' => 'welcome', 'title' => 'Welcome']);
+    $story = plan_section([
+        'slug'             => 'story',
+        'title'            => 'Story',
+        'type'             => 'editorial-story',
+        'layout_archetype' => 'asymmetric-split',
+        'background'       => 'base',
+    ]);
+    $closing = plan_section([
+        'slug'             => 'footerless-closing',
+        'title'            => 'Footerless Closing',
+        'type'             => 'cta',
+        'layout_archetype' => 'centered-stack',
+        'background'       => 'contrast',
+    ]);
+    $copyright = plan_section([
+        'slug' => 'copyright-licensing',
+        'title' => 'Copyright & Licensing',
+        'type' => 'policy',
+        'layout_archetype' => 'offset-grid',
+    ]);
+    $legalTeam = plan_section([
+        'slug' => 'legal-team',
+        'title' => 'Contact the legal team',
+        'type' => 'team',
+        'layout_archetype' => 'mixed-width-editorial',
+    ]);
+    $siteGuide = plan_section([
+        'slug' => 'site-details',
+        'title' => 'Archaeological site information',
+        'type' => 'visitor-guide',
+        'layout_archetype' => 'list-with-thumbnails',
+    ]);
+    $siteInformation = plan_section([
+        'slug' => 'site-information',
+        'title' => 'Site Information',
+        'type' => 'visitor-guide',
+        'layout_archetype' => 'equal-card-grid',
+    ]);
+    $siteInfo = plan_section([
+        'slug' => 'site-info',
+        'title' => 'Site Info',
+        'type' => 'utility',
+        'layout_archetype' => 'full-bleed-cover',
+    ]);
+    // The prompt commits slug/type to English identifiers; a localized TITLE
+    // alone is on-page copy, never a footer identity.
+    $localizedTitle = plan_section([
+        'slug' => 'visit',
+        'title' => 'Visítanos',
+        'type' => 'utility',
+        'layout_archetype' => 'centered-stack',
+    ]);
+    $raw = [
+        $hero,
+        plan_section(['slug' => 'utility', 'title' => 'Footer Info', 'type' => 'contact']),
+        $story,
+        plan_section(['slug' => 'site-footer', 'title' => 'Links', 'type' => 'navigation']),
+        plan_section(['slug' => 'legal', 'title' => 'Legal', 'type' => 'footerInfo']),
+        plan_section(['slug' => 'chrome', 'title' => 'Chrome', 'type' => 'site chrome']),
+        plan_section(['slug' => 'colophon', 'title' => 'Credits', 'type' => 'credits']),
+        $localizedTitle,
+        $siteInfo,
+        $copyright,
+        $legalTeam,
+        $siteGuide,
+        $siteInformation,
+        $closing,
+    ];
+
+    $warnings = [];
+    $filtered = PagePlanStep::removeTemplateFooterSections($raw, $warnings, 'home');
+
+    assert_eq(
+        [$hero, $story, $localizedTitle, $siteInfo, $copyright, $legalTeam, $siteGuide, $siteInformation, $closing],
+        $filtered,
+        'non-footer siblings remain byte-for-byte and in order'
+    );
+    assert_eq(5, count($warnings), 'each removed section has its own actionable warning');
+    $joined = implode("\n", $warnings);
+    assert_contains("file='pages.json'", $joined);
+    assert_contains("pages[slug='home'].sections[1]", $joined);
+    assert_contains('"title":"Footer Info"', $joined);
+    assert_contains('delivered=removed', $joined);
+    assert_contains('disposition=', $joined);
+    assert_contains('theme/parts/footer.html', $joined);
+
+    $normalized = PagePlanStep::normalize($filtered);
+    assert_eq(
+        ['hero', 'content', 'content', 'content', 'content', 'content', 'content', 'content', 'closing'],
+        array_column($normalized, 'role')
+    );
+
+    $warningsAtFixedPoint = $warnings;
+    assert_eq(
+        $filtered,
+        PagePlanStep::removeTemplateFooterSections($filtered, $warnings, 'home'),
+        'a second pass makes no content change'
+    );
+    assert_eq($warningsAtFixedPoint, $warnings, 'a second pass adds no duplicate warning');
 });
 
 test('PagePlanStep::normalize rejects an empty type', function () {
@@ -464,9 +575,12 @@ test('page-plan fans out one request per page with per-page context', function (
     assert_contains('"Menu"', $reqs['menu']['prompt']);              // its own title
     assert_contains('What we bake', $reqs['menu']['prompt']);        // its own purpose
     assert_contains('/menu/breads/', $reqs['menu']['prompt']);       // site pages list
-    assert_contains('`type` is an open-ended semantic label', $reqs['home']['prompt']);
+    assert_contains('`type` is an open-ended semantic label, always in English', $reqs['home']['prompt']);
+    assert_contains('"slug" and "type" are machine-facing identifiers and are ALWAYS plain English words', $reqs['home']['prompt']);
     assert_contains('builder derives each section\'s structural role', $reqs['home']['prompt']);
     assert_contains('examples:', $reqs['home']['prompt']);
+    assert_contains('Never plan a footer or site-chrome section', $reqs['home']['prompt']);
+    assert_contains('appends it after this page\'s LAST section', $reqs['home']['prompt']);
     assert_true(!str_contains($reqs['home']['prompt'], '"role"'), 'role is absent from the requested JSON shape');
     assert_true(!str_contains($reqs['home']['prompt'], '"type": "one of:'), 'semantic types are examples, not a closed list');
 
@@ -513,6 +627,110 @@ test('page-plan writes pages.json with sections per page', function () {
     assert_eq('bread-catalog', $plan['pages'][1]['sections'][1]['type']);
     assert_eq('menu', $plan['pages'][2]['parent']);
     assert_eq(20, $plan['pages'][2]['menu_order']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan removes a generated footer before recomputing variety and roles', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_footer_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    // Removing the footer makes the surviving centered sections adjacent, so
+    // the filtered plan—not the original three-section sequence—must drive
+    // the existing variety repair round.
+    $llm->queueJson(['sections' => [
+        plan_section([
+            'slug'             => 'welcome',
+            'layout_archetype' => 'centered-stack',
+            'background'       => 'base',
+        ]),
+        plan_section([
+            'slug'             => 'footer-info',
+            'title'            => 'Footer Info',
+            'type'             => 'site-footer',
+            'layout_archetype' => 'offset-grid',
+            'background'       => 'tinted',
+        ]),
+        plan_section([
+            'slug'             => 'reserve',
+            'title'            => 'Reserve',
+            'type'             => 'cta',
+            'layout_archetype' => 'centered-stack',
+            'background'       => 'contrast',
+        ]),
+    ]]);
+    $llm->queueJson(['sections' => [
+        plan_section([
+            'slug'             => 'welcome',
+            'layout_archetype' => 'centered-stack',
+            'background'       => 'base',
+        ]),
+        plan_section([
+            'slug'             => 'reserve',
+            'title'            => 'Reserve',
+            'type'             => 'cta',
+            'layout_archetype' => 'asymmetric-split',
+            'background'       => 'contrast',
+        ]),
+    ]]);
+
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(['welcome', 'reserve'], array_column($sections, 'slug'));
+    assert_eq(['hero', 'closing'], array_column($sections, 'role'));
+    assert_eq(
+        ['centered-stack', 'asymmetric-split'],
+        array_column($sections, 'layout_archetype'),
+        'variety is validated against the surviving adjacency'
+    );
+    assert_eq(2, count($llm->calls), 'the filtered adjacency receives one semantic repair');
+    assert_true(
+        !str_contains($llm->calls[1]['prompt'], '"slug": "footer-info"'),
+        'the repair prompt cannot ask the model to restore removed site chrome'
+    );
+
+    $warnings = $project->readJson('warnings.json')['page-plan'] ?? [];
+    $joined = implode("\n", $warnings);
+    assert_contains("pages[slug='home'].sections[1]", $joined);
+    assert_contains('"type":"site-footer"', $joined);
+    assert_contains('delivered=removed', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan substitutes a valid page when the generated footer was its only section', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_footer_only_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+
+    $llm = new FakeLlm();
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'site-footer', 'title' => 'Site Footer', 'type' => 'footer']),
+    ]]);
+
+    (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(1, count($sections));
+    assert_eq('content', $sections[0]['slug']);
+    assert_eq('hero', $sections[0]['role']);
+    PagePlanStep::normalize($sections);
+    assert_eq(1, count($llm->calls), 'footer-only content is degraded deterministically, without another model call');
+
+    $warnings = $project->readJson('warnings.json')['page-plan'] ?? [];
+    $joined = implode("\n", $warnings);
+    assert_contains('delivered=removed', $joined);
+    assert_contains('delivered=one synthesized content section', $joined);
+    assert_contains('cannot abort the build', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -755,7 +973,7 @@ test('page-plan coerces a field the repair round could not fix, instead of abort
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('page-plan repairs an empty page plan and throws when the repair is empty too', function () {
+test('page-plan repairs an empty page plan and falls back when the repair is empty too', function () {
     $tmp = sys_get_temp_dir() . '/builder_pp0_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A bakery']);
@@ -768,12 +986,94 @@ test('page-plan repairs an empty page plan and throws when the repair is empty t
     $llm->queueJson(['sections' => []]);
     $renderer = new PromptRenderer(repo_path('prompts'));
 
-    assert_throws(function () use ($llm, $renderer, $project) {
-        (new PagePlanStep($llm, $renderer))->run($project);
-    }, 'no sections');
-    // The empty plan went through the repair path before aborting.
+    (new PagePlanStep($llm, $renderer))->run($project);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(1, count($sections));
+    assert_eq('content', $sections[0]['slug']);
+    assert_eq('hero', $sections[0]['role']);
+    // The empty plan went through the repair path before degrading.
     assert_eq(2, count($llm->calls));
     assert_contains('has no sections', $llm->calls[1]['prompt']);
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains('authored=empty repaired sections array', $joined);
+    assert_contains('delivered=one synthesized content section', $joined);
+    assert_contains('disposition=', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan generated JSON fallback preserves valid page siblings', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_json_fallback_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+        ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'Breads', 'children' => []],
+    ]]));
+    $step = new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    $step->consumeGeneratedJsonFailure(
+        $project,
+        ['home' => ['sections' => [
+            plan_section(['slug' => 'welcome', 'title' => 'Welcome']),
+        ]]],
+        ['menu' => 'syntax error after bounded JSON repair'],
+    );
+
+    $pages = $project->readJson('pages.json')['pages'];
+    assert_eq(['welcome'], array_column($pages[0]['sections'], 'slug'), 'valid sibling stays authored');
+    assert_eq(['content'], array_column($pages[1]['sections'], 'slug'), 'failed sibling gets one fallback');
+    assert_eq('centered-stack', $pages[1]['sections'][0]['layout_archetype'], 'interior fallback stays compact');
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains("pages[slug='menu'].sections", $joined);
+    assert_contains('syntax error after bounded JSON repair', $joined);
+    assert_contains('delivered=one synthesized content section', $joined);
+    assert_contains('disposition=', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan degrades when a rejected plan receives unusable repair JSON', function () {
+    $tmp = sys_get_temp_dir() . '/builder_pp_repair_json_fallback_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A bakery']);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+    ]]));
+    $llm = new class implements Llm {
+        public function complete(string $prompt, array $opts = []): string
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJson(string $prompt, array $opts = []): array
+        {
+            throw new RuntimeException('unused');
+        }
+
+        public function completeJsonBatch(array $requests): array
+        {
+            throw new GeneratedJsonException([
+                'home' => 'repair response remained truncated',
+            ]);
+        }
+
+        public function completeBatch(array $requests): \Automattic\SiteBuild\TextBatchResult
+        {
+            throw new RuntimeException('unused');
+        }
+    };
+    $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+
+    $step->consume($project, ['home' => ['sections' => [
+        plan_section(['background' => 'plaid']),
+    ]]]);
+
+    $sections = $project->readJson('pages.json')['pages'][0]['sections'];
+    assert_eq(['content'], array_column($sections, 'slug'));
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains('authored=unusable generated repair JSON', $joined);
+    assert_contains('repair response remained truncated', $joined);
+    assert_contains('delivered=one synthesized content section', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
