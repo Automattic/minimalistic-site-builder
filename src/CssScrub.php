@@ -358,7 +358,12 @@ final class CssScrub
         }
         $decoded = str_replace(["\t", "\n", "\r"], '', $decoded);
         $decoded = ltrim($decoded, "\x00..\x20");
-        return preg_match('/^(?:https?:|\\/\\/)/i', $decoded) === 1;
+        return preg_match('/^https?:/i', $decoded) === 1
+            || (
+                isset($decoded[1])
+                && ($decoded[0] === '/' || $decoded[0] === '\\')
+                && ($decoded[1] === '/' || $decoded[1] === '\\')
+            );
     }
 
     private static function stringCanBeUrlIn(string $function): bool
