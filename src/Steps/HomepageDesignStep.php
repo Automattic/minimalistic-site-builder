@@ -27,7 +27,6 @@ final class HomepageDesignStep implements Step
     private const DEFAULT_CRITIQUE_ROUNDS = 2;
     private const UNSAFE_ELEMENTS = [
         'script',
-        'form',
         'input',
         'select',
         'option',
@@ -41,7 +40,15 @@ final class HomepageDesignStep implements Step
         'math',
         'iframe',
         'object',
+        'applet',
         'embed',
+        'frame',
+        'portal',
+        'noembed',
+        'noframes',
+        'noscript',
+        'base',
+        'link',
     ];
     private const VOID_ELEMENTS = [
         'area',
@@ -59,13 +66,78 @@ final class HomepageDesignStep implements Step
         'track',
         'wbr',
     ];
+    private const SAFE_HEAD_ELEMENTS = [
+        'title',
+        'style',
+    ];
+    private const SAFE_BODY_ELEMENTS = [
+        'header',
+        'nav',
+        'main',
+        'section',
+        'article',
+        'aside',
+        'footer',
+        'address',
+        'div',
+        'span',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'p',
+        'ul',
+        'ol',
+        'li',
+        'dl',
+        'dt',
+        'dd',
+        'blockquote',
+        'q',
+        'pre',
+        'code',
+        'table',
+        'caption',
+        'colgroup',
+        'col',
+        'thead',
+        'tbody',
+        'tfoot',
+        'tr',
+        'th',
+        'td',
+        'figure',
+        'figcaption',
+        'picture',
+        'source',
+        'img',
+        'a',
+        'button',
+        'br',
+        'hr',
+        'strong',
+        'em',
+        'b',
+        'i',
+        'u',
+        's',
+        'small',
+        'sub',
+        'sup',
+        'time',
+        'mark',
+    ];
     private const URL_ATTRIBUTES = [
         'href',
         'src',
+        'srcset',
         'xlink:href',
         'action',
         'formaction',
         'poster',
+        'cite',
     ];
 
     public function __construct(
@@ -657,6 +729,15 @@ final class HomepageDesignStep implements Step
         if ($root === null) {
             return false;
         }
+        if (strtolower($root->tagName) !== strtolower($target->tagName)) {
+            return false;
+        }
+        if (
+            $target->hasAttribute('id')
+            && $root->getAttribute('id') !== $target->getAttribute('id')
+        ) {
+            return false;
+        }
 
         if (preg_match('/^(?:([A-Za-z][A-Za-z0-9:-]*))?#([A-Za-z_][A-Za-z0-9_.:-]*)$/', $selector, $m)) {
             return (($m[1] ?? '') === '' || strtolower($root->tagName) === strtolower($m[1]))
@@ -679,9 +760,6 @@ final class HomepageDesignStep implements Step
             return strtolower($root->tagName) === strtolower($selector);
         }
 
-        if (strtolower($root->tagName) !== strtolower($target->tagName)) {
-            return false;
-        }
         if ($target->hasAttribute('id')) {
             return $root->getAttribute('id') === $target->getAttribute('id');
         }
@@ -907,6 +985,7 @@ final class HomepageDesignStep implements Step
         array &$warnings,
     ): string {
         $removals = [];
+        $head = self::headContentRange($html);
         $offset = 0;
         while (($token = self::nextTag($html, $offset)) !== null) {
             $offset = $token['end'];
@@ -915,24 +994,18 @@ final class HomepageDesignStep implements Step
             }
 
             $name = $token['name'];
-            $unwrap = $name === 'form' || str_contains($name, '-');
-            if ($unwrap) {
-                $removals[] = [
-                    'start'    => $token['start'],
-                    'length'   => $token['end'] - $token['start'],
-                    'authored' => substr($html, $token['start'], $token['end'] - $token['start']),
-                ];
-                $close = self::matchingCloseToken($html, $token);
-                if ($close !== null) {
-                    $removals[] = [
-                        'start'    => $close['start'],
-                        'length'   => $close['end'] - $close['start'],
-                        'authored' => substr($html, $close['start'], $close['end'] - $close['start']),
-                    ];
+            $inHead = $head !== null
+                && $token['start'] >= $head[0]
+                && $token['start'] < $head[1];
+            if ($name === 'meta') {
+                if (!$inHead || !self::isSafeHeadMeta($html, $token)) {
+                    $removals[] = self::tokenRemoval($html, $token);
+                    continue;
                 }
-                continue;
-            }
-            if (in_array($name, self::UNSAFE_ELEMENTS, true)) {
+            } elseif (
+                in_array($name, self::UNSAFE_ELEMENTS, true)
+                || ($name === 'style' && !$inHead)
+            ) {
                 $end = self::unsafeElementEnd($html, $token);
                 $removals[] = [
                     'start'    => $token['start'],
@@ -941,12 +1014,19 @@ final class HomepageDesignStep implements Step
                 ];
                 $offset = $end;
                 continue;
+            } elseif (!self::isAllowedElement($name, $inHead)) {
+                $removals[] = self::tokenRemoval($html, $token);
+                $close = self::matchingCloseToken($html, $token);
+                if ($close !== null) {
+                    $removals[] = self::tokenRemoval($html, $close);
+                }
+                continue;
             }
 
             foreach (self::unsafeAttributeRanges($html, $token) as $removal) {
                 $removals[] = $removal;
             }
-            if ($name === 'style' && !$token['self_closing']) {
+            if (in_array($name, ['style', 'title'], true) && !$token['self_closing']) {
                 $close = self::matchingCloseToken($html, $token);
                 if ($close !== null) {
                     $offset = $close['end'];
@@ -972,6 +1052,62 @@ final class HomepageDesignStep implements Step
     }
 
     /**
+     * @return array{int,int}|null
+     */
+    private static function headContentRange(string $html): ?array
+    {
+        $offset = 0;
+        while (($token = self::nextTag($html, $offset)) !== null) {
+            $offset = $token['end'];
+            if (!$token['closing'] && $token['name'] === 'head') {
+                $close = self::matchingCloseToken($html, $token);
+                return [$token['end'], $close['start'] ?? strlen($html)];
+            }
+        }
+        return null;
+    }
+
+    private static function isAllowedElement(string $name, bool $inHead): bool
+    {
+        if (in_array($name, ['html', 'head', 'body'], true)) {
+            return true;
+        }
+        return $inHead
+            ? in_array($name, self::SAFE_HEAD_ELEMENTS, true) || $name === 'meta'
+            : in_array($name, self::SAFE_BODY_ELEMENTS, true);
+    }
+
+    /**
+     * @param array{start:int,end:int,name:string,closing:bool,self_closing:bool} $token
+     */
+    private static function isSafeHeadMeta(string $html, array $token): bool
+    {
+        $attributes = self::attributeValues(
+            substr($html, $token['start'], $token['end'] - $token['start'])
+        );
+        if (array_key_exists('http-equiv', $attributes)) {
+            return false;
+        }
+        if (array_key_exists('charset', $attributes)) {
+            return trim($attributes['charset']) !== '';
+        }
+        return strtolower(trim($attributes['name'] ?? '')) === 'viewport';
+    }
+
+    /**
+     * @param array{start:int,end:int,name:string,closing:bool,self_closing:bool} $token
+     * @return array{start:int,length:int,authored:string}
+     */
+    private static function tokenRemoval(string $html, array $token): array
+    {
+        return [
+            'start'    => $token['start'],
+            'length'   => $token['end'] - $token['start'],
+            'authored' => substr($html, $token['start'], $token['end'] - $token['start']),
+        ];
+    }
+
+    /**
      * @param array{start:int,end:int,name:string,closing:bool,self_closing:bool} $opening
      */
     private static function unsafeElementEnd(string $html, array $opening): int
@@ -993,7 +1129,7 @@ final class HomepageDesignStep implements Step
         if ($opening['self_closing'] || in_array($name, self::VOID_ELEMENTS, true)) {
             return null;
         }
-        if (in_array($name, ['script', 'style'], true)) {
+        if (in_array($name, ['script', 'style', 'title', 'textarea'], true)) {
             $closeStart = stripos($html, "</{$name}", $opening['end']);
             if ($closeStart === false) {
                 return null;
@@ -1007,6 +1143,19 @@ final class HomepageDesignStep implements Step
         $offset = $opening['end'];
         while (($token = self::nextTag($html, $offset)) !== null) {
             $offset = $token['end'];
+            if (
+                !$token['closing']
+                && !$token['self_closing']
+                && in_array($token['name'], ['script', 'style', 'title', 'textarea'], true)
+                && $token['name'] !== $name
+            ) {
+                $rawClose = self::matchingCloseToken($html, $token);
+                if ($rawClose === null) {
+                    return null;
+                }
+                $offset = $rawClose['end'];
+                continue;
+            }
             if ($token['name'] !== $name || $token['self_closing']) {
                 continue;
             }
@@ -1025,11 +1174,37 @@ final class HomepageDesignStep implements Step
     private static function unsafeAttributeRanges(string $html, array $token): array
     {
         $raw = substr($html, $token['start'], $token['end'] - $token['start']);
+        $removals = [];
+        foreach (self::rawAttributes($raw) as $attribute) {
+            $name = $attribute['name'];
+            $unsafe = str_starts_with($name, 'on')
+                || in_array($name, ['srcdoc', 'ping'], true);
+            if (!$unsafe && in_array($name, self::URL_ATTRIBUTES, true)) {
+                $unsafe = !self::isSafeUrlAttribute($name, $attribute['value']);
+            }
+            if (!$unsafe) {
+                continue;
+            }
+
+            $removals[] = [
+                'start'    => $token['start'] + $attribute['offset'],
+                'length'   => strlen($attribute['raw']),
+                'authored' => $attribute['raw'],
+            ];
+        }
+        return $removals;
+    }
+
+    /**
+     * @return list<array{name:string,value:string,raw:string,offset:int}>
+     */
+    private static function rawAttributes(string $rawTag): array
+    {
         if (
-            preg_match('/^<\s*[A-Za-z][A-Za-z0-9:-]*/', $raw, $prefix) !== 1
+            preg_match('/^<\s*[A-Za-z][A-Za-z0-9:-]*/', $rawTag, $prefix) !== 1
             || preg_match_all(
                 '/\s+([^\s=\/>]+)(?:\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+))?/s',
-                $raw,
+                $rawTag,
                 $matches,
                 PREG_SET_ORDER | PREG_OFFSET_CAPTURE,
                 strlen($prefix[0]),
@@ -1038,31 +1213,75 @@ final class HomepageDesignStep implements Step
             return [];
         }
 
-        $removals = [];
+        $attributes = [];
         foreach ($matches as $match) {
-            $name = strtolower($match[1][0]);
-            $value = $match[2][0] ?? '';
-            $unsafe = str_starts_with($name, 'on') || $name === 'srcdoc';
-            if (!$unsafe && in_array($name, self::URL_ATTRIBUTES, true)) {
-                $decoded = html_entity_decode(
-                    trim($value, " \t\n\r\0\x0B\"'"),
-                    ENT_QUOTES | ENT_HTML5,
-                    'UTF-8',
-                );
-                $normalized = strtolower((string) preg_replace('/[\x00-\x20\x7f]+/u', '', $decoded));
-                $unsafe = str_starts_with($normalized, 'javascript:');
-            }
-            if (!$unsafe) {
-                continue;
-            }
-
-            $removals[] = [
-                'start'    => $token['start'] + $match[0][1],
-                'length'   => strlen($match[0][0]),
-                'authored' => $match[0][0],
+            $attributes[] = [
+                'name'   => strtolower($match[1][0]),
+                'value'  => $match[2][0] ?? '',
+                'raw'    => $match[0][0],
+                'offset' => $match[0][1],
             ];
         }
-        return $removals;
+        return $attributes;
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private static function attributeValues(string $rawTag): array
+    {
+        $values = [];
+        foreach (self::rawAttributes($rawTag) as $attribute) {
+            $values[$attribute['name']] = self::decodedAttributeValue($attribute['value']);
+        }
+        return $values;
+    }
+
+    private static function decodedAttributeValue(string $value): string
+    {
+        return html_entity_decode(
+            trim($value, " \t\n\r\0\x0B\"'"),
+            ENT_QUOTES | ENT_HTML5,
+            'UTF-8',
+        );
+    }
+
+    private static function isSafeUrlAttribute(string $name, string $authored): bool
+    {
+        $value = self::decodedAttributeValue($authored);
+        if ($name === 'srcset') {
+            foreach (explode(',', $value) as $candidate) {
+                $url = preg_split('/\s+/', trim($candidate), 2)[0] ?? '';
+                if (!self::isSafeUrl('src', $url)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return self::isSafeUrl($name, $value);
+    }
+
+    private static function isSafeUrl(string $attribute, string $value): bool
+    {
+        $normalized = (string) preg_replace('/[\x00-\x20\x7f]+/u', '', trim($value));
+        if ($normalized === '') {
+            return true;
+        }
+        if (str_starts_with($normalized, '#')) {
+            return in_array($attribute, ['href', 'cite'], true);
+        }
+        if (str_starts_with($normalized, '//')) {
+            return true;
+        }
+        if (preg_match('/^([A-Za-z][A-Za-z0-9+.-]*):/', $normalized, $match) !== 1) {
+            return true;
+        }
+
+        $scheme = strtolower($match[1]);
+        if (in_array($scheme, ['http', 'https'], true)) {
+            return true;
+        }
+        return $attribute === 'href' && in_array($scheme, ['mailto', 'tel'], true);
     }
 
     private static function warningValue(string $authored): string
@@ -1079,6 +1298,9 @@ final class HomepageDesignStep implements Step
 
     private static function fragmentRoot(string $fragment): ?\DOMElement
     {
+        if (!self::isRawBalancedSingleRoot($fragment)) {
+            return null;
+        }
         $dom = self::loadDocument(
             '<!doctype html><html><body><div id="homepage-patch-root">'
             . $fragment
@@ -1104,6 +1326,55 @@ final class HomepageDesignStep implements Step
             }
         }
         return $element;
+    }
+
+    private static function isRawBalancedSingleRoot(string $fragment): bool
+    {
+        if ($fragment === '') {
+            return false;
+        }
+
+        $stack = [];
+        $offset = 0;
+        while (($token = self::nextTag($fragment, $offset)) !== null) {
+            $offset = $token['end'];
+            if ($stack === [] && $token['start'] !== 0) {
+                return false;
+            }
+
+            $name = $token['name'];
+            if ($token['closing']) {
+                $last = array_key_last($stack);
+                if ($last === null || $stack[$last] !== $name) {
+                    return false;
+                }
+                array_pop($stack);
+                if ($stack === []) {
+                    return $token['end'] === strlen($fragment);
+                }
+                continue;
+            }
+            if ($token['self_closing'] || in_array($name, self::VOID_ELEMENTS, true)) {
+                if ($stack === []) {
+                    return $token['start'] === 0 && $token['end'] === strlen($fragment);
+                }
+                continue;
+            }
+
+            $stack[] = $name;
+            if (in_array($name, ['script', 'style', 'title', 'textarea'], true)) {
+                $close = self::matchingCloseToken($fragment, $token);
+                if ($close === null) {
+                    return false;
+                }
+                array_pop($stack);
+                $offset = $close['end'];
+                if ($stack === []) {
+                    return $close['end'] === strlen($fragment);
+                }
+            }
+        }
+        return false;
     }
 
     private static function isClosedDocument(string $html): bool
