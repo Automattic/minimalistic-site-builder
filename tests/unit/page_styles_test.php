@@ -277,7 +277,7 @@ test('site CSS path merges exact safe bytes in deterministic source and document
     [$project, $tmp] = ps_project('builder_ps_deterministic_');
     $base = "/* existing theme CSS */\n.base{display:block;}\n";
     $siteCss = "/* site */\n.site{padding:1rem;}\n";
-    $alpha = '<main>Alpha</main>'
+    $home = '<main>Alpha</main>'
         . "<style data-page-css>\n.alpha-one { margin: 1rem; }\n</style>"
         . '<style data-page-css="page">.alpha-two{padding:2rem;}</style>';
     $zeta = '<style class="ignored">.ignored{display:none;}</style>'
@@ -285,12 +285,16 @@ test('site CSS path merges exact safe bytes in deterministic source and document
     $carried = ".be-inline-geometry-1{width:42%;}\n";
     $project->writeText('theme/style.css', $base);
     $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'zeta', 'front' => false],
+        ['slug' => 'home', 'front' => true],
+    ]]);
     $project->writeText('design/zeta.html', $zeta);
-    $project->writeText('design/alpha.html', $alpha);
+    $project->writeText('design/home.html', $home);
     $project->writeText(TransformArtifacts::CARRIED_CSS, $carried);
     $sourceBytes = [
         TransformArtifacts::SITE_CSS    => $project->readText(TransformArtifacts::SITE_CSS),
-        'design/alpha.html'             => $project->readText('design/alpha.html'),
+        'design/home.html'              => $project->readText('design/home.html'),
         'design/zeta.html'              => $project->readText('design/zeta.html'),
         TransformArtifacts::CARRIED_CSS => $project->readText(TransformArtifacts::CARRIED_CSS),
     ];
@@ -328,10 +332,68 @@ test('site CSS path merges exact safe bytes in deterministic source and document
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path ignores inert page-style text inside an HTML comment', function () {
+    [$project, $tmp] = ps_project('builder_ps_inert_comment_');
+    $base = $project->readText('theme/style.css');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText(
+        'design/home.html',
+        '<!-- <style data-page-css>.comment-only{position:fixed;}</style> --><main>Home</main>'
+    );
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $base . '.site{display:grid;}',
+        $project->readText('theme/style.css'),
+        'comment text never becomes live CSS'
+    );
+    assert_eq([], $llm->calls);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path excludes losing tournament candidates from delivered page CSS', function () {
+    [$project, $tmp] = ps_project('builder_ps_candidate_exclusion_');
+    $base = $project->readText('theme/style.css');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText(
+        'design/home.html',
+        '<style data-page-css>.winner{padding:1rem;}</style><main>Winner</main>'
+    );
+    $project->writeText(
+        'design/candidate-1.html',
+        '<style data-page-css>.loser{position:fixed;}</style><main>Loser</main>'
+    );
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq(
+        $base . ".site{display:grid;}\n.winner{padding:1rem;}",
+        $project->readText('theme/style.css'),
+        'only delivered design source contributes page CSS'
+    );
+    assert_eq([], $llm->calls);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path works without transformer-carried CSS', function () {
     [$project, $tmp] = ps_project('builder_ps_no_carried_');
     $base = $project->readText('theme/style.css');
     $project->writeText(TransformArtifacts::SITE_CSS, ".site{display:grid;}\n");
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
     $project->writeText(
         'design/home.html',
         '<style data-page-css>.home{grid-template-columns:1fr 1fr;}</style>'
@@ -351,6 +413,11 @@ test('site CSS path works without transformer-carried CSS', function () {
 test('site CSS path routes live narration through Narrator', function () {
     [$project, $tmp] = ps_project('builder_ps_narrator_');
     $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Home</main>');
     $llm = new FakeLlm();
     $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
     $stream = fopen('php://memory', 'w+');
@@ -382,6 +449,10 @@ test('site CSS path warns for every scrub removal and continues after an empty s
         . 'background-image:url(https://cdn.example.invalid/nope.png);padding:1rem;}'
         . '</style>';
     $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'about',
+        'front' => false,
+    ]]]);
     $project->writeText('design/about.html', $page);
     $llm = new FakeLlm();
 

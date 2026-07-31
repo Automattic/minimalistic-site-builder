@@ -14,11 +14,18 @@ use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TransformArtifacts;
 
 /**
- * Step (LLM): generate the CSS for the layout utility classes the sections used.
+ * Step: merge HTML-first design CSS, with the LLM utility generator as the
+ * legacy path.
  *
- * Input:  designDirection.md + theme/theme.json + the final section markup
- *         (theme/parts/*.html, theme/templates/*.html — i.e. AFTER fix-blocks).
- * Output: a small plain-CSS appendix appended to theme/style.css.
+ * When design/site.css exists, this step deterministically appends its scrubbed
+ * bytes, each delivered page artifact's data-page-css style contents, and the
+ * optional scrubbed transformer-carried CSS. It never asks the model and never
+ * mutates those source artifacts.
+ *
+ * Without design/site.css, the legacy path reads designDirection.json +
+ * theme/theme.json + the final section markup (theme/parts/*.html and
+ * theme/templates/*.html, after fix-blocks), then appends a small plain-CSS
+ * utility appendix to theme/style.css.
  *
  * prompts/section.md documents a fixed vocabulary of utility classes (CLASSES
  * below) that sections MAY reference via "className" — structural devices
@@ -120,6 +127,7 @@ final class PageStylesStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: [
+                'pages.json',
                 'theme/theme.json',
                 'theme/style.css',
                 'designDirection.json',
@@ -213,20 +221,11 @@ final class PageStylesStep implements Step
             $chunks[] = $siteCss;
         }
 
-        $designFiles = glob($project->path('design/*.html')) ?: [];
-        sort($designFiles, SORT_STRING);
-        foreach ($designFiles as $file) {
-            $source = 'design/' . basename($file);
+        foreach (self::deliveredDesignSources($project) as $source) {
             $html = $project->readText($source);
-            preg_match_all(
-                '~<style\b(?=[^>]*\bdata-page-css(?=\s|=|>))[^>]*>(.*?)</style\s*>~is',
-                $html,
-                $matches,
-                PREG_SET_ORDER,
-            );
-            foreach ($matches as $index => $match) {
+            foreach (self::pageCssChunks($html) as $index => $pageCss) {
                 $css = self::scrubChunk(
-                    $match[1],
+                    $pageCss,
                     $source . ' style[data-page-css]#' . ($index + 1),
                     $warnings,
                 );
@@ -285,6 +284,182 @@ final class PageStylesStep implements Step
             );
         }
         return $result['css'];
+    }
+
+    /** @return list<string> */
+    private static function deliveredDesignSources(Project $project): array
+    {
+        $pages = $project->readJson('pages.json')['pages'] ?? null;
+        if (!is_array($pages) || $pages === []) {
+            throw new \RuntimeException('page-styles: pages.json has no delivered pages');
+        }
+
+        $sources = [];
+        foreach ($pages as $page) {
+            if (!is_array($page) || trim((string) ($page['slug'] ?? '')) === '') {
+                throw new \RuntimeException('page-styles: pages.json contains a page without a slug');
+            }
+            $source = !empty($page['front'])
+                ? 'design/home.html'
+                : 'design/' . (string) $page['slug'] . '.html';
+            $sources[$source] = true;
+        }
+        $sources = array_keys($sources);
+        sort($sources, SORT_STRING);
+        return $sources;
+    }
+
+    /** @return list<string> */
+    private static function pageCssChunks(string $html): array
+    {
+        $chunks = [];
+        $length = strlen($html);
+        $offset = 0;
+        while ($offset < $length) {
+            $start = strpos($html, '<', $offset);
+            if ($start === false) {
+                break;
+            }
+            if (substr($html, $start, 4) === '<!--') {
+                $offset = self::htmlCommentEnd($html, $start);
+                continue;
+            }
+
+            $tag = self::htmlTagAt($html, $start);
+            if ($tag === null) {
+                $offset = $start + 1;
+                continue;
+            }
+            $offset = $tag['end'];
+            if (
+                $tag['closing']
+                || !in_array($tag['name'], ['script', 'style', 'title', 'textarea'], true)
+            ) {
+                continue;
+            }
+
+            $close = self::rawTextCloseTag($html, $tag['name'], $offset);
+            if ($close === null) {
+                break;
+            }
+            if ($tag['name'] === 'style') {
+                $opening = substr($html, $tag['start'], $tag['end'] - $tag['start']);
+                if (
+                    preg_match(
+                        '/(?:^|\s)data-page-css(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+))?(?=\s|\/?>)/i',
+                        $opening,
+                    ) === 1
+                ) {
+                    $chunks[] = substr($html, $tag['end'], $close['start'] - $tag['end']);
+                }
+            }
+            $offset = $close['end'];
+        }
+        return $chunks;
+    }
+
+    /**
+     * @return array{start:int,end:int,name:string,closing:bool}|null
+     */
+    private static function htmlTagAt(string $html, int $start): ?array
+    {
+        $length = strlen($html);
+        $cursor = $start + 1;
+        while ($cursor < $length && str_contains(" \t\n\f\r", $html[$cursor])) {
+            $cursor++;
+        }
+        $closing = ($html[$cursor] ?? '') === '/';
+        if ($closing) {
+            $cursor++;
+            while ($cursor < $length && str_contains(" \t\n\f\r", $html[$cursor])) {
+                $cursor++;
+            }
+        }
+        if ($cursor >= $length || preg_match('/^[A-Za-z]$/D', $html[$cursor]) !== 1) {
+            return null;
+        }
+
+        $nameStart = $cursor;
+        while (
+            $cursor < $length
+            && $html[$cursor] !== '/'
+            && $html[$cursor] !== '>'
+            && !str_contains(" \t\n\f\r", $html[$cursor])
+        ) {
+            $cursor++;
+        }
+        $name = substr($html, $nameStart, $cursor - $nameStart);
+        if (preg_match('/^[A-Za-z][A-Za-z0-9:-]*$/D', $name) !== 1) {
+            return null;
+        }
+
+        $quote = null;
+        for ($end = $cursor; $end < $length; $end++) {
+            $byte = $html[$end];
+            if ($quote !== null) {
+                if ($byte === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($byte === '"' || $byte === "'") {
+                $quote = $byte;
+                continue;
+            }
+            if ($byte === '>') {
+                return [
+                    'start' => $start,
+                    'end' => $end + 1,
+                    'name' => strtolower($name),
+                    'closing' => $closing,
+                ];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @return array{start:int,end:int,name:string,closing:bool}|null
+     */
+    private static function rawTextCloseTag(string $html, string $name, int $offset): ?array
+    {
+        $needle = "</{$name}";
+        while (($start = stripos($html, $needle, $offset)) !== false) {
+            $afterName = $start + strlen($needle);
+            $delimiter = $html[$afterName] ?? '';
+            if (
+                $delimiter === '>'
+                || $delimiter === '/'
+                || ($delimiter !== '' && str_contains(" \t\n\f\r", $delimiter))
+            ) {
+                $tag = self::htmlTagAt($html, $start);
+                if ($tag !== null && $tag['closing'] && $tag['name'] === $name) {
+                    return $tag;
+                }
+            }
+            $offset = $afterName;
+        }
+        return null;
+    }
+
+    private static function htmlCommentEnd(string $html, int $start): int
+    {
+        if (substr($html, $start, 5) === '<!-->') {
+            return $start + 5;
+        }
+        if (substr($html, $start, 6) === '<!--->') {
+            return $start + 6;
+        }
+
+        $standard = strpos($html, '-->', $start + 4);
+        $bang = strpos($html, '--!>', $start + 4);
+        if ($standard === false && $bang === false) {
+            return strlen($html);
+        }
+        if ($bang !== false && ($standard === false || $bang < $standard)) {
+            return $bang + 4;
+        }
+        return $standard + 3;
     }
 
     /**
