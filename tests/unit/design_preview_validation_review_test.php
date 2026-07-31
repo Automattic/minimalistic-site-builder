@@ -194,31 +194,50 @@ $designPreviewDependencyDefects = [
     ),
 ];
 
+$designPreviewDeterministicDependencyRemovals = [
+    'image data src' => true,
+    'image theme src' => true,
+];
+
 foreach ($designPreviewDependencyDefects as $name => $mutate) {
-    test("design-preview repairs {$name} before delivery", function () use ($name, $mutate) {
-        [$project, $llm, $tmp] = design_preview_fixture();
-        $base = design_preview_document('AUTHORED-DEPENDENCY-DEFECT');
-        $authored = $mutate($base);
-        $safeRepair = design_preview_document('SAFE-DEPENDENCY-REPAIR');
-        assert_true($authored !== $base, "{$name} fixture carries defect");
-        $llm->queueText($authored);
-        $llm->queueText($safeRepair);
+    test(
+        "design-preview resolves {$name} before delivery",
+        function () use ($name, $mutate, $designPreviewDeterministicDependencyRemovals) {
+            [$project, $llm, $tmp] = design_preview_fixture();
+            $base = design_preview_document('AUTHORED-DEPENDENCY-DEFECT');
+            $authored = $mutate($base);
+            $safeRepair = design_preview_document('SAFE-DEPENDENCY-REPAIR');
+            assert_true($authored !== $base, "{$name} fixture carries defect");
+            $llm->queueText($authored);
+            $llm->queueText($safeRepair);
 
-        design_preview_run($project, $llm);
+            design_preview_run($project, $llm);
 
-        $delivered = $project->readText('design/preview.html');
-        $warnings = design_preview_warnings($project);
-        $completeCalls = $llm->completeCalls;
-        $allCalls = count($llm->calls);
-        design_preview_cleanup($tmp);
+            $delivered = $project->readText('design/preview.html');
+            $warnings = design_preview_warnings($project);
+            $completeCalls = $llm->completeCalls;
+            $allCalls = count($llm->calls);
+            design_preview_cleanup($tmp);
 
-        assert_eq(2, $completeCalls, "{$name} triggers exactly one repair call");
-        assert_eq(2, $allCalls, "{$name} has generation plus repair only");
-        assert_eq($safeRepair, $delivered, "{$name} delivers exact safe repair");
-        assert_contains('disposition repaired', $warnings, "{$name} repair is recorded");
-        design_preview_review_assert_no_dependency_markup($delivered);
-        design_preview_assert_shape($delivered);
-    });
+            $deterministicRemoval = isset($designPreviewDeterministicDependencyRemovals[$name]);
+            $expectedCalls = $deterministicRemoval ? 1 : 2;
+            assert_eq($expectedCalls, $completeCalls, "{$name} uses bounded LLM calls");
+            assert_eq($expectedCalls, $allCalls, "{$name} records bounded LLM calls");
+            if ($deterministicRemoval) {
+                assert_contains(
+                    'AUTHORED-DEPENDENCY-DEFECT',
+                    $delivered,
+                    "{$name} preserves authored content around removed source",
+                );
+                assert_contains('disposition removed', $warnings, "{$name} removal is recorded");
+            } else {
+                assert_eq($safeRepair, $delivered, "{$name} delivers exact safe repair");
+                assert_contains('disposition repaired', $warnings, "{$name} repair is recorded");
+            }
+            design_preview_review_assert_no_dependency_markup($delivered);
+            design_preview_assert_shape($delivered);
+        },
+    );
 }
 
 test('design-preview accepts inert URL text and a linear gradient in one call', function () {
