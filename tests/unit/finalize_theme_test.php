@@ -9,9 +9,7 @@ test('finalize-theme writes the deterministic functions.php loader', function ()
     $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
     $project = (new ProjectStore($tmp))->create('Forno Vero');
 
-    ob_start();
-    (new FinalizeThemeStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $php = $project->readText('theme/functions.php');
     // Block themes don't load style.css automatically; the enqueue is what
@@ -38,9 +36,7 @@ test('finalize-theme enqueues the motion kit and prunes to the committed profile
     (new ScaffoldThemeStep())->run($project);
     $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'dramatic']);
 
-    ob_start();
-    (new FinalizeThemeStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $php = $project->readText('theme/functions.php');
     assert_contains("wp_enqueue_style('forno-vero-motion', get_theme_file_uri('assets/motion/motion.css')", $php);
@@ -70,9 +66,7 @@ test('finalize-theme with motion none ships no kit and no motion enqueues', func
     (new ScaffoldThemeStep())->run($project);
     $project->writeJson('designDirection.json', ['description' => 'x', 'motion' => 'none']);
 
-    ob_start();
-    (new FinalizeThemeStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     $php = $project->readText('theme/functions.php');
     assert_true(!str_contains($php, 'motion'), 'no motion wiring in functions.php');
@@ -86,9 +80,7 @@ test('finalize-theme without a design direction behaves as motion none', functio
     $project = (new ProjectStore($tmp))->create('demo');
     (new ScaffoldThemeStep())->run($project);
 
-    ob_start();
-    (new FinalizeThemeStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
 
     assert_true(!str_contains($project->readText('theme/functions.php'), 'motion'));
     assert_true(!is_dir($project->themePath('assets/motion')));

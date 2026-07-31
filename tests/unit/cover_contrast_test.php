@@ -227,12 +227,7 @@ function cover_step_run(Project $project, bool $failFixer = false): void
                 return 'block-fixer: ok';
             }
         };
-    ob_start();
-    try {
-        (new CoverContrastStep($fixer))->run($project);
-    } finally {
-        ob_end_clean();
-    }
+    quietly(fn () => (new CoverContrastStep($fixer))->run($project));
 }
 
 test('cover-contrast writes its own report without changing the shared contrast report', function () {
