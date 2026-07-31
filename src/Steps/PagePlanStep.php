@@ -156,15 +156,89 @@ final class PagePlanStep implements ConcurrentStep
 
     public function requests(Project $project): array
     {
+        return $this->requestsForPages(
+            $project,
+            self::flattenPages($project->readJson('siteSpec.json')),
+        );
+    }
+
+    /**
+     * Render legacy page-plan requests for only the named pages. Used by the
+     * HTML-first mixed fallback after an inner-page design writes a .failed
+     * marker. Request keys remain page slugs, matching the ordinary batch.
+     *
+     * @param list<string> $slugs
+     * @return array<string,array<string,mixed>>
+     */
+    public function requestsForSlugs(Project $project, array $slugs): array
+    {
+        $wanted = array_fill_keys($slugs, true);
+        $sitePages = self::flattenPages($project->readJson('siteSpec.json'));
+        $pages = array_values(array_filter(
+            $sitePages,
+            static fn (array $page): bool => isset($wanted[(string) $page['slug']]),
+        ));
+        return $this->requestsForPages($project, $pages, $sitePages);
+    }
+
+    /**
+     * Run the legacy planner for only the named pages and return their planned
+     * entries without replacing pages.json. Generated-output failures degrade
+     * to the deterministic one-section plan; missing build inputs still fail
+     * while requests are rendered before the guarded LLM call.
+     *
+     * @param list<string> $slugs
+     * @return array<int,array<string,mixed>>
+     */
+    public function runForSlugs(Project $project, array $slugs): array
+    {
+        $wanted = array_fill_keys($slugs, true);
+        $pages = array_values(array_filter(
+            self::flattenPages($project->readJson('siteSpec.json')),
+            static fn (array $page): bool => isset($wanted[(string) $page['slug']]),
+        ));
+        if ($pages === []) {
+            return [];
+        }
+
+        $requests = $this->requestsForPages(
+            $project,
+            $pages,
+            self::flattenPages($project->readJson('siteSpec.json')),
+        );
+        try {
+            return $this->plannedPages($project, $pages, $this->llm->completeJsonBatch($requests));
+        } catch (\RuntimeException $error) {
+            $warnings = [];
+            foreach ($pages as &$page) {
+                $slug = (string) $page['slug'];
+                $page['sections'] = self::fallbackSections((bool) $page['front']);
+                $reason = trim((string) preg_replace('/\s+/', ' ', $error->getMessage()));
+                $warnings[] = "file pages.json block_path pages[slug={$slug}].sections "
+                    . "authored_value scoped legacy plan unavailable: {$reason} "
+                    . 'delivered_value deterministic fallback section disposition degraded';
+            }
+            unset($page);
+            $project->addWarnings($this->id(), $warnings);
+            return $pages;
+        }
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<int,array<string,mixed>>|null $sitePages
+     * @return array<string,array<string,mixed>>
+     */
+    private function requestsForPages(Project $project, array $pages, ?array $sitePages = null): array
+    {
         $meta = $project->readJson('meta.json');
-        $pages = self::flattenPages($project->readJson('siteSpec.json'));
 
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
             'site_spec'        => $project->readText('siteSpec.json'),
             'language'         => SiteSpecStep::languageOf($project),
             'design_direction' => DesignDirectionStep::readFor($project),
-            'site_pages'       => self::sitePagesList($pages),
+            'site_pages'       => self::sitePagesList($sitePages ?? $pages),
         ];
 
         $requests = [];
@@ -186,6 +260,19 @@ final class PagePlanStep implements ConcurrentStep
     public function consume(Project $project, array $results): void
     {
         $pages = self::flattenPages($project->readJson('siteSpec.json'));
+        $project->writeJson('pages.json', ['pages' => $this->plannedPages($project, $pages, $results)]);
+    }
+
+    /**
+     * Normalize and repair model results for the supplied page subset, then
+     * return complete page-plan entries in that subset's existing order.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<array-key,array<mixed>> $results
+     * @return array<int,array<string,mixed>>
+     */
+    private function plannedPages(Project $project, array $pages, array $results): array
+    {
 
         // First pass: normalize what the model returned, collecting every page
         // that broke a rule so they can all be re-asked together below.
@@ -256,7 +343,7 @@ final class PagePlanStep implements ConcurrentStep
             $out[] = $page;
         }
 
-        $project->writeJson('pages.json', ['pages' => $out]);
+        return $out;
     }
 
     /**

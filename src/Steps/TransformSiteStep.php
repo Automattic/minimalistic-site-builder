@@ -39,15 +39,21 @@ final class TransformSiteStep implements Step
 
     private HeaderUnit $headerUnit;
     private FooterUnit $footerUnit;
+    private PagePlanStep $pagePlanStep;
+    private SectionsStep $sectionsStep;
 
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
         private ?string $model = null,
         private ?float $temperature = null,
+        ?PagePlanStep $pagePlanStep = null,
+        ?SectionsStep $sectionsStep = null,
     ) {
         $this->headerUnit = new HeaderUnit($llm, $renderer, $model, $temperature);
         $this->footerUnit = new FooterUnit($llm, $renderer, $model, $temperature);
+        $this->pagePlanStep = $pagePlanStep ?? new PagePlanStep($llm, $renderer, $model, $temperature);
+        $this->sectionsStep = $sectionsStep ?? new SectionsStep($llm, $renderer, $model, $temperature);
     }
 
     public function id(): string
@@ -87,12 +93,25 @@ final class TransformSiteStep implements Step
     {
         $meta = $project->readJson('meta.json');
         $siteSpec = $project->readJson('siteSpec.json');
-        $pages = PagePlanStep::flattenPages($siteSpec);
+        $allPages = PagePlanStep::flattenPages($siteSpec);
+        $pages = [];
+        $failedPages = [];
+        $excludedHtml = [];
+        foreach ($allPages as $page) {
+            $slug = (string) $page['slug'];
+            $failedPath = "design/{$slug}.failed";
+            if (empty($page['front']) && $project->exists($failedPath)) {
+                $failedPages[] = $page;
+                $excludedHtml["{$slug}.html"] = true;
+                continue;
+            }
+            $pages[] = $page;
+        }
         $project->readJson('theme/theme.json');
         $project->readJson('designDirection.json');
         $siteCss = $project->readText(TransformArtifacts::SITE_CSS);
 
-        [$artifact, $sourceHtml] = $this->artifact($project, $pages, $siteCss);
+        [$artifact, $sourceHtml] = $this->artifact($project, $pages, $siteCss, $excludedHtml);
         $warnings = [];
         $fallbackCodes = [];
         $repairOutcomes = [];
@@ -361,7 +380,7 @@ final class TransformSiteStep implements Step
         if ($chromeNeedsGeneration !== []) {
             $this->generateMissingChrome(
                 $project,
-                $pages,
+                $allPages,
                 $siteSpec,
                 $chromeNeedsGeneration,
                 $missingLandmarks,
@@ -449,6 +468,65 @@ final class TransformSiteStep implements Step
             $deliveredPages[] = $page;
         }
 
+        if ($failedPages !== []) {
+            $failedSlugs = array_map(
+                static fn (array $page): string => (string) $page['slug'],
+                $failedPages,
+            );
+            $plannedFailedPages = $this->pagePlanStep->runForSlugs($project, $failedSlugs);
+            $sitePages = self::mergePagePlans($allPages, $deliveredPages, $plannedFailedPages);
+            $legacyPages = $this->sectionsStep->runForPages($project, $plannedFailedPages, $sitePages);
+            $legacyBySlug = [];
+            foreach ($legacyPages as $page) {
+                $legacyBySlug[(string) $page['slug']] = $page;
+            }
+
+            foreach ($failedPages as $failedPage) {
+                $slug = (string) $failedPage['slug'];
+                $marker = "design/{$slug}.failed";
+                $deliveredPaths = [];
+                foreach ((array) ($legacyBySlug[$slug]['sections'] ?? []) as $section) {
+                    if (!is_array($section)) {
+                        continue;
+                    }
+                    $part = 'theme/parts/' . SectionsStep::partSlug(
+                        $slug,
+                        (string) ($section['slug'] ?? ''),
+                    ) . '.html';
+                    if ($project->exists($part)) {
+                        $deliveredPaths[] = $part;
+                    }
+                }
+                $deliveredValue = $deliveredPaths === [] ? 'removed' : implode(',', $deliveredPaths);
+                $fallbackCodes[] = $deliveredPaths === []
+                    ? 'inner_page_legacy_reroute_failed'
+                    : 'inner_page_legacy_reroute';
+                $outcome = self::contextRow(
+                    source: $marker,
+                    selector: "page[slug={$slug}]",
+                    diagnosticCode: $deliveredPaths === []
+                        ? 'inner_page_legacy_reroute_failed'
+                        : 'inner_page_legacy_reroute',
+                    authoredValue: $marker,
+                    deliveredValue: $deliveredValue,
+                    disposition: $deliveredPaths === [] ? 'dropped' : 'retained',
+                );
+                $repairOutcomes[] = $outcome;
+                if ($deliveredPaths === []) {
+                    $droppedFragments[] = $outcome;
+                }
+                $warningCode = $deliveredPaths === []
+                    ? 'inner_page_legacy_reroute_failed'
+                    : 'inner_page_legacy_reroute';
+                $warningDisposition = $deliveredPaths === [] ? 'dropped' : 'rerouted';
+                $warnings[] = "source {$marker} selector page[slug={$slug}] "
+                    . 'block_path ' . ($deliveredPaths === [] ? 'pages.json' : implode(',', $deliveredPaths))
+                    . " diagnostic_code {$warningCode} authored_value failed design marker "
+                    . "delivered_value {$deliveredValue} disposition {$warningDisposition}";
+            }
+            $deliveredPages = self::mergePagePlans($allPages, $deliveredPages, $legacyPages);
+        }
+
         foreach ($outputs as $path => $content) {
             $project->writeText($path, $content);
         }
@@ -469,9 +547,10 @@ final class TransformSiteStep implements Step
 
     /**
      * @param array<int,array<string,mixed>> $pages
+     * @param array<string,true> $excludedHtml
      * @return array{0:array<string,mixed>,1:array<string,string>}
      */
-    private function artifact(Project $project, array $pages, string $siteCss): array
+    private function artifact(Project $project, array $pages, string $siteCss, array $excludedHtml = []): array
     {
         $files = [];
         $sources = [];
@@ -483,6 +562,9 @@ final class TransformSiteStep implements Step
         }
         foreach (glob($project->path('design/*.html')) ?: [] as $path) {
             $name = basename($path);
+            if (isset($excludedHtml[$name])) {
+                continue;
+            }
             $content = $project->readText("design/{$name}");
             $files[] = [
                 'path' => $name,
@@ -511,6 +593,37 @@ final class TransformSiteStep implements Step
             'entrypoint' => 'home.html',
             'files' => $files,
         ], $sources];
+    }
+
+    /**
+     * Merge delivered page plans back into flattened site-spec order.
+     *
+     * @param array<int,array<string,mixed>> $specPages
+     * @param array<int,array<string,mixed>> ...$pageSets
+     * @return array<int,array<string,mixed>>
+     */
+    private static function mergePagePlans(array $specPages, array ...$pageSets): array
+    {
+        $bySlug = [];
+        foreach ($pageSets as $pages) {
+            foreach ($pages as $page) {
+                if (!is_array($page)) {
+                    continue;
+                }
+                $slug = (string) ($page['slug'] ?? '');
+                if ($slug !== '') {
+                    $bySlug[$slug] = $page;
+                }
+            }
+        }
+        $merged = [];
+        foreach ($specPages as $page) {
+            $slug = (string) ($page['slug'] ?? '');
+            if (isset($bySlug[$slug])) {
+                $merged[] = $bySlug[$slug];
+            }
+        }
+        return $merged;
     }
 
     /**

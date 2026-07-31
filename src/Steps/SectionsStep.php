@@ -159,13 +159,82 @@ final class SectionsStep implements Step
 
     public function run(Project $project): void
     {
-        $warnings = [];
         $plan = $project->readJson('pages.json');
-        $pages = self::repairedPages(self::pages($project), $warnings);
-        $jobs = $this->jobs($project, $warnings, $pages);
+        $pages = $this->generateParts(
+            $project,
+            self::pages($project),
+            includeChrome: true,
+            sitePages: null,
+            degradeBatchFailure: false,
+        );
+        $plan['pages'] = $pages;
+        $project->writeJson('pages.json', $plan);
+    }
+
+    /**
+     * Generate legacy section parts for only the supplied pages. Header,
+     * footer, pages.json, and sibling page parts stay untouched. Returns the
+     * surviving page plans so the caller can merge them in site-spec order.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<int,array<string,mixed>>|null $sitePages full delivered-site context for prompts/header seam
+     * @return array<int,array<string,mixed>>
+     */
+    public function runForPages(Project $project, array $pages, ?array $sitePages = null): array
+    {
+        if ($pages === []) {
+            return [];
+        }
+        return $this->generateParts(
+            $project,
+            $pages,
+            includeChrome: false,
+            sitePages: $sitePages ?? $pages,
+            degradeBatchFailure: true,
+        );
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $sourcePages
+     * @param array<int,array<string,mixed>>|null $sitePages
+     * @return array<int,array<string,mixed>>
+     */
+    private function generateParts(
+        Project $project,
+        array $sourcePages,
+        bool $includeChrome,
+        ?array $sitePages,
+        bool $degradeBatchFailure,
+    ): array {
+        $warnings = [];
+        $pages = self::repairedPages($sourcePages, $warnings);
+        $jobs = $this->jobs($project, $warnings, $pages, $includeChrome, $sitePages);
         $requests = self::requestsFor($jobs);
         $this->warmSectionCache($requests);
-        $batch = $this->llm->completeBatch($requests);
+        try {
+            $batch = $this->llm->completeBatch($requests);
+        } catch (\RuntimeException $error) {
+            if (!$degradeBatchFailure) {
+                throw $error;
+            }
+            $reason = trim((string) preg_replace('/\s+/', ' ', $error->getMessage()));
+            foreach ($pages as $page) {
+                $slug = (string) ($page['slug'] ?? '');
+                foreach ((array) ($page['sections'] ?? []) as $section) {
+                    if (!is_array($section)) {
+                        continue;
+                    }
+                    $sectionSlug = (string) ($section['slug'] ?? '');
+                    $path = 'theme/parts/' . self::partSlug($slug, $sectionSlug) . '.html';
+                    $warnings[] = "file {$path} "
+                        . "block_path pages[slug={$slug}].sections[slug={$sectionSlug}] "
+                        . "authored_value scoped legacy section batch unavailable: {$reason} "
+                        . 'delivered_value removed disposition dropped';
+                }
+            }
+            $project->addWarnings($this->id(), $warnings);
+            return [];
+        }
         $parts = $batch->texts;
 
         // Normalize EVERY part before writing any, so one bad part doesn't
@@ -206,12 +275,11 @@ final class SectionsStep implements Step
         // survivor's positional role, so recompute roles after the cut.
         $pages = self::pruneDroppedSections($pages, $dropped, $warnings);
         $pages = self::repairedPages($pages, $warnings);
-        $plan['pages'] = $pages;
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
-        $project->writeJson('pages.json', $plan);
         $project->addWarnings($this->id(), $warnings);
+        return $pages;
     }
 
     /**
@@ -365,16 +433,25 @@ final class SectionsStep implements Step
      * @param array<int,array<string,mixed>>|null $sourcePages
      * @return array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}>
      */
-    private function jobs(Project $project, array &$warnings = [], ?array $sourcePages = null): array
+    private function jobs(
+        Project $project,
+        array &$warnings = [],
+        ?array $sourcePages = null,
+        bool $includeChrome = true,
+        ?array $sitePages = null,
+    ): array
     {
         $pages = self::repairedPages($sourcePages ?? self::pages($project), $warnings);
+        $contextPages = $sitePages === null
+            ? $pages
+            : self::repairedPages($sitePages, $warnings);
 
         $common = [
             'site_spec'        => $project->readText('siteSpec.json'),
             'language'         => SiteSpecStep::languageOf($project),
             'theme_json'       => $project->readText('theme/theme.json'),
             'design_direction' => DesignDirectionStep::readFor($project),
-            'site_pages'       => PagePlanStep::sitePagesList($pages),
+            'site_pages'       => PagePlanStep::sitePagesList($contextPages),
         ];
 
         // The chrome is briefed on the FRONT page: that's what the header sits
@@ -386,28 +463,31 @@ final class SectionsStep implements Step
         // again from the canvas rather than taking it as an argument, which
         // keeps its signature usable from tests.
         $canvas = DesignDirectionStep::canvasFor($project);
-        $headerMode = self::headerMode($pages, $canvas);
+        $headerMode = self::headerMode($contextPages, $canvas);
         // Fixed for the whole build, so the hero brief is built once, not once
         // per hero section.
         $headerContract = self::headerContract($headerMode);
-        $frontSections = self::frontPage($pages)['sections'];
-        $jobs = [
-            'header' => [
-                'unit'  => $this->headerUnit,
-                'input' => $common + [
-                    'outline'    => self::outline($frontSections),
-                    'hero_brief' => self::heroBrief($frontSections),
-                    'nav_rule'   => self::navRuleFor(count($pages)),
-                    'archetype_assignment' => self::headerAssignment($pages, $canvas),
+        $jobs = [];
+        if ($includeChrome) {
+            $frontSections = self::frontPage($contextPages)['sections'];
+            $jobs = [
+                'header' => [
+                    'unit'  => $this->headerUnit,
+                    'input' => $common + [
+                        'outline'    => self::outline($frontSections),
+                        'hero_brief' => self::heroBrief($frontSections),
+                        'nav_rule'   => self::navRuleFor(count($contextPages)),
+                        'archetype_assignment' => self::headerAssignment($contextPages, $canvas),
+                    ],
+                    'file'  => 'parts/header.html',
                 ],
-                'file'  => 'parts/header.html',
-            ],
-            'footer' => [
-                'unit'  => $this->footerUnit,
-                'input' => $common + ['outline' => self::outline($frontSections)],
-                'file'  => 'parts/footer.html',
-            ],
-        ];
+                'footer' => [
+                    'unit'  => $this->footerUnit,
+                    'input' => $common + ['outline' => self::outline($frontSections)],
+                    'file'  => 'parts/footer.html',
+                ],
+            ];
+        }
 
         foreach ($pages as $page) {
             $sections = $page['sections'];

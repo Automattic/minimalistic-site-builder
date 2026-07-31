@@ -13,6 +13,8 @@ use Automattic\SiteBuild\Steps\FinalizeThemeStep;
 use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
+use Automattic\SiteBuild\Steps\HomepageDesignStep;
+use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
 use Automattic\SiteBuild\Steps\PagePlanStep;
@@ -24,6 +26,7 @@ use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
+use Automattic\SiteBuild\Steps\TransformSiteStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
 
 /**
@@ -36,6 +39,18 @@ use Automattic\SiteBuild\Steps\ValidateThemeStep;
  */
 final class StepComposition
 {
+    /** Artifacts produced before the runtime fallback enters the legacy tail. */
+    private const LEGACY_TAIL_SEEDS = [
+        'meta.json',
+        'theme/style.css',
+        'theme/readme.txt',
+        'theme/assets/motion/*',
+        'plugin/site-content.php',
+        'siteSpec.json',
+        'designDirection.json',
+        'warnings.json',
+    ];
+
     /**
      * @param Step[]       $steps
      * @param list<string> $seeds
@@ -48,13 +63,107 @@ final class StepComposition
     }
 
     /**
-     * The package default / CLI composition. Models and temperatures are package
-     * defaults overlaid with the overrides passed here (same merge SiteBuilder used).
+     * The package default / CLI composition. HTML-first unless the explicit
+     * SITE_BUILD_LEGACY=1 escape hatch selects the unchanged legacy graph.
      *
      * @param array<string, string> $models       step id => model id overrides
      * @param array<string, ?float> $temperatures step id => temperature overrides
      */
     public static function default(
+        Llm $llm,
+        PromptRenderer $renderer,
+        array $models = [],
+        array $temperatures = [],
+        ?BlockFixer $blockFixer = null,
+    ): self {
+        if (Env::get('SITE_BUILD_LEGACY') === '1') {
+            return self::legacy($llm, $renderer, $models, $temperatures, $blockFixer);
+        }
+
+        $blockFixer ??= BlockFixers::default();
+        $models = array_merge(StepDefaults::models(), $models);
+        $temps = array_merge(StepDefaults::temperatures(), $temperatures);
+
+        return new self([
+            new ScaffoldThemeStep(),
+            new ScaffoldPluginStep(),
+            new RefinePromptStep($llm, $renderer, $models['refine-prompt'], $temps['refine-prompt']),
+            new SiteSpecStep($llm, $renderer, $models['site-spec'], $temps['site-spec']),
+            new ApplyIdentityStep(),
+            new DesignDirectionStep(
+                $llm,
+                $renderer,
+                $models['design-direction'],
+                $temps['design-direction'],
+                $models['design-direction-seeds'],
+            ),
+            new HomepageDesignStep(
+                $llm,
+                $renderer,
+                $models['homepage-design'] ?? null,
+                $temps['homepage-design'] ?? null,
+            ),
+            new ThemeJsonStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['theme-json'],
+                temperature: $temps['theme-json'],
+                htmlFirst: true,
+            ),
+            new InnerPagesDesignStep(
+                $llm,
+                $renderer,
+                $models['inner-pages-design'] ?? null,
+                $temps['inner-pages-design'] ?? null,
+            ),
+            new TransformSiteStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['transform-site'] ?? null,
+                temperature: $temps['transform-site'] ?? null,
+                pagePlanStep: new PagePlanStep(
+                    $llm,
+                    $renderer,
+                    $models['page-plan'],
+                    $temps['page-plan'],
+                ),
+                sectionsStep: new SectionsStep(
+                    $llm,
+                    $renderer,
+                    $models['sections'],
+                    $temps['sections'],
+                ),
+            ),
+            new SectionRhythmStep(),
+            new CollectImagesStep(),
+            new NormalizeLayoutStep(),
+            new HeaderHeroStep(),
+            new ContrastFixStep(htmlFirst: true),
+            new MotionSanityStep(htmlFirst: true),
+            new FixBlocksStep($blockFixer),
+            new AssemblePagesStep(),
+            new PageStylesStep(
+                llm: $llm,
+                renderer: $renderer,
+                model: $models['page-styles'],
+                temperature: $temps['page-styles'],
+                htmlFirst: true,
+            ),
+            new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
+            new FontsPhpStep(),
+            new FinalizeThemeStep(),
+            new ValidateThemeStep(),
+        ]);
+    }
+
+    /**
+     * Full pre-HTML-first composition. Keep ordering and constructor options
+     * identical for the SITE_BUILD_LEGACY=1 escape hatch.
+     *
+     * @param array<string, string> $models       step id => model id overrides
+     * @param array<string, ?float> $temperatures step id => temperature overrides
+     */
+    public static function legacy(
         Llm $llm,
         PromptRenderer $renderer,
         array $models = [],
@@ -152,6 +261,30 @@ final class StepComposition
             // later append-only steps before the project is reported as complete.
             new ValidateThemeStep(),
         ]);
+    }
+
+    /**
+     * Legacy graph after the shared design-direction prefix. Its seeds are the
+     * common artifacts already produced by the primary pipeline.
+     *
+     * @param array<string, string> $models       step id => model id overrides
+     * @param array<string, ?float> $temperatures step id => temperature overrides
+     */
+    public static function legacyTail(
+        Llm $llm,
+        PromptRenderer $renderer,
+        array $models = [],
+        array $temperatures = [],
+        ?BlockFixer $blockFixer = null,
+    ): self {
+        $steps = self::legacy($llm, $renderer, $models, $temperatures, $blockFixer)->steps();
+        foreach ($steps as $index => $step) {
+            if ($step->id() === 'design-direction') {
+                return new self(array_slice($steps, $index + 1), self::LEGACY_TAIL_SEEDS);
+            }
+        }
+
+        throw new \LogicException('StepComposition::legacyTail: design-direction boundary missing');
     }
 
     /** @return Step[] */

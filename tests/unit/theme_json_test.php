@@ -519,6 +519,22 @@ test('theme-json declares every artifact it writes', function () {
     assert_eq(['theme/theme.json', 'warnings.json'], $step->declaration()->writes);
 });
 
+test('theme-json declares design CSS only for the HTML-first graph', function () {
+    $llm = new FakeLlm();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+
+    assert_eq(
+        ['meta.json', 'siteSpec.json', 'designDirection.json'],
+        (new ThemeJsonStep($llm, $renderer))->declaration()->reads,
+        'legacy graph declaration stays byte-for-byte unchanged',
+    );
+    assert_eq(
+        ['meta.json', 'siteSpec.json', 'designDirection.json', 'design/site.css'],
+        (new ThemeJsonStep($llm, $renderer, htmlFirst: true))->declaration()->reads,
+        'HTML-first graph declares the CSS token source produced by homepage-design',
+    );
+});
+
 test('theme-json font-size repair preserves model sizes and fills each omission', function () {
     [$theme, $warnings] = ThemeJsonStep::repairFontSizes([
         'settings' => ['typography' => [
@@ -946,6 +962,7 @@ test('theme-json prompt carries authoritative tokens extracted from design CSS',
     $request = (new ThemeJsonStep(
         new FakeLlm(),
         new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
     ))->requests($project)['theme-json'];
 
     assert_contains('#123456', $request['prompt']);
@@ -976,6 +993,34 @@ test('theme-json absent CSS prompt matches the recorded legacy bytes', function 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json legacy mode ignores stale design CSS bytes', function () {
+    $expectation = json_decode(
+        file_get_contents(repo_path('tests/fixtures/theme-json/legacy-prompt-expectation.json')) ?: '',
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $tmp = sys_get_temp_dir() . '/builder_tj_legacy_stale_css_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', $expectation['meta']);
+    $project->writeJson('siteSpec.json', $expectation['siteSpec']);
+    $project->writeText(
+        'design/site.css',
+        '.stale { color: #C0FFEE; font-family: "Stale Font", sans-serif; padding: 2rem; }',
+    );
+
+    $prompt = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json']['prompt'];
+
+    assert_eq($expectation['bytes'], strlen($prompt));
+    assert_eq($expectation['sha256'], hash('sha256', $prompt));
+    assert_true(!str_contains($prompt, '#C0FFEE'));
+    assert_true(!str_contains($prompt, 'Stale Font'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json sparse CSS keeps direction prompt and writes actionable warning', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_sparse_tokens_' . uniqid();
     $store = new ProjectStore($tmp);
@@ -1001,10 +1046,15 @@ test('theme-json sparse CSS keeps direction prompt and writes actionable warning
         'design/site.css',
         file_get_contents(repo_path('tests/fixtures/design/tokens-sparse.css')) ?: '',
     );
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $htmlFirstStep = new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    );
 
-    $legacyPrompt = $step->requests($legacy)['theme-json']['prompt'];
-    $sparsePrompt = $step->requests($sparse)['theme-json']['prompt'];
+    $legacyPrompt = $legacyStep->requests($legacy)['theme-json']['prompt'];
+    $sparsePrompt = $htmlFirstStep->requests($sparse)['theme-json']['prompt'];
 
     assert_eq($legacyPrompt, $sparsePrompt, 'sparse extraction uses unchanged design-direction prompt');
     $warnings = implode(' ', $sparse->readJson('warnings.json')['theme-json'] ?? []);
@@ -1041,10 +1091,15 @@ test('theme-json invalid UTF-8 CSS keeps direction prompt and writes sparse warn
         'design/site.css',
         "body { color: #112233; font-family: \"Bad\xC3\", serif; padding: 1rem; }",
     );
-    $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $legacyStep = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $htmlFirstStep = new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    );
 
-    $legacyPrompt = $step->requests($legacy)['theme-json']['prompt'];
-    $invalidPrompt = $step->requests($invalid)['theme-json']['prompt'];
+    $legacyPrompt = $legacyStep->requests($legacy)['theme-json']['prompt'];
+    $invalidPrompt = $htmlFirstStep->requests($invalid)['theme-json']['prompt'];
 
     assert_eq($legacyPrompt, $invalidPrompt, 'invalid token bytes use unchanged design-direction prompt');
     $warnings = implode(' ', $invalid->readJson('warnings.json')['theme-json'] ?? []);

@@ -67,6 +67,10 @@ test('malformed homepage reroutes the build through the legacy tail and records 
         $meta['design_candidates'] = 1;
         $meta['critique_rounds'] = 0;
         $project->writeJson('meta.json', $meta);
+        $project->writeText(
+            'design/site.css',
+            '/* STALE-REROUTE-CSS */ .stale { color: #C0FFEE; font-family: "Stale Font", sans-serif; }',
+        );
 
         $builder->pipeline()->runThrough($project);
 
@@ -78,6 +82,19 @@ test('malformed homepage reroutes the build through the legacy tail and records 
         );
         assert_contains('legacy_reroute', $warningText, 'warnings.json records runtime reroute');
         assert_contains('homepage-design', $warningText, 'warning locates failed step');
+        assert_true(
+            !str_contains($project->readText('theme/style.css'), 'STALE-REROUTE-CSS'),
+            'legacy tail ignores stale HTML-first CSS',
+        );
+        assert_true($project->exists('logs/contrast-report.txt'), 'legacy tail runs contrast fix');
+        assert_true($project->exists('logs/motion-sanity.txt'), 'legacy tail runs motion sanity');
+        assert_true(!isset($project->readJson('warnings.json')['fixup_skipped']), 'legacy tail never skips fixups');
+        $prompts = implode("\n", array_map(
+            static fn (array $call): string => (string) ($call['prompt'] ?? ''),
+            $llm->calls,
+        ));
+        assert_true(!str_contains($prompts, '#C0FFEE'), 'legacy theme prompt ignores stale CSS tokens');
+        assert_true(!str_contains($prompts, 'Stale Font'), 'legacy theme prompt ignores stale CSS fonts');
     } finally {
         $previous === false
             ? putenv('SITE_BUILD_LEGACY')

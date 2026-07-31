@@ -174,6 +174,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     $builder = make_integration_builder($llm, $tmp);
     $project = $builder->createProject('A cozy neighborhood bakery', 'demo', multiPage: true);
+    $project->writeText('design/site.css', '/* STALE-HTML-FIRST-CSS */');
     legacy_integration_pipeline($builder)->runThrough($project);
 
     $problems = ThemeValidator::validate($project);
@@ -183,6 +184,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     // Identity propagated end to end — theme AND content plugin.
     assert_contains('Theme Name: Hearth & Crumb', $project->readText('theme/style.css'));
+    assert_true(
+        !str_contains($project->readText('theme/style.css'), 'STALE-HTML-FIRST-CSS'),
+        'SITE_BUILD_LEGACY=1 ignores stale HTML-first CSS',
+    );
+    assert_true($project->exists('logs/contrast-report.txt'), 'legacy contrast fix still runs');
+    assert_true($project->exists('logs/motion-sanity.txt'), 'legacy motion fix still runs');
+    assert_true(
+        !isset(($project->readJson('warnings.json'))['fixup_skipped']),
+        'legacy fixups never inherit stale HTML-first skip mode',
+    );
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
 

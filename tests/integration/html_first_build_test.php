@@ -88,7 +88,7 @@ function html_first_direction(): array
 
 function html_first_home_document(string $marker = 'HTML-FIRST-HOME'): string
 {
-    return <<<'HTML'
+    $html = <<<'HTML'
 <!doctype html>
 <html>
 <head>
@@ -102,13 +102,15 @@ function html_first_home_document(string $marker = 'HTML-FIRST-HOME'): string
 <body class="site-shell">
 <header class="site-shell"><p>Hearth &amp; Crumb</p></header>
 <main>
-<section id="hero" class="hero"><h1>HTML-FIRST-HOME</h1><p>Fresh loaves every morning.</p></section>
+<section id="hero" class="hero"><h1 class="has-display-font-size">HTML-FIRST-HOME</h1><p>Fresh loaves every morning.</p></section>
 <section id="story" class="story"><h2>Our bakehouse</h2><p>Slow fermentation, local grain.</p></section>
 </main>
 <footer class="site-shell"><p>Visit the neighborhood oven.</p></footer>
 </body>
 </html>
 HTML;
+
+    return str_replace('HTML-FIRST-HOME', $marker, $html);
 }
 
 function html_first_queue_success(FakeLlm $llm, array $siteSpec, string $home): void

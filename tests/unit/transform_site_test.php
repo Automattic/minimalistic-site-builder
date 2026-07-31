@@ -5,6 +5,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
+use Automattic\SiteBuild\Steps\PagePlanStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\TransformArtifacts;
@@ -311,5 +312,123 @@ test('transform-site explicitly preserves or reports styled core html and preser
         $warnings = implode("\n", $project->readJson('warnings.json')['transform-site'] ?? []);
         assert_contains('delivered_value removed', $warnings);
     }
+    transform_site_cleanup($tmp);
+});
+
+test('transform-site reroutes only failed inner pages through scoped legacy planning and sections', function () {
+    $home = '<!doctype html><html><body><header><p>TRANSFORMED-HEADER</p></header><main>'
+        . '<section id="home-content"><h1>TRANSFORMED-HOME</h1></section></main>'
+        . '<footer><p>TRANSFORMED-FOOTER</p></footer></body></html>';
+    $inner = [
+        'about' => '<main><section id="failed-source"><h1>FAILED-SOURCE-MUST-NOT-COMPILE</h1></section></main>',
+        'team' => '<main><section id="team-intro"><h1>TRANSFORMED-TEAM</h1></section></main>',
+    ];
+    [$control, $controlLlm, $controlTmp] = transform_site_fixture($home, $inner);
+    [$mixed, $mixedLlm, $mixedTmp] = transform_site_fixture($home, $inner);
+    $mixed->writeText('design/about.failed', "Inner-page generation failed after one semantic repair.\n");
+
+    transform_site_run($control, $controlLlm);
+    assert_eq(0, $controlLlm->completeJsonBatchCalls, 'no marker keeps planner call behavior unchanged');
+    assert_eq(0, $controlLlm->completeCalls, 'no marker adds no cache warm');
+    assert_eq(0, $controlLlm->completeBatchCalls, 'no marker adds no section batch');
+
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $planner = new PagePlanStep($mixedLlm, $renderer);
+    assert_eq(['about'], array_keys($planner->requestsForSlugs($mixed, ['about'])));
+
+    $mixedLlm->queueJson(['sections' => [[
+        'slug' => 'legacy-about',
+        'title' => 'Legacy About',
+        'type' => 'about',
+        'purpose' => 'Explain the studio',
+        'content_notes' => 'Introduce the team.',
+        'layout_archetype' => 'centered-stack',
+        'background' => 'base',
+        'vertical_density' => 'standard',
+        'handoff' => 'Between the site header and footer.',
+    ]]]);
+    $mixedLlm->queueText('OK');
+    $mixedLlm->queueText(
+        '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>LEGACY-ABOUT</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->',
+    );
+
+    transform_site_run($mixed, $mixedLlm);
+
+    assert_eq(1, $mixedLlm->completeJsonBatchCalls, 'one scoped page-plan JSON batch, no repair');
+    assert_eq(1, $mixedLlm->completeCalls, 'one existing section cache warm');
+    assert_eq(1, $mixedLlm->completeBatchCalls, 'one scoped section batch');
+    assert_eq(3, count($mixedLlm->calls), 'one plan + one warm + one failed-page section request');
+    assert_eq('Warm the cached section context.', $mixedLlm->calls[1]['prompt']);
+    $allPrompts = implode("\n", array_column($mixedLlm->calls, 'prompt'));
+    assert_true(!str_contains($allPrompts, 'Build the site HEADER template part'));
+    assert_true(!str_contains($allPrompts, 'Build the site FOOTER template part'));
+
+    assert_eq(['home', 'about', 'team'], array_column($mixed->readJson('pages.json')['pages'], 'slug'));
+    assert_true(!$mixed->exists('theme/parts/page-about--failed-source.html'));
+    assert_contains('LEGACY-ABOUT', $mixed->readText('theme/parts/page-about--legacy-about.html'));
+    foreach ([
+        'theme/parts/header.html',
+        'theme/parts/footer.html',
+        'theme/parts/page-home--home-content.html',
+        'theme/parts/page-team--team-intro.html',
+    ] as $path) {
+        assert_eq($control->readText($path), $mixed->readText($path), "{$path} remains byte-identical");
+    }
+
+    $warnings = implode("\n", $mixed->readJson('warnings.json')['transform-site'] ?? []);
+    assert_contains('source design/about.failed', $warnings);
+    assert_contains('page[slug=about]', $warnings);
+    assert_contains('theme/parts/page-about--legacy-about.html', $warnings);
+    assert_contains('disposition rerouted', $warnings);
+    $report = $mixed->readJson(TransformArtifacts::REPORT);
+    assert_true(in_array('inner_page_legacy_reroute', $report['fallback_codes'], true));
+    assert_eq([], $report['dropped_fragments']);
+
+    transform_site_cleanup($controlTmp);
+    transform_site_cleanup($mixedTmp);
+});
+
+test('transform-site degrades scoped legacy generation failure without aborting survivor delivery', function () {
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body><header><p>Header</p></header><main>'
+        . '<section id="home-content"><h1>SURVIVING-HOME</h1></section></main>'
+        . '<footer><p>Footer</p></footer></body></html>',
+        ['about' => '<main><section id="about"><h1>Stale About</h1></section></main>'],
+    );
+    $project->writeText('design/about.failed', "Inner-page generation failed after one semantic repair.\n");
+
+    transform_site_run($project, $llm);
+
+    assert_eq(['home'], array_column($project->readJson('pages.json')['pages'], 'slug'));
+    assert_contains('SURVIVING-HOME', $project->readText('theme/parts/page-home--home-content.html'));
+    assert_true(!$project->exists('theme/parts/page-about--about.html'));
+    $warnings = $project->readJson('warnings.json');
+    $pagePlanWarning = implode("\n", $warnings['page-plan'] ?? []);
+    assert_contains('file pages.json', $pagePlanWarning);
+    assert_contains('block_path pages[slug=about].sections', $pagePlanWarning);
+    assert_contains('authored_value scoped legacy plan unavailable', $pagePlanWarning);
+    assert_contains('delivered_value deterministic fallback section', $pagePlanWarning);
+    assert_contains('disposition degraded', $pagePlanWarning);
+    $sectionsWarning = implode("\n", $warnings['sections'] ?? []);
+    assert_contains('file theme/parts/page-about--content.html', $sectionsWarning);
+    assert_contains('block_path pages[slug=about].sections[slug=content]', $sectionsWarning);
+    assert_contains('authored_value scoped legacy section batch unavailable', $sectionsWarning);
+    assert_contains('delivered_value removed', $sectionsWarning);
+    assert_contains('disposition dropped', $sectionsWarning);
+    $transformWarning = implode("\n", $warnings['transform-site'] ?? []);
+    assert_contains('source design/about.failed', $transformWarning);
+    assert_contains('selector page[slug=about]', $transformWarning);
+    assert_contains('block_path pages.json', $transformWarning);
+    assert_contains('diagnostic_code inner_page_legacy_reroute_failed', $transformWarning);
+    assert_contains('authored_value failed design marker', $transformWarning);
+    assert_contains('delivered_value removed', $transformWarning);
+    assert_contains('disposition dropped', $transformWarning);
+    $report = $project->readJson(TransformArtifacts::REPORT);
+    assert_true(in_array('inner_page_legacy_reroute_failed', $report['fallback_codes'], true));
+    assert_eq('inner_page_legacy_reroute_failed', $report['dropped_fragments'][0]['diagnostic_code']);
+    assert_eq('removed', $report['dropped_fragments'][0]['delivered_value']);
+    assert_eq('dropped', $report['dropped_fragments'][0]['disposition']);
     transform_site_cleanup($tmp);
 });

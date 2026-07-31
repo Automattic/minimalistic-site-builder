@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\CssContrastAdjuster;
+use Automattic\SiteBuild\CssContrastCheck;
 use Automattic\SiteBuild\CssScrub;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
@@ -17,12 +19,14 @@ use Automattic\SiteBuild\TransformArtifacts;
  * Step: merge HTML-first design CSS, with the LLM utility generator as the
  * legacy path.
  *
- * When design/site.css exists, this step deterministically appends its scrubbed
- * bytes, each delivered page artifact's data-page-css style contents, and the
- * optional scrubbed transformer-carried CSS. It never asks the model and never
- * mutates those source artifacts.
+ * In explicit HTML-first composition mode, this step deterministically merges
+ * scrubbed design/site.css bytes, each delivered nonfailed page artifact's
+ * data-page-css contents, and optional scrubbed transformer-carried CSS. It
+ * checks and adjusts only that merged tail against delivered markup before
+ * appending it; existing scaffold CSS and all source artifacts stay untouched.
+ * This path never asks the model.
  *
- * Without design/site.css, the legacy path reads designDirection.json +
+ * In legacy composition mode, the step reads designDirection.json +
  * theme/theme.json + the final section markup (theme/parts/*.html and
  * theme/templates/*.html, after fix-blocks), then appends a small plain-CSS
  * utility appendix to theme/style.css.
@@ -109,6 +113,7 @@ final class PageStylesStep implements Step
         private PromptRenderer $renderer,
         private ?string $model = null,
         private ?float $temperature = null,
+        private bool $htmlFirst = false,
     ) {}
 
     public function id(): string
@@ -123,17 +128,23 @@ final class PageStylesStep implements Step
 
     public function declaration(): StepDeclaration
     {
+        $reads = [
+            'pages.json',
+            'theme/theme.json',
+            'theme/style.css',
+            'designDirection.json',
+            'theme/parts/*',
+            'theme/templates/*',
+        ];
+        if ($this->htmlFirst) {
+            $reads[] = 'design/*';
+            $reads[] = 'plugin/pages/*';
+        }
+
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: [
-                'pages.json',
-                'theme/theme.json',
-                'theme/style.css',
-                'designDirection.json',
-                'theme/parts/*',
-                'theme/templates/*',
-            ],
+            reads: $reads,
             writes: ['theme/style.css', 'warnings.json'],
             concurrent: false,
         );
@@ -141,7 +152,7 @@ final class PageStylesStep implements Step
 
     public function run(Project $project): void
     {
-        if ($project->exists(TransformArtifacts::SITE_CSS)) {
+        if ($this->htmlFirst) {
             self::mergeDeterministicStyles($project);
             return;
         }
@@ -253,6 +264,14 @@ final class PageStylesStep implements Step
         }
 
         $tail = implode("\n", $chunks);
+        $markup = self::deliveredMarkup($project);
+        $tail = CssContrastAdjuster::apply(
+            $project,
+            'theme/style.css',
+            $tail,
+            $markup,
+            CssContrastCheck::check($tail, $markup),
+        );
         $style = $project->readText('theme/style.css');
         if (str_ends_with($style, $tail)) {
             Narrator::write("  deterministic page CSS already merged\n");
@@ -299,14 +318,31 @@ final class PageStylesStep implements Step
             if (!is_array($page) || trim((string) ($page['slug'] ?? '')) === '') {
                 throw new \RuntimeException('page-styles: pages.json contains a page without a slug');
             }
+            $slug = (string) $page['slug'];
+            if ($project->exists("design/{$slug}.failed")) {
+                continue;
+            }
             $source = !empty($page['front'])
                 ? 'design/home.html'
-                : 'design/' . (string) $page['slug'] . '.html';
+                : "design/{$slug}.html";
             $sources[$source] = true;
         }
         $sources = array_keys($sources);
         sort($sources, SORT_STRING);
         return $sources;
+    }
+
+    /** Final theme and content-plugin markup in deterministic path order. */
+    private static function deliveredMarkup(Project $project): string
+    {
+        $files = $project->markupFiles();
+        sort($files, SORT_STRING);
+
+        $markup = '';
+        foreach ($files as $file) {
+            $markup .= "\n" . (string) file_get_contents($file);
+        }
+        return $markup;
     }
 
     /** @return list<string> */

@@ -26,6 +26,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * slugs are filled from the design direction's committed values, then neutral
  * defaults, with every fill recorded in warnings.json — a missing slug never
  * aborts the build.
+ *
+ * HTML-first composition mode declares and consumes design/site.css token
+ * evidence. Legacy mode ignores any stale design artifact from an earlier run.
  */
 final class ThemeJsonStep implements GeneratedJsonFallbackStep
 {
@@ -214,6 +217,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         private PromptRenderer $renderer,
         private ?string $model = null,
         private ?float $temperature = null,
+        private bool $htmlFirst = false,
     ) {}
 
     public function id(): string
@@ -228,10 +232,15 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     public function declaration(): StepDeclaration
     {
+        $reads = ['meta.json', 'siteSpec.json', 'designDirection.json'];
+        if ($this->htmlFirst) {
+            $reads[] = 'design/site.css';
+        }
+
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
+            reads: $reads,
             writes: ['theme/theme.json', 'warnings.json'],
             concurrent: false,
         );
@@ -241,7 +250,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     {
         $meta = $project->readJson('meta.json');
         $designDirection = DesignDirectionStep::readFor($project);
-        if ($project->exists('design/site.css')) {
+        if ($this->htmlFirst) {
             $tokens = CssTokenExtractor::extract($project->readText('design/site.css'));
             if ($tokens['palette'] !== [] && $tokens['fonts'] !== []) {
                 $designDirection .= "\n\n"

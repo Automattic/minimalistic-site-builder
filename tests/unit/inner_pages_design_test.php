@@ -180,6 +180,37 @@ test('inner-pages-design repairs one malformed page serially then marks only tha
     inner_pages_cleanup($tmp);
 });
 
+test('inner-pages-design rerun clears stale failed markers after primary and repaired writes', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('primary', 'Primary', 'Succeed directly on rerun'),
+        inner_page('repaired', 'Repaired', 'Succeed after repair on rerun'),
+    ]);
+
+    $llm->queueText('<section>Primary first failure</section>');
+    $llm->queueText('<section>Repaired first failure</section>');
+    $llm->queueText('<div>Primary repair still invalid</div>');
+    $llm->queueText('<div>Repaired repair still invalid</div>');
+    inner_pages_run($project, $llm);
+    assert_true($project->exists('design/primary.failed'));
+    assert_true($project->exists('design/repaired.failed'));
+
+    $primary = '<main id="primary-main"><h1>Primary now valid</h1></main>';
+    $repaired = '<main id="repaired-main"><h1>Repair now valid</h1></main>';
+    $llm->queueText($primary);
+    $llm->queueText('<section>Needs one rerun repair</section>');
+    $llm->queueText($repaired);
+    inner_pages_run($project, $llm);
+
+    assert_eq($primary, $project->readText('design/primary.html'));
+    assert_eq($repaired, $project->readText('design/repaired.html'));
+    assert_true(!$project->exists('design/primary.failed'), 'primary success clears stale marker');
+    assert_true(!$project->exists('design/repaired.failed'), 'repair success clears stale marker');
+    assert_eq(2, $llm->completeBatchCalls, 'one page batch per run');
+    assert_eq(3, $llm->completeCalls, 'two first-run repairs plus one rerun repair');
+    inner_pages_cleanup($tmp);
+});
+
 test('inner-pages-design preserves only optional page CSS before main', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'Welcome'),

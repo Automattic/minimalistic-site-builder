@@ -37,20 +37,41 @@ final class SiteBuilder
     ) {}
 
     /**
-     * Assemble the full site-creation pipeline in order. Fresh Pipeline each
-     * call. Pass a custom StepComposition to use a host-tuned graph.
+     * Assemble the full site-creation pipeline in order. Fresh runner each
+     * call. Pass a custom StepComposition to use a host-tuned fixed graph.
      */
     public function pipeline(?StepComposition $composition = null): BuildPipeline
     {
-        $composition ??= StepComposition::default(
+        if ($composition !== null) {
+            return new Pipeline($composition->steps(), $composition->seeds());
+        }
+
+        $renderer = new PromptRenderer($this->promptsDir);
+        $composition = StepComposition::default(
             llm: $this->llm,
-            renderer: new PromptRenderer($this->promptsDir),
+            renderer: $renderer,
+            models: $this->models,
+            temperatures: $this->temperatures,
+            blockFixer: $this->blockFixer,
+        );
+        $primary = new Pipeline($composition->steps(), $composition->seeds());
+
+        if (Env::get('SITE_BUILD_LEGACY') === '1') {
+            return $primary;
+        }
+
+        $legacyTail = StepComposition::legacyTail(
+            llm: $this->llm,
+            renderer: $renderer,
             models: $this->models,
             temperatures: $this->temperatures,
             blockFixer: $this->blockFixer,
         );
 
-        return new Pipeline($composition->steps(), $composition->seeds());
+        return new FallbackBuildPipeline(
+            $primary,
+            new Pipeline($legacyTail->steps(), $legacyTail->seeds()),
+        );
     }
 
     public function store(): ProjectStore

@@ -14,6 +14,22 @@ Issues for this repo are tracked in the Linear project **[Generated themes: repl
 
 We don't need to plan for backwards compatibility. This is a green field project in an early dev stage — there are no external consumers or stored data to preserve, so prefer the cleanest design and feel free to make breaking changes without migration paths or compatibility shims.
 
+## Generation step maps
+
+Default HTML-first graph:
+
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> homepage-design -> theme-json -> inner-pages-design -> transform-site -> section-rhythm -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
+
+`theme-json` reads CSS-derived design tokens. `contrast-fix` and `motion-sanity` stay addressable but skip only in explicit HTML-first composition mode. `page-styles` scrubs and merges generated CSS, then runs `CssContrastCheck` and applies safe tail-only adjustments against delivered markup. Stale `design/site.css` bytes never select pipeline behavior.
+
+Set `SITE_BUILD_LEGACY=1` for the unchanged legacy graph:
+
+`scaffold-theme -> scaffold-plugin -> refine-prompt -> site-spec -> apply-identity -> design-direction -> (theme-json + page-plan, concurrent) -> sections -> section-rhythm -> collect-images -> normalize-layout -> header-hero -> contrast-fix -> motion-sanity -> fix-blocks -> assemble-pages -> page-styles -> custom-motion -> fonts-php -> finalize-theme -> validate-theme`
+
+Default `SiteBuilder` wraps the HTML-first graph with runtime fallback. A `MalformedDesignException` from `homepage-design` keeps completed artifacts through `design-direction`, records an actionable warning, then runs the unchanged legacy tail. Other exceptions propagate.
+
+For mixed multi-page builds, each `design/<slug>.failed` marker routes only that slug through scoped legacy page planning and section generation. Other pages and shared transformed chrome stay on the HTML-first path; `page-styles` ignores failed-page source HTML.
+
 ## Generated-content validation: fix, degrade, warn — never crash the build
 
 Every validator and fixer in this pipeline exists because an LLM produced imperfect content. **A defect in generated content must never abort the build.** The user asked for a site; shipping a site with a slightly wrong margin, a missing decorative section, or a dropped inline style is always better than shipping nothing after paying for every LLM call in the graph.

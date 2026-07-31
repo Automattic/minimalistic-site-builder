@@ -45,14 +45,14 @@ test('new CSS path skips legacy contrast fix before generated artifacts change',
     $before = $project->readText('theme/theme.json');
 
     try {
-        (new ContrastFixStep())->run($project);
+        (new ContrastFixStep(htmlFirst: true))->run($project);
 
         assert_eq($before, $project->readText('theme/theme.json'));
         assert_true(!$project->exists('logs/contrast-report.txt'), 'skip returns before legacy report generation');
         $warnings = $project->readJson('warnings.json')['fixup_skipped'] ?? [];
         assert_eq(1, count($warnings));
         assert_contains('step=contrast-fix', $warnings[0]);
-        assert_contains('signal=design/site.css', $warnings[0]);
+        assert_contains('signal=composition-mode:html-first', $warnings[0]);
         assert_contains('disposition=skipped', $warnings[0]);
         assert_contains('reason=', $warnings[0]);
     } finally {
@@ -69,14 +69,14 @@ test('new CSS path skips legacy motion sanity before generated artifacts change'
     $before = $project->readText('theme/parts/section.html');
 
     try {
-        (new MotionSanityStep())->run($project);
+        (new MotionSanityStep(htmlFirst: true))->run($project);
 
         assert_eq($before, $project->readText('theme/parts/section.html'));
         assert_true(!$project->exists('logs/motion-sanity.txt'), 'skip returns before legacy report generation');
         $warnings = $project->readJson('warnings.json')['fixup_skipped'] ?? [];
         assert_eq(1, count($warnings));
         assert_contains('step=motion-sanity', $warnings[0]);
-        assert_contains('signal=design/site.css', $warnings[0]);
+        assert_contains('signal=composition-mode:html-first', $warnings[0]);
         assert_contains('disposition=skipped', $warnings[0]);
         assert_contains('reason=', $warnings[0]);
     } finally {
@@ -84,9 +84,10 @@ test('new CSS path skips legacy motion sanity before generated artifacts change'
     }
 });
 
-test('legacy path still runs contrast and motion fixups when generated CSS is absent', function () {
+test('legacy mode still runs contrast and motion fixups when generated CSS is stale', function () {
     $tmp = sys_get_temp_dir() . '/builder_fixup_skip_legacy_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeText('design/site.css', '/* STALE-HTML-FIRST-CSS */');
     $project->writeJson('theme/theme.json', fixup_skip_theme_json());
     $project->writeJson('designDirection.json', ['motion' => 'none']);
     $project->writeText('theme/parts/section.html', fixup_skip_motion_markup());

@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\CssContrastCheck;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\PageStylesStep;
@@ -48,6 +50,23 @@ function ps_project(string $prefix): array
     $project->writeText('theme/style.css', "/*\nTheme Name: Demo\n*/\n");
     $project->writeJson('theme/theme.json', ['version' => 3]);
     return [$project, $tmp];
+}
+
+function ps_warning_rows(Project $project, string $stepId): array
+{
+    if (!$project->exists('warnings.json')) {
+        return [];
+    }
+    return $project->readJson('warnings.json')[$stepId] ?? [];
+}
+
+function ps_html_first_step(FakeLlm $llm): PageStylesStep
+{
+    return new PageStylesStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+        htmlFirst: true,
+    );
 }
 
 test('validate accepts namespaced classes, preset vars, and media queries', function () {
@@ -219,9 +238,10 @@ test('run skips without an LLM call when no utility class is used', function () 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('absent site CSS keeps the recorded legacy call trace and exact style bytes', function () {
+test('legacy mode ignores stale site CSS and keeps the recorded call trace and style bytes', function () {
     [$project, $tmp] = ps_project('builder_ps_legacy_control_');
     $project->writeText('theme/style.css', "/*\nTheme Name: Legacy Control\n*/\n");
+    $project->writeText(TransformArtifacts::SITE_CSS, '/* STALE-HTML-FIRST-CSS */');
     $project->writeText(
         'theme/parts/section-work.html',
         '<!-- wp:group {"className":"overlap-up"} --><div class="wp-block-group overlap-up"></div><!-- /wp:group -->'
@@ -273,6 +293,104 @@ test('absent site CSS keeps the recorded legacy call trace and exact style bytes
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('page-styles declares HTML-first design and delivered markup reads only when enabled', function () {
+    $llm = new FakeLlm();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $legacyReads = [
+        'pages.json',
+        'theme/theme.json',
+        'theme/style.css',
+        'designDirection.json',
+        'theme/parts/*',
+        'theme/templates/*',
+    ];
+
+    assert_eq(
+        $legacyReads,
+        (new PageStylesStep($llm, $renderer))->declaration()->reads,
+        'legacy declaration stays unchanged',
+    );
+    assert_eq(
+        [...$legacyReads, 'design/*', 'plugin/pages/*'],
+        (new PageStylesStep($llm, $renderer, htmlFirst: true))->declaration()->reads,
+        'HTML-first declaration covers every deterministic CSS and delivered-markup input',
+    );
+});
+
+test('site CSS path adjusts only the merged tail against delivered markup and reaches a fixed point', function () {
+    [$project, $tmp] = ps_project('builder_ps_contrast_tail_');
+    $base = ".scaffold { color: #777777; background: #ffffff; }\n";
+    $tail = ".copy { color: #777777; background: #ffffff; }\n"
+        . ".panel .inherited { color: #777777; }\n";
+    $markup = '<div class="scaffold">Scaffold</div>'
+        . '<p class="copy">Tail</p>'
+        . '<section class="panel"><p class="inherited">Inherited</p></section>';
+    $project->writeText('theme/style.css', $base);
+    $project->writeText(TransformArtifacts::SITE_CSS, $tail);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Source</main>');
+    $project->writeText('plugin/pages/home.html', $markup);
+    $llm = new FakeLlm();
+    $step = ps_html_first_step($llm);
+    $findings = CssContrastCheck::check($tail, $markup);
+    $failed = array_values(array_filter(
+        $findings,
+        static fn (array $finding): bool => $finding['status'] === 'fail',
+    ));
+    assert_eq(1, count($failed), 'test control has one repairable tail failure');
+
+    $step->run($project);
+
+    $once = $project->readText('theme/style.css');
+    assert_contains($base, $once, 'pre-existing scaffold bytes stay untouched');
+    assert_eq(1, substr_count($once, '#777777; background: #ffffff'), 'only scaffold retains failing pair');
+    assert_contains('color: ' . $failed[0]['suggested'], $once, 'tail text color adjusted');
+    $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
+    assert_eq(2, count($warnings), 'adjusted and unverified findings both remain durable');
+    assert_contains('disposition=adjusted', implode("\n", $warnings));
+    assert_contains('disposition=unverified', implode("\n", $warnings));
+
+    $step->run($project);
+
+    assert_eq($once, $project->readText('theme/style.css'), 'second run preserves final CSS bytes');
+    assert_eq($warnings, $project->readJson('warnings.json')['css_contrast'] ?? [], 'warnings deduplicate');
+    assert_eq([], $llm->calls, 'deterministic path makes zero LLM calls');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path skips a source HTML file when its page has a failed marker', function () {
+    [$project, $tmp] = ps_project('builder_ps_failed_source_');
+    $base = $project->readText('theme/style.css');
+    $project->writeText(TransformArtifacts::SITE_CSS, '.site{display:grid;}');
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true],
+        ['slug' => 'about', 'front' => false],
+    ]]);
+    $project->writeText('design/home.html', '<style data-page-css>.home{padding:1rem;}</style>');
+    $project->writeText('design/about.failed', 'malformed inner page');
+    $project->writeText(
+        'design/about.html',
+        '<style data-page-css>.stale-failed-source{position:fixed;}</style>',
+    );
+    $project->writeText('plugin/pages/home.html', '<p>Home</p>');
+    $project->writeText('plugin/pages/about.html', '<p>Legacy about</p>');
+    $llm = new FakeLlm();
+
+    ps_html_first_step($llm)->run($project);
+
+    assert_eq(
+        $base . ".site{display:grid;}\n.home{padding:1rem;}",
+        $project->readText('theme/style.css'),
+        'failed page contributes no source HTML CSS',
+    );
+    assert_true(!str_contains($project->readText('theme/style.css'), 'stale-failed-source'));
+    assert_eq([], $llm->calls);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path merges exact safe bytes in deterministic source and document order', function () {
     [$project, $tmp] = ps_project('builder_ps_deterministic_');
     $base = "/* existing theme CSS */\n.base{display:block;}\n";
@@ -299,7 +417,7 @@ test('site CSS path merges exact safe bytes in deterministic source and document
         TransformArtifacts::CARRIED_CSS => $project->readText(TransformArtifacts::CARRIED_CSS),
     ];
     $llm = new FakeLlm();
-    $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
+    $step = ps_html_first_step($llm);
 
     $step->run($project);
 
@@ -346,7 +464,7 @@ test('site CSS path ignores inert page-style text inside an HTML comment', funct
     );
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq(
         $base . '.site{display:grid;}',
@@ -371,7 +489,7 @@ test('site CSS path ignores a style-like string with whitespace after the tag op
     );
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq(
         $base . '.site{display:grid;}',
@@ -400,7 +518,7 @@ test('site CSS path excludes losing tournament candidates from delivered page CS
     );
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq(
         $base . ".site{display:grid;}\n.winner{padding:1rem;}",
@@ -425,7 +543,7 @@ test('site CSS path works without transformer-carried CSS', function () {
     );
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq(
         $base . ".site{display:grid;}\n\n.home{grid-template-columns:1fr 1fr;}",
@@ -444,7 +562,7 @@ test('site CSS path routes live narration through Narrator', function () {
     ]]]);
     $project->writeText('design/home.html', '<main>Home</main>');
     $llm = new FakeLlm();
-    $step = new PageStylesStep($llm, new PromptRenderer(repo_path('prompts')));
+    $step = ps_html_first_step($llm);
     $stream = fopen('php://memory', 'w+');
     assert_true(is_resource($stream), 'memory narration stream opened');
     Narrator::setStream($stream);
@@ -481,7 +599,7 @@ test('site CSS path warns for every scrub removal and continues after an empty s
     $project->writeText('design/about.html', $page);
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq(
         $base . ".page{color:var(--wp--preset--color--contrast);padding:1rem;}",
@@ -519,7 +637,7 @@ test('site CSS path scrubs image-set bare remote strings before deterministic me
     $project->writeText('design/home.html', $page);
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     $style = $project->readText('theme/style.css');
     assert_true(!str_contains($style, $remote), 'remote image-set bytes never reach theme/style.css');
@@ -560,7 +678,7 @@ foreach (['hash' => '#', 'at-keyword' => '@'] as $label => $prefix) {
         $project->writeText('design/home.html', '<main>Kept</main>');
         $llm = new FakeLlm();
 
-        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        ps_html_first_step($llm)->run($project);
 
         $expected = $base . $siteCss;
         $style = $project->readText('theme/style.css');
@@ -569,7 +687,7 @@ foreach (['hash' => '#', 'at-keyword' => '@'] as $label => $prefix) {
         assert_eq($expected, $style, "{$label} token bytes retained exactly");
         assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
         assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
-        assert_true(!$project->exists('warnings.json'), "{$label} lookalike emits zero warnings");
+        assert_eq([], ps_warning_rows($project, 'page-styles'), "{$label} lookalike emits zero scrub warnings");
         exec('rm -rf ' . escapeshellarg($tmp));
     });
 }
@@ -592,7 +710,7 @@ foreach (
         $project->writeText('design/home.html', '<main>Kept</main>');
         $llm = new FakeLlm();
 
-        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        ps_html_first_step($llm)->run($project);
 
         $expected = $base . $siteCss;
         $style = $project->readText('theme/style.css');
@@ -601,7 +719,7 @@ foreach (
         assert_eq($expected, $style, "{$label} token bytes retained exactly");
         assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
         assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
-        assert_true(!$project->exists('warnings.json'), "{$label} lookalike emits zero warnings");
+        assert_eq([], ps_warning_rows($project, 'page-styles'), "{$label} lookalike emits zero scrub warnings");
         exec('rm -rf ' . escapeshellarg($tmp));
     });
 }
@@ -626,7 +744,7 @@ foreach (
         $project->writeText('design/home.html', '<main>Kept</main>');
         $llm = new FakeLlm();
 
-        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        ps_html_first_step($llm)->run($project);
 
         assert_eq($base . '.actual{color:red}', $project->readText('theme/style.css'), $label);
         assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
@@ -661,7 +779,7 @@ test('site CSS path still scrubs a real image-set function beside token lookalik
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq($base . '.actual{color:red}', $project->readText('theme/style.css'));
     assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
@@ -695,7 +813,7 @@ test('site CSS path scrubs image-set remote strings after leading whitespace nor
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     $style = $project->readText('theme/style.css');
     assert_true(!str_contains($style, $remote), 'normalized remote bytes never reach theme/style.css');
@@ -733,7 +851,7 @@ test('site CSS path scrubs image-set remote strings after leading C0 control nor
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     $style = $project->readText('theme/style.css');
     assert_true(!str_contains($style, $vtabRemote), 'vertical-tab remote bytes never reach theme/style.css');
@@ -777,7 +895,7 @@ test('site CSS path scrubs image-set remote strings with embedded URL whitespace
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq(
         $base . '.tab{display:grid}.lf{padding:1rem}.cr{margin:2rem}.safe{position:relative}',
@@ -823,7 +941,7 @@ test('site CSS path preserves raw and CSS-escaped NUL image strings without warn
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     $expected = $base . $siteCss;
     $style = $project->readText('theme/style.css');
@@ -834,7 +952,7 @@ test('site CSS path preserves raw and CSS-escaped NUL image strings without warn
     assert_contains($rawRemote, $style, 'raw-NUL remote-like suffix remains inert');
     assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
     assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
-    assert_true(!$project->exists('warnings.json'), 'inert NUL strings emit zero warnings');
+    assert_eq([], ps_warning_rows($project, 'page-styles'), 'inert NUL strings emit zero scrub warnings');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -862,7 +980,7 @@ test('site CSS path scrubs every slash-backslash authority pair and keeps a sing
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     assert_eq(
         $base
@@ -913,7 +1031,7 @@ test('site CSS path recovers after a malformed string before a later remote imag
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     $expected = $base . $malformed . '.later{display:grid}' . $safe;
     $style = $project->readText('theme/style.css');
@@ -956,7 +1074,7 @@ test('site CSS path removes an external image string in an EOF-truncated final d
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     $expected = $base . $prefix;
     $style = $project->readText('theme/style.css');
@@ -993,7 +1111,7 @@ test('site CSS path preserves a closed rule with an unmatched image function wit
     $project->writeText('design/home.html', '<main>Kept</main>');
     $llm = new FakeLlm();
 
-    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    ps_html_first_step($llm)->run($project);
 
     $expected = $base . $siteCss;
     $style = $project->readText('theme/style.css');
@@ -1002,7 +1120,7 @@ test('site CSS path preserves a closed rule with an unmatched image function wit
     assert_eq($expected, $style);
     assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
     assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
-    assert_true(!$project->exists('warnings.json'), 'closed unmatched function emits zero warnings');
+    assert_eq([], ps_warning_rows($project, 'page-styles'), 'closed unmatched function emits zero scrub warnings');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -1025,7 +1143,7 @@ foreach (
         $project->writeText('design/home.html', '<main>Kept</main>');
         $llm = new FakeLlm();
 
-        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        ps_html_first_step($llm)->run($project);
 
         $expected = $base . $siteCss;
         $style = $project->readText('theme/style.css');
@@ -1034,7 +1152,7 @@ foreach (
         assert_eq($expected, $style);
         assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
         assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
-        assert_true(!$project->exists('warnings.json'), "allowed {$label} URL emits zero warnings");
+        assert_eq([], ps_warning_rows($project, 'page-styles'), "allowed {$label} URL emits zero scrub warnings");
         exec('rm -rf ' . escapeshellarg($tmp));
     });
 }

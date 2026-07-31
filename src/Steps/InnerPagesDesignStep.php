@@ -133,6 +133,7 @@ final class InnerPagesDesignStep implements Step
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
             $path = "design/{$slug}.html";
+            $failedPath = "design/{$slug}.failed";
             if (!array_key_exists($slug, $batch->texts)) {
                 throw new \RuntimeException(
                     "inner-pages-design: missing batch result for page '{$slug}'"
@@ -160,7 +161,7 @@ final class InnerPagesDesignStep implements Step
             );
             $sanitized = trim($sanitized);
             if (self::isValidFragment($sanitized)) {
-                $project->writeText($path, $sanitized);
+                self::writeSuccessfulDesign($project, $path, $failedPath, $sanitized);
                 continue;
             }
 
@@ -196,14 +197,13 @@ final class InnerPagesDesignStep implements Step
             );
             $repair = trim($repair);
             if (self::isValidFragment($repair)) {
-                $project->writeText($path, $repair);
+                self::writeSuccessfulDesign($project, $path, $failedPath, $repair);
                 $warnings[] = "malformed_design: {$path} context page {$slug}; authored "
                     . self::warningValue($authored)
                     . "; delivered {$path} repaired fragment; disposition replaced";
                 continue;
             }
 
-            $failedPath = "design/{$slug}.failed";
             $project->writeText(
                 $failedPath,
                 "Inner-page generation failed after one semantic repair.\n",
@@ -214,6 +214,27 @@ final class InnerPagesDesignStep implements Step
         }
 
         $project->addWarnings($this->id(), $warnings);
+    }
+
+    /**
+     * Commit a usable page before clearing any marker from an earlier failed
+     * run. Marker deletion is an I/O operation: failure remains fatal instead
+     * of leaving contradictory successful and failed artifacts in place.
+     */
+    private static function writeSuccessfulDesign(
+        Project $project,
+        string $path,
+        string $failedPath,
+        string $content,
+    ): void {
+        $project->writeText($path, $content);
+        if (!$project->exists($failedPath)) {
+            return;
+        }
+        $marker = $project->path($failedPath);
+        if (!is_file($marker) || !@unlink($marker)) {
+            throw new \RuntimeException("Could not remove stale failed marker: {$marker}");
+        }
     }
 
     private static function homeReference(string $html): ?string
