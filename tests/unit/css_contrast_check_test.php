@@ -217,6 +217,33 @@ test('css contrast adjuster repairs only the declaration that wins the cascade',
     assert_eq($findings[0]['suggested'], $after[0]['fg']);
 });
 
+test('css contrast adjuster leaves a shared declaration untouched when rendered contexts need different repairs', function () {
+    $css = <<<'CSS'
+.copy { color: #777777; }
+.light > .copy { background: #ffffff; }
+.mid > .copy { background: #888888; }
+CSS;
+    $markup = '<div class="light"><p class="copy">Light</p></div>'
+        . '<div class="mid"><p class="copy">Mid</p></div>';
+    $findings = CssContrastCheck::check($css, $markup);
+    assert_eq(2, count($findings));
+    assert_eq('fail', $findings[0]['status']);
+    assert_eq('fail', $findings[1]['status']);
+    assert_true($findings[0]['suggested'] !== $findings[1]['suggested']);
+    $root = sys_get_temp_dir() . '/css-contrast-ambiguous-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
+
+    assert_eq($css, $adjusted);
+    $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
+    assert_eq(2, count($warnings));
+    foreach ($warnings as $warning) {
+        assert_contains('delivered=unchanged', $warning);
+        assert_contains('reason=text-color-declaration-target-ambiguous', $warning);
+    }
+});
+
 test('css contrast warnings scrub invalid UTF-8 before durable JSON writes', function () {
     $css = ".bad\xFF { color: #777777; background: #ffffff; }";
     $markup = '<p class="bad">Bad selector bytes</p>';

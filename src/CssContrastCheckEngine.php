@@ -5,6 +5,8 @@ namespace Automattic\SiteBuild;
 
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use DOMDocument;
 use DOMElement;
 use Throwable;
@@ -25,11 +27,15 @@ final class CssContrastCheckEngine
     public static function check(string $css, string $markup): array
     {
         try {
-            $rules = self::rules($css);
-            $elements = self::elements($markup);
             $findings = [];
-            foreach ($rules as $rule) {
-                $findings[] = self::finding($rule, $elements);
+            $seen = [];
+            foreach (self::analysis($css, $markup) as $entry) {
+                $key = serialize($entry['finding']);
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $findings[] = $entry['finding'];
             }
             return $findings;
         } catch (Throwable) {
@@ -37,29 +43,25 @@ final class CssContrastCheckEngine
         }
     }
 
-    /** @return array{css:string,replaced:bool} */
-    public static function adjustOne(string $css, string $selector, string $authored, string $suggested): array
+    /** @return array{value_start:int,value_end:int}|null */
+    public static function repairTarget(string $css, string $markup, array $finding): ?array
     {
         try {
-            foreach (self::rules($css) as $rule) {
-                if ($rule['selector'] !== $selector) {
+            $targets = [];
+            foreach (self::analysis($css, $markup) as $entry) {
+                if ($entry['finding'] !== $finding || $entry['target'] === null) {
                     continue;
                 }
-                $color = self::declaration($rule, ['color']);
-                if ($color === null || $color['value'] !== $authored) {
-                    continue;
-                }
-                return [
-                    'css' => substr($css, 0, $color['value_start'])
-                        . $suggested
-                        . substr($css, $color['value_end']),
-                    'replaced' => true,
+                $key = $entry['target']['value_start'] . ':' . $entry['target']['value_end'];
+                $targets[$key] = [
+                    'value_start' => $entry['target']['value_start'],
+                    'value_end' => $entry['target']['value_end'],
                 ];
             }
+            return count($targets) === 1 ? array_values($targets)[0] : null;
         } catch (Throwable) {
-            // Generated CSS that cannot be transformed is delivered unchanged.
+            return null;
         }
-        return ['css' => $css, 'replaced' => false];
     }
 
     public static function authoredContext(string $css, string $selector): string
@@ -84,68 +86,204 @@ final class CssContrastCheckEngine
     }
 
     /**
-     * @param array{selector:string,complete:bool,declarations:list<array{property:string,value:string,value_start:int,value_end:int}>} $rule
-     * @param list<DOMElement> $elements
-     * @return array{selector:string,status:string,fg:?string,bg:?string,ratio:?float,suggested:?string}
+     * Resolve rendered pairs per element, retaining winning declaration source
+     * internally so effectful repair never guesses from the frozen public row.
+     *
+     * @return list<array{
+     *   finding:array{selector:string,status:string,fg:?string,bg:?string,ratio:?float,suggested:?string},
+     *   target:?array{property:string,value:string,value_start:int,value_end:int,important:bool},
+     *   order:int
+     * }>
      */
-    private static function finding(array $rule, array $elements): array
+    private static function analysis(string $css, string $markup): array
     {
-        $unverified = self::unverified($rule['selector']);
-        if (!$rule['complete']) {
-            return $unverified;
-        }
-        $parsedSelector = CssSelectorMatcher::parse($rule['selector']);
-        if (!self::isSupportedSelector($parsedSelector)) {
-            return $unverified;
-        }
-
-        $matched = false;
-        foreach ($elements as $element) {
-            $result = CssSelectorMatcher::matches($element, $parsedSelector);
-            if (!($result['supported'] ?? false)) {
-                return $unverified;
+        $prepared = [];
+        $entries = [];
+        foreach (self::rules($css) as $rule) {
+            $parsed = CssSelectorMatcher::parse($rule['selector']);
+            $supported = $rule['complete'] && self::isSupportedSelector($parsed);
+            $prepared[] = [
+                'rule' => $rule,
+                'parsed' => $parsed,
+                'supported' => $supported,
+                'specificity' => $supported ? self::specificity($parsed) : 0,
+                'matched' => false,
+            ];
+            if (!$supported) {
+                $entries[] = [
+                    'finding' => self::unverified($rule['selector']),
+                    'target' => null,
+                    'order' => $rule['source_start'],
+                ];
             }
-            if ($result['matches'] ?? false) {
-                $matched = true;
-                break;
+        }
+
+        foreach (self::elements($markup) as $element) {
+            $matching = [];
+            foreach ($prepared as $index => $item) {
+                if (!$item['supported']) {
+                    continue;
+                }
+                $match = CssSelectorMatcher::matches($element, $item['parsed']);
+                if (!($match['supported'] ?? false) || !($match['matches'] ?? false)) {
+                    continue;
+                }
+                $prepared[$index]['matched'] = true;
+                $matching[] = $item;
             }
-        }
-        if (!$matched) {
-            return $unverified;
-        }
+            if ($matching === []) {
+                continue;
+            }
 
-        $fgDeclaration = self::declaration($rule, ['color']);
-        $bgDeclaration = self::declaration($rule, ['background', 'background-color']);
-        if ($fgDeclaration === null || $bgDeclaration === null) {
-            return $unverified;
-        }
-        $fg = self::color($fgDeclaration['value']);
-        $bg = self::color($bgDeclaration['value']);
-        if ($fg === null || $bg === null || $bg['alpha'] < 1.0) {
-            return $unverified;
-        }
+            $fgDeclaration = self::winningDeclaration($matching, ['color']);
+            $bgDeclaration = self::winningDeclaration($matching, ['background', 'background-color']);
+            $selector = $fgDeclaration['selector']
+                ?? $bgDeclaration['selector']
+                ?? $matching[count($matching) - 1]['rule']['selector'];
+            if ($fgDeclaration === null || $bgDeclaration === null
+                || $fgDeclaration['state'] !== 'resolved'
+                || $bgDeclaration['state'] !== 'resolved') {
+                $entries[] = [
+                    'finding' => self::unverified($selector),
+                    'target' => null,
+                    'order' => $fgDeclaration['source_order']
+                        ?? $bgDeclaration['source_order']
+                        ?? $matching[count($matching) - 1]['rule']['source_start'],
+                ];
+                continue;
+            }
 
-        $renderedFg = ContrastMath::compositeOver($fg['rgb'], $fg['alpha'], $bg['rgb']);
-        $ratio = ContrastMath::ratio($renderedFg, $bg['rgb']);
-        if ($ratio >= ContrastMath::NORMAL_TEXT) {
-            return [
-                'selector' => $rule['selector'],
-                'status' => 'pass',
-                'fg' => $fgDeclaration['value'],
-                'bg' => $bgDeclaration['value'],
-                'ratio' => $ratio,
-                'suggested' => null,
+            $fg = $fgDeclaration['color'];
+            $bg = $bgDeclaration['color'];
+            if ($fg === null || $bg === null || $bg['alpha'] < 1.0) {
+                $entries[] = [
+                    'finding' => self::unverified($selector),
+                    'target' => null,
+                    'order' => $fgDeclaration['source_order'],
+                ];
+                continue;
+            }
+            $renderedFg = ContrastMath::compositeOver($fg['rgb'], $fg['alpha'], $bg['rgb']);
+            $ratio = ContrastMath::ratio($renderedFg, $bg['rgb']);
+            if ($ratio >= ContrastMath::NORMAL_TEXT) {
+                $entries[] = [
+                    'finding' => [
+                        'selector' => $selector,
+                        'status' => 'pass',
+                        'fg' => $fgDeclaration['value'],
+                        'bg' => $bgDeclaration['value'],
+                        'ratio' => $ratio,
+                        'suggested' => null,
+                    ],
+                    'target' => null,
+                    'order' => $fgDeclaration['source_order'],
+                ];
+                continue;
+            }
+            $entries[] = [
+                'finding' => [
+                    'selector' => $selector,
+                    'status' => 'fail',
+                    'fg' => $fgDeclaration['value'],
+                    'bg' => $bgDeclaration['value'],
+                    'ratio' => $ratio,
+                    'suggested' => self::nudge($fg['rgb'], $fg['alpha'], $bg['rgb']),
+                ],
+                'target' => $fgDeclaration['declaration'],
+                'order' => $fgDeclaration['source_order'],
             ];
         }
 
-        return [
-            'selector' => $rule['selector'],
-            'status' => 'fail',
-            'fg' => $fgDeclaration['value'],
-            'bg' => $bgDeclaration['value'],
-            'ratio' => $ratio,
-            'suggested' => self::nudge($fg['rgb'], $fg['alpha'], $bg['rgb']),
-        ];
+        foreach ($prepared as $item) {
+            if ($item['supported'] && !$item['matched']) {
+                $entries[] = [
+                    'finding' => self::unverified($item['rule']['selector']),
+                    'target' => null,
+                    'order' => $item['rule']['source_start'],
+                ];
+            }
+        }
+        usort($entries, static fn (array $a, array $b): int => $a['order'] <=> $b['order']);
+        return $entries;
+    }
+
+    /**
+     * @param list<array{rule:array<string,mixed>,parsed:array<string,mixed>,supported:bool,specificity:int,matched:bool}> $matching
+     * @param list<string> $properties
+     * @return array{
+     *   selector:string,state:string,color:?array{rgb:array{0:int,1:int,2:int},alpha:float},
+     *   value:string,declaration:array{property:string,value:string,value_start:int,value_end:int,important:bool},
+     *   important:bool,specificity:int,source_order:int
+     * }|null
+     */
+    private static function winningDeclaration(array $matching, array $properties): ?array
+    {
+        $winner = null;
+        foreach ($matching as $item) {
+            foreach ($item['rule']['declarations'] as $declaration) {
+                if (!in_array($declaration['property'], $properties, true)) {
+                    continue;
+                }
+                [$state, $color] = self::declarationColor($declaration['value']);
+                if ($state === 'invalid') {
+                    continue;
+                }
+                $candidate = [
+                    'selector' => $item['rule']['selector'],
+                    'state' => $state,
+                    'color' => $color,
+                    'value' => $declaration['value'],
+                    'declaration' => $declaration,
+                    'important' => $declaration['important'],
+                    'specificity' => $item['specificity'],
+                    'source_order' => $declaration['value_start'],
+                ];
+                if ($winner === null || self::outranks($candidate, $winner)) {
+                    $winner = $candidate;
+                }
+            }
+        }
+        return $winner;
+    }
+
+    /** @return array{0:string,1:?array{rgb:array{0:int,1:int,2:int},alpha:float}} */
+    private static function declarationColor(string $value): array
+    {
+        $color = self::color($value);
+        if ($color !== null) {
+            return ['resolved', $color];
+        }
+        $lower = strtolower(trim($value));
+        if (in_array($lower, [
+            'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'currentcolor', 'transparent',
+        ], true)
+            || preg_match('/^(?:var|hsl|hsla|oklch|lab|lch|color|color-mix|light-dark|url|(?:repeating-)?(?:linear|radial|conic)-gradient)\s*\(/i', $value) === 1
+            || preg_match('/^[a-z]+$/i', $value) === 1) {
+            return ['unresolved', null];
+        }
+        return ['invalid', null];
+    }
+
+    /** @param array<string,mixed> $candidate @param array<string,mixed> $winner */
+    private static function outranks(array $candidate, array $winner): bool
+    {
+        if ($candidate['important'] !== $winner['important']) {
+            return $candidate['important'];
+        }
+        if ($candidate['specificity'] !== $winner['specificity']) {
+            return $candidate['specificity'] > $winner['specificity'];
+        }
+        return $candidate['source_order'] > $winner['source_order'];
+    }
+
+    /** @param array<string,mixed> $parsed */
+    private static function specificity(array $parsed): int
+    {
+        $specificity = 0;
+        foreach ($parsed['compounds'] ?? [] as $compound) {
+            $specificity += count($compound['classes'] ?? []);
+        }
+        return $specificity;
     }
 
     /**
@@ -181,9 +319,9 @@ final class CssContrastCheckEngine
     }
 
     /**
-     * @param array{selector:string,complete:bool,declarations:list<array{property:string,value:string,value_start:int,value_end:int}>} $rule
+     * @param array{selector:string,source_start:int,complete:bool,declarations:list<array{property:string,value:string,value_start:int,value_end:int,important:bool}>} $rule
      * @param list<string> $properties
-     * @return array{property:string,value:string,value_start:int,value_end:int}|null
+     * @return array{property:string,value:string,value_start:int,value_end:int,important:bool}|null
      */
     private static function declaration(array $rule, array $properties): ?array
     {
@@ -261,30 +399,43 @@ final class CssContrastCheckEngine
         if (!class_exists(DOMDocument::class)) {
             return [];
         }
-        $previous = libxml_use_internal_errors(true);
-        try {
-            $document = new DOMDocument();
-            if (!$document->loadHTML(
-                '<div data-css-contrast-root="">' . $markup . '</div>',
-                LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD,
-            )) {
-                return [];
-            }
-            $elements = [];
-            foreach ($document->getElementsByTagName('*') as $element) {
-                if ($element instanceof DOMElement) {
-                    $elements[] = $element;
-                }
-            }
-            return $elements;
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($previous);
+        $document = new DOMDocument();
+        $root = $document->createElement('div');
+        $document->appendChild($root);
+        $elements = [];
+        foreach (HtmlFragment::parse($markup)->children() as $node) {
+            self::appendElementTree($document, $root, $node, $elements);
+        }
+        return $elements;
+    }
+
+    /** @param list<DOMElement> $elements */
+    private static function appendElementTree(
+        DOMDocument $document,
+        DOMElement $parent,
+        HtmlNode $node,
+        array &$elements,
+    ): void {
+        if (!$node->isElement()) {
+            return;
+        }
+        // Class-only selectors need hierarchy + class tokens, not browser HTML
+        // recovery. Build matcher input without invoking libxml's HTML parser or
+        // touching its process-global error queue.
+        $element = $document->createElement('div');
+        $class = $node->attribute('class');
+        if ($class !== null && preg_match('//u', $class) === 1) {
+            $element->setAttribute('class', $class);
+        }
+        $parent->appendChild($element);
+        $elements[] = $element;
+        foreach ($node->children() as $child) {
+            self::appendElementTree($document, $element, $child, $elements);
         }
     }
 
     /**
-     * @return list<array{selector:string,complete:bool,declarations:list<array{property:string,value:string,value_start:int,value_end:int}>}>
+     * @return list<array{selector:string,source_start:int,complete:bool,declarations:list<array{property:string,value:string,value_start:int,value_end:int,important:bool}>}>
      */
     private static function rules(string $css): array
     {
@@ -303,6 +454,7 @@ final class CssContrastCheckEngine
             if ($selector !== '') {
                 $rules[] = [
                     'selector' => $selector,
+                    'source_start' => $offset,
                     'complete' => $close !== null,
                     'declarations' => str_starts_with($selector, '@')
                         ? []
@@ -365,7 +517,7 @@ final class CssContrastCheckEngine
         return null;
     }
 
-    /** @return list<array{property:string,value:string,value_start:int,value_end:int}> */
+    /** @return list<array{property:string,value:string,value_start:int,value_end:int,important:bool}> */
     private static function declarations(string $css, int $start, int $end): array
     {
         $declarations = [];
@@ -391,7 +543,7 @@ final class CssContrastCheckEngine
         return $declarations;
     }
 
-    /** @return array{property:string,value:string,value_start:int,value_end:int}|null */
+    /** @return array{property:string,value:string,value_start:int,value_end:int,important:bool}|null */
     private static function parseDeclaration(string $css, int $start, int $end): ?array
     {
         $state = CssSyntaxScanner::state();
@@ -423,7 +575,9 @@ final class CssContrastCheckEngine
             $valueEnd--;
         }
         $value = substr($css, $valueStart, $valueEnd - $valueStart);
+        $isImportant = false;
         if (preg_match('/!\s*important\s*$/i', $value, $important, PREG_OFFSET_CAPTURE)) {
+            $isImportant = true;
             $valueEnd = $valueStart + $important[0][1];
             while ($valueEnd > $valueStart && CssSyntaxScanner::isCssWhitespace($css[$valueEnd - 1])) {
                 $valueEnd--;
@@ -438,6 +592,7 @@ final class CssContrastCheckEngine
             'value' => $value,
             'value_start' => $valueStart,
             'value_end' => $valueEnd,
+            'important' => $isImportant,
         ];
     }
 
