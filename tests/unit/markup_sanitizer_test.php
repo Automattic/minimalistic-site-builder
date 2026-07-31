@@ -310,8 +310,7 @@ test('sanitize and normalize report their removals through the notes out-param',
     MarkupSanitizer::sanitize('<!-- wp:paragraph --><p>Safe.</p><!-- /wp:paragraph -->', $clean);
     assert_eq([], $clean);
 
-    // The intake normalize prefixes each note with its part key, so the
-    // caller can route them into warnings.json verbatim.
+    // Intake normalization turns each loss into a self-contained durable row.
     $intake = [];
     GeneratedMarkup::normalize(
         '<!-- wp:html --><script>alert(1)</script><!-- /wp:html -->'
@@ -319,7 +318,17 @@ test('sanitize and normalize report their removals through the notes out-param',
         'section-test',
         $intake
     );
-    assert_contains("part 'section-test': sanitized script-capable markup", implode(' | ', $intake));
+    $intakeWarning = implode(' | ', $intake);
+    foreach ([
+        "file='theme/parts/section-test.html'",
+        "block='generated part intake'",
+        'sanitized script-capable markup',
+        'authored=',
+        'delivered=',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $intakeWarning);
+    }
 });
 
 test('normalize reports truncation salvage through the notes out-param', function () {
@@ -332,5 +341,8 @@ test('normalize reports truncation salvage through the notes out-param', functio
     );
     assert_eq($kept, $out);
     assert_true($notes !== [], 'salvage produces a durable note');
-    assert_contains("part 'section-test':", $notes[0]);
+    assert_contains("file='theme/parts/section-test.html'", $notes[0]);
+    assert_contains('dropped 1 incomplete trailing block(s)', $notes[0]);
+    assert_contains('delivered=', $notes[0]);
+    assert_contains('disposition=', $notes[0]);
 });

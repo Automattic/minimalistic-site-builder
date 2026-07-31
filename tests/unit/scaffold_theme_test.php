@@ -38,6 +38,42 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container-open:not(.always-shown)', $css);
     assert_contains('.wp-site-blocks .wp-block-navigation__responsive-container:not(.hidden-by-default):not(.is-menu-open)', $css);
 
+    // Hero topology and mobile behavior are code-owned. All recipe hooks ship
+    // in the static stylesheet (unused hooks are inert), and the mobile rules
+    // consume only the transformation marker normalized by HeroUnit.
+    foreach ([
+        'cinematic-safe-zone',
+        'editorial-split',
+        'framed-portrait',
+        'panorama-rail',
+        'diptych-editorial',
+        'typographic-poster',
+        'focal-subject-stage',
+        'layered-poster',
+    ] as $recipe) {
+        assert_contains('.hero-composition--' . $recipe, $css);
+    }
+    assert_contains('@media (max-width: 781.98px)', $css);
+    foreach ([
+        'stack-copy-first',
+        'stack-media-first',
+        'rail-below',
+        'collapse-to-single-focus',
+        'flatten-layers',
+        'retain-media-overlay',
+    ] as $transformation) {
+        assert_contains('.hero-mobile--' . $transformation, $css);
+    }
+    assert_contains('.hero-composition__media-secondary', $css);
+    assert_contains('display: none;', $css);
+    assert_contains('.hero-mobile--stack-copy-first .wp-block-media-text__content', $css);
+    assert_contains('.hero-mobile--stack-copy-first .wp-block-media-text__media', $css);
+    assert_contains('.hero-mobile--stack-media-first .wp-block-media-text__media', $css);
+    assert_contains('.hero-mobile--stack-media-first .wp-block-media-text__content', $css);
+    assert_contains('.hero-mobile--rail-below .wp-block-media-text__media', $css);
+    assert_contains('grid-template-columns: minmax(0, 1fr) !important;', $css);
+    assert_contains('grid-row: 2;', $css);
+
     $readme = $project->readText('theme/readme.txt');
     assert_contains('=== {{THEME_NAME}} ===', $readme);
 

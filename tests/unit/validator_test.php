@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SectionRhythm;
@@ -26,6 +28,101 @@ function validator_project(): array
 test('validator passes a well-formed theme', function () {
     [$project, $tmp] = validator_project();
     assert_eq([], ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/** @return array{0:\Automattic\SiteBuild\Project,1:string} */
+function validator_above_fold_project(): array
+{
+    [$project, $tmp] = validator_project();
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'title' => 'Home',
+            'layout_archetype' => 'mixed-width-editorial',
+            'background' => 'contrast',
+            'primary_action' => null,
+        ]],
+    ]];
+    $blueprint = HeroBlueprint::defaultFor('typographic-poster');
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'validator-test', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'standard-row',
+    );
+    $header = '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group header-archetype--standard-row has-base-background-color has-contrast-color"></div>'
+        . '<!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--typographic-poster","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--typographic-poster"></div><!-- /wp:group -->';
+    $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
+        'part_keys' => ['header', 'page-home--hero'],
+        'opening_overlay_support' => ['page-home--hero' => false],
+        'primary_action_delivered' => true,
+    ]);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $final);
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $hero . "\n");
+    return [$project, $tmp];
+}
+
+test('final above-fold validator accepts the persisted header and hero relation', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    assert_eq([], ThemeValidator::aboveFoldWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator reports downstream drift without mutating markup', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    $header = str_replace('header-archetype--standard-row', 'header-archetype--split-nav', $project->readText('theme/parts/header.html'));
+    $hero = str_replace('hero-composition--typographic-poster', 'hero-composition--editorial-split', $project->readText('plugin/pages/home.html'));
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $hero);
+
+    $warnings = ThemeValidator::aboveFoldWarnings($project);
+    $joined = implode("\n", $warnings);
+    assert_contains('header.archetype', $joined);
+    assert_contains('hero.recipe_marker', $joined);
+    assert_contains("file='theme/parts/header.html'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=', $joined);
+    assert_contains('disposition=', $joined);
+    assert_eq($header, $project->readText('theme/parts/header.html'), 'advisory validation must not mutate header');
+    assert_eq($hero, $project->readText('plugin/pages/home.html'), 'advisory validation must not mutate page');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator reports competing stacked chrome and an over-budget opening cover', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    $header = str_replace(
+        '"backgroundColor":"base"',
+        '"backgroundColor":"base","gradient":"invented-gradient"',
+        $project->readText('theme/parts/header.html'),
+    );
+    $opening = '<!-- wp:group {"anchor":"hero","className":"hero-composition--typographic-poster","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--typographic-poster">'
+        . '<!-- wp:cover {"minHeight":92,"minHeightUnit":"vh"} --><div class="wp-block-cover" style="min-height:92vh"></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $opening);
+
+    $warnings = ThemeValidator::aboveFoldWarnings($project);
+    $joined = implode("\n", $warnings);
+    assert_contains('header.stacked_surface', $joined);
+    assert_contains('stacked_cover_max_vh', $joined);
+    assert_contains('authored=80', $joined);
+    assert_contains('delivered=92', $joined);
+    assert_eq($header, $project->readText('theme/parts/header.html'));
+    assert_eq($opening, $project->readText('plugin/pages/home.html'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

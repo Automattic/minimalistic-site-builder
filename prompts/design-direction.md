@@ -26,23 +26,12 @@ Every image on the site is generated independently, so the only thing that makes
 
 Examples of good grades: "monochrome documentary, visible 35mm grain, charcoal midtones, available light, no saturated color" — "warm kodachrome color, soft golden light, shallow depth of field, gentle film grain". The grade must fit the direction's concept and palette: a dark-luxe direction and a pastel-pop direction should have visibly different grades.
 
-## Hero Section — The First Impression
-
-The direction MUST describe a distinctive hero section layout as part of its vision. The hero is the emotional anchor — describe it cinematically:
-
-- **Spatial composition**: Where does the eye land first? Is content centered like a film title card, asymmetrically balanced like an editorial spread, split diagonally with tension, or does imagery bleed edge-to-edge behind floating text?
-- **Image treatment**: Full-bleed photography that immerses? A contained frame that creates breathing room? Overlapping elements that add depth? Abstract shapes that suggest rather than show? A full-bleed background image should read wide/landscape; a framed or foreground image within the hero can be any shape that fits its slot.
-- **Typography staging**: Massive display type that dominates? Elegant understatement with generous whitespace? Text that interacts with imagery — overlapping, masked, or integrated? Keep headlines and reading text horizontal — never rotated or vertical.
-- **Motion and rhythm**: Does it feel expansive and slow, or compact and energetic? Horizontal flow or vertical scroll invitation?
-
 ## Anti-Patterns — What to Avoid
 
 Do NOT produce a direction that feels like generic AI output:
 - **Generic palettes**: Purple gradients on white, safe blue-and-gray corporate schemes, arbitrary rainbow accents
 - **Generic fonts**: Inter, Roboto, Arial, Open Sans, system fonts — never mention these
-- **Generic layouts**: The default "text left, image right" — be inventive with spatial composition
 - **Topic-agnostic styles**: If you could swap the site topic and the direction still works unchanged, it's too generic
-- **Vague hero descriptions**: Don't just say "centered layout" — describe the specific visual composition
 
 ## Output Format
 
@@ -57,7 +46,12 @@ Besides the vivid narrative, the direction commits to explicit structured fields
 - `motion_note`: ONE short line of motion art direction refining the profile (e.g. "let the hero image breathe; cards rise one by one"), or `""` when the profile alone says enough.
 - `canvas`: `"full-bleed"` or `"framed"` — how the page meets the viewport edge. `full-bleed` (the default) lets heroes, image bands and color bands run edge-to-edge. Commit to `framed` ONLY when the concept genuinely calls for a contained, gallery-mat presentation (an art-book portfolio, a print-inspired editorial) — the page then keeps a visible mat of page background around every band, and the header can never float over the hero. Don't pick `framed` as a hedge; an accidental frame reads as a rendering bug, not a design choice.
 - `signature_device`: the ONE repeated visual motif that makes the direction recognizable. Invent it FOR this concept from the site's real-world visual culture, and test it before committing: if an unrelated site could adopt it unchanged, or it amounts to "every section opens with <the same treatment>", it is a default, not a signature — design a different one. It must be executable with theme tokens (type, color, spacing, sparingly borders): never a generated image asset (drawn ornaments — sprigs, crests, emblems, icons — come out off-palette and wobbly), and never words or letters rendered as imagery (models garble glyphs; lettering ideas become real typography instead). Generated directions herd onto the same few defaults — treat these as ALREADY TAKEN: hairline rules and ruled boxes, section numbering ("01, 02…"), indentation systems, repeated glyph marks (✳ ❖ ✦ and kin). Commit to one of those only when the subject matter makes it near-literal (a numbered tasting menu, an archive with real catalogue numbers), name the real-world source it quotes, and confine it to a few deliberate moments — never before every heading or eyebrow, never as list bullets, metadata separators, or a divider under every block.
-- `hero_composition`: the composition archetype the hero commits to, in one concrete sentence that pins down where the imagery sits, where the headline sits, and how the remaining space is used — composed for THIS concept, per the Hero Section guidance above. Describe only the hero section's OWN content — never the site header, wordmark, or navigation; those live in a separate header part rendered above the hero.
+- `signature_device_slots`: zero to two unique placement slots chosen explicitly from `"header"`, `"hero"`, `"body"`, `"closing"`, and `"footer"`. Use `[]` when no signature device was selected. This is a hard placement budget: do not encode placement prose inside `signature_device`.
+- `hero_blueprint`: fill the bounded front-page-only object from the one assigned recipe below. The assigned `recipe` is authoritative. Do not mention that recipe, its topology, its media placement, or any hero-specific spatial arrangement in `description`; downstream general prompts receive the narrative but must not learn the front-page structure through prose.
+
+## Front-page hero assignment (front page only)
+
+{{hero_composition}}
 
 Respond with ONLY a JSON object. No explanation, no commentary, no text before or after.
 
@@ -65,7 +59,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
 {
   "direction": {
     "title": "The chosen seed's title (refine it only if the expansion truly demands it)",
-    "description": "A rich, vivid paragraph describing the complete design vision including the hero section composition. Paint the picture: what does a visitor feel the moment they land? Describe the hero layout cinematically — how is space used, where does imagery sit, how does typography interact with visuals? Then flow into the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes.",
+    "description": "A rich, vivid paragraph describing the complete site-wide visual language: the color world (with specific hex codes), typography choices (specific font names and weights), spatial rhythm, mood, texture, image treatment, and distinctive design details. Write it like a creative brief that would inspire a designer — evocative yet concrete. This is a single cohesive narrative, not a list of attributes. Keep front-page hero topology entirely out of this narrative.",
     "palette": {
       "base": "#RRGGBB",
       "contrast": "#RRGGBB",
@@ -82,7 +76,24 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
     "motion_note": "One short line of motion art direction, or an empty string.",
     "canvas": "full-bleed",
     "signature_device": "The one repeated visual motif, one concrete sentence.",
-    "hero_composition": "The hero's composition archetype, one concrete sentence."
+    "signature_device_slots": ["hero", "body"],
+    "hero_blueprint": {
+      "version": 1,
+      "recipe": "Copy the exact assigned recipe id",
+      "media_mode": "Use one bounded value allowed by the selected recipe",
+      "headline_register": "restrained",
+      "text_anchor": "center-start",
+      "headline_line_target": {
+        "desktop": [1, 3],
+        "mobile": [2, 5]
+      },
+      "focal_region": "end",
+      "text_safe_region": "start",
+      "height_profile": "standard",
+      "cta_treatment": "prominent",
+      "mobile_transformation": "Use one bounded value allowed by the selected recipe",
+      "signature_device_use": "One bounded placement instruction, or an empty string."
+    }
   }
 }
 ```

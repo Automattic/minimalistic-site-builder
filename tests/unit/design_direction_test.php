@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -39,7 +41,8 @@ function designdir_direction(): array
         'type'             => ['heading' => 'Fraunces 700/900', 'body' => 'Source Sans 3 400/600'],
         'image_grade'      => 'warm kodachrome color, soft golden light',
         'signature_device' => 'hairline rules with small caps folios',
-        'hero_composition' => 'full-bleed bakery photo, headline pinned lower-left',
+        'signature_device_slots' => ['hero', 'body'],
+        'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
     ];
 }
 
@@ -58,7 +61,10 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Fraunces 700/900', $written['type']['heading']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('hairline rules with small caps folios', $written['signature_device']);
-    assert_eq('full-bleed bakery photo, headline pinned lower-left', $written['hero_composition']);
+    assert_eq(['hero', 'body'], $written['signature_device_slots']);
+    assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
+    assert_contains('Seed ', $written['concept_seed']);
+    assert_true(!array_key_exists('hero_composition', $written), 'old prose field is gone');
 
     // The seed prompt carries the user's words and the factual spec.
     assert_eq(2, count($llm->calls), 'exactly two calls: seeds + expansion');
@@ -71,8 +77,15 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'signature_device', 'hero_composition'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'signature_device', 'signature_device_slots', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
+    }
+    $assigned = $written['hero_blueprint']['recipe'];
+    assert_contains($assigned, $llm->calls[1]['prompt']);
+    foreach (HeroComposition::RECIPES as $other) {
+        if ($other !== $assigned) {
+            assert_true(!str_contains($llm->calls[1]['prompt'], $other), "{$other} recipe does not leak");
+        }
     }
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -273,15 +286,15 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
             'weird'     => '#FFFFFF',   // unknown role → dropped
         ],
         'type'        => ['heading' => 'Fraunces 900'],
-    ]);
+    ], 'cinematic-safe-zone');
     assert_eq('Forge & Flame', $direction['title']);
     assert_eq(['base' => '#FDF6EC', 'primary' => '#8A5A2B'], $direction['palette']);
     assert_eq('Fraunces 900', $direction['type']['heading']);
     assert_eq('', $direction['type']['body']);
     assert_eq('', $direction['image_grade']);
 
-    assert_eq(null, DesignDirectionStep::normalize(['title' => 'Empty', 'description' => '   ']));
-    assert_eq(null, DesignDirectionStep::normalize('not an array'));
+    assert_eq(null, DesignDirectionStep::normalize(['title' => 'Empty', 'description' => '   '], 'cinematic-safe-zone'));
+    assert_eq(null, DesignDirectionStep::normalize('not an array', 'cinematic-safe-zone'));
 });
 
 test('format renders the narrative plus the structured fact list', function () {
@@ -292,23 +305,27 @@ test('format renders the narrative plus the structured fact list', function () {
         'type'             => ['heading' => 'Fraunces 900', 'body' => 'Source Sans 3 400'],
         'image_grade'      => 'monochrome documentary',
         'signature_device' => 'hairline rules with folios',
-        'hero_composition' => 'headline pinned lower-left',
+        'signature_device_slots' => ['hero'],
+        'concept_seed' => 'must stay hidden',
+        'hero_blueprint' => HeroBlueprint::defaultFor('editorial-split'),
     ]);
     assert_contains('# Archivo Silencioso', $text);
     assert_contains('base #F4F1EA', $text);
     assert_contains('heading — Fraunces 900; body — Source Sans 3 400', $text);
     assert_contains('Signature device', $text);
-    assert_contains('hero composition', strtolower($text));
+    assert_contains('placement slots', strtolower($text));
     assert_contains('monochrome documentary', $text);
+    assert_true(!str_contains($text, 'editorial-split'), 'general format excludes hero recipe');
+    assert_true(!str_contains($text, 'must stay hidden'), 'general format excludes concept seed');
 
     // Empty fields are omitted — a bare direction is just the narrative.
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
 test('normalize commits a canvas: framed passes through, everything else is full-bleed', function () {
-    assert_eq('framed', DesignDirectionStep::normalize(['description' => 'x', 'canvas' => ' Framed '])['canvas']);
-    assert_eq('full-bleed', DesignDirectionStep::normalize(['description' => 'x'])['canvas']);
-    assert_eq('full-bleed', DesignDirectionStep::normalize(['description' => 'x', 'canvas' => 'poster'])['canvas']);
+    assert_eq('framed', DesignDirectionStep::normalize(['description' => 'x', 'canvas' => ' Framed '], 'cinematic-safe-zone')['canvas']);
+    assert_eq('full-bleed', DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone')['canvas']);
+    assert_eq('full-bleed', DesignDirectionStep::normalize(['description' => 'x', 'canvas' => 'poster'], 'cinematic-safe-zone')['canvas']);
 });
 
 test('format renders the canvas commitment with its executable meaning', function () {
@@ -405,10 +422,13 @@ test('design-direction keeps an operational expansion failure fatal', function (
 });
 
 test('fallbackDirection builds on the chosen seed, generic brief otherwise', function () {
-    $seeded = DesignDirectionStep::fallbackDirection('Neon Dusk — electric gradients over charcoal.');
+    $seeded = DesignDirectionStep::fallbackDirection(
+        'Neon Dusk — electric gradients over charcoal.',
+        'cinematic-safe-zone',
+    );
     assert_eq('Neon Dusk — electric gradients over charcoal.', $seeded['description']);
 
-    $generic = DesignDirectionStep::fallbackDirection('');
+    $generic = DesignDirectionStep::fallbackDirection('', 'cinematic-safe-zone');
     assert_contains('bold', $generic['description']);
     assert_eq('calm', $generic['motion']);
 });
@@ -476,6 +496,7 @@ test('theme-json injects the design direction into its prompt', function () {
         'description' => 'Editorial-magazine direction.',
         'palette'     => ['base' => '#FDF6EC'],
         'type'        => ['heading' => 'Fraunces 900', 'body' => 'Source Sans 3 400'],
+        'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
 
     $llm = new FakeLlm();
@@ -491,12 +512,12 @@ test('theme-json injects the design direction into its prompt', function () {
 });
 
 test('normalize commits a motion profile: valid values pass, anything else defaults', function () {
-    assert_eq('dramatic', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ' Dramatic '])['motion']);
-    assert_eq('none', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'none'])['motion']);
-    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x'])['motion'], 'missing → default');
-    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'bouncy'])['motion'], 'unknown → default');
-    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ['calm']])['motion'], 'non-string → default');
-    assert_eq('a note', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '])['motion_note']);
+    assert_eq('dramatic', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ' Dramatic '], 'cinematic-safe-zone')['motion']);
+    assert_eq('none', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'none'], 'cinematic-safe-zone')['motion']);
+    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone')['motion'], 'missing → default');
+    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => 'bouncy'], 'cinematic-safe-zone')['motion'], 'unknown → default');
+    assert_eq('calm', DesignDirectionStep::normalize(['description' => 'x', 'motion' => ['calm']], 'cinematic-safe-zone')['motion'], 'non-string → default');
+    assert_eq('a note', DesignDirectionStep::normalize(['description' => 'x', 'motion_note' => ' a note '], 'cinematic-safe-zone')['motion_note']);
 });
 
 test('format renders the motion commitment with its executable meaning', function () {
@@ -527,4 +548,197 @@ test('motionProfileFor fails closed to none', function () {
     assert_eq('energetic', DesignDirectionStep::motionProfileFor($project));
 
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+
+    putenv('HERO_RECIPE=typographic-poster');
+    try {
+        (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    } finally {
+        putenv('HERO_RECIPE');
+    }
+
+    $direction = $project->readJson('designDirection.json');
+    assert_eq('typographic-poster', $direction['hero_blueprint']['recipe']);
+    assert_eq('none', $direction['hero_blueprint']['media_mode']);
+    assert_contains('typographic-poster', $llm->calls[1]['prompt']);
+    foreach (HeroComposition::RECIPES as $recipe) {
+        if ($recipe !== 'typographic-poster') {
+            assert_true(!str_contains($llm->calls[1]['prompt'], $recipe), "{$recipe} is not exposed");
+        }
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('unknown or caller-incompatible HERO_RECIPE fails before any LLM spend', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    putenv('HERO_RECIPE=not-a-recipe');
+    try {
+        assert_throws(fn () => (new DesignDirectionStep(
+            $llm,
+            new PromptRenderer(repo_path('prompts')),
+        ))->run($project));
+    } finally {
+        putenv('HERO_RECIPE');
+    }
+    assert_eq(0, count($llm->calls));
+
+    $project->writeJson('meta.json', [
+        'prompt' => 'A cozy neighborhood bakery',
+        'design_constraints' => ['allowed_hero_media_modes' => ['none']],
+    ]);
+    putenv('HERO_RECIPE=editorial-split');
+    try {
+        assert_throws(fn () => (new DesignDirectionStep(
+            $llm,
+            new PromptRenderer(repo_path('prompts')),
+        ))->run($project));
+    } finally {
+        putenv('HERO_RECIPE');
+    }
+    assert_eq(0, count($llm->calls));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('caller-incompatible HEADER_ARCHETYPE fails before the design-direction seed call', function () {
+    $cases = [
+        ['override' => 'not-a-header', 'constraints' => []],
+        ['override' => 'minimal-overlay', 'constraints' => ['hero_canvas' => 'framed']],
+        ['override' => 'minimal-overlay', 'constraints' => ['allowed_hero_media_modes' => ['none']]],
+        ['override' => 'split-nav', 'constraints' => []],
+    ];
+    foreach ($cases as $case) {
+        [$project, $llm, $tmp] = make_designdir_fixture();
+        $project->writeJson('meta.json', [
+            'prompt' => 'A cozy neighborhood bakery',
+            'multi_page' => false,
+            'design_constraints' => $case['constraints'],
+        ]);
+        putenv('HEADER_ARCHETYPE=' . $case['override']);
+        try {
+            assert_throws(fn () => (new DesignDirectionStep(
+                $llm,
+                new PromptRenderer(repo_path('prompts')),
+            ))->run($project), (string) $case['override']);
+        } finally {
+            putenv('HEADER_ARCHETYPE');
+            exec('rm -rf ' . escapeshellarg($tmp));
+        }
+        assert_eq(0, count($llm->calls), 'header preflight runs before any paid model call');
+    }
+});
+
+test('split-nav preflight counts caller-requested nested pages recursively', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $project->writeJson('meta.json', [
+        'prompt' => 'A neighborhood bakery',
+        'multi_page' => true,
+        'pages' => [[
+            'title' => 'Home',
+            'children' => [['title' => 'Menu', 'children' => []]],
+        ]],
+    ]);
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+    putenv('HEADER_ARCHETYPE=split-nav');
+    try {
+        (new DesignDirectionStep(
+            $llm,
+            new PromptRenderer(repo_path('prompts')),
+        ))->run($project);
+    } finally {
+        putenv('HEADER_ARCHETYPE');
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+    assert_eq(2, count($llm->calls), 'nested child makes the caller-owned scope definitively multi-page');
+});
+
+test('fallible batch hero assignment remaps incompatibility and warns with requested and delivered values', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $project->writeJson('meta.json', [
+        'prompt' => 'A cozy neighborhood bakery',
+        'design_constraints' => ['allowed_hero_media_modes' => ['none']],
+        'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'diptych-editorial'],
+    ]);
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $llm->queueJson(['direction' => designdir_direction()]);
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $direction = $project->readJson('designDirection.json');
+    assert_eq('typographic-poster', $direction['hero_blueprint']['recipe']);
+    $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('diptych-editorial', $joined);
+    assert_contains('typographic-poster', $joined);
+    assert_contains('remapped', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('malformed fallible hero assignment remaps with actionable provenance', function () {
+    $warnings = [];
+    $recipe = DesignDirectionStep::selectHeroRecipe(
+        ['hero_assignment' => 'not-an-assignment-object'],
+        'stable-site',
+        'Committed seed',
+        $warnings,
+    );
+
+    assert_true(in_array($recipe, HeroComposition::RECIPES, true));
+    assert_eq(1, count($warnings));
+    foreach ([
+        "file='meta.json'",
+        'path="hero_assignment"',
+        'authored=',
+        'delivered=',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
+});
+
+test('hero blueprint accessors keep front-page topology out of the general brief', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddblueprint_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    assert_throws(fn () => DesignDirectionStep::heroBlueprintFor($project));
+
+    $blueprint = HeroBlueprint::defaultFor('framed-portrait');
+    $project->writeJson('designDirection.json', [
+        'description' => 'A quiet gallery language with warm mineral color.',
+        'hero_blueprint' => $blueprint,
+        'concept_seed' => 'Hidden seed bytes',
+    ]);
+    assert_eq($blueprint, DesignDirectionStep::heroBlueprintFor($project));
+    $focused = DesignDirectionStep::formatHeroBlueprint($blueprint);
+    assert_contains('Front-page hero blueprint (front page only)', $focused);
+    assert_contains('framed-portrait', $focused);
+    $general = DesignDirectionStep::readFor($project);
+    assert_true(!str_contains($general, 'framed-portrait'));
+    assert_true(!str_contains($general, 'Hidden seed bytes'));
+
+    $project->writeJson('designDirection.json', [
+        'description' => 'Corrupt persisted blueprint.',
+        'hero_blueprint' => ['recipe' => 'not-in-the-catalog'],
+    ]);
+    assert_throws(fn () => DesignDirectionStep::heroBlueprintFor($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('invalid signature-device slots degrade to empty and clear hero placement with warnings', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize([
+        'description' => 'A complete visual direction.',
+        'signature_device' => 'One notched color block.',
+        'signature_device_slots' => ['hero', 'hero', 'somewhere'],
+        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('editorial-split'), [
+            'signature_device_use' => 'Place the notch beside the headline.',
+        ]),
+    ], 'editorial-split', 'Seed bytes', $repairs, $warnings);
+    assert_eq([], $direction['signature_device_slots']);
+    assert_eq('', $direction['hero_blueprint']['signature_device_use']);
+    assert_true(count($warnings) >= 2);
+    assert_contains('signature_device_slots', implode(' ', $warnings));
 });

@@ -37,6 +37,7 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo', 'visual_vibe' => 'warm and rustic']);
+    seed_test_design_direction($project);
 
     $llm = new FakeLlm();
     $llm->queueJson(valid_theme_payload());
@@ -65,6 +66,7 @@ test('theme-json delivers a deterministic base theme when repaired model JSON is
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
 
     $llm = new class implements Llm {
         public int $rounds = 0;
@@ -117,6 +119,7 @@ test('theme-json keeps an operational JSON failure fatal', function () {
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
 
     assert_throws(fn () => (new ThemeJsonStep(
         new FakeLlm(), // no queued response => plain RuntimeException
@@ -132,6 +135,7 @@ test('theme-json fallback retains a valid concurrent sibling', function () {
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
 
     $sibling = new class implements ConcurrentStep {
         public array $consumed = [];
@@ -191,6 +195,7 @@ test('theme-json forces a non-null blockGap so frontend spacing matches the edit
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
 
     $llm = new FakeLlm();
     $llm->queueJson(valid_theme_payload()); // no blockGap anywhere
@@ -208,6 +213,7 @@ test('theme-json keeps a model-provided blockGap', function () {
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
 
     $payload = valid_theme_payload();
     $payload['settings']['spacing']['blockGap'] = true;
@@ -329,6 +335,7 @@ test('theme-json fills a missing required color slug from the direction, then de
     $project->writeJson('designDirection.json', [
         'description' => 'Warm hearth tones.',
         'palette'     => ['accent' => '#C0FFEE'],
+        'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
 
     $payload = valid_theme_payload();
@@ -416,6 +423,7 @@ test('theme-json forces useRootPaddingAwareAlignments when root side padding is 
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
 
     $payload = valid_theme_payload();
     // The stanza the model reliably copies from published themes — without the
@@ -484,6 +492,7 @@ test('theme-json fills a missing required font slug with the system stack', func
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
 
     $payload = valid_theme_payload();
     $payload['settings']['typography']['fontFamilies'] = [
@@ -670,6 +679,7 @@ test('theme-json repairs malformed scaffold shapes with durable actionable warni
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
     $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project);
 
     $payload = valid_theme_payload();
     $payload['styles'] = [
@@ -729,6 +739,7 @@ test('theme-json repairs malformed top-level styles values with durable warnings
         $project = (new ProjectStore($tmp))->create('demo');
         $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
         $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+        seed_test_design_direction($project);
 
         $payload = valid_theme_payload();
         $payload['styles'] = $authored;
@@ -922,6 +933,7 @@ test('theme-json sends no json_schema', function () {
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
     $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project);
 
     $request = (new ThemeJsonStep(
         new FakeLlm(),
@@ -933,11 +945,34 @@ test('theme-json sends no json_schema', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json receives the front hero blueprint as focused sizing context', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_hero_context_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project);
+
+    $request = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json'];
+    $prompt = $request['prompt'];
+
+    assert_contains('FRONT-PAGE HERO BLUEPRINT (front-page type sizing context only)', $prompt);
+    assert_contains('cinematic-safe-zone', $prompt);
+    assert_contains('headline', strtolower($prompt));
+    assert_eq(1, substr_count($prompt, 'cinematic-safe-zone'), 'recipe appears only in focused context');
+    assert_true(!str_contains($prompt, 'hero_composition'), 'removed prose field is not a sizing source');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json run wires the scaffold into the written theme', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_scaffold_run_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
     $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project);
 
     $llm = new FakeLlm();
     $llm->queueJson(valid_theme_payload());
@@ -963,6 +998,7 @@ test('theme-json never fails on an empty model response', function () {
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
     $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project);
 
     $llm = new FakeLlm();
     $llm->queueJson([]);
@@ -1002,6 +1038,7 @@ test('theme-json representative model response survives scaffold and validates',
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
     $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project);
 
     $payload = json_decode(
         file_get_contents(repo_path('tests/fixtures/theme-json/representative-model-response.json')),

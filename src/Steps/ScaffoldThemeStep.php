@@ -180,6 +180,131 @@ final class ScaffoldThemeStep implements Step
             margin-block-start: 0;
         }
 
+        /* Reviewed hero recipe skeletons. The generator owns site-specific
+           ratios and spacing inside these bounds; these inert, code-owned
+           hooks preserve each recipe's essential media behavior when no
+           generated page-style appendix is available. */
+        .hero-composition--cinematic-safe-zone > .wp-block-cover,
+        .hero-composition--layered-poster > .wp-block-cover {
+            overflow: hidden;
+        }
+        .hero-composition--editorial-split .wp-block-columns,
+        .hero-composition--framed-portrait .wp-block-columns,
+        .hero-composition--focal-subject-stage .wp-block-columns {
+            align-items: center;
+        }
+        .hero-composition--editorial-split .hero-composition__media img,
+        .hero-composition--focal-subject-stage .hero-composition__media img {
+            width: 100%;
+            height: auto;
+            object-fit: cover;
+        }
+        .hero-composition--framed-portrait .hero-composition__media img {
+            width: 100%;
+            aspect-ratio: 3 / 4;
+            object-fit: cover;
+        }
+        .hero-composition--panorama-rail .hero-composition__media img {
+            width: 100%;
+            aspect-ratio: 16 / 7;
+            object-fit: cover;
+        }
+        .hero-composition--diptych-editorial .hero-composition__media img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .hero-composition--typographic-poster,
+        .hero-composition--layered-poster {
+            overflow: hidden;
+        }
+        .hero-composition--typographic-poster .wp-block-heading,
+        .hero-composition--layered-poster .wp-block-heading {
+            overflow-wrap: anywhere;
+        }
+
+        /* Blueprint-selected mobile transformations. These rules act only on
+           the exact root marker normalized by HeroUnit; CSS never guesses a
+           quiet image region or changes the selected recipe at runtime. */
+        @media (max-width: 781.98px) {
+            .hero-mobile--stack-copy-first .wp-block-columns,
+            .hero-mobile--stack-media-first .wp-block-columns,
+            .hero-mobile--rail-below .wp-block-columns,
+            .hero-mobile--collapse-to-single-focus .wp-block-columns {
+                flex-direction: column;
+            }
+            .hero-mobile--stack-copy-first .wp-block-media-text,
+            .hero-mobile--stack-media-first .wp-block-media-text,
+            .hero-mobile--rail-below .wp-block-media-text {
+                grid-template-columns: minmax(0, 1fr) !important;
+            }
+            .hero-mobile--stack-copy-first .wp-block-media-text__content,
+            .hero-mobile--stack-media-first .wp-block-media-text__media,
+            .hero-mobile--rail-below .wp-block-media-text__media {
+                grid-column: 1;
+                grid-row: 1;
+            }
+            .hero-mobile--stack-copy-first .wp-block-media-text__media,
+            .hero-mobile--stack-media-first .wp-block-media-text__content,
+            .hero-mobile--rail-below .wp-block-media-text__content {
+                grid-column: 1;
+                grid-row: 2;
+            }
+            .hero-mobile--stack-copy-first .hero-composition__copy {
+                order: 1;
+            }
+            .hero-mobile--stack-copy-first .hero-composition__media {
+                order: 2;
+            }
+            .hero-mobile--stack-media-first .hero-composition__media,
+            .hero-mobile--rail-below .hero-composition__media {
+                order: 1;
+            }
+            .hero-mobile--stack-media-first .hero-composition__copy,
+            .hero-mobile--rail-below .hero-composition__copy {
+                order: 2;
+            }
+            /* A cover owns both the media and copy DOM, so flex order cannot
+               reparent its nested copy. Turn only the assigned cinematic
+               mobile variant into a visual media-then-copy sequence: the
+               cover image/protection layer occupies the upper field and the
+               inner container becomes the solid readable lower field. */
+            .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first .wp-block-cover {
+                min-height: 0 !important;
+                padding: min(62vw, 28rem) 0 0;
+                background: var(--wp--preset--color--contrast);
+            }
+            .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
+                .wp-block-cover__image-background,
+            .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
+                .wp-block-cover__background {
+                top: 0;
+                bottom: auto;
+                height: min(62vw, 28rem);
+            }
+            .hero-composition--cinematic-safe-zone.hero-mobile--stack-media-first
+                .wp-block-cover__inner-container {
+                width: 100%;
+                box-sizing: border-box;
+                padding: var(--wp--preset--spacing--lg) var(--wp--preset--spacing--md);
+                background: var(--wp--preset--color--contrast);
+                color: var(--wp--preset--color--base);
+            }
+            .hero-mobile--collapse-to-single-focus .hero-composition__media-secondary {
+                display: none;
+            }
+            .hero-mobile--flatten-layers .hero-composition__layers,
+            .hero-mobile--flatten-layers .hero-composition__copy,
+            .hero-mobile--flatten-layers .hero-composition__media {
+                position: static;
+                inset: auto;
+                transform: none;
+            }
+            .hero-mobile--retain-media-overlay .hero-composition__copy {
+                max-width: min(88%, 32rem);
+            }
+        }
+
         CSS;
 
     private const README = <<<TXT

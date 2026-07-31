@@ -2,7 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
@@ -15,21 +18,70 @@ function final_validation_project(): array
     $project->writeText('theme/style.css', "/*\nTheme Name: Demo\n*/\n");
     $project->writeJson(
         'theme/theme.json',
-        ThemeJsonStep::normalizeSpacingSettings(['version' => 3])
+        ThemeJsonStep::normalizeSpacingSettings([
+            'version' => 3,
+            'settings' => ['color' => ['palette' => [
+                ['slug' => 'base', 'name' => 'Base', 'color' => '#FFFFFF'],
+                ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#111111'],
+            ]]],
+        ])
     );
     $template = '<!-- wp:template-part {"slug":"header"} /-->'
         . '<!-- wp:paragraph --><p>Content</p><!-- /wp:paragraph -->'
         . '<!-- wp:template-part {"slug":"footer"} /-->';
     $project->writeText('theme/templates/index.html', $template);
     $project->writeText('theme/templates/page.html', $template);
-    $project->writeText('theme/parts/header.html', '<!-- wp:site-title /-->');
+    $header = '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row has-base-background-color has-contrast-color"></div>'
+        . '<!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $header);
     $project->writeText('theme/parts/footer.html', '<!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph -->');
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'title' => 'Home',
+            'layout_archetype' => 'mixed-width-editorial',
+            'background' => 'contrast',
+            'vertical_density' => 'standard',
+            'primary_action' => null,
+        ]],
+    ]];
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--typographic-poster","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--typographic-poster"></div><!-- /wp:group -->';
+    $hero = SectionRhythm::rewrite([[
+        'slug' => 'hero',
+        'markup' => $hero,
+        'density' => 'standard',
+        'background' => 'contrast',
+    ]])['markups'][0];
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('typographic-poster'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'validate-step', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'standard-row',
+    );
+    $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
+        'part_keys' => ['header', 'page-home--hero'],
+        'opening_overlay_support' => ['page-home--hero' => false],
+        'primary_action_delivered' => true,
+    ]);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $final);
+    $project->writeText('plugin/pages/home.html', $hero . "\n");
     return [$project, $tmp];
 }
 
 test('validate-theme declaration rejects an incomplete theme graph', function () {
     assert_eq([
         'pages.json',
+        'aboveFold.json',
         'theme/style.css',
         'theme/theme.json',
         'theme/templates/index.html',

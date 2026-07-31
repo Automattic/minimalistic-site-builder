@@ -9,6 +9,14 @@ SITE SPEC (JSON — factual info about the site, no design):
 DESIGN DIRECTION (the committed creative concept for THIS site — let it drive every choice below):
 {{design_direction}}
 
+FRONT-PAGE HERO BLUEPRINT (front-page type sizing context only):
+{{hero_sizing_context}}
+
+Use the blueprint's headline register, desktop/mobile line targets, text anchor,
+and height profile only to calibrate the shared display step. Do not copy its
+front-page recipe or topology into global block styles: ordinary sections and
+interior page openings use the same theme tokens without sharing that layout.
+
 Make opinionated, specific design choices that genuinely fit this site's topic, area, audience, and visual vibe — not generic defaults. Translate the DESIGN DIRECTION into concrete tokens: the palette must express its stated palette approach, the font pairing its type pairing, and the spacing/shapes its shape language. When the DESIGN DIRECTION carries an explicit **Palette** fact list (hex per role) and a **Type** pairing, EXECUTE them: use those exact hexes for the five palette slugs and those exact families/weights for heading/body — adjust a hex only when a pair misses the CONTRAST REQUIREMENTS below, and keep any adjustment in the same hue family (darken/lighten, don't re-hue). Steer clear of the cliché it calls out avoiding. You tend to converge toward safe, "on-distribution" output — resist it; commit to a distinctive, cohesive aesthetic.
 
 Design intelligence to encode as tokens:
@@ -20,7 +28,7 @@ Design intelligence to encode as tokens:
     `lead` — 1.25–1.4rem. The single standout line: hero subcopy, a one-sentence section intro.
     `heading` — ~1.75rem. h3, card and item headings.
     `section-title` — a gentle fluid clamp around 2.25–3rem. h2 / section titles.
-    `display` — the hero masthead: a fluid `clamp()` reaching roughly 5–7rem at desktop widths, sized to the DESIGN DIRECTION's ambition (a broadsheet/poster direction earns ~7rem; a quiet editorial one ~5rem). Size it to the direction's `hero_composition`, not the viewport alone: when the composition places the headline inside a narrow column (half the page or less) or explicitly commits to a restrained size, follow it down — cap near 4.5rem, because a viewport-scaled headline in a ~450px column wraps to five broken lines, which reads far worse than a modest one. Otherwise do NOT cap it near 3.5–4rem — an undersized hero headline on a full-width stage reads as timid.
+    `display` — the hero masthead: a fluid `clamp()` reaching roughly 5–7rem at desktop widths, sized to the FRONT-PAGE HERO BLUEPRINT's explicit headline register and line targets rather than the viewport alone. When its text anchor/topology places the headline inside a narrow column (half the page or less) or its register is restrained, follow it down — cap near 4.5rem, because a viewport-scaled headline in a ~450px column wraps to five broken lines, which reads far worse than a modest one. Otherwise do NOT cap it near 3.5–4rem — an undersized display headline on a full-width stage reads as timid.
   Example: `0.875rem / 1.125rem / 1.375rem / 1.75rem / clamp(2.25rem, 3vw, 3rem) / clamp(3rem, 7vw, 6rem)`. Only caption and body are paragraph sizes (lead is for ONE short line per section); everything above is heading territory, and display exists for ONE hero/masthead moment per page.
 - **Heading line height.** This remains a model-authored design choice. Choose 1.1–1.3; never below 1.0, and set it at `styles.elements.heading.typography.lineHeight` — the build supplies the body line-height but not this one, so headings inherit a body rhythm unless you set it.
 - **Color — dominant with sharp accents.** Commit to a cohesive palette; dominant colors with sharp accents outperform timid, evenly-distributed schemes. Keep `accent` RARE: CTAs/interaction, plus at most the ONE micro-motif the DESIGN DIRECTION's `signature_device` explicitly commits accent to — never body text, large-area backgrounds, or any motif the direction didn't name. Avoid purple-on-white and generic blue-gray.

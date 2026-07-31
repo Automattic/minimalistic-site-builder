@@ -6,11 +6,13 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\WritingDirection;
 
 /**
  * Step 2 (LLM): produce the site spec from the user's creation prompt.
@@ -105,6 +107,11 @@ final class SiteSpecStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
+        // Validate an explicit caller value before spending the site-spec LLM
+        // call. The generated spec never owns this field.
+        $callerWritingDirection = array_key_exists('writing_direction', $meta)
+            ? WritingDirection::validate($meta['writing_direction'])
+            : null;
 
         // Inner pages are opt-in: the runner records the --multi-page flag in
         // meta.json; without it the spec plans (and normalize() enforces) a
@@ -136,10 +143,12 @@ final class SiteSpecStep implements Step
         }
 
         $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
+        $spec['writing_direction'] = $callerWritingDirection
+            ?? WritingDirection::fromLanguage((string) ($spec['language'] ?? ''));
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
-            echo '  [site-spec] warning: ' . count($warnings)
-                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n";
+            Narrator::write('  [site-spec] warning: ' . count($warnings)
+                . " spec field(s) repaired with deterministic fallbacks (recorded in warnings.json)\n");
         }
         $project->writeJson('siteSpec.json', $spec);
     }
@@ -174,6 +183,15 @@ final class SiteSpecStep implements Step
     {
         $language = trim((string) ($project->readJson('siteSpec.json')['language'] ?? ''));
         return $language !== '' ? $language : 'the language the user prompt is written in';
+    }
+
+    /** The normalized logical writing direction persisted in siteSpec.json. */
+    public static function writingDirectionOf(Project $project): string
+    {
+        $direction = strtolower(trim((string) (
+            $project->readJson('siteSpec.json')['writing_direction'] ?? ''
+        )));
+        return in_array($direction, WritingDirection::VALUES, true) ? $direction : 'ltr';
     }
 
     /**

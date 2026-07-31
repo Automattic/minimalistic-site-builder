@@ -22,6 +22,7 @@ function sm_project(string $prefix): array
     $tmp = sys_get_temp_dir() . '/' . $prefix . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    seed_test_design_direction($project);
     return [$project, $tmp];
 }
 
@@ -112,12 +113,11 @@ test('sections passes the configured model into every part request', function ()
     $project->writeJson('pages.json', ['pages' => [[
         'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true, 'parent' => null, 'menu_order' => 0, 'purpose' => 'Welcome',
         'sections' => [
-            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header above and the footer below.'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header above and the footer below.', 'primary_action' => null],
         ],
     ]]]);
     $llm = new FakeLlm();
-    // Cache probe, then header, footer, one section in requests() order.
-    $llm->queueText('OK');
+    // Header, footer, then the uncached dedicated hero in request order.
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -125,7 +125,7 @@ test('sections passes the configured model into every part request', function ()
 
     (new SectionsStep($llm, $renderer, 'claude-opus-4-8'))->run($project);
 
-    assert_true(count($llm->calls) === 4, 'one cache probe plus one request per part');
+    assert_true(count($llm->calls) === 3, 'hero-only builds skip cache warming and send one request per part');
     foreach ($llm->calls as $call) {
         assert_eq('claude-opus-4-8', $call['opts']['model'] ?? null);
     }
@@ -139,11 +139,10 @@ test('sections sends no model key when none is configured', function () {
     $project->writeJson('pages.json', ['pages' => [[
         'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true, 'parent' => null, 'menu_order' => 0, 'purpose' => 'Welcome',
         'sections' => [
-            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header above and the footer below.'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header above and the footer below.', 'primary_action' => null],
         ],
     ]]]);
     $llm = new FakeLlm();
-    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -192,11 +191,10 @@ test('sections passes the configured temperature into every part request', funct
     $project->writeJson('pages.json', ['pages' => [[
         'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true, 'parent' => null, 'menu_order' => 0, 'purpose' => 'Welcome',
         'sections' => [
-            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.', 'primary_action' => null],
         ],
     ]]]);
     $llm = new FakeLlm();
-    $llm->queueText('OK');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
     $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
@@ -204,7 +202,7 @@ test('sections passes the configured temperature into every part request', funct
 
     (new SectionsStep($llm, $renderer, null, 0.9))->run($project);
 
-    assert_true(count($llm->calls) === 4, 'one cache probe plus one request per part');
+    assert_true(count($llm->calls) === 3, 'hero-only builds skip cache warming and send one request per part');
     foreach ($llm->calls as $call) {
         assert_eq(0.9, $call['opts']['temperature'] ?? null);
     }

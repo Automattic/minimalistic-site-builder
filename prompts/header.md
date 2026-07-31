@@ -12,6 +12,9 @@ DESIGN DIRECTION (the committed creative concept for THIS site — the header mu
 PLANNED HERO SECTION (what the header will sit directly above — or float on top of):
 {{hero_brief}}
 
+AUTHORITATIVE ABOVE-FOLD CONTRACT (canonical facts shared with the front-page hero; follow these exact mode, archetype, foreground/protection, viewport, ownership, and seam values):
+{{above_fold_contract}}
+
 HOMEPAGE OUTLINE (what the header sits above — or floats on — on the front page):
 {{outline}}
 

@@ -74,10 +74,31 @@ final class SiteBuilder
      * `pages` (a host whose site spec already names its pages) survives the
      * merge and behaves exactly like the argument.
      *
+     * $designConstraints is the optional caller-owned hero capability object;
+     * it is validated before a project directory is claimed. $writingDirection
+     * is the optional explicit logical direction and accepts only ltr|rtl.
+     *
      * @param array<int,string|array<string,mixed>> $pages
+     * @param array<string,mixed>                    $designConstraints
      */
-    public function createProject(string $prompt, ?string $slug = null, bool $multiPage = false, array $pages = []): Project
-    {
+    public function createProject(
+        string $prompt,
+        ?string $slug = null,
+        bool $multiPage = false,
+        array $pages = [],
+        array $designConstraints = [],
+        ?string $writingDirection = null,
+    ): Project {
+        $designConstraints = HeroComposition::validateConstraints($designConstraints);
+        if (HeroComposition::compatible($designConstraints) === []) {
+            throw new \InvalidArgumentException(
+                'designConstraints leave no compatible hero recipe'
+            );
+        }
+        $writingDirection = $writingDirection === null
+            ? null
+            : WritingDirection::validate($writingDirection);
+
         $store = $this->store();
         $project = $slug === null
             ? $store->claimNew(ProjectStore::randomSlug())
@@ -91,6 +112,12 @@ final class SiteBuilder
         ];
         if ($pages !== []) {
             $seed['pages'] = array_values($pages);
+        }
+        if ($designConstraints !== []) {
+            $seed['design_constraints'] = $designConstraints;
+        }
+        if ($writingDirection !== null) {
+            $seed['writing_direction'] = $writingDirection;
         }
 
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];

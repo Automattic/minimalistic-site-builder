@@ -13,7 +13,7 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--with-images] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=none,foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
@@ -57,6 +57,11 @@ $pagesArg = null;
 $port = null;
 $serve = true;
 $provider = null;
+$writingDirection = null;
+$heroCanvas = null;
+$heroMediaModesArg = null;
+$maxHeroImagesArg = null;
+$heroCopyCapacity = null;
 foreach ($args as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
@@ -68,6 +73,16 @@ foreach ($args as $a) {
         $pagesArg = substr($a, 8);
     } elseif (str_starts_with($a, '--port=')) {
         $port = (int) substr($a, 7);
+    } elseif (str_starts_with($a, '--writing-direction=')) {
+        $writingDirection = substr($a, 20);
+    } elseif (str_starts_with($a, '--hero-canvas=')) {
+        $heroCanvas = substr($a, 14);
+    } elseif (str_starts_with($a, '--hero-media-modes=')) {
+        $heroMediaModesArg = substr($a, 19);
+    } elseif (str_starts_with($a, '--max-hero-images=')) {
+        $maxHeroImagesArg = substr($a, 18);
+    } elseif (str_starts_with($a, '--hero-copy-capacity=')) {
+        $heroCopyCapacity = substr($a, 21);
     } elseif ($a === '--no-serve') {
         $serve = false;
     } elseif ($a === '--with-images') {
@@ -80,7 +95,7 @@ foreach ($args as $a) {
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
+    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=none,cover-image,foreground-image,diptych] [--max-hero-images=0..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
     exit(1);
 }
 
@@ -93,6 +108,27 @@ if ($pagesArg !== null && !$multiPage) {
 }
 $pages = $pagesArg === null ? []
     : array_values(array_filter(array_map('trim', explode(',', $pagesArg)), static fn (string $t): bool => $t !== ''));
+
+$designConstraints = [];
+if ($heroCanvas !== null) {
+    $designConstraints['hero_canvas'] = $heroCanvas;
+}
+if ($heroMediaModesArg !== null) {
+    $designConstraints['allowed_hero_media_modes'] = array_values(array_filter(
+        array_map('trim', explode(',', $heroMediaModesArg)),
+        static fn (string $mode): bool => $mode !== '',
+    ));
+}
+if ($maxHeroImagesArg !== null) {
+    if (preg_match('/^\d+$/', $maxHeroImagesArg) !== 1) {
+        fwrite(STDERR, "--max-hero-images must be an integer from 0 through 2.\n");
+        exit(1);
+    }
+    $designConstraints['max_hero_images'] = (int) $maxHeroImagesArg;
+}
+if ($heroCopyCapacity !== null) {
+    $designConstraints['hero_copy_capacity'] = $heroCopyCapacity;
+}
 
 // --provider selects the model set for the whole run. It just sets LLM_PROVIDER
 // (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
@@ -130,7 +166,19 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
 // Without an explicit --slug, createProject picks a free random adjective-noun
 // name. Explicit --slug reuses that directory across re-runs. meta.json is
 // seeded (and merged) inside createProject so demo orchestrators can pre-seed.
-$project = $builder->createProject($prompt, $slug, $multiPage, $pages);
+try {
+    $project = $builder->createProject(
+        $prompt,
+        $slug,
+        $multiPage,
+        $pages,
+        $designConstraints,
+        $writingDirection,
+    );
+} catch (InvalidArgumentException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    exit(1);
+}
 
 echo "Building '{$project->slug()}'\n";
 

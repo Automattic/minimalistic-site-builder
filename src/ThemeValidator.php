@@ -105,6 +105,235 @@ final class ThemeValidator
     }
 
     /**
+     * Advisory final check of the persisted above-fold contract after section
+     * parts have been serialized into plugin pages. This method never mutates
+     * generated markup. Residual drift is actionable repair input and must not
+     * prevent delivery of an otherwise usable theme.
+     *
+     * `aboveFold.json` is a required upstream artifact for callers of this
+     * method; missing/corrupt/wrong-phase input remains an artifact failure,
+     * not a generated-content defect.
+     *
+     * @return list<string>
+     */
+    public static function aboveFoldWarnings(Project $project): array
+    {
+        $contract = $project->readJson('aboveFold.json');
+        AboveFoldContract::assertPhase($contract, AboveFoldContract::PHASE_FINAL);
+        $pages = array_values(array_filter(
+            (array) ($project->readJson('pages.json')['pages'] ?? []),
+            'is_array',
+        ));
+        $warnings = [];
+
+        $headerFile = 'theme/parts/header.html';
+        if (!$project->exists($headerFile)) {
+            $warnings[] = self::aboveFoldWarning(
+                $headerFile,
+                'header',
+                $contract['header'] ?? null,
+                'removed',
+                'final header part is absent; retain the delivered site and regenerate the contract-owned header',
+            );
+        } else {
+            try {
+                $facts = AboveFoldPartFacts::headerFacts($project->readText($headerFile));
+                foreach (['mode', 'archetype'] as $field) {
+                    $expected = $contract['header'][$field] ?? null;
+                    $delivered = $facts[$field] ?? null;
+                    if ($expected !== $delivered) {
+                        $warnings[] = self::aboveFoldWarning(
+                            $headerFile,
+                            "header.{$field}",
+                            $expected,
+                            $delivered,
+                            'downstream markup drifted from the final above-fold relation; retain it and repair this exact header field',
+                        );
+                    }
+                }
+                $expectedForeground = $contract['header']['foreground_token'] ?? null;
+                if (($facts['foreground'] ?? null) !== $expectedForeground) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $headerFile,
+                        'header.foreground_token',
+                        $expectedForeground,
+                        $facts['foreground'] ?? null,
+                        'downstream markup drifted from the final readable foreground; retain it and restore the contract token',
+                    );
+                }
+                if (($contract['header']['mode'] ?? null) === AboveFoldContract::MODE_STACKED) {
+                    $expectedSurface = $contract['header']['protection_token'] ?? null;
+                    if (($facts['background'] ?? null) !== $expectedSurface) {
+                        $warnings[] = self::aboveFoldWarning(
+                            $headerFile,
+                            'header.protection_token',
+                            $expectedSurface,
+                            $facts['background'] ?? null,
+                            'downstream markup drifted from the stacked protection surface; retain it and restore the contract token',
+                        );
+                    }
+                    if (($facts['gradient'] ?? null) !== null || ($facts['custom_background'] ?? false) === true) {
+                        $warnings[] = self::aboveFoldWarning(
+                            $headerFile,
+                            'header.stacked_surface',
+                            ['background' => $expectedSurface, 'gradient' => null, 'custom_background' => false],
+                            [
+                                'background' => $facts['background'] ?? null,
+                                'gradient' => $facts['gradient'] ?? null,
+                                'custom_background' => $facts['custom_background'] ?? false,
+                            ],
+                            'downstream markup added a competing stacked surface; retain it and restore only the contract-owned background',
+                        );
+                    }
+                } elseif (($facts['background'] ?? null) !== null
+                    || ($facts['gradient'] ?? null) !== null
+                    || ($facts['custom_background'] ?? false) === true
+                ) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $headerFile,
+                        'header.overlay_surface',
+                        ['background' => null, 'gradient' => null, 'custom_background' => false],
+                        [
+                            'background' => $facts['background'] ?? null,
+                            'gradient' => $facts['gradient'] ?? null,
+                            'custom_background' => $facts['custom_background'] ?? false,
+                        ],
+                        'downstream markup made the overlay header opaque; retain it and restore transparent contract-owned chrome',
+                    );
+                }
+            } catch (\RuntimeException $error) {
+                $warnings[] = self::aboveFoldWarning(
+                    $headerFile,
+                    'header.root',
+                    'parseable wp:group with final relation markers',
+                    'uninspectable: ' . $error->getMessage(),
+                    'final advisory inspection could not isolate the generated header drift; retain the bytes for a later repair pass',
+                );
+            }
+        }
+
+        foreach ($pages as $page) {
+            $pageSlug = (string) ($page['slug'] ?? '');
+            $pageFile = 'plugin/pages/' . $pageSlug . '.html';
+            if ($pageSlug === '' || !$project->exists($pageFile)) {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    "openings[page='{$pageSlug}']",
+                    'first planned section markup',
+                    'removed',
+                    'assembled page opening is absent; retain the rest of the site and regenerate only this page opening',
+                );
+                continue;
+            }
+            try {
+                $sections = Steps\SectionRhythmStep::splitTopLevel($project->readText($pageFile));
+            } catch (\RuntimeException $error) {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    "openings[page='{$pageSlug}']",
+                    'inspectable first section',
+                    'uninspectable: ' . $error->getMessage(),
+                    'final advisory inspection could not isolate the generated opening drift; retain the page bytes for a later repair pass',
+                );
+                continue;
+            }
+            $opening = $sections[0] ?? '';
+            if ($opening === '') {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    "openings[page='{$pageSlug}']",
+                    'first planned section markup',
+                    'removed',
+                    'assembled page has no opening; retain the page and regenerate only the missing opening',
+                );
+                continue;
+            }
+
+            if (($contract['header']['mode'] ?? null) === AboveFoldContract::MODE_OVERLAY) {
+                $openingContract = null;
+                foreach ((array) ($contract['openings'] ?? []) as $candidate) {
+                    if (is_array($candidate) && (string) ($candidate['page'] ?? '') === $pageSlug) {
+                        $openingContract = $candidate;
+                        break;
+                    }
+                }
+                $surface = (string) ($openingContract['surface'] ?? '');
+                $protection = (string) ($contract['header']['protection_token'] ?? 'contrast');
+                if (!AboveFoldPartFacts::supportsOverlay($opening, $surface, $protection)) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $pageFile,
+                        "openings[page='{$pageSlug}'].top_protection_token",
+                        $protection,
+                        'unsupported',
+                        'serialized page opening no longer protects the final overlay header; retain it and restore the exact top-edge relation',
+                    );
+                }
+            }
+
+            if (($contract['header']['mode'] ?? null) === AboveFoldContract::MODE_STACKED) {
+                $maxVh = $contract['viewport']['stacked_cover_max_vh'] ?? null;
+                if (is_numeric($maxVh)) {
+                    foreach (AboveFoldPartFacts::coverViewportHeights($opening) as $height) {
+                        if ($height <= (float) $maxVh) {
+                            continue;
+                        }
+                        $warnings[] = self::aboveFoldWarning(
+                            $pageFile,
+                            "openings[page='{$pageSlug}'].stacked_cover_max_vh",
+                            (float) $maxVh,
+                            $height,
+                            'serialized page opening exceeds the final stacked first-viewport budget; retain it and cap only this cover height',
+                        );
+                    }
+                }
+            }
+
+            if (($page['front'] ?? false) !== true) {
+                continue;
+            }
+            $heroFacts = AboveFoldPartFacts::heroFacts($opening, (string) ($contract['recipe'] ?? ''));
+            foreach (['root_group', 'recipe_marker'] as $field) {
+                if (($heroFacts[$field] ?? false) !== true) {
+                    $warnings[] = self::aboveFoldWarning(
+                        $pageFile,
+                        'hero.' . $field,
+                        true,
+                        $heroFacts[$field] ?? false,
+                        'serialized front hero drifted from its objective envelope; retain it and restore only the root/assigned marker invariant',
+                    );
+                }
+            }
+            $action = $contract['primary_action'] ?? null;
+            if (is_array($action) && !AboveFoldPartFacts::containsAction($opening, $action)) {
+                $warnings[] = self::aboveFoldWarning(
+                    $pageFile,
+                    'hero.primary_action',
+                    $action,
+                    'removed or changed',
+                    'serialized front hero no longer contains the exact final action; retain it and reconcile only that control',
+                );
+            }
+        }
+
+        return array_values(array_unique($warnings));
+    }
+
+    private static function aboveFoldWarning(
+        string $file,
+        string $path,
+        mixed $authored,
+        mixed $delivered,
+        string $disposition,
+    ): string {
+        $value = static fn (mixed $item): string => is_string($item)
+            ? json_encode($item, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            : (string) json_encode($item, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return "above-fold final validation: file='{$file}'; path=\"{$path}\"; authored="
+            . $value($authored) . '; delivered=' . $value($delivered)
+            . '; disposition=' . $disposition;
+    }
+
+    /**
      * Raw AI_IMAGE specs still occupying URL/source fields in generated markup.
      *
      * The documented AI_IMAGE value belongs in an img alt until collect-images

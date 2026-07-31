@@ -19,6 +19,8 @@ THIS PAGE:
 
 {{page_emphasis}}
 
+{{front_hero_context}}
+
 Tailor the section choice to the site's `site_type` / `area` and THIS page's purpose, for example:
 - portfolio → project or photo gallery, selected work, about the maker
 - SaaS / product → feature grids, how-it-works, pricing tiers
@@ -41,10 +43,26 @@ Return a single JSON object with this exact shape:
       "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, mixed-width-editorial, equal-card-grid, list-with-thumbnails",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
-      "handoff": "1 line: what visually sits immediately above and below this section (each neighbor's background + archetype), so the transitions are designed rather than accidental"
+      "handoff": "1 line: what visually sits immediately above and below this section (each neighbor's background + archetype), so the transitions are designed rather than accidental",
+      "primary_action": null
     }
   ]
 }
+
+`primary_action` is REQUIRED on every section and is either null or exactly:
+{
+  "label": "Short visitor-facing action copy in the site's language",
+  "intent": "One planning sentence explaining what the action helps the visitor do",
+  "destination": "/an-exact-page-path/ or #an-exact-planned-section-anchor"
+}
+{{primary_action_rule}}
+When present, keep `label` to 1-80 Unicode grapheme clusters of plain text with no
+markup or control characters. Use that exact visitor-facing label; `intent` is
+non-empty plain-text planning context and must never become button copy;
+`destination` is also plain text. Never invent or guess a
+route, placeholder `#`, phone number, or external URL. A contact mailto may
+mint a short local part only at SITE SPEC's exact `email_domain`; never invent
+an alternate domain.
 
 Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text
@@ -82,7 +100,7 @@ Rules:
 - The FIRST section is the page-opening hero. In a plan with two or more sections, the LAST provides a strong closing next step, while every section between them carries the page's content. A one-section plan is necessarily the opening hero.
 - "slug" is lowercase a-z, 0-9 and hyphens only, unique across the list, and descriptive (e.g. "hero", "menu-highlights", "meet-the-team").
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.
-- "content_notes" must never include site chrome — no wordmark, site title lockup, navigation, or menu links, even if the design direction's hero composition mentions them. The site header is a separate template part that renders above (or overlaid on) the hero; planning nav into a section produces a doubled header.
+- "content_notes" must never include site chrome — no wordmark, site title lockup, navigation, or menu links, even if the design direction mentions them. The site header is a separate template part that renders above (or overlaid on) the hero; planning nav into a section produces a doubled header.
 - Never plan a footer or site-chrome section. The theme generates exactly one separate footer template part and appends it after this page's LAST section, so a section whose slug, title, or type is `footer`, `footer-info`, `site-footer`, or equivalent would produce a duplicate ending. Make the LAST section a page-owned next step that follows from THIS page's purpose and the spec's facts — not global navigation, legal links, or footer contact columns.
 - Decorative ornaments (drawn flourishes, motif marks, illustrated icons) are NEVER planned as generated imagery — AI-generated ornaments come out off-palette and wobbly. Glyph marks are not a planning tool either: plan a typographic glyph mark ONLY if the design direction's signature device explicitly commits to a specific character, use exactly that character and color, and only at the few moments the direction names — at most 1-2 on the whole page. Never invent glyph marks the direction didn't commit to, and never use one as a list bullet, metadata separator, or a mark repeated before every heading. Plain rules, hairlines and underlines are never planned as imagery — they are borders/separators the section authors build with styles. Likewise, never plan words, names or calligraphic lettering as imagery (generated images garble glyphs): anything meant to be read is planned as real text, styled by the theme's typography. Planned imagery is content imagery only: hero covers, feature/gallery/card images, photographic bands.
 - Variety is mandatory: NO layout_archetype may be used by two ADJACENT sections, and "equal-card-grid" may appear at most TWICE on the whole page.

@@ -8,6 +8,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\WritingDirection;
 
 /** @return array{0:Project,1:FakeLlm,2:string} */
 function make_sitespec_fixture(bool $multiPage = false, ?array $pages = null): array
@@ -50,6 +51,7 @@ test('site-spec writes a factual, normalized siteSpec.json', function () {
     assert_eq('Hearth & Crumb', $spec['title']);         // title falls back to name
     assert_eq('warm and rustic', $spec['visual_vibe']);
     assert_eq('en', $spec['language']);
+    assert_eq('ltr', $spec['writing_direction']);
     assert_eq('hearthandcrumb.com', $spec['email_domain']);       // lowercased
     assert_eq(['name', 'email_domain'], $spec['invented']);       // non-identity key dropped
     assert_true(is_array($spec['sections']));
@@ -436,5 +438,51 @@ test('site-spec throws when meta prompt missing', function () {
     assert_throws(function () use ($renderer, $project) {
         (new SiteSpecStep(new FakeLlm(), $renderer))->run($project);
     });
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('writing direction uses caller override, then reviewed language mapping, then ltr', function () {
+    assert_eq('rtl', WritingDirection::fromLanguage('ar'));
+    assert_eq('rtl', WritingDirection::fromLanguage('Hebrew'));
+    assert_eq('rtl', WritingDirection::fromLanguage('fa-IR'));
+    assert_eq('ltr', WritingDirection::fromLanguage('es-AR'));
+    assert_eq('ltr', WritingDirection::fromLanguage('unknown language'));
+
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $project->writeJson('meta.json', [
+        'prompt' => 'A publication in Arabic',
+        'writing_direction' => 'ltr',
+    ]);
+    $llm->queueJson(['name' => 'مجلة', 'language' => 'ar']);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq('ltr', $project->readJson('siteSpec.json')['writing_direction'], 'caller wins over language');
+    assert_eq('ltr', SiteSpecStep::writingDirectionOf($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site-spec derives rtl from generated language and ignores a model-authored direction', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $llm->queueJson([
+        'name' => 'مجلة',
+        'language' => 'ar',
+        'writing_direction' => 'ltr',
+    ]);
+    (new SiteSpecStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+    assert_eq('rtl', $project->readJson('siteSpec.json')['writing_direction']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('invalid caller writing direction fails before the site-spec LLM call', function () {
+    [$project, $llm, $tmp] = make_sitespec_fixture();
+    $project->writeJson('meta.json', [
+        'prompt' => 'A cozy neighborhood bakery',
+        'writing_direction' => 'auto',
+    ]);
+    assert_throws(fn () => (new SiteSpecStep(
+        $llm,
+        new PromptRenderer(repo_path('prompts')),
+    ))->run($project));
+    assert_eq(0, count($llm->calls));
+    assert_true(!$project->exists('siteSpec.json'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });

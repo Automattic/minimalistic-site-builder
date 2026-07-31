@@ -17,7 +17,8 @@ HTML;
     $out = MarkupSalvage::repair($markup);
 
     assert_eq($markup, $out['markup'], 'a well-formed part is byte-for-byte untouched');
-    assert_eq([], $out['notes']);
+    assert_eq([], $out['repairs']);
+    assert_eq([], $out['warnings']);
 });
 
 test('MarkupSalvage repairs a response cut off mid-attribute-JSON (BIGR-716 shape)', function () {
@@ -44,8 +45,10 @@ HTML;
         'every group opener has a closer',
     );
     assert_eq(substr_count($salvaged, '<div'), substr_count($salvaged, '</div>'), 'the div stack is rebalanced');
-    assert_eq(1, count($out['notes']));
-    assert_contains('salvaged truncated markup', $out['notes'][0]);
+    assert_eq(1, count($out['warnings']));
+    assert_contains('dropped an incomplete trailing block delimiter', $out['warnings'][0]);
+    assert_eq(1, count($out['repairs']));
+    assert_contains('closed 2 unclosed block(s)', $out['repairs'][0]);
 
     // The end-to-end point of the salvage: the part now passes the
     // section-rhythm gate that aborted the portfolio2 build.
@@ -71,8 +74,8 @@ HTML;
 
     assert_true(!str_contains($out['markup'], 'cut o'), 'the half-written paragraph is dropped, not published');
     assert_contains('<p>Complete thought.</p>', $out['markup']);
-    assert_contains('dropped 1 incomplete trailing block(s)', $out['notes'][0]);
-    assert_contains('closed 1 unclosed block(s)', $out['notes'][0]);
+    assert_contains('dropped 1 incomplete trailing block(s)', $out['warnings'][0]);
+    assert_contains('closed 1 unclosed block(s)', $out['repairs'][0]);
 });
 
 test('MarkupSalvage closes an unclosed container whose children are all complete', function () {
@@ -92,6 +95,9 @@ HTML;
     assert_contains('<!-- /wp:columns -->', $out['markup']);
     assert_contains('<!-- /wp:group -->', $out['markup']);
     assert_eq(substr_count($out['markup'], '<div'), substr_count($out['markup'], '</div>'));
+    assert_eq([], $out['warnings'], 'synthesizing unambiguous closers is a successful repair, not durable loss');
+    assert_eq(1, count($out['repairs']));
+    assert_contains('closed 2 unclosed block(s)', $out['repairs'][0]);
 });
 
 test('MarkupSalvage closes wrapper elements opened between retained children', function () {
@@ -135,7 +141,8 @@ test('MarkupSalvage trims a dangling delimiter after a fully closed document', f
     $out = MarkupSalvage::repair($markup);
 
     assert_true(str_ends_with($out['markup'], '<!-- /wp:group -->'));
-    assert_contains('trimmed an incomplete trailing delimiter', $out['notes'][0]);
+    assert_eq([], $out['repairs']);
+    assert_contains('dropped an incomplete trailing block delimiter', $out['warnings'][0]);
 });
 
 test('MarkupSalvage throws when nothing complete remains to keep', function () {

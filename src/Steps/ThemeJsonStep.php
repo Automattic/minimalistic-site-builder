@@ -239,10 +239,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     public function requests(Project $project): array
     {
         $meta = $project->readJson('meta.json');
+        $heroBlueprint = DesignDirectionStep::heroBlueprintFor($project);
         $rendered = $this->renderer->render('theme-json.md', [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
             'site_spec'        => $project->readText('siteSpec.json'),
             'design_direction' => DesignDirectionStep::readFor($project),
+            'hero_sizing_context' => DesignDirectionStep::formatHeroBlueprint($heroBlueprint),
         ]);
 
         return [self::REQ => $this->withOptions(['prompt' => $rendered])];

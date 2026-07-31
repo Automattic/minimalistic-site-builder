@@ -2,7 +2,9 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\AboveFoldPartFacts;
 use Automattic\SiteBuild\BlockFixers;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
@@ -62,7 +64,10 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
         'signature_device' => 'hairline rules with small caps folios',
-        'hero_composition' => 'full-bleed bakery photo, headline pinned lower-left',
+        'signature_device_slots' => ['hero', 'footer'],
+        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('cinematic-safe-zone'), [
+            'signature_device_use' => 'Use one hairline folio beside the proposition.',
+        ]),
     ]]);
     // Concurrent group, request order is [theme-json, page-plan(home), page-plan(menu)]:
     // theme-json (json) — design decisions made inline, no design.md
@@ -83,13 +88,13 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]);
     // page-plan home (json) — ordered list of the front page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.'],
-        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.'],
+        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.', 'primary_action' => null],
+        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.', 'primary_action' => null],
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.'],
-        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.'],
+        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
+        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
     ]]);
     // sections (raw markup) — disposable cache probe, then header, footer,
     // home's parts, and menu's parts in requests() order
@@ -160,7 +165,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     );
 
     $builder = make_integration_builder($llm, $tmp);
-    $project = $builder->createProject('A cozy neighborhood bakery', 'demo', multiPage: true);
+    $project = $builder->createProject(
+        'A cozy neighborhood bakery',
+        'demo',
+        multiPage: true,
+        designConstraints: [
+            'allowed_hero_media_modes' => ['cover-image'],
+            'max_hero_images' => 1,
+            'hero_copy_capacity' => 'compact',
+        ],
+    );
     $builder->pipeline()->runThrough($project);
 
     $problems = ThemeValidator::validate($project);
@@ -182,6 +196,25 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // Every page's content was inlined into the plugin in plan order, and the
     // transient page parts left the theme.
     $home = $project->readText('plugin/pages/home.html');
+    $direction = $project->readJson('designDirection.json');
+    assert_eq('cinematic-safe-zone', $direction['hero_blueprint']['recipe']);
+    $aboveFold = $project->readJson('aboveFold.json');
+    assert_eq('final', $aboveFold['phase']);
+    assert_eq('cinematic-safe-zone', $aboveFold['recipe']);
+    assert_eq('stacked', $aboveFold['header']['mode'], 'the tinted interior opening rules out one global overlay');
+    assert_eq(null, $aboveFold['primary_action']);
+    assert_contains('hero-composition--cinematic-safe-zone', $home);
+    assert_contains('hero-mobile--stack-media-first', $home);
+    $headerFacts = AboveFoldPartFacts::headerFacts($project->readText('theme/parts/header.html'));
+    assert_eq($aboveFold['header']['mode'], $headerFacts['mode']);
+    assert_eq($aboveFold['header']['archetype'], $headerFacts['archetype']);
+    assert_true(
+        !str_contains(
+            implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []),
+            'above-fold final validation',
+        ),
+        'downstream serialization preserves the final above-fold contract',
+    );
     assert_contains('>Hero<', $home);
     assert_true(strpos($home, 'Hero') < strpos($home, 'Specials'), 'home sections in plan order');
     assert_contains('>Breads<', $project->readText('plugin/pages/menu.html'));

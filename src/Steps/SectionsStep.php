@@ -3,17 +3,25 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\AboveFoldPartFacts;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FooterComposition;
+use Automattic\SiteBuild\HeaderFallback;
+use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PageOpeningFallback;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\SectionRole;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\TextBatchResult;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\HeaderUnit;
+use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
 
@@ -85,43 +93,12 @@ final class SectionsStep implements Step
     }
 
     private SectionUnit $sectionUnit;
+    private HeroUnit $heroUnit;
     private HeaderUnit $headerUnit;
     private FooterUnit $footerUnit;
 
-    /** Env var: force a header archetype (e.g. HEADER_ARCHETYPE=branded-lockup). */
-    public const ARCHETYPE_ENV = 'HEADER_ARCHETYPE';
-
-    /** Header archetype menu — must match the catalog in header.md. */
-    public const HEADER_ARCHETYPES = [
-        'standard-row',
-        'centered-masthead',
-        'minimal-overlay',
-        'oversized-wordmark',
-        'branded-lockup',
-        'double-decker',
-        'split-nav',
-    ];
-
     /** Footer composition menu shared with the stateless FooterUnit. */
     public const FOOTER_ARCHETYPES = FooterComposition::ARCHETYPES;
-
-    /** Floats transparently over the hero, so it needs an image-led hero under it. */
-    private const OVERLAY_ARCHETYPE = 'minimal-overlay';
-
-    /** Splits the site's pages across two navs, so it needs pages to split. */
-    private const SPLIT_NAV_ARCHETYPE = 'split-nav';
-
-    /** Display-scale wordmark — competes head-on with a display-scale hero H1. */
-    private const OVERSIZED_ARCHETYPE = 'oversized-wordmark';
-
-    /** Multi-row centered masthead — too tall to stack above a viewport-scale cover. */
-    private const MASTHEAD_ARCHETYPE = 'centered-masthead';
-
-    /** Header mode: the header floats transparently over the hero cover. */
-    public const MODE_OVERLAY = 'overlay';
-
-    /** Header mode: the header is an opaque bar stacked above the hero. */
-    public const MODE_STACKED = 'stacked';
 
     public function __construct(
         private Llm $llm,
@@ -130,6 +107,7 @@ final class SectionsStep implements Step
         ?float $temperature = null,
     ) {
         $this->sectionUnit = new SectionUnit($llm, $renderer, $model, $temperature);
+        $this->heroUnit = new HeroUnit($llm, $renderer, $model, $temperature);
         $this->headerUnit = new HeaderUnit($llm, $renderer, $model, $temperature);
         $this->footerUnit = new FooterUnit($llm, $renderer, $model, $temperature);
     }
@@ -157,25 +135,42 @@ final class SectionsStep implements Step
             ],
             // pages.json: a section whose markup is unusable is dropped and
             // pruned from the plan so downstream steps see a consistent site.
-            writes: ['theme/parts/*', 'pages.json', 'warnings.json'],
+            writes: ['theme/parts/*', 'pages.json', 'aboveFold.json', 'warnings.json'],
             concurrent: true,
         );
     }
 
     public function requests(Project $project): array
     {
-        return self::requestsFor($this->jobs($project));
+        return self::requestsFor($this->jobPlan($project)['jobs']);
     }
 
     public function run(Project $project): void
     {
         $warnings = [];
+        $repairs = [];
         $plan = $project->readJson('pages.json');
-        $pages = self::repairedPages(self::pages($project), $warnings);
-        $jobs = $this->jobs($project, $warnings, $pages);
+        $pages = self::repairedPages(self::pages($project), $repairs);
+        $jobPlan = $this->jobPlan($project, $repairs, $pages);
+        $jobs = $jobPlan['jobs'];
+        $initialContract = $jobPlan['contract'];
         $requests = self::requestsFor($jobs);
         $this->warmSectionCache($requests);
-        $batch = $this->llm->completeBatch($requests);
+        $batchFailure = null;
+        try {
+            $batch = $this->llm->completeBatch($requests);
+        } catch (\RuntimeException $error) {
+            // The raw-text transport is all-or-nothing, but every member has
+            // a reviewed unit fallback below. Treat a permanent batch failure
+            // as one missing result per key so already-paid planning work can
+            // still deliver the smallest meaningful site.
+            $batch = new TextBatchResult([]);
+            $batchFailure = str_replace(["\r", "\n"], ' ', $error->getMessage());
+            Narrator::write(
+                '    (sections batch failed; applying per-unit fallbacks: '
+                . $batchFailure . ")\n"
+            );
+        }
         $parts = $batch->texts;
 
         // Normalize EVERY part before writing any, so one bad part doesn't
@@ -189,13 +184,23 @@ final class SectionsStep implements Step
         $files = [];
         $dropped = [];
         foreach ($jobs as $key => $job) {
-            $isChrome = in_array($key, ['header', 'footer'], true);
             try {
                 if (!array_key_exists($key, $parts) || !is_string($parts[$key])) {
-                    throw new \RuntimeException('the batch returned no result');
+                    throw new \RuntimeException($batchFailure === null
+                        ? 'the batch returned no result'
+                        : "the generation batch failed: {$batchFailure}");
                 }
-                $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
-                array_push($warnings, ...$batch->notesFor($key));
+                $result = $job['unit']->finish($parts[$key], $job['input']);
+                if (($job['opening'] ?? false) === true) {
+                    self::assertOpeningRoot($result->markup, $key);
+                }
+                $files[$job['file']] = $result->markup;
+                array_push($repairs, ...$result->repairs);
+                array_push(
+                    $warnings,
+                    ...$result->warnings,
+                    ...self::batchWarnings($job['file'], $batch->notesFor($key)),
+                );
             } catch (\RuntimeException $e) {
                 $authoredFailure = json_encode(
                     $e->getMessage(),
@@ -206,7 +211,12 @@ final class SectionsStep implements Step
                 }
                 $warningContext = "file='theme/{$job['file']}'; block='part root'; "
                     . "authored={$authoredFailure}; ";
-                if ($isChrome) {
+                if ($key === 'header') {
+                    $fallback = HeaderFallback::render($job['input'], $initialContract, $e->getMessage());
+                    $files[$job['file']] = $fallback->markup;
+                    array_push($repairs, ...$fallback->repairs);
+                    array_push($warnings, ...$fallback->warnings);
+                } elseif ($key === 'footer') {
                     // This is an error handler: an unknown archetype falls
                     // back to the default surface instead of throwing again.
                     $assignedArchetype = (string) ($job['input']['composition_archetype'] ?? '');
@@ -221,6 +231,16 @@ final class SectionsStep implements Step
                     $warnings[] = "part '{$key}': unusable generated markup; {$warningContext}"
                         . "delivered=deterministic minimal {$key}; disposition=unusable template-part markup "
                         . 'replaced while preserving the rest of the generated site';
+                } elseif (($job['front_hero'] ?? false) === true) {
+                    $fallback = HeroFallback::render($job['input'], $initialContract, $e->getMessage());
+                    $files[$job['file']] = $fallback->markup;
+                    array_push($repairs, ...$fallback->repairs);
+                    array_push($warnings, ...$fallback->warnings);
+                } elseif (($job['opening'] ?? false) === true) {
+                    $fallback = PageOpeningFallback::render($job['input'], $initialContract, $e->getMessage());
+                    $files[$job['file']] = $fallback->markup;
+                    array_push($repairs, ...$fallback->repairs);
+                    array_push($warnings, ...$fallback->warnings);
                 } else {
                     $dropped[$key] = true;
                     $warnings[] = "part '{$key}': unusable generated markup; {$warningContext}"
@@ -236,13 +256,88 @@ final class SectionsStep implements Step
         // leaves pages.json byte-for-byte unchanged. Pruning can change each
         // survivor's positional role, so recompute roles after the cut.
         $pages = self::pruneDroppedSections($pages, $dropped, $warnings);
-        $pages = self::repairedPages($pages, $warnings);
+        $pages = self::repairedPages($pages, $repairs);
+
+        $partBytes = self::partBytes($files);
+        $facts = AboveFoldPartFacts::inspect($pages, $partBytes, $initialContract);
+        $delivery = AboveFoldContract::finalizeDelivery($initialContract, $pages, $facts);
+
+        // A failed/protection-less opening can invalidate an initially safe
+        // overlay relation. Commit matching header bytes with the narrowed
+        // delivery contract; never leave the next step to discover a contract
+        // describing a different page top.
+        if (($delivery['header']['mode'] ?? null) !== ($initialContract['header']['mode'] ?? null)
+            || ($delivery['header']['archetype'] ?? null) !== ($initialContract['header']['archetype'] ?? null)
+        ) {
+            $fallback = HeaderFallback::render(
+                $jobs['header']['input'],
+                $delivery,
+                'initial header assignment became incompatible with delivered opening markup',
+            );
+            $files['parts/header.html'] = $fallback->markup;
+            array_push($repairs, ...$fallback->repairs);
+            array_push($warnings, ...$fallback->warnings);
+            $partBytes = self::partBytes($files);
+            $facts = AboveFoldPartFacts::inspect($pages, $partBytes, $delivery);
+            $delivery = AboveFoldContract::finalizeDelivery($delivery, $pages, $facts);
+        }
+
+        if (is_array($initialContract['primary_action'] ?? null)
+            && !is_array($delivery['primary_action'] ?? null)
+        ) {
+            $heroPart = (string) ($initialContract['hero_part'] ?? '');
+            $heroRel = 'parts/' . $heroPart . '.html';
+            if ($heroPart !== '' && isset($files[$heroRel])) {
+                $removedAction = GeneratedMarkup::withoutPrimaryAction(
+                    $files[$heroRel],
+                    $initialContract['primary_action'],
+                    $heroPart,
+                );
+                $files[$heroRel] = $removedAction['markup'];
+                array_push($repairs, ...$removedAction['repairs']);
+                array_push($warnings, ...$removedAction['warnings']);
+            }
+        }
+        $pages = self::synchronizePrimaryAction($pages, $initialContract, $delivery, $warnings);
+        array_push($warnings, ...AboveFoldContract::warningRows($delivery));
         $plan['pages'] = $pages;
         foreach ($files as $rel => $markup) {
             $project->writeText('theme/' . $rel, $markup . "\n");
         }
         $project->writeJson('pages.json', $plan);
+        $project->writeJson('aboveFold.json', $delivery);
         $project->addWarnings($this->id(), $warnings);
+        $project->writeText('logs/sections.txt', $repairs === []
+            ? "No semantics-preserving unit repairs were needed.\n"
+            : implode("\n", array_map(
+                static fn (mixed $repair): string => is_string($repair)
+                    ? $repair
+                    : (string) json_encode(
+                        $repair,
+                        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+                    ),
+                $repairs,
+            )) . "\n");
+        if ($repairs !== []) {
+            Narrator::write('    sections: ' . count($repairs) . " successful repair(s); details in logs/sections.txt\n");
+        }
+    }
+
+    private static function assertOpeningRoot(string $markup, string $part): void
+    {
+        $document = BlockMarkup::parse($markup);
+        $roots = array_values(array_filter(
+            $document->indices(),
+            static fn (int $index): bool => $document->parent($index) === null,
+        ));
+        if (count($roots) !== 1
+            || $document->name($roots[0]) !== 'group'
+            || $document->endOffset($roots[0]) === null
+        ) {
+            throw new \RuntimeException(
+                "contract-critical opening '{$part}' must deliver one complete top-level wp:group"
+            );
+        }
     }
 
     /**
@@ -353,6 +448,51 @@ final class SectionsStep implements Step
         return $pages;
     }
 
+    /** @param array<string,string> $files @return array<string,string> */
+    private static function partBytes(array $files): array
+    {
+        $parts = [];
+        foreach ($files as $rel => $markup) {
+            if (!str_starts_with($rel, 'parts/') || !str_ends_with($rel, '.html')) {
+                continue;
+            }
+            $parts[substr($rel, strlen('parts/'), -strlen('.html'))] = $markup;
+        }
+        return $parts;
+    }
+
+    /**
+     * Keep pages.json honest when a generated/fallback hero did not deliver
+     * its validated primary action. Only the front opening is touched.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    private static function synchronizePrimaryAction(
+        array $pages,
+        array $initial,
+        array $delivery,
+        array &$warnings,
+    ): array {
+        if (!is_array($initial['primary_action'] ?? null) || is_array($delivery['primary_action'] ?? null)) {
+            return $pages;
+        }
+        foreach ($pages as $pageIndex => $page) {
+            if (($page['front'] ?? false) !== true || !is_array($page['sections'][0] ?? null)) {
+                continue;
+            }
+            $authored = $pages[$pageIndex]['sections'][0]['primary_action'] ?? null;
+            $pages[$pageIndex]['sections'][0]['primary_action'] = null;
+            $warnings[] = "file='pages.json'; path=\"pages[{$pageIndex}].sections[0].primary_action\"; authored="
+                . (string) json_encode($authored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                . '; delivered=null; disposition=the delivered hero did not preserve the authoritative visitor-facing '
+                . 'action, so plan and contract presence were atomically removed instead of claiming dead UI';
+            break;
+        }
+        return $pages;
+    }
+
     /**
      * Ask each job's unit to render its self-contained LLM request.
      *
@@ -366,6 +506,20 @@ final class SectionsStep implements Step
             $requests[$key] = $job['unit']->request($job['input']);
         }
         return $requests;
+    }
+
+    /** @param list<string> $notes @return list<string> */
+    private static function batchWarnings(string $file, array $notes): array
+    {
+        return array_map(static function (string $note) use ($file): string {
+            if (str_contains($note, "file='")) {
+                return $note;
+            }
+            return "file='theme/{$file}'; block='generated response'; authored="
+                . (string) json_encode($note, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                . '; delivered=\"best normalized partial response\"; disposition=abnormally terminated '
+                . 'generation was retained only after bounded regeneration and per-unit normalization';
+        }, $notes);
     }
 
     /**
@@ -400,14 +554,14 @@ final class SectionsStep implements Step
     /**
      * Deterministically repair plan drift in every page's section list: a
      * section role is a pure function of its position, and a missing semantic
-     * type has a safe generic default. Each repair is noted in $warnings for
-     * warnings.json. Pure — unit-testable.
+     * type has a safe generic default. Each semantics-preserving correction is
+     * reported through $repairs, never promoted into warnings.json.
      *
      * @param array<int,array<string,mixed>> $pages
-     * @param list<string> $warnings appended to in place
+     * @param list<string> $repairs appended to in place
      * @return array<int,array<string,mixed>>
      */
-    public static function repairedPages(array $pages, array &$warnings = []): array
+    public static function repairedPages(array $pages, array &$repairs = []): array
     {
         foreach ($pages as $p => $page) {
             $sections = (array) ($page['sections'] ?? []);
@@ -419,14 +573,14 @@ final class SectionsStep implements Step
                 $expectedRole = SectionRole::forPosition($i, count($sections));
                 if ($role !== $expectedRole) {
                     $slug = (string) ($section['slug'] ?? "section-{$i}");
-                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
+                    $repairs[] = "page '{$page['slug']}' section '{$slug}': "
                         . "role '{$role}' corrected to '{$expectedRole}' (derived from its position in the plan)";
                     $sections[$i]['role'] = $expectedRole;
                 }
                 $type = trim((string) ($section['type'] ?? ''));
                 if ($type === '') {
                     $slug = (string) ($section['slug'] ?? "section-{$i}");
-                    $warnings[] = "page '{$page['slug']}' section '{$slug}': "
+                    $repairs[] = "page '{$page['slug']}' section '{$slug}': "
                         . "missing semantic type; defaulted to 'content'";
                     $sections[$i]['type'] = 'content';
                 }
@@ -442,15 +596,20 @@ final class SectionsStep implements Step
      * consistent plan. run() passes its in-memory repaired pages here and
      * commits them only after every generated response has been normalized.
      *
-     * @param list<string> $warnings appended to in place
+     * @param list<string> $repairs appended to in place
      * @param array<int,array<string,mixed>>|null $sourcePages
-     * @return array<string,array{unit:MarkupUnit,input:array<mixed>,file:string}>
+     * @return array{
+     *   jobs:array<string,array{unit:MarkupUnit,input:array<mixed>,file:string,opening?:bool,front_hero?:bool}>,
+     *   contract:array<string,mixed>
+     * }
      */
-    private function jobs(Project $project, array &$warnings = [], ?array $sourcePages = null): array
+    private function jobPlan(Project $project, array &$repairs = [], ?array $sourcePages = null): array
     {
-        $pages = self::repairedPages($sourcePages ?? self::pages($project), $warnings);
+        $pages = self::repairedPages($sourcePages ?? self::pages($project), $repairs);
         $siteSpec = $project->readText('siteSpec.json');
+        $siteSpecData = $project->readJson('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
+        $blueprint = DesignDirectionStep::heroBlueprintFor($project);
 
         $common = [
             'site_spec'        => $siteSpec,
@@ -460,24 +619,29 @@ final class SectionsStep implements Step
             'site_pages'       => PagePlanStep::sitePagesList($pages),
         ];
 
-        // Chrome is briefed on both ends of the FRONT page: the header receives
-        // the opening hero, while the footer receives the actual final section.
-        // Each chrome archetype is also carried into the neighboring section's
-        // brief so content and seam ownership are agreed from both sides.
-        //
-        // The header mode is the shared top-seam contract: both sides derive it
-        // from the same pure headerMode(), so the header's archetype assignment
-        // and every hero section's brief compose deliberately instead of each
-        // guessing. headerAssignment() derives it again from the canvas rather
-        // than taking it as an argument, which keeps its signature usable from
-        // tests.
-        $canvas = DesignDirectionStep::canvasFor($project);
-        $headerMode = self::headerMode($pages, $canvas);
-        // Fixed for the whole build, so the hero brief is built once, not once
-        // per hero section.
-        $headerContract = self::headerContract($headerMode);
-        $frontSections = self::frontPage($pages)['sections'];
+        // Select the footer first: a singleton hero's lower edge must name the
+        // actual coda rather than pretending a detail section exists. The one
+        // AboveFoldContract then owns the complete top relation; no unit
+        // derives mode or header archetype independently.
+        $frontSections = (array) (self::frontPage($pages)['sections'] ?? []);
         $footerArchetype = self::footerArchetype($pages, $siteSpec, $designDirection);
+        $contract = AboveFoldContract::resolve(
+            pages: $pages,
+            blueprint: $blueprint,
+            canvas: DesignDirectionStep::canvasFor($project),
+            themeContext: $project->readJson('theme/theme.json'),
+            siteContext: [
+                'stable_id' => (string) ($siteSpecData['slug'] ?? $project->slug()),
+                'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
+                'page_count' => count($pages),
+            ],
+            footerContext: [
+                'archetype' => $footerArchetype,
+                'surface' => FooterComposition::surface($footerArchetype),
+            ],
+            forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
+        );
+        $frontContract = AboveFoldContract::frontContract($contract);
         $jobs = [
             'header' => [
                 'unit'  => $this->headerUnit,
@@ -485,7 +649,7 @@ final class SectionsStep implements Step
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
                     'nav_rule'   => self::navRuleFor(count($pages)),
-                    'archetype_assignment' => self::headerAssignment($pages, $canvas),
+                    'above_fold_contract' => $contract,
                 ],
                 'file'  => 'parts/header.html',
             ],
@@ -506,31 +670,50 @@ final class SectionsStep implements Step
             // A compact outline of THIS page, so each section knows its place.
             $outline = self::outline($sections);
             foreach ($sections as $i => $section) {
+                $frontHero = self::isFrontHero($page, $i);
+                $opening = $i === 0;
                 $input = $common + [
                     'outline'   => $outline,
                     'page'      => [
                         'slug'  => (string) ($page['slug'] ?? ''),
                         'title' => (string) ($page['title'] ?? ''),
                         'path'  => (string) ($page['path'] ?? '/'),
+                        'front' => (bool) ($page['front'] ?? false),
                     ],
                     'section'   => $section,
                     'neighbors' => self::neighbors($sections, $i, $footerArchetype),
-                    // Only page-opening sections share the viewport with the
-                    // header; everything below scrolls in under its own rules.
-                    'header_contract' => (string) ($section['role'] ?? '') === SectionRole::HERO
-                        ? $headerContract
+                    'header_contract' => $opening
+                        ? ($frontHero
+                            ? $frontContract
+                            : AboveFoldContract::openingHeaderContract(
+                                $contract,
+                                (string) ($page['slug'] ?? ''),
+                            ))
                         : '',
                 ];
-                $key = $this->sectionUnit->key($input);
+                $unit = $frontHero ? $this->heroUnit : $this->sectionUnit;
+                if ($frontHero) {
+                    $input['hero_blueprint'] = $blueprint;
+                    $input['above_fold_contract'] = $contract;
+                }
+                $key = $unit->key($input);
                 $jobs[$key] = [
-                    'unit'  => $this->sectionUnit,
+                    'unit'  => $unit,
                     'input' => $input,
                     'file'  => 'parts/' . $key . '.html',
+                    'opening' => $opening,
+                    'front_hero' => $frontHero,
                 ];
             }
         }
 
-        return $jobs;
+        return ['jobs' => $jobs, 'contract' => $contract];
+    }
+
+    /** The portable routing rule: position and front flag, never mutable role prose. */
+    public static function isFrontHero(array $page, int $sectionIndex): bool
+    {
+        return ($page['front'] ?? false) === true && $sectionIndex === 0;
     }
 
     /**
@@ -661,15 +844,15 @@ final class SectionsStep implements Step
     }
 
     /**
-     * A plain-text brief of the FRONT page's planned hero section, so
-     * the header prompt can pick the archetype that fits what it will sit
-     * directly above — or float on top of. Pure — unit-testable.
+     * A plain-text brief of the front page's positional opening. The same
+     * `page.front && index === 0` rule routes HeroUnit, so header context cannot
+     * drift back to mutable semantic-role selection. Pure — unit-testable.
      *
      * @param array<int,array<string,mixed>> $sections
      */
     public static function heroBrief(array $sections): string
     {
-        $hero = self::heroSection($sections);
+        $hero = $sections[0] ?? null;
         if (!is_array($hero)) {
             return '(No hero section planned.)';
         }
@@ -729,6 +912,20 @@ final class SectionsStep implements Step
                 $lines[] = "{$label}: {$value}";
             }
         }
+        $action = $final['primary_action'] ?? null;
+        if (is_array($action)
+            && is_string($action['label'] ?? null)
+            && is_string($action['destination'] ?? null)
+            && trim($action['label']) !== ''
+            && trim($action['destination']) !== ''
+        ) {
+            $lines[] = 'Primary action label (authoritative): ' . trim($action['label']);
+            $lines[] = 'Primary action destination: ' . trim($action['destination']);
+            $intent = trim((string) ($action['intent'] ?? ''));
+            if ($intent !== '') {
+                $lines[] = 'Primary action intent (planning context, never button copy): ' . $intent;
+            }
+        }
         return $lines === [] ? '(No final section planned.)' : implode("\n", $lines);
     }
 
@@ -765,55 +962,6 @@ final class SectionsStep implements Step
     }
 
     /**
-     * The planned section with the structural hero ROLE — the semantic type is
-     * free-form and a `type: hero` elsewhere on the page must not win. No
-     * fallback: a plan without a hero role has no hero.
-     *
-     * @param array<int,array<string,mixed>> $sections
-     * @return array<string,mixed>|null
-     */
-    private static function heroSection(array $sections): ?array
-    {
-        foreach ($sections as $s) {
-            if ((string) ($s['role'] ?? '') === SectionRole::HERO) {
-                return $s;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Whether the planned hero is an image-led cover (the composition an
-     * overlay header can float on and read against).
-     *
-     * @param array<int,array<string,mixed>> $sections
-     */
-    private static function imageLedHero(array $sections): bool
-    {
-        $hero = self::heroSection($sections);
-        return is_array($hero) && (
-            (string) ($hero['layout_archetype'] ?? '') === 'full-bleed-cover'
-            || (string) ($hero['background'] ?? '') === 'image'
-        );
-    }
-
-    /**
-     * The deterministic top-of-page contract (BIGR-735): decided once from the
-     * plan, then injected into BOTH the header prompt and every hero-section
-     * prompt, so the two parts compose instead of colliding blind.
-     *
-     * `overlay` — the header floats transparently over the hero — requires an
-     * image-led, full-bleed front hero (never a "framed" canvas, whose mat
-     * would sit under the overlay instead of the image), and because the
-     * header renders on EVERY page, every page's opening section must read as
-     * a dark band (an `image` background is dimmed to 40%+ by the cover rules;
-     * a `contrast` band is dark by definition) so the one light text color the
-     * overlay commits to reads everywhere. Anything else is `stacked`.
-     * Pure — unit-testable.
-     *
-     * @param array<int,array<string,mixed>> $pages
-     */
-    /**
      * The section a page opens on — the only one that shares the viewport with
      * the header, and so the one both sides of the seam ask about.
      *
@@ -824,135 +972,5 @@ final class SectionsStep implements Step
     {
         $first = ((array) ($page['sections'] ?? []))[0] ?? null;
         return is_array($first) ? $first : null;
-    }
-
-    public static function headerMode(array $pages, string $canvas = ''): string
-    {
-        $front = self::frontPage($pages);
-        if (!self::imageLedHero((array) ($front['sections'] ?? [])) || $canvas === 'framed') {
-            return self::MODE_STACKED;
-        }
-        foreach ($pages as $page) {
-            $first = self::openingSection($page);
-            $background = is_array($first) ? (string) ($first['background'] ?? '') : '';
-            if (!in_array($background, ['image', 'contrast'], true)) {
-                return self::MODE_STACKED;
-            }
-        }
-        return self::MODE_OVERLAY;
-    }
-
-    /**
-     * The header archetypes compatible with the header mode and the site's
-     * shape. In overlay mode the pool IS minimal-overlay: the mode exists so
-     * that an image-led full-bleed hero reliably gets the floating header the
-     * theme's `.header-overlay` CSS was written for, instead of losing a
-     * random draw to an opaque bar (the audited projects shipped that dead CSS
-     * 6 times out of 6). In stacked mode:
-     *  - minimal-overlay is out (nothing image-led to float on),
-     *  - split-nav needs pages to split, so a one-page site drops it,
-     *  - oversized-wordmark is out when the plan has a hero: every planned
-     *    hero opens with a display-scale H1, and a display-scale wordmark
-     *    ~100px above it is two competing mastheads,
-     *  - centered-masthead (2-3 stacked centered rows, the tallest archetype)
-     *    is out when the hero is image-led: stacking it above a viewport-scale
-     *    cover pushes the hero's content below the fold.
-     * Pure — unit-testable.
-     *
-     * @param array<int,array<string,mixed>> $pages
-     * @return string[]
-     */
-    public static function headerArchetypePool(array $pages, string $canvas = ''): array
-    {
-        if (self::headerMode($pages, $canvas) === self::MODE_OVERLAY) {
-            return [self::OVERLAY_ARCHETYPE];
-        }
-        $frontSections = (array) (self::frontPage($pages)['sections'] ?? []);
-        $excluded = [self::OVERLAY_ARCHETYPE];
-        if (count($pages) <= 1) {
-            $excluded[] = self::SPLIT_NAV_ARCHETYPE;
-        }
-        if (self::heroSection($frontSections) !== null) {
-            $excluded[] = self::OVERSIZED_ARCHETYPE;
-        }
-        if (self::imageLedHero($frontSections)) {
-            $excluded[] = self::MASTHEAD_ARCHETYPE;
-        }
-        return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
-    }
-
-    /**
-     * The archetype assignment injected into header.md: the forced archetype
-     * (HEADER_ARCHETYPE env var), the contract-mandated minimal-overlay in
-     * overlay mode, or two random picks from the compatible pool for the model
-     * to choose between. Randomizing the shortlist in code is what actually
-     * spreads header variety across builds — offered the full menu, the model
-     * gravitates to the same one or two archetypes every time.
-     *
-     * @param array<int,array<string,mixed>> $pages
-     */
-    public static function headerAssignment(array $pages, string $canvas = ''): string
-    {
-        $forced = Env::get(self::ARCHETYPE_ENV);
-        if ($forced !== null && $forced !== '') {
-            if (!in_array($forced, self::HEADER_ARCHETYPES, true)) {
-                throw new \RuntimeException(sprintf(
-                    'sections: %s=%s is not a header archetype (use one of: %s)',
-                    self::ARCHETYPE_ENV,
-                    $forced,
-                    implode(', ', self::HEADER_ARCHETYPES),
-                ));
-            }
-            return "ASSIGNED HEADER ARCHETYPE for this build: **{$forced}**. Build exactly this one.";
-        }
-
-        $pool = self::headerArchetypePool($pages, $canvas);
-        if ($pool === [self::OVERLAY_ARCHETYPE]) {
-            return 'ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**. '
-                . 'The planned hero is an image-led, full-bleed cover and every page opens on a dark band, '
-                . 'so the header floats over the imagery instead of stacking above it. Build exactly this one; '
-                . 'its top-level wp:group MUST carry "className":"header-overlay" (a deterministic pass verifies it). '
-                . 'Every other catalog entry below is reference only and is OFF the table for this build.';
-        }
-        $first = array_splice($pool, random_int(0, count($pool) - 1), 1)[0];
-        $second = $pool[random_int(0, count($pool) - 1)];
-        return "ASSIGNED HEADER ARCHETYPES for this build: **{$first}** or **{$second}**. "
-            . 'Build EXACTLY ONE of these two — whichever serves the DESIGN DIRECTION and the planned hero better. '
-            . 'Every other catalog entry below is reference only and is OFF the table for this build. '
-            . 'This header STACKS as an opaque bar directly above the hero, inside the same first viewport '
-            . '(the hero is told the same thing and caps its cover height for you) — keep the bar to ONE compact row.';
-    }
-
-    /**
-     * The header-side contract rendered into every hero-role section brief
-     * ({{header_contract}} in section.md), so the section composes with the
-     * header that will render above — or float on — it. The header renders on
-     * every page, so every page's opening section gets the same contract.
-     * Pure — unit-testable.
-     */
-    public static function headerContract(string $mode): string
-    {
-        if ($mode === self::MODE_OVERLAY) {
-            return "HEADER CONTRACT (this is a page-opening section):\n"
-                . "The site header floats TRANSPARENTLY over the very top of this section — a slim overlay bar "
-                . "(~60px) with no background of its own. Compose for it:\n"
-                . "- The cover's dim/gradient protection MUST reach the very top edge of the image: the header's "
-                . "text sits on your top ~80px, not only behind your headline.\n"
-                . "- A full-viewport cover (\"minHeight\":90-100 with \"minHeightUnit\":\"vh\") is welcome — nothing "
-                . "opaque stacks above it.\n"
-                . "- Do NOT reserve blank space for the header and do NOT stack a padded page-background band above "
-                . "the cover: the image meets the top of the viewport.";
-        }
-        return "HEADER CONTRACT (this is a page-opening section):\n"
-            . "An OPAQUE site header (one compact bar, roughly 80-100px tall) is stacked directly above this "
-            . "section, inside the same first viewport. Compose for the space that remains:\n"
-            . "- Cap any cover at \"minHeight\":" . HeaderHeroStep::STACKED_COVER_VH . " with "
-            . "\"minHeightUnit\":\"vh\" or less — header + cover must fit ~100vh together (a deterministic "
-            . "pass lowers taller covers to " . HeaderHeroStep::STACKED_COVER_VH . "vh).\n"
-            . "- The headline and any CTA must land inside the first viewport: on a cover of 70vh or more, avoid a "
-            . "bottom-anchored \"contentPosition\" — center or upper placement keeps the masthead above the fold.\n"
-            . "- Do not open with a tall band of bare page background above your first visual: the header already "
-            . "spent ~100px of the viewport, so keep the section's own top spacing at or below the md step when the "
-            . "band above it shares its background.";
     }
 }

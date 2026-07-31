@@ -65,6 +65,55 @@ function assert_throws(callable $fn, string $msg = ''): void
     throw new RuntimeException('assert_throws failed: no exception' . ($msg !== '' ? ": {$msg}" : ''));
 }
 
+/** Complete delivery-phase fixture for portable header/hero unit contracts. */
+function test_above_fold_contract(
+    string $recipe = 'typographic-poster',
+    string $headerArchetype = 'standard-row',
+    ?array $action = null,
+): array {
+    $blueprint = \Automattic\SiteBuild\HeroBlueprint::defaultFor($recipe);
+    $projection = \Automattic\SiteBuild\HeroComposition::planProjection($blueprint);
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'title' => 'Hero',
+            'layout_archetype' => $projection['layout_archetype'],
+            'background' => $projection['default_background'],
+            'primary_action' => $action,
+        ]],
+    ]];
+    return \Automattic\SiteBuild\AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'unit-contract', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        $headerArchetype,
+    );
+}
+
+/** Complete persisted design-direction fixture for steps that consume the hero blueprint. */
+function test_design_direction(string $recipe = 'cinematic-safe-zone', array $overrides = []): array
+{
+    return array_replace([
+        'title' => 'Test direction',
+        'description' => 'A clear, code-owned test direction.',
+        'canvas' => 'full-bleed',
+        'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor($recipe),
+    ], $overrides);
+}
+
+/** Persist the complete design-direction fixture without hiding artifact reads in production code. */
+function seed_test_design_direction(object $project, string $recipe = 'cinematic-safe-zone', array $overrides = []): void
+{
+    $project->writeJson('designDirection.json', test_design_direction($recipe, $overrides));
+}
+
 /** Run all registered tests, print results, return exit code. */
 function run_tests(): int
 {

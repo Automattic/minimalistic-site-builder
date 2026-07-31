@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\SectionRhythm;
 
 /** @param array<mixed> $attrs */
@@ -655,4 +657,39 @@ test('section rhythm patches the image cover wrapper style, not just its attribu
     assert_true(!array_key_exists('className', $coverAttrs), 'the rhythm-owned cover cannot overlap upward');
     assert_true(!str_contains($result['markups'][0], 'overlap-up'));
     assert_true(!str_contains($result['markups'][0], '12rem'));
+});
+
+test('every code-owned hero recipe has a section-rhythm-compatible root skeleton', function () {
+    foreach (HeroComposition::RECIPES as $recipe) {
+        $projection = HeroComposition::planProjection(HeroBlueprint::defaultFor($recipe));
+        $background = $projection['default_background'];
+        $inner = '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Title</h1><!-- /wp:heading -->';
+        if ($background === 'image') {
+            $inner = '<!-- wp:cover {"align":"full","dimRatio":50} -->'
+                . '<div class="wp-block-cover alignfull"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
+                . '<div class="wp-block-cover__inner-container">' . $inner . '</div></div><!-- /wp:cover -->';
+        }
+        $markup = sr_section([
+            'className' => 'hero-composition--' . $recipe,
+            'layout' => ['type' => 'constrained'],
+        ], $inner);
+
+        $result = SectionRhythm::rewrite([[
+            'slug' => 'hero',
+            'markup' => $markup,
+            'density' => 'standard',
+            'background' => $background,
+        ]]);
+
+        assert_eq([], $result['degradations'], "{$recipe} skeleton retains its intended rhythm mode");
+        assert_eq(
+            'hero-composition--' . $recipe,
+            sr_root_attrs($result['markups'][0])['className'] ?? null,
+        );
+        if ($background === 'image') {
+            assert_eq('var:preset|spacing|xl', sr_first_attrs($result['markups'][0], 'cover')['style']['spacing']['padding']['top']);
+        } else {
+            assert_eq('var:preset|spacing|xl', sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['top']);
+        }
+    }
 });
