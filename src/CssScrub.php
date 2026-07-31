@@ -356,7 +356,7 @@ final class CssScrub
         if ($decoded === null) {
             return false;
         }
-        $decoded = ltrim($decoded, " \t\r\n\f");
+        $decoded = ltrim($decoded, "\x00..\x20");
         return preg_match('/^(?:https?:|\\/\\/)/i', $decoded) === 1;
     }
 
