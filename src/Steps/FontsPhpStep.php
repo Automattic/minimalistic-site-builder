@@ -26,9 +26,6 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class FontsPhpStep implements Step
 {
-    /** Weights every build loads: body default + strong. Scanned weights add to these. */
-    private const BASE_WEIGHTS = [400, 700];
-
     /** Families that are system/web-safe or CSS generics — never enqueue these. */
     private const GENERIC = [
         'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui',
@@ -110,47 +107,10 @@ final class FontsPhpStep implements Step
     }
 
     /**
-     * Every font weight the build references, plus whether italics appear.
-     * Sources: theme.json fontWeight/fontStyle values anywhere (styles.elements.*,
-     * styles.blocks.*, top-level styles) and the generated markup's block
-     * attributes ("fontWeight":"300") and inline styles (font-weight:300).
-     * 400 and 700 are always included. Pure — unit-testable.
-     *
-     * @param array<mixed> $theme decoded theme.json
-     * @param string $markup concatenated parts/templates HTML
-     * @return array{0:int[],1:bool} ascending unique weights, italics used
-     */
-    public static function fontVariants(array $theme, string $markup): array
-    {
-        $weights = array_fill_keys(self::BASE_WEIGHTS, true);
-        $italic = false;
-
-        self::collectTypography($theme, $weights, $italic);
-
-        if (preg_match_all('/"fontWeight":\s*"?([1-9]00)"?/', $markup, $m) > 0) {
-            foreach ($m[1] as $w) {
-                $weights[(int) $w] = true;
-            }
-        }
-        if (preg_match_all('/font-weight:\s*([1-9]00)\b/i', $markup, $m) > 0) {
-            foreach ($m[1] as $w) {
-                $weights[(int) $w] = true;
-            }
-        }
-        if (preg_match('/"fontStyle":\s*"italic"|font-style:\s*italic/i', $markup) === 1) {
-            $italic = true;
-        }
-
-        $weights = array_keys($weights);
-        sort($weights);
-        return [$weights, $italic];
-    }
-
-    /**
      * Google-hosted family requirements from the generated theme, keyed by
-     * family name in theme.json order. Unlike fontVariants(), this keeps weights
-     * and italics attached to the family that uses them so validation/fallback do
-     * not accidentally let one family cover another family's variant.
+     * family name in theme.json order. Weights and italics stay attached to the
+     * family that uses them so validation/fallback do not accidentally let one
+     * family cover another family's variant.
      *
      * @param array<mixed> $theme decoded theme.json
      * @param array<mixed> $direction normalized designDirection.json
@@ -280,17 +240,6 @@ final class FontsPhpStep implements Step
                 );
             });
             PHP;
-    }
-
-    /**
-     * Unique Google-hostable family names from theme.json, first-seen order.
-     *
-     * @param array<mixed> $theme
-     * @return string[]
-     */
-    public static function googleFamilies(array $theme): array
-    {
-        return array_values(self::googleFamiliesBySlug($theme));
     }
 
     /** True when BundleFontsStep already shipped fontFace entries for this slug. */
@@ -751,29 +700,6 @@ final class FontsPhpStep implements Step
     {
         $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         return is_string($encoded) ? $encoded : get_debug_type($value);
-    }
-
-    /**
-     * Walk decoded theme.json collecting fontWeight / fontStyle:italic values
-     * wherever they appear.
-     *
-     * @param array<mixed> $node
-     * @param array<int,bool> $weights
-     */
-    private static function collectTypography(array $node, array &$weights, bool &$italic): void
-    {
-        foreach ($node as $key => $value) {
-            if (is_array($value)) {
-                self::collectTypography($value, $weights, $italic);
-                continue;
-            }
-            if ($key === 'fontWeight' && preg_match('/^[1-9]00$/', (string) $value) === 1) {
-                $weights[(int) $value] = true;
-            }
-            if ($key === 'fontStyle' && is_string($value) && strtolower($value) === 'italic') {
-                $italic = true;
-            }
-        }
     }
 
     /**

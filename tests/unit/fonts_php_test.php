@@ -33,32 +33,23 @@ function fp_project(array $fontFamilies, array $extraTheme = []): array
     return [$project, $tmp];
 }
 
-test('fontVariants always includes 400/700 and scans both sources', function () {
-    // No usage anywhere → the base set, upright only.
-    assert_eq([[400, 700], false], FontsPhpStep::fontVariants(['version' => 3], ''));
+test('fontRequirements scans theme.json values and block attributes', function () {
+    $theme = [
+        'settings' => ['typography' => ['fontFamilies' => [
+            ['slug' => 'body', 'fontFamily' => '"Lora", serif', 'name' => 'Body'],
+        ]]],
+        'styles' => [
+            // Numeric weights count; non-numeric ones ('bold') are ignored.
+            'blocks' => ['core/button' => ['typography' => ['fontWeight' => 600]]],
+            'elements' => ['cite' => ['typography' => ['fontStyle' => 'italic', 'fontWeight' => 'bold']]],
+        ],
+    ];
+    $markup = '<!-- wp:paragraph {"style":{"typography":{"fontWeight":"200"}}} -->'
+        . '<p>x</p><!-- /wp:paragraph -->';
 
-    // theme.json weights (numeric or string) + markup attributes and inline styles.
-    [$weights, $italic] = FontsPhpStep::fontVariants(
-        ['styles' => ['blocks' => ['core/button' => ['typography' => ['fontWeight' => 600]]]]],
-        '<!-- wp:paragraph {"style":{"typography":{"fontWeight":"200"}}} -->'
-        . '<p style="font-weight:900">x</p><!-- /wp:paragraph -->'
-    );
-    assert_eq([200, 400, 600, 700, 900], $weights);
-    assert_eq(false, $italic);
-
-    // Italic via theme.json fontStyle.
-    [, $italic] = FontsPhpStep::fontVariants(
-        ['styles' => ['elements' => ['cite' => ['typography' => ['fontStyle' => 'italic']]]]],
-        ''
-    );
-    assert_eq(true, $italic);
-
-    // Non-numeric weights are ignored (the base set still covers them).
-    [$weights] = FontsPhpStep::fontVariants(
-        ['styles' => ['typography' => ['fontWeight' => 'bold']]],
-        ''
-    );
-    assert_eq([400, 700], $weights);
+    assert_eq([
+        'Lora' => ['weights' => [200, 400, 600, 700], 'italic' => true],
+    ], FontsPhpStep::fontRequirements($theme, $markup));
 });
 
 test('googleFontsUrl builds the css2 axis forms', function () {
