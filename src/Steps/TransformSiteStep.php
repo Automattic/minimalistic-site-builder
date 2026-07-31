@@ -573,6 +573,7 @@ final class TransformSiteStep implements Step
             $sections[] = [
                 'source' => $source,
                 'selector' => $rawSlug !== '' ? "#{$rawSlug}" : "{$element->tagName}:nth-child(" . ($index + 1) . ')',
+                'source_selector' => self::sourceSelector($element),
                 'slug' => $slug,
                 'section_slug' => $slug,
                 'title' => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
@@ -606,6 +607,7 @@ final class TransformSiteStep implements Step
         return [
             'source' => $source,
             'selector' => $area,
+            'source_selector' => self::sourceSelector($element),
             'slug' => $area,
             'section_slug' => $area,
             'title' => ucfirst($area),
@@ -627,8 +629,20 @@ final class TransformSiteStep implements Step
             }
             $source = 'design/' . basename((string) ($fallback['source'] ?? ''));
             $html = self::fallbackHtml($fallback);
+            $selector = is_string($fallback['selector'] ?? null)
+                ? $fallback['selector']
+                : (is_string($fallback['source_selector'] ?? null) ? $fallback['source_selector'] : '');
             foreach ($fragments as $key => $fragment) {
-                if ($fragment['source'] !== $source || $html === '' || !str_contains((string) $fragment['html'], $html)) {
+                $prefix = (string) ($fragment['source_selector'] ?? '');
+                $ownsSelector = $selector !== ''
+                    && $prefix !== ''
+                    && ($selector === $prefix || str_starts_with($selector, $prefix . ' > '));
+                if (
+                    $fragment['source'] !== $source
+                    || !$ownsSelector
+                    || $html === ''
+                    || !str_contains((string) $fragment['html'], $html)
+                ) {
                     continue;
                 }
                 $located[$key][] = $fallback;
@@ -636,6 +650,29 @@ final class TransformSiteStep implements Step
             }
         }
         return $located;
+    }
+
+    /**
+     * Compiler-identical selector for matching one bundle diagnostic back to
+     * its owning source fragment. IDs are deliberately irrelevant: vendored
+     * fallback diagnostics use tag + nth-of-type paths.
+     */
+    private static function sourceSelector(DOMElement $element): string
+    {
+        $parts = [];
+        $current = $element;
+        while ($current instanceof DOMElement && strtolower($current->tagName) !== 'body') {
+            $tagName = strtolower($current->tagName);
+            $index = 1;
+            for ($sibling = $current->previousSibling; $sibling instanceof DOMNode; $sibling = $sibling->previousSibling) {
+                if ($sibling instanceof DOMElement && strtolower($sibling->tagName) === $tagName) {
+                    $index++;
+                }
+            }
+            array_unshift($parts, $tagName . ':nth-of-type(' . $index . ')');
+            $current = $current->parentNode instanceof DOMElement ? $current->parentNode : null;
+        }
+        return implode(' > ', $parts);
     }
 
     /** @param array<int,array<string,mixed>> $fallbacks */

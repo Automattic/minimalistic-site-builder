@@ -169,6 +169,32 @@ test('transform-site repairs each unsupported diagnostic once in one batch', fun
     transform_site_cleanup($tmp);
 });
 
+test('transform-site matches identical unsupported HTML to its exact sibling fragment', function () {
+    [$project, $llm, $tmp] = transform_site_fixture(
+        '<!doctype html><html><body><header><p>Header</p></header><main>'
+        . '<section id="first"><dialog>SAME</dialog><p>FIRST-SIBLING</p></section>'
+        . '<section id="second"><dialog>SAME</dialog><p>SECOND-SIBLING</p></section>'
+        . '</main><footer><p>Footer</p></footer></body></html>',
+    );
+    $llm->queueText('<div><p>FIRST-REPAIRED</p></div>');
+    $llm->queueText('<div><p>SECOND-REPAIRED</p></div>');
+
+    transform_site_run($project, $llm);
+
+    assert_eq(1, $llm->completeBatchCalls);
+    assert_eq(2, count($llm->calls));
+    $first = $project->readText('theme/parts/page-home--first.html');
+    $second = $project->readText('theme/parts/page-home--second.html');
+    assert_contains('FIRST-REPAIRED', $first);
+    assert_contains('FIRST-SIBLING', $first);
+    assert_true(!str_contains($first, 'SECOND-REPAIRED'));
+    assert_contains('SECOND-REPAIRED', $second);
+    assert_contains('SECOND-SIBLING', $second);
+    assert_true(!str_contains($second, 'FIRST-REPAIRED'));
+    assert_eq([], $project->readJson(TransformArtifacts::REPORT)['dropped_fragments']);
+    transform_site_cleanup($tmp);
+});
+
 test('transform-site repair budget drops only exhausted fragment and reports actionable context', function () {
     [$project, $llm, $tmp] = transform_site_fixture(
         '<!doctype html><html><body><header><p>Header</p></header><main>'
