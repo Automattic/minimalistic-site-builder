@@ -3,15 +3,15 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Tests;
 
-use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\FinishReasonAwareLlm;
 
 /**
  * Test double for Llm. Returns queued canned responses (FIFO) and records the
  * prompts/options it received so tests can assert on what a step sent.
  */
-final class FakeLlm implements Llm
+final class FakeLlm implements FinishReasonAwareLlm
 {
-    /** @var string[] */
+    /** @var list<array{text:string,finish_reason:?string}> */
     private array $textQueue = [];
     /** @var array<int,array<mixed>> */
     private array $jsonQueue = [];
@@ -21,6 +21,7 @@ final class FakeLlm implements Llm
     public int $completeJsonCalls = 0;
     public int $completeBatchCalls = 0;
     public int $completeJsonBatchCalls = 0;
+    private ?string $lastFinishReason = null;
     /** @var array<array-key,list<string>> keyed notes returned with the next raw-text batch */
     public array $batchNotes = [];
 
@@ -34,9 +35,9 @@ final class FakeLlm implements Llm
      */
     public array $failPromptSubstrings = [];
 
-    public function queueText(string $text): void
+    public function queueText(string $text, ?string $finishReason = null): void
     {
-        $this->textQueue[] = $text;
+        $this->textQueue[] = ['text' => $text, 'finish_reason' => $finishReason];
     }
 
     /** @param array<mixed> $data */
@@ -47,6 +48,7 @@ final class FakeLlm implements Llm
 
     public function complete(string $prompt, array $opts = []): string
     {
+        $this->lastFinishReason = null;
         $this->completeCalls++;
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
         if ($this->shouldFail($prompt)) {
@@ -55,7 +57,14 @@ final class FakeLlm implements Llm
         if ($this->textQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued text response');
         }
-        return array_shift($this->textQueue);
+        $response = array_shift($this->textQueue);
+        $this->lastFinishReason = $response['finish_reason'];
+        return $response['text'];
+    }
+
+    public function lastFinishReason(): ?string
+    {
+        return $this->lastFinishReason;
     }
 
     public function completeJson(string $prompt, array $opts = []): array
@@ -117,7 +126,7 @@ final class FakeLlm implements Llm
             if ($this->textQueue === []) {
                 throw new \RuntimeException('FakeLlm: no queued text response');
             }
-            $out[$key] = array_shift($this->textQueue);
+            $out[$key] = array_shift($this->textQueue)['text'];
         }
         $notes = $this->batchNotes;
         $this->batchNotes = [];
