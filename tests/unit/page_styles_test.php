@@ -763,6 +763,50 @@ test('site CSS path scrubs every slash-backslash authority pair and keeps a sing
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path recovers after a malformed string before a later remote image string', function () {
+    [$project, $tmp] = ps_project('builder_ps_bad_string_recovery_');
+    $base = $project->readText('theme/style.css');
+    $malformed = '.broken{--token:"unterminated' . "\n" . ';color:red}';
+    $declaration = 'background-image:image-set("https://evil.example/after-bad-string.png" 1x);';
+    $safe = '.note::before{content:"https://x";display:block}';
+    $siteCss = $malformed . '.later{' . $declaration . 'display:grid}' . $safe;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $expected = $base . $malformed . '.later{display:grid}' . $safe;
+    $style = $project->readText('theme/style.css');
+    assert_true(
+        !str_contains($style, 'https://evil.example/after-bad-string.png'),
+        'later remote bytes never reach theme/style.css'
+    );
+    assert_eq(strlen($expected), strlen($style), 'malformed and safe merged byte length retained');
+    assert_eq(hash('sha256', $expected), hash('sha256', $style), 'malformed and safe merged byte hash retained');
+    assert_eq($expected, $style, 'malformed bytes and later safe siblings retained exactly');
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+    $authored = json_encode(
+        $declaration,
+        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+    );
+    assert_true(is_string($authored));
+    assert_eq(
+        [
+            'source=design/site.css; authored_value=' . $authored
+                . '; delivered_value=removed; disposition=removed_external_url',
+        ],
+        $project->readJson('warnings.json')['page-styles'] ?? [],
+        'one exact actionable warning for the later remote declaration'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(

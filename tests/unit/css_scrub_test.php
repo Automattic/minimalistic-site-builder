@@ -435,6 +435,39 @@ test('css scrub never carries an unclosed image function across a rule boundary'
     assert_eq([], $result['removals']);
 });
 
+foreach (['LF' => "\n", 'CR' => "\r", 'FF' => "\f"] as $label => $terminator) {
+    test("css scrub recovers after raw {$label} in a string before a later remote image string", function () use ($label, $terminator): void {
+        $malformed = '.broken{--token:"unterminated' . $terminator . ';color:red}';
+        $declaration = 'background-image:image-set("https://evil.example/after-bad-string.png" 1x);';
+        $safe = '.note::before{content:"https://x";display:block}';
+        $css = $malformed . '.later{' . $declaration . 'display:grid}' . $safe;
+        $expected = $malformed . '.later{display:grid}' . $safe;
+
+        $result = CssScrub::scrub($css);
+
+        assert_eq(strlen($expected), strlen($result['css']), "{$label} retained byte length");
+        assert_eq(hash('sha256', $expected), hash('sha256', $result['css']), "{$label} retained byte hash");
+        assert_eq($expected, $result['css'], "{$label} malformed bytes and safe siblings retained");
+        assert_eq(1, count($result['removals']), $label);
+        assert_eq($declaration, $result['removals'][0]['authored_value'], $label);
+        assert_eq('removed_external_url', $result['removals'][0]['disposition'], $label);
+    });
+}
+
+foreach (['LF' => "\n", 'CR' => "\r", 'FF' => "\f"] as $label => $terminator) {
+    test("css scrub does not carry raw {$label} in a malformed string into later safe content", function () use ($terminator): void {
+        $css = '.broken{--token:"unterminated' . $terminator . ';color:red}'
+            . '.note::before{content:"https://x";display:block}';
+
+        $result = CssScrub::scrub($css);
+
+        assert_eq(strlen($css), strlen($result['css']));
+        assert_eq(hash('sha256', $css), hash('sha256', $result['css']));
+        assert_eq($css, $result['css']);
+        assert_eq([], $result['removals']);
+    });
+}
+
 test('css scrub output and report are idempotent and byte stable', function (): void {
     $css = '@import "https://bad.example/x.css";'
         . '.hero{background:url(https://bad.example/x.png);color:red}'
