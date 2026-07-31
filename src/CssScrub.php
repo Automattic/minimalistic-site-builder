@@ -136,16 +136,33 @@ final class CssScrub
     {
         $length = strlen($css);
         $parentheses = 0;
+        $brackets = 0;
 
         while ($offset < $length) {
             if (self::startsComment($css, $offset)) {
-                $offset = self::commentEnd($css, $offset);
+                $commentEnd = strpos($css, '*/', $offset + 2);
+                if ($commentEnd === false) {
+                    return null;
+                }
+                $offset = $commentEnd + 2;
                 continue;
             }
 
             $byte = $css[$offset];
             if ($byte === '"' || $byte === "'") {
-                $offset = self::stringEnd($css, $offset);
+                $stringEnd = self::completeStringEnd($css, $offset);
+                if ($stringEnd === null) {
+                    return null;
+                }
+                $offset = $stringEnd;
+                continue;
+            }
+            if ($byte === '\\') {
+                $escapeEnd = CssSyntaxScanner::escapeEnd($css, $offset);
+                if ($escapeEnd === null) {
+                    return null;
+                }
+                $offset = $escapeEnd;
                 continue;
             }
             if ($byte === '(') {
@@ -155,16 +172,27 @@ final class CssScrub
                     return null;
                 }
                 $parentheses--;
-            } elseif ($parentheses === 0 && $byte === ';') {
+            } elseif ($byte === '[') {
+                $brackets++;
+            } elseif ($byte === ']') {
+                if ($brackets === 0) {
+                    return null;
+                }
+                $brackets--;
+            } elseif ($parentheses === 0 && $brackets === 0 && $byte === ';') {
                 return $offset + 1;
-            } elseif ($parentheses === 0 && ($byte === '{' || $byte === '}')) {
+            } elseif (
+                $parentheses === 0
+                && $brackets === 0
+                && ($byte === '{' || $byte === '}')
+            ) {
                 return null;
             }
 
             $offset++;
         }
 
-        return null;
+        return $parentheses === 0 && $brackets === 0 ? $length : null;
     }
 
     /**
@@ -450,6 +478,33 @@ final class CssScrub
         }
 
         return $length;
+    }
+
+    private static function completeStringEnd(string $css, int $offset): ?int
+    {
+        $length = strlen($css);
+        $quote = $css[$offset];
+        $offset++;
+
+        while ($offset < $length) {
+            if ($css[$offset] === '\\') {
+                $escapeEnd = CssSyntaxScanner::escapeEnd($css, $offset);
+                if ($escapeEnd === null) {
+                    return null;
+                }
+                $offset = $escapeEnd;
+                continue;
+            }
+            if ($css[$offset] === $quote) {
+                return $offset + 1;
+            }
+            if ($css[$offset] === "\n" || $css[$offset] === "\r" || $css[$offset] === "\f") {
+                return null;
+            }
+            $offset++;
+        }
+
+        return null;
     }
 
     private static function skipWhitespaceAndComments(string $css, int $offset): int

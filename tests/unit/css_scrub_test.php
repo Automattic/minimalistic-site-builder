@@ -30,6 +30,27 @@ test('css scrub removes nested imports without consuming sibling rules', functio
     assert_eq(1, count($result['removals']));
 });
 
+test('css scrub removes a balanced terminal import without a semicolon', function (): void {
+    $css = '@import url(https://evil.example/x.css)';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq('', $result['css']);
+    assert_eq('@import url(https://evil.example/x.css)', $result['removals'][0]['authored_value']);
+});
+
+test('css scrub retains lexically unbalanced terminal imports', function (): void {
+    foreach ([
+        '@import url(https://evil.example/x.css',
+        '@import "https://evil.example/x.css',
+        '@import url(https://evil.example/x.css) /* unclosed',
+    ] as $css) {
+        $result = CssScrub::scrub($css);
+        assert_eq($css, $result['css']);
+        assert_eq([], $result['removals']);
+    }
+});
+
 test('css scrub removes only declarations carrying external urls', function (): void {
     $css = '.hero { color:red; background:url("https://bad.example/a.png") center/cover;'
         . ' border:1px solid; mask:URL (  //cdn.example/m.svg  ); padding:2rem; }';
