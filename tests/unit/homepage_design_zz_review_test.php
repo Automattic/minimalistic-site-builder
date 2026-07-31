@@ -473,6 +473,35 @@ test('homepage-design keeps a DOM-head style before the literal html element', f
     homepage_cleanup($tmp);
 });
 
+test('homepage-design does not treat a style after body text as head content', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $winner = '<!doctype html><html>body text<head><style>.late { color: red; }</style></head>'
+        . '<body><header>Text-started body header</header><main><section>Content</section></main>'
+        . '<footer>Text-started body footer</footer></body></html>';
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+    $llm->queueText(homepage_document('REPAIRED', "\n.repaired { color: green; }\n"));
+
+    homepage_run($project, $llm);
+
+    $home = $project->readText('design/home.html');
+    assert_true(!str_contains($home, '.late'), 'body-owned style not silently delivered');
+    assert_true(
+        !str_contains($project->readText('design/site.css'), '.late'),
+        'body-owned style not extracted as site CSS',
+    );
+    $warnings = homepage_review_warnings($project);
+    assert_contains('authored', $warnings);
+    assert_contains('late', $warnings);
+    assert_contains('delivered removed', $warnings);
+    homepage_cleanup($tmp);
+});
+
 test('homepage-design extracts style content after a quoted greater-than attribute', function () {
     [$project, $llm, $tmp] = homepage_fixture([
         'design_candidates' => 2,
