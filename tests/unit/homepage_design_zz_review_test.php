@@ -507,6 +507,38 @@ test('homepage-design ignores an XML processing instruction before DOM-head styl
     );
 });
 
+test('homepage-design removes a DOM-body style after adjacent doctypes', function () {
+    [$project, $llm, $tmp] = homepage_fixture([
+        'design_candidates' => 2,
+        'critique_rounds' => 0,
+    ]);
+    $winner = '<!doctype html><!doctype html><!doctype html PUBLIC "a>b">'
+        . '<html><style>.x{}</style><body><header>Adjacent doctype header</header>'
+        . '<main><section>Content</section></main><footer>Adjacent doctype footer</footer>'
+        . '</body></html>';
+    homepage_queue_tournament($llm, [
+        $winner,
+        homepage_document('SAFE', "\n.safe { color: blue; }\n"),
+    ]);
+    $llm->queueText(homepage_document('REPAIRED', "\n.repaired { color: green; }\n"));
+
+    homepage_run($project, $llm);
+
+    assert_true(
+        !str_contains($project->readText('design/home.html'), '.x{}'),
+        'DOM-body style not silently delivered',
+    );
+    assert_true(
+        !str_contains($project->readText('design/site.css'), '.x{}'),
+        'DOM-body style not extracted as site CSS',
+    );
+    $warnings = homepage_review_warnings($project);
+    assert_contains('authored', $warnings);
+    assert_contains('.x{}', $warnings);
+    assert_contains('delivered removed', $warnings);
+    homepage_cleanup($tmp);
+});
+
 test('homepage-design does not treat a style after body text as head content', function () {
     [$project, $llm, $tmp] = homepage_fixture([
         'design_candidates' => 2,
