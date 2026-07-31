@@ -530,7 +530,11 @@ final class CssScrub
             $offset++;
         }
 
-        return null;
+        if ($colon === null || $colon >= $urlOffset || $urlOffset >= $length) {
+            return null;
+        }
+
+        return ['start' => $start, 'end' => $length];
     }
 
     private static function startsComment(string $css, int $offset): bool
