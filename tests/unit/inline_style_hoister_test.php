@@ -154,3 +154,57 @@ test('nested inline style selector still matches only its original descendant af
         @rmdir($root);
     }
 });
+
+test('inline style hoister drops malformed and unsafe declarations without breaking safe CSS syntax', function (): void {
+    $safe = 'color:red; background-image:url("data:text/plain;a:b"); font-family:"A; B"; content:"a:b"';
+    $style = $safe
+        . '; bad property:1'
+        . '; missing-colon'
+        . '; padding:{1px}'
+        . '; border:1px solid <red>'
+        . "; opacity:0.\x011"
+        . '; background:red}</style><script>alert(1)</script>';
+    $className = 'se-' . hash('sha256', $safe);
+    $markup = '<div style=\'' . $style . '\'>Safe content</div>';
+
+    $result = (new InlineStyleHoister())->hoist(['part.html' => $markup]);
+
+    assert_eq(1, $result['style_count']);
+    assert_eq(6, $result['dropped_declarations']);
+    assert_eq(0, $result['unhoistable']);
+    assert_eq('.' . $className . '{' . $safe . "}\n", $result['css']);
+    assert_eq('<div class="' . $className . '">Safe content</div>', $result['parts']['part.html']);
+    assert_true(!str_contains($result['css'], '</style>'));
+    assert_true(!str_contains($result['parts']['part.html'], '<script>'));
+});
+
+test('inline style hoister removes an inline style when every declaration is unsafe', function (): void {
+    $style = 'background:red}</style><script>alert(1)</script>';
+    $markup = '<p style=\'' . $style . '\'>Safe content</p>';
+
+    $result = (new InlineStyleHoister())->hoist(['part.html' => $markup]);
+
+    assert_eq(0, $result['style_count']);
+    assert_eq(1, $result['dropped_declarations']);
+    assert_eq(0, $result['unhoistable']);
+    assert_eq('', $result['css']);
+    assert_eq('<p>Safe content</p>', $result['parts']['part.html']);
+});
+
+test('inline style hoister leaves a trailing styled element outside owner HTML untouched', function (): void {
+    $style = 'color:red';
+    $markup = '<!-- wp:group -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph {"content":"Child"} --><p>Child</p><!-- /wp:paragraph -->'
+        . '<span style="' . $style . '">Trailing</span>'
+        . '</div>'
+        . '<!-- /wp:group -->';
+
+    $result = (new InlineStyleHoister())->hoist(['part.html' => $markup]);
+
+    assert_eq($markup, $result['parts']['part.html']);
+    assert_eq('', $result['css']);
+    assert_eq(0, $result['style_count']);
+    assert_eq(0, $result['dropped_declarations']);
+    assert_eq(1, $result['unhoistable']);
+});
