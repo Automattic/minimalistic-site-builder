@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\ContinuationRecovery;
-use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\MalformedDesignException;
@@ -65,6 +64,12 @@ final class HomepageDesignStep implements Step
         'source',
         'track',
         'wbr',
+    ];
+    private const RAW_TEXT_ELEMENTS = [
+        'script',
+        'style',
+        'title',
+        'textarea',
     ];
     private const SAFE_HEAD_ELEMENTS = [
         'title',
@@ -192,162 +197,166 @@ final class HomepageDesignStep implements Step
         );
 
         $warnings = [];
-        $seeds = $this->candidateSeeds($brief, $siteSpec, $candidateCount, $warnings);
-        $requests = [];
-        foreach ($seeds as $index => $seed) {
-            $requests[$index] = $this->withOptions([
-                'prompt' => $this->renderer->render('homepage-design.md', [
-                    'brief'            => $brief,
-                    'site_spec'        => $siteSpec,
-                    'design_direction' => $designDirection,
-                    'seed'             => $seed,
-                ]),
-            ]);
-        }
+        try {
+            $seeds = $this->candidateSeeds($brief, $siteSpec, $candidateCount, $warnings);
+            $requests = [];
+            foreach ($seeds as $index => $seed) {
+                $requests[$index] = $this->withOptions([
+                    'prompt' => $this->renderer->render('homepage-design.md', [
+                        'brief'            => $brief,
+                        'site_spec'        => $siteSpec,
+                        'design_direction' => $designDirection,
+                        'seed'             => $seed,
+                    ]),
+                ]);
+            }
 
-        $batch = $this->llm->completeBatch($requests);
-        $candidates = [];
-        foreach (array_keys($requests) as $index) {
-            if (!array_key_exists($index, $batch->texts)) {
-                throw new \RuntimeException("homepage-design: missing candidate result {$index}");
-            }
-            $candidate = $batch->texts[$index];
-            $candidatePath = 'design/candidate-' . ($index + 1) . '.html';
-            if (!self::isClosedDocument($candidate)) {
-                $candidate = $this->recoverCandidate(
-                    $candidate,
-                    $index,
-                    $candidatePath,
-                    $warnings,
-                );
-            }
-            $candidate = self::sanitizeHtml(
-                $candidate,
-                $candidatePath,
-                'tournament candidate ' . ($index + 1),
-                $warnings,
-            );
-            if (!self::isClosedDocument($candidate)) {
-                $candidate = self::closeDocumentDeterministically($candidate);
+            $batch = $this->llm->completeBatch($requests);
+            $candidates = [];
+            foreach (array_keys($requests) as $index) {
+                if (!array_key_exists($index, $batch->texts)) {
+                    throw new \RuntimeException("homepage-design: missing candidate result {$index}");
+                }
+                $candidate = $batch->texts[$index];
+                $candidatePath = 'design/candidate-' . ($index + 1) . '.html';
+                if (!self::isClosedDocument($candidate)) {
+                    $candidate = $this->recoverCandidate(
+                        $candidate,
+                        $index,
+                        $candidatePath,
+                        $warnings,
+                    );
+                }
                 $candidate = self::sanitizeHtml(
                     $candidate,
                     $candidatePath,
-                    'deterministic candidate closure',
+                    'tournament candidate ' . ($index + 1),
                     $warnings,
                 );
-                $warnings[] = "malformed_design: {$candidatePath} context tournament candidate "
-                    . ($index + 1) . '; authored unclosed regeneration delivered DOM-closed '
-                    . 'document; disposition repaired';
-            }
-            $candidates[$index] = $candidate;
-            $project->writeText($candidatePath, $candidate);
-            foreach ($batch->notesFor($index) as $note) {
-                $warnings[] = "candidate_generation: {$candidatePath} delivered with degraded "
-                    . "generation: {$note}";
-            }
-        }
-
-        $judge = $this->judge($candidates, $warnings);
-        $project->writeJson('design/judge.json', $judge);
-        $winner = $this->winnerIndex($judge, count($candidates), $warnings);
-        $document = $candidates[$winner];
-
-        for ($round = 1; $round <= $critiqueRounds; $round++) {
-            $critique = $this->critique($document, $round, $warnings);
-            $project->writeJson("design/critique-{$round}.json", $critique);
-
-            $normalized = self::normalizeCritique($critique);
-            if ($normalized === null) {
-                $warnings[] = "malformed_critique: design/critique-{$round}.json lacks a usable "
-                    . 'pass verdict or revise notes; unchanged document delivered';
-                continue;
-            }
-            if ($normalized['verdict'] === 'pass') {
-                break;
+                if (!self::isClosedDocument($candidate)) {
+                    $candidate = self::closeDocumentDeterministically($candidate);
+                    $candidate = self::sanitizeHtml(
+                        $candidate,
+                        $candidatePath,
+                        'deterministic candidate closure',
+                        $warnings,
+                    );
+                    $warnings[] = "malformed_design: {$candidatePath} context tournament candidate "
+                        . ($index + 1) . '; authored unclosed regeneration delivered DOM-closed '
+                        . 'document; disposition repaired';
+                }
+                $candidates[$index] = $candidate;
+                $project->writeText($candidatePath, $candidate);
+                foreach ($batch->notesFor($index) as $note) {
+                    $warnings[] = "candidate_generation: {$candidatePath} delivered with degraded "
+                        . "generation: {$note}";
+                }
             }
 
-            $beforeRevision = $document;
-            $patches = $this->replacementPatches(
-                $document,
-                $normalized['notes'],
-                $round,
-                $warnings,
-            );
-            $spliced = self::splicePatches($document, $normalized['notes'], $patches);
-            if ($spliced['document'] !== null) {
-                $document = $spliced['document'];
-                continue;
-            }
+            $judge = $this->judge($candidates, $warnings);
+            $project->writeJson('design/judge.json', $judge);
+            $winner = $this->winnerIndex($judge, count($candidates), $warnings);
+            $document = $candidates[$winner];
 
-            $selector = $spliced['selector'] ?? '(unknown)';
-            $warnings[] = "splice_failure: design/home.html landmark {$selector} could not be "
-                . 'replaced; one full-document revision attempted';
-            try {
-                $document = $this->reviseWholeDocument(
+            for ($round = 1; $round <= $critiqueRounds; $round++) {
+                $critique = $this->critique($document, $round, $warnings);
+                $project->writeJson("design/critique-{$round}.json", $critique);
+
+                $normalized = self::normalizeCritique($critique);
+                if ($normalized === null) {
+                    $warnings[] = "malformed_critique: design/critique-{$round}.json lacks a usable "
+                        . 'pass verdict or revise notes; unchanged document delivered';
+                    continue;
+                }
+                if ($normalized['verdict'] === 'pass') {
+                    break;
+                }
+
+                $beforeRevision = $document;
+                $patches = $this->replacementPatches(
                     $document,
                     $normalized['notes'],
-                    "splice failure at {$selector}",
-                    "homepage-design-full-revise-{$round}",
-                    'design/home.html',
-                    "critique round {$round} full-document fallback",
+                    $round,
                     $warnings,
                 );
-            } catch (TruncatedGenerationException $error) {
-                $document = $beforeRevision;
-                $warnings[] = 'truncated_generation: full-document splice fallback remained '
-                    . 'unclosed after continuation cap; pre-revision bytes delivered';
-            }
-        }
+                $spliced = self::splicePatches($document, $normalized['notes'], $patches);
+                if ($spliced['document'] !== null) {
+                    $document = $spliced['document'];
+                    continue;
+                }
 
-        $issue = self::designIssue($document);
-        if ($issue !== null) {
-            $beforeRepair = $document;
-            try {
-                $document = $this->reviseWholeDocument(
-                    $document,
-                    [[
-                        'section'     => 'document',
-                        'instruction' => "Repair {$issue} while preserving all usable content.",
-                    ]],
-                    $issue,
-                    'homepage-design-repair',
-                    'design/home.html',
-                    'final malformed-design repair',
-                    $warnings,
-                );
-            } catch (TruncatedGenerationException $error) {
-                $document = $beforeRepair;
+                $selector = $spliced['selector'] ?? '(unknown)';
+                $warnings[] = "splice_failure: design/home.html landmark {$selector} could not be "
+                    . 'replaced; one full-document revision attempted';
+                try {
+                    $document = $this->reviseWholeDocument(
+                        $document,
+                        $normalized['notes'],
+                        "splice failure at {$selector}",
+                        "homepage-design-full-revise-{$round}",
+                        'design/home.html',
+                        "critique round {$round} full-document fallback",
+                        $warnings,
+                    );
+                } catch (TruncatedGenerationException $error) {
+                    $document = $beforeRevision;
+                    $warnings[] = 'truncated_generation: full-document splice fallback remained '
+                        . 'unclosed after continuation cap; pre-revision bytes delivered';
+                }
             }
 
-            $repairedIssue = self::designIssue($document);
-            if ($repairedIssue !== null) {
-                $project->writeText('design/home.html', $beforeRepair);
-                $warnings[] = "malformed_design: design/home.html {$issue}; one repair attempt "
-                    . "still produced {$repairedIssue}; pre-repair bytes delivered";
-                $project->addWarnings($this->id(), $warnings);
+            $issue = self::designIssue($document);
+            if ($issue !== null) {
+                $beforeRepair = $document;
+                try {
+                    $document = $this->reviseWholeDocument(
+                        $document,
+                        [[
+                            'section'     => 'document',
+                            'instruction' => "Repair {$issue} while preserving all usable content.",
+                        ]],
+                        $issue,
+                        'homepage-design-repair',
+                        'design/home.html',
+                        'final malformed-design repair',
+                        $warnings,
+                    );
+                } catch (TruncatedGenerationException $error) {
+                    $document = $beforeRepair;
+                }
+
+                $repairedIssue = self::designIssue($document);
+                if ($repairedIssue !== null) {
+                    $project->writeText('design/home.html', $beforeRepair);
+                    $warnings[] = "malformed_design: design/home.html {$issue}; one repair attempt "
+                        . "still produced {$repairedIssue}; pre-repair bytes delivered";
+                    throw new MalformedDesignException(
+                        "homepage-design: {$repairedIssue} after one repair attempt"
+                    );
+                }
+
+                $warnings[] = "malformed_design: design/home.html {$issue}; one full-document repair "
+                    . 'delivered replacement markup';
+            }
+
+            $document = self::sanitizeHtml(
+                $document,
+                'design/home.html',
+                'final homepage delivery',
+                $warnings,
+            );
+            $style = self::styleContents($document);
+            if ($style === null) {
                 throw new MalformedDesignException(
-                    "homepage-design: {$repairedIssue} after one repair attempt"
+                    'homepage-design: validated document lost its style element'
                 );
             }
 
-            $warnings[] = "malformed_design: design/home.html {$issue}; one full-document repair "
-                . 'delivered replacement markup';
+            $project->writeText('design/home.html', $document);
+            $project->writeText('design/site.css', $style);
+        } finally {
+            $project->addWarnings($this->id(), $warnings);
         }
-
-        $document = self::sanitizeHtml(
-            $document,
-            'design/home.html',
-            'final homepage delivery',
-            $warnings,
-        );
-        $style = self::styleContents($document);
-        if ($style === null) {
-            throw new \LogicException('homepage-design: validated document lost its style element');
-        }
-
-        $project->writeText('design/home.html', $document);
-        $project->writeText('design/site.css', $style);
-        $project->addWarnings($this->id(), $warnings);
     }
 
     /**
@@ -417,7 +426,8 @@ final class HomepageDesignStep implements Step
         string $path,
         array &$warnings,
     ): string {
-        $prompt = "Tournament candidate {$index} is not a closed HTML document.\n\n"
+        $candidateNumber = $index + 1;
+        $prompt = "Tournament candidate {$candidateNumber} is not a closed HTML document.\n\n"
             . "<partial_document>\n{$partial}\n</partial_document>\n\n"
             . 'Regenerate it as one complete, self-contained HTML document. Preserve usable '
             . 'content and design intent. Return ONLY the full document from <!doctype html> '
@@ -426,19 +436,21 @@ final class HomepageDesignStep implements Step
             $recovered = ContinuationRecovery::completeToClose(
                 $this->llm,
                 $prompt,
-                $this->withOptions(['log_label' => "homepage-design-candidate-recovery-{$index}"]),
+                $this->withOptions([
+                    'log_label' => "homepage-design-candidate-recovery-{$candidateNumber}",
+                ]),
                 static fn (string $html): bool => self::isClosedDocument($html),
             );
         } catch (TruncatedGenerationException $error) {
             $recovered = $error->getPartialText();
         }
 
-        $warnings[] = "malformed_design: {$path} context tournament candidate {$index}; "
+        $warnings[] = "malformed_design: {$path} context tournament candidate {$candidateNumber}; "
             . 'authored unclosed document delivered regenerated document; disposition repaired';
         return self::sanitizeHtml(
             $recovered,
             $path,
-            "tournament candidate {$index} regeneration",
+            "tournament candidate {$candidateNumber} regeneration",
             $warnings,
         );
     }
@@ -462,9 +474,9 @@ final class HomepageDesignStep implements Step
                 $prompt,
                 $this->withOptions(['log_label' => 'homepage-design-judge']),
             );
-        } catch (GeneratedJsonException $error) {
+        } catch (\RuntimeException $error) {
             $warnings[] = 'invalid_judge_verdict: design/judge.json remained invalid after JSON '
-                . 'repair; candidate 0 delivered';
+                . 'repair or unavailable at advisory boundary; candidate 0 delivered';
             return [];
         }
     }
@@ -713,7 +725,13 @@ final class HomepageDesignStep implements Step
         foreach ($dom->getElementsByTagName($target->tagName) as $element) {
             if ($element->isSameNode($target)) {
                 $span = self::rawElementSpan($html, strtolower($target->tagName), $ordinal);
-                return $span === null ? null : ['span' => $span, 'target' => $target];
+                if ($span === null) {
+                    return null;
+                }
+                $source = substr($html, $span[0], $span[1]);
+                return self::replacementMatchesLandmark($source, $selector, $target)
+                    ? ['span' => $span, 'target' => $target]
+                    : null;
             }
             $ordinal++;
         }
@@ -859,7 +877,8 @@ final class HomepageDesignStep implements Step
 
     private static function normalizedText(string $text): string
     {
-        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $text)));
+        $normalized = preg_replace('/\s+/u', ' ', $text);
+        return $normalized === null ? '' : mb_strtolower(trim($normalized));
     }
 
     /**
@@ -878,7 +897,7 @@ final class HomepageDesignStep implements Step
             if (
                 !$token['closing']
                 && !$token['self_closing']
-                && in_array($name, ['style', 'script'], true)
+                && in_array($name, self::RAW_TEXT_ELEMENTS, true)
             ) {
                 $rawClose = stripos($html, "</{$name}", $offset);
                 if ($rawClose === false) {
@@ -888,10 +907,25 @@ final class HomepageDesignStep implements Step
                 if ($close === null || !$close['closing'] || $close['name'] !== $name) {
                     return null;
                 }
+                if ($name === $targetTag) {
+                    if ($seen === $ordinal) {
+                        return [$token['start'], $close['end'] - $token['start']];
+                    }
+                    $seen++;
+                }
                 $offset = $close['end'];
                 continue;
             }
-            if ($name !== $targetTag || $token['self_closing']) {
+            if ($name !== $targetTag) {
+                continue;
+            }
+            if ($token['self_closing']) {
+                if ($start === null) {
+                    if ($seen === $ordinal) {
+                        return [$token['start'], $token['end'] - $token['start']];
+                    }
+                    $seen++;
+                }
                 continue;
             }
 
@@ -929,11 +963,7 @@ final class HomepageDesignStep implements Step
                 return null;
             }
             if (substr($html, $start, 4) === '<!--') {
-                $commentEnd = strpos($html, '-->', $start + 4);
-                if ($commentEnd === false) {
-                    return null;
-                }
-                $offset = $commentEnd + 3;
+                $offset = self::commentSpan($html, $start)['end'];
                 continue;
             }
 
@@ -976,6 +1006,79 @@ final class HomepageDesignStep implements Step
     }
 
     /**
+     * @return array{start:int,end:int,malformed:bool}
+     */
+    private static function commentSpan(string $html, int $start): array
+    {
+        $length = strlen($html);
+        if (substr($html, $start, 5) === '<!-->') {
+            return ['start' => $start, 'end' => $start + 5, 'malformed' => true];
+        }
+        if (substr($html, $start, 6) === '<!--->') {
+            return ['start' => $start, 'end' => $start + 6, 'malformed' => true];
+        }
+
+        $standardEnd = strpos($html, '-->', $start + 4);
+        $bangEnd = strpos($html, '--!>', $start + 4);
+        if ($standardEnd === false && $bangEnd === false) {
+            return ['start' => $start, 'end' => $length, 'malformed' => true];
+        }
+        if ($bangEnd !== false && ($standardEnd === false || $bangEnd < $standardEnd)) {
+            return ['start' => $start, 'end' => $bangEnd + 4, 'malformed' => true];
+        }
+        return ['start' => $start, 'end' => $standardEnd + 3, 'malformed' => false];
+    }
+
+    /**
+     * @return list<array{start:int,length:int,authored:string}>
+     */
+    private static function malformedCommentRemovals(string $html): array
+    {
+        $removals = [];
+        $offset = 0;
+        while ($offset < strlen($html)) {
+            $commentStart = strpos($html, '<!--', $offset);
+            $token = self::nextTag($html, $offset);
+            if (
+                $commentStart !== false
+                && ($token === null || $commentStart < $token['start'])
+            ) {
+                $comment = self::commentSpan($html, $commentStart);
+                if ($comment['malformed']) {
+                    $removals[] = [
+                        'start' => $commentStart,
+                        'length' => $comment['end'] - $commentStart,
+                        'authored' => substr(
+                            $html,
+                            $commentStart,
+                            $comment['end'] - $commentStart,
+                        ),
+                    ];
+                }
+                $offset = $comment['end'];
+                continue;
+            }
+            if ($token === null) {
+                break;
+            }
+
+            $offset = $token['end'];
+            if (
+                !$token['closing']
+                && !$token['self_closing']
+                && in_array($token['name'], self::RAW_TEXT_ELEMENTS, true)
+            ) {
+                $close = self::matchingCloseToken($html, $token);
+                if ($close === null) {
+                    break;
+                }
+                $offset = $close['end'];
+            }
+        }
+        return $removals;
+    }
+
+    /**
      * @param list<string> $warnings
      */
     private static function sanitizeHtml(
@@ -984,7 +1087,7 @@ final class HomepageDesignStep implements Step
         string $context,
         array &$warnings,
     ): string {
-        $removals = [];
+        $removals = self::malformedCommentRemovals($html);
         $head = self::headContentRange($html);
         $offset = 0;
         while (($token = self::nextTag($html, $offset)) !== null) {
@@ -1026,7 +1129,7 @@ final class HomepageDesignStep implements Step
             foreach (self::unsafeAttributeRanges($html, $token) as $removal) {
                 $removals[] = $removal;
             }
-            if (in_array($name, ['style', 'title'], true) && !$token['self_closing']) {
+            if (in_array($name, self::RAW_TEXT_ELEMENTS, true) && !$token['self_closing']) {
                 $close = self::matchingCloseToken($html, $token);
                 if ($close !== null) {
                     $offset = $close['end'];
@@ -1057,11 +1160,50 @@ final class HomepageDesignStep implements Step
     private static function headContentRange(string $html): ?array
     {
         $offset = 0;
+        $htmlContentStart = null;
         while (($token = self::nextTag($html, $offset)) !== null) {
             $offset = $token['end'];
+            if (!$token['closing'] && $token['name'] === 'html') {
+                $htmlContentStart = $token['end'];
+                continue;
+            }
             if (!$token['closing'] && $token['name'] === 'head') {
                 $close = self::matchingCloseToken($html, $token);
                 return [$token['end'], $close['start'] ?? strlen($html)];
+            }
+            if (
+                !$token['closing']
+                && $token['name'] === 'body'
+                && $htmlContentStart !== null
+            ) {
+                return [$htmlContentStart, $token['start']];
+            }
+            if ($htmlContentStart === null) {
+                continue;
+            }
+            if ($token['closing'] && $token['name'] === 'html') {
+                return [$htmlContentStart, $token['start']];
+            }
+            if (
+                !$token['closing']
+                && !in_array(
+                    $token['name'],
+                    ['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title'],
+                    true,
+                )
+            ) {
+                return [$htmlContentStart, $token['start']];
+            }
+            if (
+                !$token['closing']
+                && !$token['self_closing']
+                && in_array($token['name'], self::RAW_TEXT_ELEMENTS, true)
+            ) {
+                $close = self::matchingCloseToken($html, $token);
+                if ($close === null) {
+                    return [$htmlContentStart, strlen($html)];
+                }
+                $offset = $close['end'];
             }
         }
         return null;
@@ -1129,7 +1271,7 @@ final class HomepageDesignStep implements Step
         if ($opening['self_closing'] || in_array($name, self::VOID_ELEMENTS, true)) {
             return null;
         }
-        if (in_array($name, ['script', 'style', 'title', 'textarea'], true)) {
+        if (in_array($name, self::RAW_TEXT_ELEMENTS, true)) {
             $closeStart = stripos($html, "</{$name}", $opening['end']);
             if ($closeStart === false) {
                 return null;
@@ -1146,7 +1288,7 @@ final class HomepageDesignStep implements Step
             if (
                 !$token['closing']
                 && !$token['self_closing']
-                && in_array($token['name'], ['script', 'style', 'title', 'textarea'], true)
+                && in_array($token['name'], self::RAW_TEXT_ELEMENTS, true)
                 && $token['name'] !== $name
             ) {
                 $rawClose = self::matchingCloseToken($html, $token);
@@ -1203,7 +1345,9 @@ final class HomepageDesignStep implements Step
         if (
             preg_match('/^<\s*[A-Za-z][A-Za-z0-9:-]*/', $rawTag, $prefix) !== 1
             || preg_match_all(
-                '/\s+([^\s=\/>]+)(?:\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+))?/s',
+                '/(?:\s*\/+\s*|\s+|(?<=["\']))'
+                    . '([^\s=\/>"\']+)'
+                    . '(?:\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+))?/s',
                 $rawTag,
                 $matches,
                 PREG_SET_ORDER | PREG_OFFSET_CAPTURE,
@@ -1284,7 +1428,10 @@ final class HomepageDesignStep implements Step
 
     private static function isSafeUrl(string $attribute, string $value): bool
     {
-        $normalized = (string) preg_replace('/[\x00-\x20\x7f]+/u', '', trim($value));
+        $normalized = preg_replace('/[\x00-\x20\x7f]+/u', '', trim($value));
+        if ($normalized === null) {
+            return false;
+        }
         if ($normalized === '') {
             return true;
         }
@@ -1307,7 +1454,8 @@ final class HomepageDesignStep implements Step
 
     private static function warningValue(string $authored): string
     {
-        $value = trim((string) preg_replace('/\s+/u', ' ', $authored));
+        $normalized = preg_replace('/\s+/u', ' ', $authored);
+        $value = trim($normalized ?? $authored);
         if (mb_strlen($value) > 160) {
             $value = mb_substr($value, 0, 157) . '...';
         }
@@ -1383,7 +1531,7 @@ final class HomepageDesignStep implements Step
             }
 
             $stack[] = $name;
-            if (in_array($name, ['script', 'style', 'title', 'textarea'], true)) {
+            if (in_array($name, self::RAW_TEXT_ELEMENTS, true)) {
                 $close = self::matchingCloseToken($fragment, $token);
                 if ($close === null) {
                     return false;
@@ -1458,10 +1606,15 @@ final class HomepageDesignStep implements Step
 
     private static function styleContents(string $html): ?string
     {
-        if (preg_match('/<style\b[^>]*>(.*?)<\/style\s*>/is', $html, $match) !== 1) {
+        $matched = preg_match_all(
+            '/<style\b[^>]*>(.*?)<\/style\s*>/is',
+            $html,
+            $matches,
+        );
+        if (!is_int($matched) || $matched < 1) {
             return null;
         }
-        return $match[1];
+        return implode('', $matches[1]);
     }
 
     private static function loadDocument(string $html): ?\DOMDocument
