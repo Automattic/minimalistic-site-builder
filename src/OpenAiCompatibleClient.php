@@ -689,7 +689,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm
         // TextBatchRecovery / JsonBatchRecovery can selectively regenerate
         // only the affected member. Keep the explicit false mode for callers
         // that need the legacy immediate rejection policy.
-        if (!$preserveAbnormalTerminal && self::isTruncationStopReason($parsed['stop_reason'])) {
+        if (!$preserveAbnormalTerminal && TextBatchRecovery::isTruncation($parsed['stop_reason'])) {
             return [
                 'ok' => false,
                 'transient' => false,
@@ -1259,12 +1259,6 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm
             'error_type'  => $errorType,
             'stop_reason' => $stopReason,
         ];
-    }
-
-    private static function isTruncationStopReason(mixed $reason): bool
-    {
-        return is_string($reason)
-            && in_array(trim($reason), ['max_tokens', 'length', 'model_context_window_exceeded'], true);
     }
 
     private static function truncate(string $s, int $max = 300): string
