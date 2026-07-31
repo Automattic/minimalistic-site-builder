@@ -532,6 +532,51 @@ foreach (['LF' => "\n", 'CR' => "\r", 'FF' => "\f"] as $label => $terminator) {
     });
 }
 
+test('css scrub removes an external image string in an EOF-truncated final declaration', function (): void {
+    $prefix = '.x{color:red;';
+    $declaration = 'background-image:image-set("http://127.0.0.1:9/eof.png" 1x';
+    $css = $prefix . $declaration;
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq(strlen($prefix), strlen($result['css']), 'prior byte length retained');
+    assert_eq(hash('sha256', $prefix), hash('sha256', $result['css']), 'prior byte hash retained');
+    assert_eq($prefix, $result['css'], 'only harmful final declaration removed through EOF');
+    assert_eq(1, count($result['removals']));
+    assert_eq($declaration, $result['removals'][0]['authored_value']);
+    assert_eq('removed_external_url', $result['removals'][0]['disposition']);
+});
+
+test('css scrub preserves a closed rule with an unmatched image function byte for byte', function (): void {
+    $css = '.x{background-image:image-set("https://evil.example/x.png" 1x}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq(strlen($css), strlen($result['css']));
+    assert_eq(hash('sha256', $css), hash('sha256', $result['css']));
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
+foreach (
+    [
+        'relative' => './local.png',
+        'data' => 'data:image/png;base64,AAAA',
+        'fragment' => '#paint',
+    ] as $label => $value
+) {
+    test("css scrub preserves an allowed {$label} image string through EOF", function () use ($value): void {
+        $css = '.x{color:red;background-image:image-set("' . $value . '" 1x';
+
+        $result = CssScrub::scrub($css);
+
+        assert_eq(strlen($css), strlen($result['css']));
+        assert_eq(hash('sha256', $css), hash('sha256', $result['css']));
+        assert_eq($css, $result['css']);
+        assert_eq([], $result['removals']);
+    });
+}
+
 test('css scrub output and report are idempotent and byte stable', function (): void {
     $css = '@import "https://bad.example/x.css";'
         . '.hero{background:url(https://bad.example/x.png);color:red}'

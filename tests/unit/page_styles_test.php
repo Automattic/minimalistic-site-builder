@@ -942,6 +942,103 @@ test('site CSS path recovers after a malformed string before a later remote imag
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path removes an external image string in an EOF-truncated final declaration', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_eof_remote_');
+    $base = $project->readText('theme/style.css');
+    $prefix = '.x{color:red;';
+    $declaration = 'background-image:image-set("http://127.0.0.1:9/eof.png" 1x';
+    $siteCss = $prefix . $declaration;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $expected = $base . $prefix;
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, 'http://127.0.0.1:9/eof.png'), 'EOF remote bytes absent');
+    assert_eq(strlen($expected), strlen($style), 'prior merged byte length retained');
+    assert_eq(hash('sha256', $expected), hash('sha256', $style), 'prior merged byte hash retained');
+    assert_eq($expected, $style, 'only harmful final declaration removed through EOF');
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+    $authored = json_encode(
+        $declaration,
+        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+    );
+    assert_true(is_string($authored));
+    assert_eq(
+        [
+            'source=design/site.css; authored_value=' . $authored
+                . '; delivered_value=removed; disposition=removed_external_url',
+        ],
+        $project->readJson('warnings.json')['page-styles'] ?? []
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path preserves a closed rule with an unmatched image function without warnings', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_closed_unmatched_');
+    $base = $project->readText('theme/style.css');
+    $siteCss = '.x{background-image:image-set("https://evil.example/x.png" 1x}';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $expected = $base . $siteCss;
+    $style = $project->readText('theme/style.css');
+    assert_eq(strlen($expected), strlen($style));
+    assert_eq(hash('sha256', $expected), hash('sha256', $style));
+    assert_eq($expected, $style);
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
+    assert_true(!$project->exists('warnings.json'), 'closed unmatched function emits zero warnings');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+foreach (
+    [
+        'relative' => './local.png',
+        'data' => 'data:image/png;base64,AAAA',
+        'fragment' => '#paint',
+    ] as $label => $value
+) {
+    test("site CSS path preserves an allowed {$label} image string through EOF", function () use ($label, $value) {
+        [$project, $tmp] = ps_project('builder_ps_image_set_eof_' . $label . '_');
+        $base = $project->readText('theme/style.css');
+        $siteCss = '.x{color:red;background-image:image-set("' . $value . '" 1x';
+        $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home',
+            'front' => true,
+        ]]]);
+        $project->writeText('design/home.html', '<main>Kept</main>');
+        $llm = new FakeLlm();
+
+        (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $expected = $base . $siteCss;
+        $style = $project->readText('theme/style.css');
+        assert_eq(strlen($expected), strlen($style));
+        assert_eq(hash('sha256', $expected), hash('sha256', $style));
+        assert_eq($expected, $style);
+        assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+        assert_eq([], $llm->calls, 'deterministic merge makes zero LLM calls');
+        assert_true(!$project->exists('warnings.json'), "allowed {$label} URL emits zero warnings");
+        exec('rm -rf ' . escapeshellarg($tmp));
+    });
+}
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(
