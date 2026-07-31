@@ -140,7 +140,7 @@ final class MotionSanityStep implements Step
      */
     public static function fileGroups(Project $project): array
     {
-        $all = FixBlocksStep::themeFiles($project);
+        $all = $project->themeFiles();
 
         $pages = $project->exists('pages.json')
             ? (array) ($project->readJson('pages.json')['pages'] ?? [])

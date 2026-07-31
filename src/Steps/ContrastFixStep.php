@@ -93,28 +93,25 @@ final class ContrastFixStep implements Step
             self::fontSizeMap($themeJson),
         );
 
-        foreach (['parts', 'templates'] as $dir) {
-            foreach (glob($project->themePath($dir . '/*.html')) ?: [] as $abs) {
-                $rel = $dir . '/' . basename($abs);
-                $markup = $project->readText('theme/' . $rel);
-                // The header floats over the hero — lint only (see class doc).
-                $repair = basename($abs) !== 'header.html';
-                $result = $fix->process($markup, $repair);
-                if ($result['changed']) {
-                    $project->writeText('theme/' . $rel, $result['markup']);
+        foreach ($project->themeFiles() as $rel) {
+            $markup = $project->readText('theme/' . $rel);
+            // The header floats over the hero — lint only (see class doc).
+            $repair = basename($rel) !== 'header.html';
+            $result = $fix->process($markup, $repair);
+            if ($result['changed']) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['findings'] as $f) {
+                $warning = !$f['repaired'] || ($f['residual'] ?? false);
+                $disposition = $f['repaired']
+                    ? ($warning ? '(repaired) (warning)' : '(repaired)')
+                    : '(warning)';
+                $report[] = sprintf('[%s] %s %s', $rel, $f['detail'], $disposition);
+                if ($f['repaired']) {
+                    $repaired++;
                 }
-                foreach ($result['findings'] as $f) {
-                    $warning = !$f['repaired'] || ($f['residual'] ?? false);
-                    $disposition = $f['repaired']
-                        ? ($warning ? '(repaired) (warning)' : '(repaired)')
-                        : '(warning)';
-                    $report[] = sprintf('[%s] %s %s', $rel, $f['detail'], $disposition);
-                    if ($f['repaired']) {
-                        $repaired++;
-                    }
-                    if ($warning) {
-                        $warnings++;
-                    }
+                if ($warning) {
+                    $warnings++;
                 }
             }
         }

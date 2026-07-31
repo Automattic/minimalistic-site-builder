@@ -226,7 +226,7 @@ final class FixBlocksStep implements Step
         $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
-        foreach (self::themeFiles($project) as $rel) {
+        foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
             }
@@ -528,7 +528,7 @@ final class FixBlocksStep implements Step
     private static function snapshotThemeFiles(Project $project): array
     {
         $snapshot = [];
-        foreach (self::themeFiles($project) as $relative) {
+        foreach ($project->themeFiles() as $relative) {
             $snapshot[$relative] = $project->readText('theme/' . $relative);
         }
         return $snapshot;
@@ -540,18 +540,6 @@ final class FixBlocksStep implements Step
         foreach ($snapshot as $relative => $markup) {
             $project->writeText('theme/' . $relative, $markup);
         }
-    }
-
-    /** @return string[] parts/*.html and templates/*.html, theme-relative */
-    public static function themeFiles(Project $project): array
-    {
-        $rels = [];
-        foreach (['parts', 'templates'] as $sub) {
-            foreach (glob($project->themePath($sub) . '/*.html') ?: [] as $file) {
-                $rels[] = $sub . '/' . basename($file);
-            }
-        }
-        return $rels;
     }
 
     /**
