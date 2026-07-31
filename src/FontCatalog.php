@@ -28,7 +28,7 @@ final class FontCatalog
     {
         foreach ($families as $family) {
             $this->byName[strtolower((string) $family['name'])] = $family;
-            $this->bySlug[(string) $family['slug']] = $family;
+            $this->bySlug[strtolower((string) $family['slug'])] = $family;
         }
     }
 
@@ -64,8 +64,9 @@ final class FontCatalog
         if ($first === null) {
             return null;
         }
-        return $this->byName[strtolower($first)]
-            ?? $this->bySlug[$first]
+        $normalized = strtolower($first);
+        return $this->byName[$normalized]
+            ?? $this->bySlug[$normalized]
             ?? null;
     }
 

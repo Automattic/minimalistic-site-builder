@@ -45,6 +45,7 @@ test('FontCatalog resolves names, slugs, and CSS stacks case-insensitively', fun
     assert_eq('Inter', $catalog->resolve('Inter')['name']);
     assert_eq('Inter', $catalog->resolve('inter')['name']);
     assert_eq('Inter', $catalog->resolve('INTER')['name']);
+    assert_eq('Playfair Display', $catalog->resolve('PLAYFAIR-DISPLAY')['name']);
     assert_eq('Inter', $catalog->resolve('Inter, sans-serif')['name']);
     assert_eq('Playfair Display', $catalog->resolve('"Playfair Display", serif')['name']);
     assert_eq('Playfair Display', $catalog->resolve("'Playfair Display'")['name']);
@@ -99,9 +100,11 @@ test('the vendored catalog honors the distiller invariants', function () {
     // distiller refuses anything else at build time; this re-checks the
     // committed artifact so a hand edit cannot widen the origin set.
     $decoded = json_decode((string) file_get_contents(dirname(__DIR__, 2) . '/data/google-fonts/catalog.json'), true);
+    $faceCount = 0;
     foreach ($decoded['font_families'] as $family) {
         assert_true($family['fontFace'] !== [], "family {$family['name']} has no faces");
         foreach ($family['fontFace'] as $face) {
+            ++$faceCount;
             assert_eq('fonts.gstatic.com', parse_url($face['src'], PHP_URL_HOST));
             assert_eq('https', parse_url($face['src'], PHP_URL_SCHEME));
         }
@@ -113,5 +116,20 @@ test('the vendored catalog honors the distiller invariants', function () {
         $manifest['catalog']['sha256'],
         hash('sha256', (string) file_get_contents(dirname(__DIR__, 2) . '/data/google-fonts/catalog.json')),
         'catalog.json was edited without re-running the distiller'
+    );
+    assert_eq(
+        $manifest['distiller']['sha256'],
+        hash_file('sha256', dirname(__DIR__, 2) . '/bin/distill-google-fonts-catalog.php'),
+        'distiller changed without regenerating catalog-manifest.json'
+    );
+    assert_eq(
+        $manifest['catalog']['families'],
+        count($decoded['font_families']),
+        'catalog-manifest.json records a stale family count'
+    );
+    assert_eq(
+        $manifest['catalog']['faces'],
+        $faceCount,
+        'catalog-manifest.json records a stale face count'
     );
 });
