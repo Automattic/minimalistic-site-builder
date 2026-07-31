@@ -60,14 +60,25 @@ final class FontCatalog
      */
     public function resolve(string $reference): ?array
     {
-        $first = trim(explode(',', $reference)[0]);
-        $first = trim($first, " \t\"'");
-        if ($first === '') {
+        $first = self::primaryFamily($reference);
+        if ($first === null) {
             return null;
         }
         return $this->byName[strtolower($first)]
             ?? $this->bySlug[$first]
             ?? null;
+    }
+
+    /**
+     * The family a CSS font-family stack names: its first segment, unquoted.
+     * The one parser for this — FontsPhpStep delegates here, so the scan and
+     * the catalog can never disagree about which family a stack refers to.
+     */
+    public static function primaryFamily(string $stack): ?string
+    {
+        $first = trim(explode(',', $stack)[0]);
+        $first = trim($first, " \t\"'");
+        return $first === '' ? null : $first;
     }
 
     /**
@@ -97,6 +108,8 @@ final class FontCatalog
             if ($available === []) {
                 continue;
             }
+            // Ascending, so nearest() breaks equidistant ties toward the
+            // lighter weight deterministically.
             ksort($available);
             foreach ($weights as $weight) {
                 $face = $available[$weight] ?? $available[self::nearest($weight, array_keys($available))];
