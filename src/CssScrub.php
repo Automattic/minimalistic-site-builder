@@ -377,7 +377,7 @@ final class CssScrub
 
         for ($offset = 0; $offset < $length;) {
             if ($value[$offset] !== '\\') {
-                $decoded .= $value[$offset];
+                $decoded .= $value[$offset] === "\0" ? "\u{FFFD}" : $value[$offset];
                 $offset++;
                 continue;
             }
