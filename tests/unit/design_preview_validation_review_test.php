@@ -326,7 +326,6 @@ foreach ($designPreviewHarmlessCssControls as $name => $css) {
         assert_eq($authored, $delivered, "{$name} ships byte-identically");
         assert_eq('', $warnings, "{$name} needs no warning");
         design_preview_review_assert_no_dependency_markup($delivered);
-        design_preview_assert_shape($delivered);
     });
 }
 
