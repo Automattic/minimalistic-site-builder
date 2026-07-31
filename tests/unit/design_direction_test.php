@@ -684,3 +684,12 @@ test('motionProfileFor fails closed to none', function () {
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('directionFor returns nothing when no direction was committed', function () {
+    $project = new Project(sys_get_temp_dir() . '/design-direction-absent-' . uniqid());
+    try {
+        assert_eq([], DesignDirectionStep::dataFor($project));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($project->root));
+    }
+});

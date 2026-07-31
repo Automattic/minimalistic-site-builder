@@ -316,9 +316,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Missing required slugs are filled deterministically instead of
         // aborting the build: the direction's committed hexes first, neutral
         // readable defaults otherwise. Every fill is recorded durably.
-        $direction = $project->exists('designDirection.json')
-            ? $project->readJson('designDirection.json')
-            : [];
+        $direction = DesignDirectionStep::dataFor($project);
         $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
         [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
         $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
