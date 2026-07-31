@@ -257,36 +257,21 @@ final class CssContrastCheckEngine
         if ($color !== null) {
             return ['resolved', $color];
         }
+        if ($property === 'background') {
+            // Any complete, nonempty shorthand that is not exactly one solid
+            // resolved color still resets background-color. Keep it as the
+            // cascade winner but mark the rendered background unverified;
+            // skipping it would expose a stale earlier longhand as evidence.
+            return ['unresolved', null];
+        }
+
         $lower = strtolower(trim($value));
         $commonUnresolved = in_array($lower, [
             'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'currentcolor', 'transparent',
         ], true)
             || preg_match('/^(?:var|rgb|rgba|hsl|hsla|oklch|lab|lch|color|color-mix|light-dark)\s*\(/i', $value) === 1
             || preg_match('/^[a-z]+$/i', $value) === 1;
-        if ($property !== 'background') {
-            return $commonUnresolved ? ['unresolved', null] : ['invalid', null];
-        }
-
-        // A syntactically complete background shorthand can be valid while
-        // exceeding this checker's single-color model. It must still win the
-        // CSS cascade and force unverified; skipping it exposes stale earlier
-        // background-color declarations as false evidence.
-        if ($commonUnresolved
-            || self::containsColorToken($value)
-            || preg_match('/^(?:url|image|image-set|cross-fade|element|(?:repeating-)?(?:linear|radial|conic)-gradient)\s*\(/i', $value) === 1
-            || preg_match('/\b(?:none|repeat|no-repeat|cover|contain|scroll|fixed|local|padding-box|border-box|content-box)\b/i', $value) === 1) {
-            return ['unresolved', null];
-        }
-        return ['invalid', null];
-    }
-
-    private static function containsColorToken(string $value): bool
-    {
-        if (ContrastMath::parseCssColors($value) !== []) {
-            return true;
-        }
-        return preg_match('/#[0-9a-f]{4}(?:[0-9a-f]{4})?\b/i', $value) === 1
-            || preg_match('/\brgba?\s*\(/i', $value) === 1;
+        return $commonUnresolved ? ['unresolved', null] : ['invalid', null];
     }
 
     /** @param array<string,mixed> $candidate @param array<string,mixed> $winner */
