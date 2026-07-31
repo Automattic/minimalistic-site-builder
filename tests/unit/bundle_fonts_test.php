@@ -166,3 +166,41 @@ test('BundleFontsStep degrades a family whose scan selects no faces', function (
         exec('rm -rf ' . escapeshellarg($project->root));
     }
 });
+
+test('BundleFontsStep contains a traversal slug inside the fonts directory', function () {
+    // fontFamilies slugs are model-authored and ThemeJsonStep::repairFonts only
+    // trims them, so a slug carrying `../..` used to escape theme/assets/fonts/
+    // and write wherever the path resolved.
+    $tmp = sys_get_temp_dir() . '/bundle-fonts-traversal-' . uniqid();
+    $project = new Project($tmp);
+    $project->writeJson('theme/theme.json', [
+        'settings' => ['typography' => ['fontFamilies' => [[
+            'slug'       => '../../evil',
+            'name'       => 'Inter',
+            'fontFamily' => 'Inter, sans-serif',
+        ]]]],
+    ]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:paragraph --><p><strong>Body copy</strong></p><!-- /wp:paragraph -->',
+    );
+
+    try {
+        (new BundleFontsStep(new FakeFontFetcher()))->run($project);
+
+        assert_true(
+            !file_exists($project->path('theme/evil-400.woff2')),
+            'nothing is written outside theme/assets/fonts/'
+        );
+        $faces = $project->readJson('theme/theme.json')['settings']['typography']['fontFamilies'][0]['fontFace'];
+        foreach ($faces as $face) {
+            assert_true(
+                !str_contains($face['src'][0], '..'),
+                'no declared src escapes the fonts directory: ' . $face['src'][0]
+            );
+        }
+        assert_eq(['file:./assets/fonts/evil-400.woff2'], $faces[0]['src']);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($project->root));
+    }
+});

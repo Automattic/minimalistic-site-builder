@@ -7,6 +7,7 @@ use Automattic\SiteBuild\CurlFontFetcher;
 use Automattic\SiteBuild\FontCatalog;
 use Automattic\SiteBuild\FontFetcher;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 
@@ -30,6 +31,9 @@ use Automattic\SiteBuild\StepDeclaration;
  */
 final class BundleFontsStep implements Step
 {
+    /** Face formats the build will write; the vendored catalog is woff2 throughout. */
+    private const FACE_EXTENSIONS = ['woff2', 'woff', 'ttf', 'otf'];
+
     public function __construct(
         private ?FontFetcher $fetcher = null,
         private ?FontCatalog $catalog = null,
@@ -51,7 +55,7 @@ final class BundleFontsStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*'],
+            reads: ['theme/theme.json', 'theme/parts/*', 'theme/templates/*', 'plugin/pages/*'],
             writes: ['theme/theme.json', 'theme/assets/fonts/*', 'warnings.json'],
             concurrent: false,
         );
@@ -126,13 +130,25 @@ final class BundleFontsStep implements Step
             . "\n";
     }
 
-    /** @param array{fontWeight:string,fontStyle:string,src:string} $face */
+    /**
+     * Both halves are attacker-reachable and both land in a filesystem path, so
+     * neither is trusted: the slug is model-authored (theme.json fontFamilies,
+     * where `../..` would escape assets/fonts/) and the extension is parsed out
+     * of a URL. Slugify matches what every other filesystem-facing name in the
+     * build already does, and the catalog is woff2 throughout, so the extension
+     * allowlist is a no-op on real data.
+     *
+     * @param array{fontWeight:string,fontStyle:string,src:string} $face
+     */
     private static function faceFilename(string $slug, array $face): string
     {
         $extension = strtolower(pathinfo((string) parse_url($face['src'], PHP_URL_PATH), PATHINFO_EXTENSION));
-        return $slug . '-' . $face['fontWeight']
+        if (!in_array($extension, self::FACE_EXTENSIONS, true)) {
+            $extension = 'woff2';
+        }
+        return ProjectStore::slugify($slug) . '-' . $face['fontWeight']
             . ($face['fontStyle'] === 'italic' ? '-italic' : '')
-            . '.' . ($extension !== '' ? $extension : 'woff2');
+            . '.' . $extension;
     }
 
     /**
