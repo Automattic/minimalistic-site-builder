@@ -36,6 +36,8 @@ final class CssScrub
 
         /** @var array<string,array{start:int,end:int,kind:string}> $ranges */
         $ranges = [];
+        /** @var list<string|null> $functionStack */
+        $functionStack = [];
 
         for ($offset = 0; $offset < $length;) {
             if (self::startsComment($css, $offset)) {
@@ -45,7 +47,32 @@ final class CssScrub
 
             $byte = $css[$offset];
             if ($byte === '"' || $byte === "'") {
-                $offset = self::stringEnd($css, $offset);
+                $stringEnd = self::completeStringEnd($css, $offset);
+                if ($stringEnd === null) {
+                    $offset = self::stringEnd($css, $offset);
+                    continue;
+                }
+
+                $function = $functionStack === []
+                    ? null
+                    : $functionStack[array_key_last($functionStack)];
+                if (
+                    $function !== null
+                    && self::stringCanBeUrlIn($function)
+                    && self::isExternalUrl(substr($css, $offset + 1, $stringEnd - $offset - 2))
+                ) {
+                    $declaration = self::declarationRange($css, $offset);
+                    if ($declaration !== null) {
+                        $key = "{$declaration['start']}:{$declaration['end']}";
+                        $ranges[$key] = [
+                            'start' => $declaration['start'],
+                            'end'   => $declaration['end'],
+                            'kind'  => 'external_url_declaration',
+                        ];
+                    }
+                }
+
+                $offset = $stringEnd;
                 continue;
             }
 
@@ -85,10 +112,21 @@ final class CssScrub
 
             $identifier = self::identifierAt($css, $offset);
             if ($identifier !== null) {
+                $functionOpen = self::skipWhitespaceAndComments($css, $identifier['end']);
+                if ($functionOpen < $length && $css[$functionOpen] === '(') {
+                    $functionStack[] = $identifier['value'];
+                    $offset = $functionOpen + 1;
+                    continue;
+                }
                 $offset = $identifier['end'];
                 continue;
             }
 
+            if ($byte === '(') {
+                $functionStack[] = null;
+            } elseif ($byte === ')' && $functionStack !== []) {
+                array_pop($functionStack);
+            }
             $offset++;
         }
 
@@ -314,6 +352,15 @@ final class CssScrub
     {
         $decoded = self::decodeCssEscapes($url);
         return $decoded !== null && preg_match('/^(?:https?:|\\/\\/)/i', $decoded) === 1;
+    }
+
+    private static function stringCanBeUrlIn(string $function): bool
+    {
+        return in_array(
+            strtolower($function),
+            ['image-set', '-webkit-image-set', 'image', 'cross-fade', 'src'],
+            true,
+        );
     }
 
     private static function decodeCssEscapes(string $value): ?string
