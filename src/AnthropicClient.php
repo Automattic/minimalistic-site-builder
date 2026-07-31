@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  * no streaming, no tool use, no agentic loop. This is the production transport
  * for the builder; see PROGRESS.md for why the wpcom proxy is not used.
  */
-final class AnthropicClient implements Llm
+final class AnthropicClient implements FinishReasonAwareLlm
 {
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
@@ -65,12 +65,24 @@ final class AnthropicClient implements Llm
     private int $outputTokens = 0;
     private int $cacheReadInputTokens = 0;
     private int $cacheCreationInputTokens = 0;
+    private ?string $lastFinishReason = null;
+    private ?\Closure $singleTransport;
 
     public function __construct(
         private string $apiKey,
         private string $model,
         private int $defaultMaxTokens = 16000,
-    ) {}
+        ?callable $singleTransport = null,
+    ) {
+        $this->singleTransport = $singleTransport === null
+            ? null
+            : \Closure::fromCallable($singleTransport);
+    }
+
+    public function lastFinishReason(): ?string
+    {
+        return $this->lastFinishReason;
+    }
 
     /**
      * Cumulative token usage across every request this client has made.
@@ -117,6 +129,8 @@ final class AnthropicClient implements Llm
      */
     public function complete(string $prompt, array $opts = []): string
     {
+        $this->lastFinishReason = null;
+
         // Stream the response: bytes arrive incrementally, so a stalled
         // connection is detected quickly (and retried) instead of blocking the
         // full timeout, and long generations never hit an idle-connection
@@ -147,6 +161,9 @@ final class AnthropicClient implements Llm
         if (!$tolerateEmpty && trim($res['text']) === '') {
             throw new \RuntimeException('No text content in streamed response');
         }
+        $this->lastFinishReason = is_string($res['stop_reason'] ?? null)
+            ? $res['stop_reason']
+            : null;
         return $res['text'];
     }
 
@@ -790,7 +807,7 @@ final class AnthropicClient implements Llm
     {
         return self::retrySingleRequest(
             $body,
-            fn (array $requestBody): array => $this->streamRequest($requestBody),
+            $this->singleTransport ?? fn (array $requestBody): array => $this->streamRequest($requestBody),
             [2, 5, 12],
             $tolerateEmpty,
         );
