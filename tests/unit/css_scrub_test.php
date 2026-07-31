@@ -251,6 +251,27 @@ CSS;
     assert_eq('removed_external_url', $result['removals'][0]['disposition']);
 });
 
+test('css scrub removes bare remote strings after raw or escaped leading whitespace', function (): void {
+    $cases = [
+        'raw leading whitespace' => ' http://127.0.0.1:9/px.png',
+        'CSS-escaped leading whitespace' => '\20 https://evil.example/escaped-space.png',
+    ];
+
+    foreach ($cases as $label => $value) {
+        $css = '.bad{background-image:image-set("' . $value . '" 1x);color:red}';
+        $result = CssScrub::scrub($css);
+
+        assert_eq('.bad{color:red}', $result['css'], $label);
+        assert_eq(1, count($result['removals']), $label);
+        assert_eq(
+            'background-image:image-set("' . $value . '" 1x);',
+            $result['removals'][0]['authored_value'],
+            $label
+        );
+        assert_eq('removed_external_url', $result['removals'][0]['disposition'], $label);
+    }
+});
+
 test('css scrub preserves allowed bare string urls in image functions byte for byte on one line', function (): void {
     $css = '.relative{background-image:image-set("./asset.png" 1x)}'
         . '.data{background-image:-webkit-image-set("data:image/png;base64,AAAA" 2x)}'
@@ -267,6 +288,29 @@ test('css scrub preserves strings outside immediate image function url context',
         . '.tokens{--asset:"https://x"}'
         . '.custom{value:not-an-image("https://x")}'
         . '.typed{background-image:image-set("./hero.avif" type("image/avif") 1x)}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
+test('css scrub recovers function context at a rule boundary before a later remote image string', function (): void {
+    $css = '.broken{color:foo(1}.later{background-image:image-set("https://evil/px.png" 1x);display:block}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq('.broken{color:foo(1}.later{display:block}', $result['css']);
+    assert_eq(1, count($result['removals']));
+    assert_eq(
+        'background-image:image-set("https://evil/px.png" 1x);',
+        $result['removals'][0]['authored_value']
+    );
+    assert_eq('removed_external_url', $result['removals'][0]['disposition']);
+});
+
+test('css scrub never carries an unclosed image function across a rule boundary', function (): void {
+    $css = '.broken{background-image:image-set(foo}.later{content:"https://x");display:block}';
 
     $result = CssScrub::scrub($css);
 

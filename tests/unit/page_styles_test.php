@@ -546,6 +546,42 @@ test('site CSS path scrubs image-set bare remote strings before deterministic me
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path scrubs image-set remote strings after leading whitespace normalization', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_space_scrub_');
+    $base = $project->readText('theme/style.css');
+    $remote = 'http://127.0.0.1:9/px.png';
+    $siteCss = '.hero{background-image:image-set(" ' . $remote . '" 1x);display:grid}'
+        . '.safe{padding:1rem}';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', '<main>Kept</main>');
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, $remote), 'normalized remote bytes never reach theme/style.css');
+    assert_eq(
+        $base . '.hero{display:grid}.safe{padding:1rem}',
+        $style,
+        'deterministic merge keeps both safe sibling rules'
+    );
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+    $warnings = implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []);
+    assert_contains('source=design/site.css', $warnings);
+    assert_contains(
+        'authored_value="background-image:image-set(\\" http://127.0.0.1:9/px.png\\" 1x);"',
+        $warnings
+    );
+    assert_contains('delivered_value=removed', $warnings);
+    assert_contains('disposition=removed_external_url', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(
