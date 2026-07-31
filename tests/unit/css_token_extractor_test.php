@@ -144,3 +144,42 @@ CSS);
         ['color' => '#040506', 'count' => 1],
     ], $tokens['palette']);
 });
+
+test('css-token-extractor keeps unresolved nested var fallbacks opaque after one level', function () {
+    $tokens = CssTokenExtractor::extract(<<<'CSS'
+:root {
+    --brand: #112233;
+    --nested: var(--brand, rgb(255, 255, 255));
+    --undefined-chain: var(--missing, var(--other, #445566));
+}
+body {
+    color: var(--nested);
+    background: var(--undefined-chain);
+    font-family: serif;
+}
+CSS);
+
+    assert_eq([
+        'palette' => [],
+        'fonts' => [],
+        'spacing' => [],
+    ], $tokens);
+});
+
+test('css-token-extractor treats Unicode and CSS escapes as color name boundaries', function () {
+    $tokens = CssTokenExtractor::extract(<<<'CSS'
+body {
+    font-family: serif;
+    color: érgb(1 2 3);
+    border-color: #123456é;
+    outline-color: #123456\65;
+    text-decoration-color: \rgb(7 8 9);
+    background: linear-gradient(#ABCDEF,rgb(4 5 6));
+}
+CSS);
+
+    assert_eq([
+        ['color' => '#ABCDEF', 'count' => 1],
+        ['color' => '#040506', 'count' => 1],
+    ], $tokens['palette']);
+});
