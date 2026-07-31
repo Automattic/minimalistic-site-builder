@@ -1,0 +1,156 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/trunk/schemas/site-spec.schema.json",
+    "title": "SiteBuild canonical site spec",
+    "description": "The decoded factual site specification accepted by SiteBuilder::createProject(siteSpec: ...) and emitted as siteSpec.json. The fixed fields describe identity, subject, language, homepage scope, and the page tree. Additional top-level properties are allowed for grounded facts such as hours, location, services, or social links; design decisions do not belong here.",
+    "type": "object",
+    "required": [
+        "name",
+        "slug",
+        "title",
+        "description",
+        "site_type",
+        "topic",
+        "area",
+        "audience",
+        "language",
+        "persona_name",
+        "email_domain",
+        "invented",
+        "visual_vibe",
+        "animation_request",
+        "sections",
+        "pages"
+    ],
+    "properties": {
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short, masthead-friendly brand or site name."
+        },
+        "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Lowercase, URL-safe site slug."
+        },
+        "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Main site title or visitor-facing headline."
+        },
+        "description": {
+            "type": "string",
+            "description": "One factual sentence describing the site and what it offers."
+        },
+        "site_type": {
+            "type": "string",
+            "description": "Kind of site, for example business storefront, blog, portfolio, menu, or landing page."
+        },
+        "topic": {
+            "type": "string",
+            "description": "What the site is about, in one short phrase."
+        },
+        "area": {
+            "type": "string",
+            "description": "Business type, domain, or category."
+        },
+        "audience": {
+            "type": "string",
+            "description": "Who the site is for."
+        },
+        "language": {
+            "type": "string",
+            "description": "Language for all generated copy. Prefer a BCP-47 code such as en or es-AR. An empty normalized value means downstream steps follow the prompt language.",
+            "examples": [
+                "en",
+                "es-AR"
+            ]
+        },
+        "persona_name": {
+            "type": "string",
+            "description": "Full name for the person represented by a personal site; empty for non-personal sites."
+        },
+        "email_domain": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
+            "description": "Lowercase bare domain used to construct contact email addresses; no @ sign or URL scheme."
+        },
+        "invented": {
+            "type": "array",
+            "description": "Identity fields invented because the source prompt did not state them.",
+            "items": {
+                "type": "string",
+                "enum": [
+                    "name",
+                    "persona_name",
+                    "email_domain"
+                ]
+            },
+            "uniqueItems": true
+        },
+        "visual_vibe": {
+            "type": "string",
+            "description": "Brief overall mood phrase, without concrete colors, fonts, spacing, or layout choices."
+        },
+        "animation_request": {
+            "type": "string",
+            "description": "Verbatim specific motion behavior requested by the user; empty when none was requested."
+        },
+        "sections": {
+            "type": "array",
+            "description": "Ordered section hints for the homepage.",
+            "items": {
+                "type": "string"
+            }
+        },
+        "pages": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Site page tree. The first top-level page is the homepage by position.",
+            "items": {
+                "$ref": "#/$defs/page"
+            }
+        }
+    },
+    "additionalProperties": true,
+    "$defs": {
+        "page": {
+            "type": "object",
+            "description": "One page in the site tree. Slugs must be unique across the entire tree; generated specs normally stay at two levels, although the runtime accepts recursive children.",
+            "required": [
+                "title",
+                "slug",
+                "purpose",
+                "children"
+            ],
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Short navigation title in the site language."
+                },
+                "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "description": "Lowercase, URL-safe slug unique across the complete page tree."
+                },
+                "purpose": {
+                    "type": "string",
+                    "description": "What content belongs on this page so it does not overlap sibling pages."
+                },
+                "children": {
+                    "type": "array",
+                    "description": "Nested pages in the same canonical shape.",
+                    "items": {
+                        "$ref": "#/$defs/page"
+                    }
+                }
+            },
+            "additionalProperties": false
+        }
+    }
+}
