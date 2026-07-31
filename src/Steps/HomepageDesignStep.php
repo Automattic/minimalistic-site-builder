@@ -952,6 +952,34 @@ final class HomepageDesignStep implements Step
      */
     private static function nextTag(string $html, int $offset): ?array
     {
+        while (($candidate = self::nextTagCandidate($html, $offset)) !== null) {
+            $offset = $candidate['end'];
+            if ($candidate['malformed']) {
+                continue;
+            }
+            return [
+                'start'        => $candidate['start'],
+                'end'          => $candidate['end'],
+                'name'         => $candidate['name'],
+                'closing'      => $candidate['closing'],
+                'self_closing' => $candidate['self_closing'],
+            ];
+        }
+        return null;
+    }
+
+    /**
+     * @return array{
+     *   start:int,
+     *   end:int,
+     *   malformed:bool,
+     *   name?:string,
+     *   closing?:bool,
+     *   self_closing?:bool
+     * }|null
+     */
+    private static function nextTagCandidate(string $html, int $offset): ?array
+    {
         $length = strlen($html);
         while ($offset < $length) {
             $start = strpos($html, '<', $offset);
@@ -963,8 +991,50 @@ final class HomepageDesignStep implements Step
                 continue;
             }
 
+            if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
+                $declarationEnd = self::ignoredPreHeadMarkupEnd($html, $start, $length);
+                if ($declarationEnd !== null) {
+                    $offset = $declarationEnd;
+                    continue;
+                }
+                return [
+                    'start'     => $start,
+                    'end'       => $length,
+                    'malformed' => true,
+                ];
+            }
+
+            $cursor = $start + 1;
+            while ($cursor < $length && str_contains(" \t\n\f\r", $html[$cursor])) {
+                $cursor++;
+            }
+            $closing = ($html[$cursor] ?? '') === '/';
+            if ($closing) {
+                $cursor++;
+                while ($cursor < $length && str_contains(" \t\n\f\r", $html[$cursor])) {
+                    $cursor++;
+                }
+            }
+            if (
+                $cursor >= $length
+                || preg_match('/^[A-Za-z]$/D', $html[$cursor]) !== 1
+            ) {
+                $offset = $start + 1;
+                continue;
+            }
+
+            $nameStart = $cursor;
+            while (
+                $cursor < $length
+                && !self::isTagNameDelimiter($html[$cursor])
+            ) {
+                $cursor++;
+            }
+            $rawName = substr($html, $nameStart, $cursor - $nameStart);
+            $validName = preg_match('/^[A-Za-z][A-Za-z0-9:-]*$/D', $rawName) === 1;
+
             $quote = null;
-            $end = $start + 1;
+            $end = $cursor;
             for (; $end < $length; $end++) {
                 $char = $html[$end];
                 if ($quote !== null) {
@@ -982,25 +1052,40 @@ final class HomepageDesignStep implements Step
                 }
             }
             if ($end >= $length) {
-                return null;
+                return [
+                    'start'     => $start,
+                    'end'       => $length,
+                    'malformed' => true,
+                ];
             }
 
-            $raw = substr($html, $start, $end - $start + 1);
-            if (!preg_match('/^<\s*(\/?)\s*([A-Za-z][A-Za-z0-9:-]*)\b/s', $raw, $match)) {
-                $offset = $end + 1;
-                continue;
+            if (!$validName) {
+                return [
+                    'start'     => $start,
+                    'end'       => $end + 1,
+                    'malformed' => true,
+                ];
             }
-            $name = strtolower($match[2]);
+            $raw = substr($html, $start, $end - $start + 1);
+            $name = strtolower($rawName);
             return [
                 'start'        => $start,
                 'end'          => $end + 1,
+                'malformed'    => false,
                 'name'         => $name,
-                'closing'      => $match[1] === '/',
+                'closing'      => $closing,
                 'self_closing' => !in_array($name, self::RAW_TEXT_ELEMENTS, true)
                     && preg_match('/\/\s*>$/s', $raw) === 1,
             ];
         }
         return null;
+    }
+
+    private static function isTagNameDelimiter(string $char): bool
+    {
+        return $char === '/'
+            || $char === '>'
+            || str_contains(" \t\n\f\r", $char);
     }
 
     /**
@@ -1108,6 +1193,42 @@ final class HomepageDesignStep implements Step
     }
 
     /**
+     * @return list<array{start:int,length:int,authored:string}>
+     */
+    private static function malformedTagRemovals(string $html): array
+    {
+        $removals = [];
+        $offset = 0;
+        while (($candidate = self::nextTagCandidate($html, $offset)) !== null) {
+            $offset = $candidate['end'];
+            if ($candidate['malformed']) {
+                $removals[] = [
+                    'start'    => $candidate['start'],
+                    'length'   => $candidate['end'] - $candidate['start'],
+                    'authored' => substr(
+                        $html,
+                        $candidate['start'],
+                        $candidate['end'] - $candidate['start'],
+                    ),
+                ];
+                continue;
+            }
+            if (
+                !$candidate['closing']
+                && !$candidate['self_closing']
+                && in_array($candidate['name'], self::RAW_TEXT_ELEMENTS, true)
+            ) {
+                $close = self::matchingCloseToken($html, $candidate);
+                if ($close === null) {
+                    break;
+                }
+                $offset = $close['end'];
+            }
+        }
+        return $removals;
+    }
+
+    /**
      * @param list<string> $warnings
      */
     private static function sanitizeHtml(
@@ -1116,7 +1237,23 @@ final class HomepageDesignStep implements Step
         string $context,
         array &$warnings,
     ): string {
-        $removals = self::malformedCommentRemovals($html);
+        $malformedTags = self::malformedTagRemovals($html);
+        $removals = $malformedTags;
+        foreach (self::malformedCommentRemovals($html) as $commentRemoval) {
+            $overlapsMalformedTag = false;
+            foreach ($malformedTags as $tagRemoval) {
+                if (
+                    $commentRemoval['start'] < $tagRemoval['start'] + $tagRemoval['length']
+                    && $tagRemoval['start'] < $commentRemoval['start'] + $commentRemoval['length']
+                ) {
+                    $overlapsMalformedTag = true;
+                    break;
+                }
+            }
+            if (!$overlapsMalformedTag) {
+                $removals[] = $commentRemoval;
+            }
+        }
         $head = self::headContentRange($html);
         $headStyleStarts = self::domHeadStyleStarts($html);
         $offset = 0;
@@ -1345,7 +1482,13 @@ final class HomepageDesignStep implements Step
                 $sourceStyle['start'],
                 $sourceStyle['end'] - $sourceStyle['start'],
             );
-            if (preg_match('/^<\s*style\b/i', $raw, $match) !== 1) {
+            if (
+                preg_match(
+                    '/^<\s*style(?=[ \t\n\f\r\/>])/i',
+                    $raw,
+                    $match,
+                ) !== 1
+            ) {
                 continue;
             }
             $insertAt = $sourceStyle['start'] + strlen($match[0]);
