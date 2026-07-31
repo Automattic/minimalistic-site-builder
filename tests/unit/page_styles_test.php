@@ -502,6 +502,50 @@ test('site CSS path warns for every scrub removal and continues after an empty s
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path scrubs image-set bare remote strings before deterministic merge', function () {
+    [$project, $tmp] = ps_project('builder_ps_image_set_scrub_');
+    $base = $project->readText('theme/style.css');
+    $remote = 'https://evil.example/tracker.png';
+    $siteCss = '.hero{color:var(--wp--preset--color--contrast);'
+        . 'background-image:image-set("' . $remote . '" 1x);padding:1rem;}'
+        . '.site-safe{background-image:image-set("./local.png" 1x);}';
+    $pageCss = '.page-safe{display:grid;}';
+    $page = '<main>Kept</main><style data-page-css>' . $pageCss . '</style>';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText('design/home.html', $page);
+    $llm = new FakeLlm();
+
+    (new PageStylesStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, $remote), 'remote image-set bytes never reach theme/style.css');
+    assert_eq(
+        $base
+        . '.hero{color:var(--wp--preset--color--contrast);padding:1rem;}'
+        . '.site-safe{background-image:image-set("./local.png" 1x);}'
+        . "\n"
+        . $pageCss,
+        $style,
+        'deterministic merge keeps safe declarations and page sibling bytes'
+    );
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'site CSS source unchanged');
+    assert_eq($page, $project->readText('design/home.html'), 'page source unchanged');
+    assert_eq([], $llm->calls, 'deterministic scrub makes zero LLM calls');
+    $warnings = implode("\n", $project->readJson('warnings.json')['page-styles'] ?? []);
+    assert_contains('source=design/site.css', $warnings);
+    assert_contains(
+        'authored_value="background-image:image-set(\\"https://evil.example/tracker.png\\" 1x);"',
+        $warnings
+    );
+    assert_contains('delivered_value=removed', $warnings);
+    assert_contains('disposition=removed_external_url', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('run appends validated CSS to style.css and passes the configured model', function () {
     [$project, $tmp] = ps_project('builder_ps_ok_');
     $project->writeText(

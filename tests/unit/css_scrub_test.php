@@ -207,6 +207,73 @@ test('css scrub leaves malformed import boundary unchanged and does not lose saf
     assert_eq([], $result['removals']);
 });
 
+test('css scrub removes remote bare strings from every supported image function context', function (): void {
+    $cases = [
+        'image-set' => 'image-set("https://evil.example/image-set.png" 1x)',
+        '-webkit-image-set' => '-webkit-image-set("//evil.example/webkit.png" 2x)',
+        'image' => 'image("HTTP://evil.example/image.png")',
+        'cross-fade' => 'cross-fade("https://evil.example/cross-fade.png", transparent, 50%)',
+        'src' => 'src("https://evil.example/font.woff2")',
+    ];
+
+    foreach ($cases as $function => $value) {
+        $css = ".bad{background-image:{$value};color:red}";
+        $result = CssScrub::scrub($css);
+
+        assert_eq('.bad{color:red}', $result['css'], "{$function} remote string removed");
+        assert_eq(1, count($result['removals']), "{$function} reports one removal");
+        assert_eq('external_url_declaration', $result['removals'][0]['kind'], $function);
+        assert_eq("background-image:{$value};", $result['removals'][0]['authored_value'], $function);
+        assert_eq('removed', $result['removals'][0]['delivered_value'], $function);
+        assert_eq('removed_external_url', $result['removals'][0]['disposition'], $function);
+    }
+});
+
+test('css scrub matches image function names case insensitively', function (): void {
+    $css = '.bad{background-image:ImAgE-SeT("HTTPS://evil.example/case.png" 1x);color:red}'
+        . '.also-bad{background-image:CrOsS-FaDe("//evil.example/case-2.png", transparent, 50%);display:block}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq('.bad{color:red}.also-bad{display:block}', $result['css']);
+    assert_eq(2, count($result['removals']));
+});
+
+test('css scrub removes image function bare strings with CSS-escaped external schemes', function (): void {
+    $css = <<<'CSS'
+.bad{background-image:image-set("https\3a //evil.example/escaped.png" 1x);color:red}
+CSS;
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq('.bad{color:red}', $result['css']);
+    assert_eq(1, count($result['removals']));
+    assert_eq('removed_external_url', $result['removals'][0]['disposition']);
+});
+
+test('css scrub preserves allowed bare string urls in image functions byte for byte on one line', function (): void {
+    $css = '.relative{background-image:image-set("./asset.png" 1x)}'
+        . '.data{background-image:-webkit-image-set("data:image/png;base64,AAAA" 2x)}'
+        . '.fragment{background-image:image("#local-paint")}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
+test('css scrub preserves strings outside immediate image function url context', function (): void {
+    $css = '.note::before{content:"https://x"}'
+        . '.tokens{--asset:"https://x"}'
+        . '.custom{value:not-an-image("https://x")}'
+        . '.typed{background-image:image-set("./hero.avif" type("image/avif") 1x)}';
+
+    $result = CssScrub::scrub($css);
+
+    assert_eq($css, $result['css']);
+    assert_eq([], $result['removals']);
+});
+
 test('css scrub output and report are idempotent and byte stable', function (): void {
     $css = '@import "https://bad.example/x.css";'
         . '.hero{background:url(https://bad.example/x.png);color:red}'
