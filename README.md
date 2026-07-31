@@ -162,6 +162,11 @@ in one command — useful as testing evidence for pipeline/theme changes:
 php bin/build-demos.php --with-images   # build every demo, with generated images
 ```
 
+An entry may carry a canonical `site_spec` object (the `hearth` demo does): it
+is pre-seeded into the project's `meta.json`, so the site-spec step normalizes
+it deterministically instead of generating one via LLM — a fixed, reproducible
+probe of the host-supplied-spec path described above.
+
 The demos build **in parallel** by default (up to three at once for OpenRouter) —
 one `bin/build.php` child process per entry, output streamed with a `[slug]`
 prefix. After the builds, each home page is
