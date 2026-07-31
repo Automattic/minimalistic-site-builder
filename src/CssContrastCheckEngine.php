@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild;
 
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssValueSplitter;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlFragment;
 use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use DOMDocument;
@@ -91,7 +92,7 @@ final class CssContrastCheckEngine
      *
      * @return list<array{
      *   finding:array{selector:string,status:string,fg:?string,bg:?string,ratio:?float,suggested:?string},
-     *   target:?array{property:string,value:string,value_start:int,value_end:int,important:bool},
+     *   target:?array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool},
      *   order:int
      * }>
      */
@@ -212,7 +213,7 @@ final class CssContrastCheckEngine
      * @param list<string> $properties
      * @return array{
      *   selector:string,state:string,color:?array{rgb:array{0:int,1:int,2:int},alpha:float},
-     *   value:string,declaration:array{property:string,value:string,value_start:int,value_end:int,important:bool},
+     *   value:string,declaration:array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool},
      *   important:bool,specificity:int,source_order:int
      * }|null
      */
@@ -224,7 +225,10 @@ final class CssContrastCheckEngine
                 if (!in_array($declaration['property'], $properties, true)) {
                     continue;
                 }
-                [$state, $color] = self::declarationColor($declaration['value']);
+                [$state, $color] = self::declarationColor(
+                    $declaration['evaluation'],
+                    $declaration['property'],
+                );
                 if ($state === 'invalid') {
                     continue;
                 }
@@ -247,21 +251,42 @@ final class CssContrastCheckEngine
     }
 
     /** @return array{0:string,1:?array{rgb:array{0:int,1:int,2:int},alpha:float}} */
-    private static function declarationColor(string $value): array
+    private static function declarationColor(string $value, string $property): array
     {
         $color = self::color($value);
         if ($color !== null) {
             return ['resolved', $color];
         }
         $lower = strtolower(trim($value));
-        if (in_array($lower, [
+        $commonUnresolved = in_array($lower, [
             'inherit', 'initial', 'unset', 'revert', 'revert-layer', 'currentcolor', 'transparent',
         ], true)
-            || preg_match('/^(?:var|hsl|hsla|oklch|lab|lch|color|color-mix|light-dark|url|(?:repeating-)?(?:linear|radial|conic)-gradient)\s*\(/i', $value) === 1
-            || preg_match('/^[a-z]+$/i', $value) === 1) {
+            || preg_match('/^(?:var|rgb|rgba|hsl|hsla|oklch|lab|lch|color|color-mix|light-dark)\s*\(/i', $value) === 1
+            || preg_match('/^[a-z]+$/i', $value) === 1;
+        if ($property !== 'background') {
+            return $commonUnresolved ? ['unresolved', null] : ['invalid', null];
+        }
+
+        // A syntactically complete background shorthand can be valid while
+        // exceeding this checker's single-color model. It must still win the
+        // CSS cascade and force unverified; skipping it exposes stale earlier
+        // background-color declarations as false evidence.
+        if ($commonUnresolved
+            || self::containsColorToken($value)
+            || preg_match('/^(?:url|image|image-set|cross-fade|element|(?:repeating-)?(?:linear|radial|conic)-gradient)\s*\(/i', $value) === 1
+            || preg_match('/\b(?:none|repeat|no-repeat|cover|contain|scroll|fixed|local|padding-box|border-box|content-box)\b/i', $value) === 1) {
             return ['unresolved', null];
         }
         return ['invalid', null];
+    }
+
+    private static function containsColorToken(string $value): bool
+    {
+        if (ContrastMath::parseCssColors($value) !== []) {
+            return true;
+        }
+        return preg_match('/#[0-9a-f]{4}(?:[0-9a-f]{4})?\b/i', $value) === 1
+            || preg_match('/\brgba?\s*\(/i', $value) === 1;
     }
 
     /** @param array<string,mixed> $candidate @param array<string,mixed> $winner */
@@ -319,9 +344,9 @@ final class CssContrastCheckEngine
     }
 
     /**
-     * @param array{selector:string,source_start:int,complete:bool,declarations:list<array{property:string,value:string,value_start:int,value_end:int,important:bool}>} $rule
+     * @param array{selector:string,source_start:int,complete:bool,declarations:list<array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool}>} $rule
      * @param list<string> $properties
-     * @return array{property:string,value:string,value_start:int,value_end:int,important:bool}|null
+     * @return array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool}|null
      */
     private static function declaration(array $rule, array $properties): ?array
     {
@@ -336,14 +361,80 @@ final class CssContrastCheckEngine
     /** @return array{rgb:array{0:int,1:int,2:int},alpha:float}|null */
     private static function color(string $value): ?array
     {
-        if (!preg_match('/^(?:#[0-9a-f]{3}(?:[0-9a-f]{3})?|rgba?\([^)]*\))$/i', $value)) {
+        $value = trim($value);
+        if (preg_match('/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i', $value) === 1
+            || preg_match('/^rgba?\([^)]*\)$/i', $value) === 1) {
+            $colors = ContrastMath::parseCssColors($value);
+            if (count($colors) === 1) {
+                return $colors[0];
+            }
+        }
+
+        if (preg_match('/^#([0-9a-f]{4}|[0-9a-f]{8})$/i', $value, $hex) === 1) {
+            $digits = $hex[1];
+            if (strlen($digits) === 4) {
+                $rgbHex = $digits[0] . $digits[0] . $digits[1] . $digits[1] . $digits[2] . $digits[2];
+                $alphaHex = $digits[3] . $digits[3];
+            } else {
+                $rgbHex = substr($digits, 0, 6);
+                $alphaHex = substr($digits, 6, 2);
+            }
+            $rgb = ContrastMath::hexToRgb($rgbHex);
+            return $rgb === null ? null : [
+                'rgb' => $rgb,
+                'alpha' => hexdec($alphaHex) / 255,
+            ];
+        }
+
+        if (preg_match('/^rgba?\((.*)\)$/is', $value, $functional) !== 1
+            || str_contains($functional[1], ',')) {
             return null;
         }
-        $colors = ContrastMath::parseCssColors($value);
-        if (count($colors) !== 1) {
+        $slash = CssValueSplitter::splitTopLevel($functional[1], ['/']);
+        if (count($slash) > 2) {
             return null;
         }
-        return $colors[0];
+        $channels = CssValueSplitter::splitTopLevelWhitespace($slash[0] ?? '');
+        if (count($channels) !== 3) {
+            return null;
+        }
+        $rgb = [];
+        foreach ($channels as $channel) {
+            $parsed = self::rgbChannel($channel);
+            if ($parsed === null) {
+                return null;
+            }
+            $rgb[] = $parsed;
+        }
+        $alpha = isset($slash[1]) ? self::alphaChannel($slash[1]) : 1.0;
+        if ($alpha === null) {
+            return null;
+        }
+        return ['rgb' => $rgb, 'alpha' => $alpha];
+    }
+
+    private static function rgbChannel(string $channel): ?int
+    {
+        $channel = trim($channel);
+        if (preg_match('/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))%$/', $channel, $percent) === 1) {
+            return (int) round(max(0.0, min(100.0, (float) $percent[1])) * 255 / 100);
+        }
+        if (preg_match('/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/', $channel) !== 1) {
+            return null;
+        }
+        return (int) round(max(0.0, min(255.0, (float) $channel)));
+    }
+
+    private static function alphaChannel(string $alpha): ?float
+    {
+        $alpha = trim($alpha);
+        if (preg_match('/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))%$/', $alpha, $percent) === 1) {
+            return max(0.0, min(100.0, (float) $percent[1])) / 100;
+        }
+        if (preg_match('/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/', $alpha) !== 1) {
+            return null;
+        }
+        return max(0.0, min(1.0, (float) $alpha));
     }
 
     /**
@@ -435,7 +526,7 @@ final class CssContrastCheckEngine
     }
 
     /**
-     * @return list<array{selector:string,source_start:int,complete:bool,declarations:list<array{property:string,value:string,value_start:int,value_end:int,important:bool}>}>
+     * @return list<array{selector:string,source_start:int,complete:bool,declarations:list<array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool}>}>
      */
     private static function rules(string $css): array
     {
@@ -517,7 +608,7 @@ final class CssContrastCheckEngine
         return null;
     }
 
-    /** @return list<array{property:string,value:string,value_start:int,value_end:int,important:bool}> */
+    /** @return list<array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool}> */
     private static function declarations(string $css, int $start, int $end): array
     {
         $declarations = [];
@@ -543,7 +634,7 @@ final class CssContrastCheckEngine
         return $declarations;
     }
 
-    /** @return array{property:string,value:string,value_start:int,value_end:int,important:bool}|null */
+    /** @return array{property:string,value:string,evaluation:string,value_start:int,value_end:int,important:bool}|null */
     private static function parseDeclaration(string $css, int $start, int $end): ?array
     {
         $state = CssSyntaxScanner::state();
@@ -562,7 +653,12 @@ final class CssContrastCheckEngine
         if ($colon === null) {
             return null;
         }
-        $property = strtolower(trim(substr($css, $start, $colon - $start)));
+        $propertySource = substr($css, $start, $colon - $start);
+        $propertyMasked = self::commentsMasked($propertySource);
+        if ($propertyMasked === null) {
+            return null;
+        }
+        $property = strtolower(trim($propertyMasked));
         if (!preg_match('/^(?:color|background|background-color)$/', $property)) {
             return null;
         }
@@ -575,25 +671,90 @@ final class CssContrastCheckEngine
             $valueEnd--;
         }
         $value = substr($css, $valueStart, $valueEnd - $valueStart);
+        $masked = self::commentsMasked($value);
+        if ($masked === null) {
+            return null;
+        }
         $isImportant = false;
-        if (preg_match('/!\s*important\s*$/i', $value, $important, PREG_OFFSET_CAPTURE)) {
+        if (preg_match('/!\s*important\s*$/i', $masked, $important, PREG_OFFSET_CAPTURE)) {
             $isImportant = true;
             $valueEnd = $valueStart + $important[0][1];
             while ($valueEnd > $valueStart && CssSyntaxScanner::isCssWhitespace($css[$valueEnd - 1])) {
                 $valueEnd--;
             }
             $value = substr($css, $valueStart, $valueEnd - $valueStart);
+            $masked = substr($masked, 0, $important[0][1]);
         }
-        if ($value === '') {
+        $evaluation = trim($masked);
+        if ($value === '' || $evaluation === '') {
             return null;
         }
         return [
             'property' => $property,
             'value' => $value,
+            'evaluation' => $evaluation,
             'value_start' => $valueStart,
             'value_end' => $valueEnd,
             'important' => $isImportant,
         ];
+    }
+
+    /**
+     * Replace comments outside CSS strings with same-length spaces. Offsets in
+     * the returned view therefore map exactly to original generated CSS.
+     */
+    private static function commentsMasked(string $source): ?string
+    {
+        $masked = $source;
+        $quote = '';
+        $length = strlen($source);
+        for ($offset = 0; $offset < $length;) {
+            $character = $source[$offset];
+            if ($quote !== '') {
+                if ($character === '\\') {
+                    $next = CssSyntaxScanner::escapeEnd($source, $offset);
+                    if ($next === null) {
+                        return null;
+                    }
+                    $offset = $next;
+                    continue;
+                }
+                if ($character === $quote) {
+                    $quote = '';
+                }
+                $offset++;
+                continue;
+            }
+            if ($character === '"' || $character === "'") {
+                $quote = $character;
+                $offset++;
+                continue;
+            }
+            if ($character === '/' && ($source[$offset + 1] ?? '') === '*') {
+                $close = strpos($source, '*/', $offset + 2);
+                if ($close === false) {
+                    return null;
+                }
+                $end = $close + 2;
+                for ($index = $offset; $index < $end; $index++) {
+                    if (!CssSyntaxScanner::isCssWhitespace($masked[$index])) {
+                        $masked[$index] = ' ';
+                    }
+                }
+                $offset = $end;
+                continue;
+            }
+            if ($character === '\\') {
+                $next = CssSyntaxScanner::escapeEnd($source, $offset);
+                if ($next === null) {
+                    return null;
+                }
+                $offset = $next;
+                continue;
+            }
+            $offset++;
+        }
+        return $quote === '' ? $masked : null;
     }
 
     /** @return array{selector:string,status:string,fg:null,bg:null,ratio:null,suggested:null} */
