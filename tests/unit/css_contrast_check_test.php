@@ -297,3 +297,97 @@ test('css contrast check preserves the caller libxml error queue exactly', funct
         libxml_use_internal_errors($previous);
     }
 });
+
+test('css contrast cascade ignores comments between declarations and repairs the real winner', function () {
+    $css = '.copy{color:#000000;/* generated */ color:#777777;background:#ffffff}';
+    $markup = '<p class="copy">Commented cascade</p>';
+
+    $findings = CssContrastCheck::check($css, $markup);
+
+    assert_eq(1, count($findings));
+    assert_eq('fail', $findings[0]['status']);
+    assert_eq('#777777', $findings[0]['fg']);
+    $root = sys_get_temp_dir() . '/css-contrast-comments-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+    $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
+    assert_eq(
+        '.copy{color:#000000;/* generated */ color:' . $findings[0]['suggested'] . ';background:#ffffff}',
+        $adjusted,
+    );
+});
+
+test('css contrast cascade recognizes important split by a comment', function () {
+    $css = '.copy{color:#777777 !/**/important;color:#000000;background:#ffffff}';
+    $markup = '<p class="copy">Commented important</p>';
+
+    $findings = CssContrastCheck::check($css, $markup);
+
+    assert_eq(1, count($findings));
+    assert_eq('fail', $findings[0]['status']);
+    assert_eq('#777777', $findings[0]['fg']);
+    $root = sys_get_temp_dir() . '/css-contrast-important-comment-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+    $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
+    assert_eq(
+        '.copy{color:' . $findings[0]['suggested'] . ' !/**/important;color:#000000;background:#ffffff}',
+        $adjusted,
+    );
+});
+
+test('css contrast comment handling keeps comment tokens inside strings byte-identical', function () {
+    $css = '.copy{--note:"literal /* generated */ token";color:#777777;background:#ffffff}';
+    $markup = '<p class="copy">String token</p>';
+    $findings = CssContrastCheck::check($css, $markup);
+    $root = sys_get_temp_dir() . '/css-contrast-string-comment-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+
+    $adjusted = CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings);
+
+    assert_contains('--note:"literal /* generated */ token"', $adjusted);
+    assert_eq(
+        str_replace('color:#777777', 'color:' . $findings[0]['suggested'], $css),
+        $adjusted,
+    );
+});
+
+test('css contrast resolves modern space rgb and opaque alpha hex instead of stale fallbacks', function () {
+    $markup = '<p class="copy">Modern colors</p>';
+    foreach ([
+        'rgb(119 119 119)',
+        '#777777ff',
+    ] as $authored) {
+        $findings = CssContrastCheck::check(
+            ".copy{color:#000000;color:{$authored};background:#ffffff}",
+            $markup,
+        );
+
+        assert_eq(1, count($findings), $authored);
+        assert_eq('fail', $findings[0]['status'], $authored);
+        assert_eq($authored, $findings[0]['fg'], $authored);
+        assert_true(is_float($findings[0]['ratio']) && $findings[0]['ratio'] < ContrastMath::NORMAL_TEXT);
+        assert_true(is_string($findings[0]['suggested']));
+    }
+});
+
+test('valid unresolved background shorthand wins cascade and stays untouched with warning', function () {
+    $css = '.copy{color:#777777;background-color:#000000;background:#ffffff none}';
+    $markup = '<p class="copy">Shorthand background</p>';
+
+    $findings = CssContrastCheck::check($css, $markup);
+
+    assert_eq([[
+        'selector' => '.copy',
+        'status' => 'unverified',
+        'fg' => null,
+        'bg' => null,
+        'ratio' => null,
+        'suggested' => null,
+    ]], $findings);
+    $root = sys_get_temp_dir() . '/css-contrast-shorthand-' . bin2hex(random_bytes(8));
+    $project = new Project($root);
+    assert_eq($css, CssContrastAdjuster::apply($project, 'theme/style.css', $css, $markup, $findings));
+    $warnings = $project->readJson('warnings.json')['css_contrast'] ?? [];
+    assert_eq(1, count($warnings));
+    assert_contains('disposition=unverified', $warnings[0]);
+    assert_contains('delivered=unchanged', $warnings[0]);
+});
