@@ -50,13 +50,13 @@ foreach (array_slice($argv, 1) as $a) {
         $prompt = $a;
     } else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"]\n");
+        fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images]\n");
         exit(1);
     }
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"]\n");
+    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images]\n");
     exit(1);
 }
 
