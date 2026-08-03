@@ -191,8 +191,13 @@ function write_report(array $results): void
 
     // Speed table.
     $md .= "## Speed (seconds per step)\n\n";
-    $md .= '| Site | ' . implode(' | ', array_map(fn ($s) => short($s), $stepIds)) . " | **Total** |\n";
-    $md .= '|' . str_repeat('---|', count($stepIds) + 2) . "\n";
+    $speedHeaders = array_merge(
+        ['Site'],
+        array_map(fn ($s) => short($s), $stepIds),
+        ['**Total**']
+    );
+    $md .= '| ' . implode(' | ', $speedHeaders) . " |\n";
+    $md .= '|' . str_repeat('---|', count($speedHeaders)) . "\n";
     foreach ($results as $slug => $r) {
         $row = ["`{$slug}`"];
         foreach ($stepIds as $sid) {
@@ -249,7 +254,11 @@ function write_report(array $results): void
         fwrite(STDERR, "Failed to write {$evalDir}/report.md\n");
         exit(1);
     }
-    if (file_put_contents($evalDir . '/results.json', json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+    $resultsJson = json_encode(
+        $results,
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+    );
+    if (file_put_contents($evalDir . '/results.json', $resultsJson) === false) {
         fwrite(STDERR, "Failed to write {$evalDir}/results.json\n");
         exit(1);
     }

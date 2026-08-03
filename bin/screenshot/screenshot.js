@@ -31,9 +31,13 @@
 const { chromium } = require('playwright-core');
 
 function parseArgs(argv) {
-  const envWidth = parseInt(process.env.SHOT_WIDTH || '', 10);
+  const positiveInteger = (raw) => {
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  };
+  const envWidth = positiveInteger(process.env.SHOT_WIDTH || '');
   const opts = {
-    width: Number.isFinite(envWidth) && envWidth > 0 ? envWidth : 1366,
+    width: envWidth ?? 1366,
     scroll: true,
     timeout: 15000,
     chrome: process.env.CHROME || process.env.CHROME_BIN,
@@ -42,13 +46,13 @@ function parseArgs(argv) {
   for (const a of argv) {
     if (a === '--no-scroll') opts.scroll = false;
     else if (a.startsWith('--width=')) {
-      opts.width = parseInt(a.slice(8), 10);
-      if (!Number.isFinite(opts.width) || opts.width <= 0) throw new Error(`--width must be a positive integer: ${a}`);
+      opts.width = positiveInteger(a.slice(8));
+      if (opts.width === null) throw new Error(`--width must be a positive integer: ${a}`);
     }
     else if (a.startsWith('--chrome=')) opts.chrome = a.slice(9);
     else if (a.startsWith('--timeout=')) {
-      opts.timeout = parseInt(a.slice(10), 10);
-      if (!Number.isFinite(opts.timeout) || opts.timeout <= 0) throw new Error(`--timeout must be a positive integer (ms): ${a}`);
+      opts.timeout = positiveInteger(a.slice(10));
+      if (opts.timeout === null) throw new Error(`--timeout must be a positive integer (ms): ${a}`);
     }
     else if (a.startsWith('--')) throw new Error(`unknown option: ${a}`);
     else positional.push(a);
@@ -191,7 +195,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`screenshot failed: ${err.message}\n`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    process.stderr.write(`screenshot failed: ${err.message}\n`);
+    process.exit(1);
+  });
+}
+
+module.exports = { parseArgs };

@@ -110,7 +110,11 @@ $blueprint = [
 ];
 // Pid-stamped, instance-unique path — the why lives on the helper.
 $blueprintPath = playground_blueprint_path($slug, getmypid());
-if (file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+$blueprintJson = json_encode(
+    $blueprint,
+    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+);
+if (file_put_contents($blueprintPath, $blueprintJson) === false) {
     fwrite(STDERR, "Failed to write blueprint to {$blueprintPath}\n");
     exit(1);
 }
