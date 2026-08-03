@@ -346,8 +346,11 @@ test('cover-contrast rolls back only files in a real PHP fixer FAILED report', f
 
     try {
         ob_start();
-        (new CoverContrastStep(new PhpBlockFixer()))->run($project);
-        $console = (string) ob_get_clean();
+        try {
+            (new CoverContrastStep(new PhpBlockFixer()))->run($project);
+        } finally {
+            $console = (string) ob_get_clean();
+        }
 
         assert_eq(
             $failed,
