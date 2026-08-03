@@ -700,7 +700,7 @@ final class OpenAiCompatibleClient implements Llm
 
     private static function isTransientCurl(int $errno): bool
     {
-        return in_array($errno, [6, 7, 28, 35, 52, 55, 56], true);
+        return in_array($errno, TransientApiException::TRANSIENT_CURL_ERRNOS, true);
     }
 
     private static function isTransientStatus(int $status, string $provider = 'openai'): bool
