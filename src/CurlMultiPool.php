@@ -81,16 +81,21 @@ class CurlMultiPool
         };
 
         // Classify one finished transfer and release its handle (and slot).
+        // The release is in a finally: a classify callback may throw (e.g.
+        // WpcomImageClient's disk write fails mid-batch, which is by design
+        // allowed to propagate), and the finished handle must not leak.
         $finish = function (string|int $key, \CurlHandle $ch) use ($multi, $classify, &$inFlight, &$holding): array {
             $httpStatus = $this->httpStatus($ch);
             if ($httpStatus === 429) {
                 $holding = true;
             }
-            $outcome = $classify($key, $ch, $httpStatus);
-            unset($inFlight[spl_object_id($ch)]);
-            $this->removeHandle($multi, $ch);
-            $this->closeHandle($ch);
-            return $outcome;
+            try {
+                return $classify($key, $ch, $httpStatus);
+            } finally {
+                unset($inFlight[spl_object_id($ch)]);
+                $this->removeHandle($multi, $ch);
+                $this->closeHandle($ch);
+            }
         };
 
         $await = function () use ($multi, &$inFlight, &$queuedOutcomes, $finish): array {
@@ -133,6 +138,12 @@ class CurlMultiPool
         try {
             return RollingPool::run($items, $start, $await, $cap);
         } finally {
+            // Aborting mid-batch (a throwing classify) leaves siblings in
+            // flight; drain and close them before closing the multi handle.
+            foreach ($inFlight as [, $ch]) {
+                $this->removeHandle($multi, $ch);
+                $this->closeHandle($ch);
+            }
             $this->multiClose($multi);
         }
     }

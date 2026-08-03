@@ -32,6 +32,8 @@ class FakeCurlMultiPool extends CurlMultiPool
     public bool $failMulti = false;
     /** @var list<string|int> keys whose add is refused */
     public array $refuseAdds = [];
+    /** @var list<string|int> keys whose handle was closed */
+    public array $closed = [];
 
     /**
      * @param array<int,list<string|int>> $script
@@ -93,6 +95,7 @@ class FakeCurlMultiPool extends CurlMultiPool
 
     protected function closeHandle(\CurlHandle $ch): void
     {
+        $this->closed[] = $this->keysById[spl_object_id($ch)];
     }
 
     protected function multiClose(\CurlMultiHandle $multi): void
@@ -206,6 +209,31 @@ test('CurlMultiPool classifies every remaining transfer when the multi stack fai
     assert_eq(['a', 'b'], $classified, 'every in-flight transfer is classified by the fallback');
     assert_eq(true, $out['b']['transient'], 'fallback outcomes flow back keyed to their requests');
     assert_true($pool->multiClosed, 'the multi handle is closed even after a CURLM failure');
+});
+
+test('CurlMultiPool closes the finished handle and in-flight siblings when classify throws', function () {
+    // A classify callback is allowed to throw (WpcomImageClient's disk write
+    // failing mid-batch aborts the build by design). The pool must still
+    // remove+close the finished handle and drain every in-flight sibling
+    // before the exception propagates — not leak open connections.
+    $pool = new FakeCurlMultiPool([['a']]);
+    [$buildHandle] = cmp_seams($pool);
+    $classify = function (string|int $key, \CurlHandle $ch): array {
+        throw new RuntimeException("disk full while saving '{$key}'");
+    };
+
+    $err = null;
+    try {
+        $pool->run(['a' => 1, 'b' => 2], $buildHandle, $classify, 2);
+    } catch (RuntimeException $e) {
+        $err = $e->getMessage();
+    }
+
+    assert_eq("disk full while saving 'a'", $err, 'the classify failure propagates to the caller');
+    $closed = $pool->closed;
+    sort($closed);
+    assert_eq(['a', 'b'], $closed, 'the finished handle and the in-flight sibling are both closed');
+    assert_true($pool->multiClosed, 'the multi handle is closed after the classify failure');
 });
 
 test('CurlMultiPool rejects a completion for an unregistered curl handle', function () {

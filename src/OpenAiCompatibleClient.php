@@ -412,7 +412,8 @@ final class OpenAiCompatibleClient implements Llm
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>> $transport
      * @param list<int> $delays
      * @param null|callable(string|int,string,float):void $onFailure
-     * @param null|callable(int):void $sleeper Test seam for the remaining wait
+     * @param null|callable(int):void $sleeper Test seam for the remaining
+     *        Retry-After wait and the shared helper's backoff waits
      * @param null|callable():int $clock Test seam returning the current epoch
      * @return array<array-key,array<string,mixed>>
      */
@@ -472,6 +473,7 @@ final class OpenAiCompatibleClient implements Llm
             $wrappedTransport,
             $delays,
             $onFailure,
+            $sleeper,
         );
     }
 

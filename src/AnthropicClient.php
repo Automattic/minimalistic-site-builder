@@ -433,9 +433,10 @@ final class AnthropicClient implements Llm
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,stop_reason?:?string}> $transport
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param null|callable(string|int,string,float):void $onFailure called with (key, error, time) for a request that fails for good, just before the batch aborts — lets the caller log it
+     * @param null|callable(int):void $sleeper Test seam for the backoff waits; defaults to sleep().
      * @return array<array-key,array{text:string,input:int,output:int,cache_read_input_tokens:int,cache_creation_input_tokens:int,time:float,stop_reason:?string}>
      */
-    public static function retryTextBatch(array &$bodies, callable $transport, array $delays, ?callable $onFailure = null): array
+    public static function retryTextBatch(array &$bodies, callable $transport, array $delays, ?callable $onFailure = null, ?callable $sleeper = null): array
     {
         $results = [];
         $pending = array_keys($bodies);
@@ -504,13 +505,20 @@ final class AnthropicClient implements Llm
             $pending = $transientRetry;
             if ($pending !== []) {
                 // Wait long enough for every really-attempted transient in
-                // this wave. A held-only wave waits zero: no request consumed
-                // a retry or owns a backoff slot.
-                $wait = $retryWaits === [] ? 0 : max($retryWaits);
+                // this wave. A held-only wave (the rate-limited sibling itself
+                // resolved another way, so no request owns a backoff slot)
+                // still waits the first backoff: the hold only exists because
+                // a sibling really hit a 429, and re-sending immediately would
+                // fire straight into the still-active rate limit.
+                $wait = $retryWaits === [] ? ($delays[0] ?? 0) : max($retryWaits);
                 $retryWave++;
                 Narrator::write('    (transient API error on ' . count($pending)
                     . " request(s); retry {$retryWave} in {$wait}s)\n");
-                sleep($wait);
+                if ($sleeper !== null) {
+                    $sleeper($wait);
+                } else {
+                    sleep($wait);
+                }
             }
         }
 

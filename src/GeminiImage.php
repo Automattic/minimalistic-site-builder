@@ -503,6 +503,7 @@ final class GeminiImage
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param callable(int,int,int):void|null $onRetry called before each backoff with (pending count, attempt #, wait seconds)
      * @param callable(int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}):void|null $onResult called once per index with its final result
+     * @param null|callable(int):void $sleeper Test seam for the backoff waits; defaults to sleep().
      * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>,succeeded:int}
      */
     public static function retryBatch(
@@ -511,6 +512,7 @@ final class GeminiImage
         array $delays,
         ?callable $onRetry = null,
         ?callable $onResult = null,
+        ?callable $sleeper = null,
     ): array
     {
         $results = [];
@@ -564,14 +566,21 @@ final class GeminiImage
             $pending = $retry;
             if ($pending !== []) {
                 // Wait long enough for every really-attempted transient in
-                // this wave. A held-only wave waits zero: no request consumed
-                // a retry or owns a backoff slot.
-                $wait = $retryWaits === [] ? 0 : max($retryWaits);
+                // this wave. A held-only wave (the rate-limited sibling itself
+                // resolved another way, so no request owns a backoff slot)
+                // still waits the first backoff: the hold only exists because
+                // a sibling really hit a 429, and re-sending immediately would
+                // fire straight into the still-active rate limit.
+                $wait = $retryWaits === [] ? ($delays[0] ?? 0) : max($retryWaits);
                 $retryWave++;
                 if ($onRetry !== null) {
                     $onRetry(count($pending), $retryWave, $wait);
                 }
-                sleep($wait);
+                if ($sleeper !== null) {
+                    $sleeper($wait);
+                } else {
+                    sleep($wait);
+                }
             }
         }
 

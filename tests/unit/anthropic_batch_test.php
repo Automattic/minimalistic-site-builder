@@ -824,3 +824,30 @@ test('retryTextBatch survives a held launch with an empty delay schedule', funct
     );
     assert_eq('H', $results['h']['text'], 'a held launch retries even when no transient rounds are configured');
 });
+
+test('retryTextBatch charges the first backoff for a held-only retry wave', function () {
+    // When the rate-limited sibling itself resolves another way (a stripped
+    // parameter, or a 429 carrying a terminal stop reason), the retry wave
+    // contains ONLY held keys and no request owns a backoff slot. Re-sending
+    // with zero wait would fire straight into the still-active rate limit, so
+    // the wave must wait at least the first backoff delay.
+    $bodies = ['h' => ['model' => 'm']];
+    $round = 0;
+    $slept = [];
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            return ['h' => $round === 1
+                ? ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)']
+                : ['ok' => true, 'text' => 'H', 'input' => 1, 'output' => 1]];
+        },
+        [3, 9],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+    );
+    assert_eq('H', $results['h']['text']);
+    assert_eq([3], $slept, 'a held-only wave waits the first backoff delay instead of zero');
+});

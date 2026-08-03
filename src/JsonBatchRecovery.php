@@ -164,7 +164,7 @@ final class JsonBatchRecovery
         $prompt = (string) ($request['prompt'] ?? '');
         $reason = is_string($response['stop_reason'] ?? null) ? trim($response['stop_reason']) : '';
 
-        if (self::isTruncation($reason)) {
+        if (StopReasons::isTruncation($reason)) {
             // Twice the explicit budget, or twice the calling client's
             // effective configurable default when the request relied on it.
             $repair['max_tokens'] = isset($request['max_tokens'])
