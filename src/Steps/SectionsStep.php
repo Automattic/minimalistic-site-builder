@@ -16,6 +16,7 @@ use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\HeaderUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM, concurrent): generate every part of every page in ONE batch — the
@@ -197,13 +198,7 @@ final class SectionsStep implements Step
                 $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
                 array_push($warnings, ...$batch->notesFor($key));
             } catch (\RuntimeException $e) {
-                $authoredFailure = json_encode(
-                    $e->getMessage(),
-                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
-                );
-                if (!is_string($authoredFailure)) {
-                    $authoredFailure = get_debug_type($e->getMessage());
-                }
+                $authoredFailure = Warnings::value($e->getMessage());
                 $warningContext = "file='theme/{$job['file']}'; block='part root'; "
                     . "authored={$authoredFailure}; ";
                 if ($isChrome) {
