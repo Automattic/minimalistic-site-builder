@@ -85,11 +85,6 @@ final class HtmlNode
         $this->end = max($this->innerEnd, $end);
     }
 
-    public function type(): string
-    {
-        return $this->type;
-    }
-
     public function isDocument(): bool
     {
         return $this->type === self::DOCUMENT;
