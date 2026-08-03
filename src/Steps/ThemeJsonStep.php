@@ -11,6 +11,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM): generate the block theme's theme.json.
@@ -290,7 +291,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             && (!is_array($theme['styles'])
                 || ($theme['styles'] !== [] && array_is_list($theme['styles'])))) {
             $warnings[] = 'theme/theme.json styles: authored '
-                . self::warningValue($theme['styles'])
+                . Warnings::value($theme['styles'])
                 . '; delivered build-supplied styles object'
                 . '; disposition replaced malformed shape before normalization';
             $theme['styles'] = [];
@@ -303,7 +304,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 || ($theme['styles']['spacing'] !== []
                     && array_is_list($theme['styles']['spacing'])))) {
             $warnings[] = 'theme/theme.json styles.spacing: authored '
-                . self::warningValue($theme['styles']['spacing'])
+                . Warnings::value($theme['styles']['spacing'])
                 . '; delivered {"blockGap":"var:preset|spacing|md"}'
                 . '; disposition replaced malformed shape before normalization';
             $theme['styles']['spacing'] = [];
@@ -487,13 +488,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
             if ($slug === '') {
                 $warnings[] = 'theme.json palette: entry with missing or invalid slug '
-                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                    . Warnings::value($entry['slug'] ?? null) . ' removed';
                 continue;
             }
             $color = $entry['color'] ?? null;
             if (!is_string($color) || preg_match('/^#[0-9A-F]{3}(?:[0-9A-F]{3})?$/i', trim($color)) !== 1) {
                 $warnings[] = "theme.json palette slug '{$slug}': invalid color "
-                    . self::warningValue($color) . '; malformed entry removed';
+                    . Warnings::value($color) . '; malformed entry removed';
                 continue;
             }
             $entry['slug'] = $slug;
@@ -543,7 +544,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 $preferred[$slot] = $family;
             } elseif ($family !== '') {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
-                    . self::warningValue($family)
+                    . Warnings::value($family)
                     . '; delivered removed; disposition invalid family name could not be applied to theme.json';
             }
         }
@@ -563,13 +564,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
             if ($slug === '') {
                 $warnings[] = 'theme.json fontFamilies: entry with missing or invalid slug '
-                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                    . Warnings::value($entry['slug'] ?? null) . ' removed';
                 continue;
             }
             $family = $entry['fontFamily'] ?? null;
             if (!is_string($family) || trim($family) === '') {
                 $warnings[] = "theme.json fontFamilies slug '{$slug}': invalid fontFamily "
-                    . self::warningValue($family) . '; malformed entry removed';
+                    . Warnings::value($family) . '; malformed entry removed';
                 continue;
             }
             $entry['slug'] = $slug;
@@ -625,7 +626,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($sizes) || ($sizes !== [] && !array_is_list($sizes))) {
             if ($sizes !== null) {
                 $warnings[] = 'theme.json settings.typography.fontSizes: invalid container '
-                    . self::warningValue($sizes) . '; rebuilt from the default scale';
+                    . Warnings::value($sizes) . '; rebuilt from the default scale';
             }
             $sizes = [];
         }
@@ -635,27 +636,27 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         foreach ($sizes as $entry) {
             if (!is_array($entry)) {
                 $warnings[] = 'theme.json fontSizes: removed malformed (non-object) entry '
-                    . self::warningValue($entry);
+                    . Warnings::value($entry);
                 continue;
             }
             $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
             if ($slug === '') {
                 $warnings[] = 'theme.json fontSizes: entry with missing or invalid slug '
-                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                    . Warnings::value($entry['slug'] ?? null) . ' removed';
                 continue;
             }
             $size = $entry['size'] ?? null;
             if (!is_string($size) || !self::isSafeFontSize($size)) {
                 $warnings[] = "theme.json fontSizes slug '{$slug}': invalid size "
-                    . self::warningValue($size) . '; malformed entry removed';
+                    . Warnings::value($size) . '; malformed entry removed';
                 continue;
             }
             $entry['slug'] = $slug;
             $entry['size'] = trim($size);
             if (isset($seen[$slug])) {
                 $warnings[] = "theme.json fontSizes duplicate slug '{$slug}': authored size "
-                    . self::warningValue($entry['size']) . '; delivered first authored size '
-                    . self::warningValue($seen[$slug]) . '; disposition removed duplicate';
+                    . Warnings::value($entry['size']) . '; delivered first authored size '
+                    . Warnings::value($seen[$slug]) . '; disposition removed duplicate';
                 continue;
             }
             // Only the name is missing — keep the authored size rather than
@@ -799,7 +800,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($parent[$leaf])
             || ($parent[$leaf] !== [] && array_is_list($parent[$leaf]))) {
             $warnings[] = "theme/theme.json {$label}: authored "
-                . self::warningValue($parent[$leaf])
+                . Warnings::value($parent[$leaf])
                 . '; delivered removed'
                 . '; disposition removed malformed context-free color container';
             unset($parent[$leaf]);
@@ -809,7 +810,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             return;
         }
         $warnings[] = "theme/theme.json {$label}.text: authored "
-            . self::warningValue($parent[$leaf]['text'])
+            . Warnings::value($parent[$leaf]['text'])
             . '; delivered removed'
             . '; disposition removed context-free text color invisible to contrast repair';
         unset($parent[$leaf]['text']);
@@ -873,23 +874,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 || (!is_array($scaffoldValue)
                     && get_debug_type($modelValue) !== get_debug_type($scaffoldValue))) {
                 $warnings[] = "theme/theme.json {$currentPath}: authored "
-                    . self::warningValue($modelValue) . '; delivered '
-                    . self::warningValue($scaffoldValue)
+                    . Warnings::value($modelValue) . '; delivered '
+                    . Warnings::value($scaffoldValue)
                     . '; disposition replaced malformed shape with scaffold default';
                 $model[$key] = $scaffoldValue;
             }
         }
 
         return $model;
-    }
-
-    /** Compact authored-value evidence for one actionable warnings.json row. */
-    private static function warningValue(mixed $value): string
-    {
-        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($encoded)) {
-            return get_debug_type($value);
-        }
-        return mb_strlen($encoded) > 160 ? mb_substr($encoded, 0, 157) . '...' : $encoded;
     }
 }

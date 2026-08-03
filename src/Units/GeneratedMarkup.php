@@ -9,6 +9,7 @@ use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Warnings;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
@@ -490,10 +491,7 @@ final class GeneratedMarkup
         mixed $authored,
         string $color
     ): void {
-        $encoded = json_encode($authored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($encoded)) {
-            $encoded = get_debug_type($authored);
-        }
+        $encoded = Warnings::value($authored);
         $notes[] = "file='parts/footer.html'; block='root wp:group'; authored {$path}={$encoded}; "
             . "delivered=removed; disposition=opaque or malformed root styling removed so the assigned "
             . "'{$color}' footer surface cannot be overridden";
