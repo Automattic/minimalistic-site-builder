@@ -161,6 +161,7 @@ final class AnthropicClient implements Llm
         return JsonBatchRecovery::run(
             $requests,
             fn (array $subset): array => $this->responseBatch($subset, true),
+            defaultMaxTokens: $this->defaultMaxTokens,
         );
     }
 
