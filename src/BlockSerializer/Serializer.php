@@ -55,7 +55,7 @@ final class Serializer implements TemplateTransformer
                 // No freeform handler is registered in the pinned runtime, so
                 // parse() routes it through core/missing: trim, but do not
                 // wpautop or wrap the authored bytes.
-                $content = $this->jsTrim($node->content);
+                $content = JsString::trim($node->content);
                 if ($content === '') {
                     continue;
                 }
@@ -178,14 +178,5 @@ final class Serializer implements TemplateTransformer
         foreach ($node->innerBlocks as $index => $child) {
             $this->collectParagraphPaths($child, $path . '/' . $index, $paths);
         }
-    }
-
-    private function jsTrim(string $value): string
-    {
-        return preg_replace(
-            '/^[\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]+|[\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]+$/u',
-            '',
-            $value,
-        ) ?? trim($value);
     }
 }

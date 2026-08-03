@@ -319,7 +319,7 @@ final class WpcomImageClient implements ImageClient
     private static function throwOnTransportError(int $errno, string $error): void
     {
         // Connection-level failures: DNS, timeout, stall, connect/recv — retryable.
-        if (in_array($errno, [6, 7, 28, 35, 52, 55, 56], true)) {
+        if (in_array($errno, TransientApiException::TRANSIENT_CURL_ERRNOS, true)) {
             throw new TransientApiException("cURL ({$errno}): {$error}");
         }
         if ($errno !== 0) {
