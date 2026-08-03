@@ -109,35 +109,23 @@ function overlayCommentAttributes(blocks, rawBlocks) {
 
 function fixBlockRecursively(block, compatibilityRepairs = [], blockPath = []) {
   // Recursively fix all inner blocks
-  const fixedInnerBlocks = [];
-
-  if (block.innerBlocks && block.innerBlocks.length > 0) {
-    for (let index = 0; index < block.innerBlocks.length; index++) {
-      const innerBlock = block.innerBlocks[index];
-      const result = fixBlockRecursively(
-        innerBlock,
-        compatibilityRepairs,
-        [...blockPath, index]
-      );
-      fixedInnerBlocks.push(result.block);
-    }
-  }
+  const fixedInnerBlocks = (block.innerBlocks || []).map((innerBlock, index) => (
+    fixBlockRecursively(innerBlock, compatibilityRepairs, [...blockPath, index])
+  ));
 
   // Always recreate blocks from attributes to normalize HTML structure.
   // This ensures element order, data-attributes, and CSS property order
   // exactly match what WordPress save() produces.
   if (!block.name) {
     // Can't fix blocks without a name (freeform HTML)
-    return { block, wasFixed: false };
+    return block;
   }
 
-  const fixedBlock = createBlock(
+  return createBlock(
     block.name,
     normalizedAttributes(block, compatibilityRepairs, blockPath),
     fixedInnerBlocks.length > 0 ? fixedInnerBlocks : undefined
   );
-
-  return { block: fixedBlock, wasFixed: true };
 }
 
 /**
@@ -221,7 +209,7 @@ function fixBlocksInTemplate(htmlContent, { throwOnError = false } = {}) {
     // Re-serializing via createBlock() ensures the HTML matches exactly
     // what WordPress save() produces.
     const fixedBlocks = blocks.map((block, index) => (
-      fixBlockRecursively(block, compatibilityRepairs, [index]).block
+      fixBlockRecursively(block, compatibilityRepairs, [index])
     ));
 
     // Serialize the fixed blocks back to HTML
@@ -282,132 +270,10 @@ function fixBlocksInTemplate(htmlContent, { throwOnError = false } = {}) {
   }
 }
 
-/**
- * Extract the HTML block markup portion from a PHP pattern file.
- * Pattern files have a PHP header comment followed by `?>` and then HTML.
- * Returns { header, html } where header is everything up to and including `?>`.
- */
-function splitPatternPhp(content) {
-  // Find the closing PHP tag that separates the header from HTML
-  const closeTagIndex = content.indexOf('?>');
-  if (closeTagIndex === -1) {
-    return null;
-  }
-  const headerEnd = closeTagIndex + 2;
-  return {
-    header: content.substring(0, headerEnd),
-    html: content.substring(headerEnd),
-  };
-}
-
-/**
- * Split a content file into its leading <!-- telex:meta --> header and body.
- * Returns { header: '', body: fullContent } when no header is present.
- *
- * @param {string} content
- * @returns {{ header: string, body: string }}
- */
-function splitContentFile(content) {
-  const trimmed = content.replace(/^\s+/, '');
-  if (!trimmed.startsWith('<!-- telex:meta')) {
-    return { header: '', body: content };
-  }
-  const closeIdx = trimmed.indexOf('-->');
-  if (closeIdx === -1) {
-    return { header: '', body: content };
-  }
-  const header = trimmed.slice(0, closeIdx + 3);
-  const body = trimmed.slice(closeIdx + 3);
-  return { header, body };
-}
-
-/**
- * Process an array of artefact files, fixing any template/parts/pattern files.
- * Preserves all original file properties while updating content.
- */
-function fixArtefactTemplates(files) {
-  // Initialize early to catch any registration errors
-  initializeBlockRegistry();
-
-  return files.map((file) => {
-    // Process template and parts HTML files
-    const isTemplate =
-      file.path.startsWith('templates/') && file.path.endsWith('.html');
-    const isPart =
-      file.path.startsWith('parts/') && file.path.endsWith('.html');
-    // Also process pattern PHP files (they contain block HTML after a PHP header)
-    const isPattern =
-      file.path.startsWith('patterns/') && file.path.endsWith('.php');
-    const isContent =
-      file.path.startsWith('content/') && file.path.endsWith('.html');
-
-    if (!isTemplate && !isPart && !isPattern && !isContent) {
-      return file;
-    }
-
-    // Only process files that contain WordPress block comments
-    // Plain HTML files without block markup should not be processed
-    if (!file.content.includes('<!-- wp:')) {
-      console.error(`[BlockFixer] Skipping ${file.path} - no WordPress block markup found`);
-      return file;
-    }
-
-    if (isPattern) {
-      // Pattern files: split PHP header from HTML, fix only the HTML part
-      const parts = splitPatternPhp(file.content);
-      if (!parts) {
-        console.error(`[BlockFixer] Skipping ${file.path} - no closing ?> tag found`);
-        return file;
-      }
-
-      const result = fixBlocksInTemplate(parts.html);
-
-      if (result.changed) {
-        console.error(`[BlockFixer] Fixed blocks in ${file.path}`);
-      }
-
-      return {
-        ...file,
-        content: parts.header + result.html,
-      };
-    }
-
-    if (isContent) {
-      const { header, body } = splitContentFile(file.content);
-      const result = fixBlocksInTemplate(body);
-
-      if (result.changed) {
-        console.error(`[BlockFixer] Fixed blocks in ${file.path}`);
-      }
-
-      const prefix = header ? `${header}\n` : '';
-      return {
-        ...file,
-        content: prefix + result.html,
-      };
-    }
-
-    // Template/parts HTML files
-    const result = fixBlocksInTemplate(file.content);
-
-    if (result.changed) {
-      console.error(`[BlockFixer] Fixed blocks in ${file.path}`);
-    }
-
-    // Spread original file to preserve additional properties
-    return {
-      ...file,
-      content: result.html,
-    };
-  });
-}
-
 module.exports = {
   initializeBlockRegistry,
   fixBlocksInTemplate,
-  fixArtefactTemplates,
   fixNestedParagraphs,
   normalizedAttributes,
   overlayCommentAttributes,
-  splitContentFile,
 };
