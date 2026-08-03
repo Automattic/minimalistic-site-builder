@@ -96,7 +96,7 @@ final class AlignmentClassLossDetector
         $index = 0;
         foreach ($document->nodes() as $node) {
             if ($node instanceof FreeformNode) {
-                if ($this->jsTrim($node->content) !== '') {
+                if (JsString::trim($node->content) !== '') {
                     $index++;
                 }
                 continue;
@@ -204,15 +204,5 @@ final class AlignmentClassLossDetector
                 => 'vertical-container',
             default => null,
         };
-    }
-
-    /** JavaScript trim semantics used by Serializer for top-level freeform. */
-    private function jsTrim(string $value): string
-    {
-        return preg_replace(
-            '/^[\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]+|[\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]+$/u',
-            '',
-            $value,
-        ) ?? trim($value);
     }
 }

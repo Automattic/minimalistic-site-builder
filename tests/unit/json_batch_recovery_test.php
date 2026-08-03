@@ -292,6 +292,21 @@ test('JsonBatchRecovery regenerates a truncated response with a doubled budget',
     );
 });
 
+test('JsonBatchRecovery doubles the calling client configurable default for a truncated repair', function () {
+    $requests = ['plan' => ['prompt' => 'Plan the site']];
+    $budgets = [];
+
+    $send = function (array $subset) use (&$budgets): array {
+        $budgets[] = $subset['plan']['max_tokens'] ?? null;
+        return count($budgets) === 1
+            ? ['plan' => ['text' => '{"sections":["cut-off-mid', 'stop_reason' => 'max_tokens']]
+            : ['plan' => ['text' => '{"ok":true}', 'stop_reason' => 'end_turn']];
+    };
+
+    JsonBatchRecovery::run($requests, $send, defaultMaxTokens: 4096);
+    assert_eq([null, 8192], $budgets);
+});
+
 test('JsonBatchRecovery regenerates a refusal without claiming invalid JSON', function () {
     $requests = ['page' => ['prompt' => 'Plan the page']];
     $repairs = [];

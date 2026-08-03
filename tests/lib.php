@@ -65,6 +65,17 @@ function assert_throws(callable $fn, string $msg = ''): void
     throw new RuntimeException('assert_throws failed: no exception' . ($msg !== '' ? ": {$msg}" : ''));
 }
 
+/** Run $fn with its output buffered and discarded — even when it throws. */
+function quietly(callable $fn): mixed
+{
+    ob_start();
+    try {
+        return $fn();
+    } finally {
+        ob_end_clean();
+    }
+}
+
 /** Run all registered tests, print results, return exit code. */
 function run_tests(): int
 {

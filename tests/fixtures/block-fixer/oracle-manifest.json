@@ -30,7 +30,7 @@
     "implementationSources": {
       "bin/block-fixer/fix-templates.js": "346c5142552e2be8fccd51260ab84a5d2ead2cfdeb558ce90d8ccfb8ced73457",
       "bin/block-fixer/oracle.js": "44e1a521c61693bb0d6546b4fcdcfe4ebc72ae0d77385124710e9161dfdd8755",
-      "bin/block-fixer/lib/blockFixer.js": "83b5d70fa516ff7591c64ceab907a78fd54f7503126d5a816e6b594ac380c820",
+      "bin/block-fixer/lib/blockFixer.js": "f0d00b12a0100d528c830622be1b4f46086c7f564699488a6abc828c867d4be8",
       "bin/block-fixer/lib/paragraphFixer.js": "d0757bc23f0680fe694a186abbe47c3b1e8850daed67c91c71ae2a4d9362193c",
       "bin/block-fixer/lib/domEnvironment.js": "e4b799188c0afddd1fd99d4458e21a83e6cd84e4b16792998e006b556efc7fcd",
       "bin/block-fixer/lib/droppedContentDetector.js": "e814e907fa16ec54c06f3a52a73423add68c3cc3af7bebdaabd4bd71aade3cbc",
@@ -52,7 +52,7 @@
   "registry": {
     "generatorVersion": "1.0.0",
     "generatorSourceSha256": "2c7e583270b3720da9c6b51c7fc1816c8ed5b29dd555023f363a63915e4fbc11",
-    "runtimeJsonSha256": "6f333f89fccd6967a7d1fbc174d3961f675988fa45cd020ce80017ae3a776589",
+    "runtimeJsonSha256": "1f696c41dc08522c1938158db819c6ff8487b23d7901e88c95b77b92382ad383",
     "generatedPhpSha256": "a7479ab7698d85b95f311048dba3e5f8bb35783f0873c2537e0b2369ba95aa9d",
     "registeredSnapshotSha256": "1ccdc8c9047b772fbe7fc572bd8d504f4b100a5b691cf47bda204ad601b515a0",
     "hookTraceSha256": "718a6d2f635b3eb512a996fe3005e2312cbbadddd5f411fb847469b9c0bae4d4",

@@ -161,6 +161,7 @@ final class AnthropicClient implements Llm
         return JsonBatchRecovery::run(
             $requests,
             fn (array $subset): array => $this->responseBatch($subset, true),
+            defaultMaxTokens: $this->defaultMaxTokens,
         );
     }
 
@@ -757,15 +758,12 @@ final class AnthropicClient implements Llm
     }
 
     /**
-     * Connection-level cURL failures worth retrying with backoff. 6 = could not
-     * resolve host (the DNS blip that used to abort builds), 7 = could not
-     * connect, 28 = timeout, 35 = SSL connect, 52 = empty reply, 55 = send
-     * error, 56 = recv error. Any other cURL error (bad URL, cert, etc.) is
-     * permanent. Pure.
+     * Connection-level cURL failures worth retrying with backoff. Any other
+     * cURL error (bad URL, cert, etc.) is permanent. Pure.
      */
     private static function isTransientCurl(int $errno): bool
     {
-        return in_array($errno, [6, 7, 28, 35, 52, 55, 56], true);
+        return in_array($errno, TransientApiException::TRANSIENT_CURL_ERRNOS, true);
     }
 
     /**
