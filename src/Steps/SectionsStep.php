@@ -793,6 +793,19 @@ final class SectionsStep implements Step
     }
 
     /**
+     * The section a page opens on — the only one that shares the viewport with
+     * the header, and so the one both sides of the seam ask about.
+     *
+     * @param array<string,mixed> $page
+     * @return array<string,mixed>|null
+     */
+    public static function openingSection(array $page): ?array
+    {
+        $first = ((array) ($page['sections'] ?? []))[0] ?? null;
+        return is_array($first) ? $first : null;
+    }
+
+    /**
      * The deterministic top-of-page contract (BIGR-735): decided once from the
      * plan, then injected into BOTH the header prompt and every hero-section
      * prompt, so the two parts compose instead of colliding blind.
@@ -808,19 +821,6 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $pages
      */
-    /**
-     * The section a page opens on — the only one that shares the viewport with
-     * the header, and so the one both sides of the seam ask about.
-     *
-     * @param array<string,mixed> $page
-     * @return array<string,mixed>|null
-     */
-    public static function openingSection(array $page): ?array
-    {
-        $first = ((array) ($page['sections'] ?? []))[0] ?? null;
-        return is_array($first) ? $first : null;
-    }
-
     public static function headerMode(array $pages, string $canvas = ''): string
     {
         $front = self::frontPage($pages);

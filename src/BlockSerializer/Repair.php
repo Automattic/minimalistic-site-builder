@@ -14,14 +14,18 @@ final class Repair
         }
     }
 
-    public function key(string $file): string
+    public function key(): string
     {
-        return $file . "\0" . $this->blockPath . "\0" . $this->code;
+        return $this->blockPath . "\0" . $this->code;
     }
 
-    /** @return array{code:string,blockPath:string} */
-    public function toArray(): array
+    /** @param list<Repair> $repairs @return list<Repair> */
+    public static function dedupe(array $repairs): array
     {
-        return ['code' => $this->code, 'blockPath' => $this->blockPath];
+        $unique = [];
+        foreach ($repairs as $repair) {
+            $unique[$repair->key()] = $repair;
+        }
+        return array_values($unique);
     }
 }

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -37,10 +38,7 @@ final class FontsPhpStep implements Step
     ];
 
     /** HTML elements that never establish an inherited-family stack frame. */
-    private const VOID_TAGS = [
-        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-        'link', 'meta', 'param', 'source', 'track', 'wbr',
-    ];
+    private const VOID_TAGS = HtmlNode::VOID_TAGS;
 
     public function id(): string
     {

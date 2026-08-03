@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
@@ -35,7 +36,7 @@ final class GeneratedMarkup
         // Sanitize the whole response before looking for a document boundary:
         // block-looking comments inside a script body are not payload.
         $sanitizerNotes = [];
-        $text = MarkupSanitizer::sanitize(self::stripFences(trim($text)), $sanitizerNotes);
+        $text = MarkupSanitizer::sanitize(CodeFences::strip($text), $sanitizerNotes);
         foreach ($sanitizerNotes as $note) {
             $record("sanitized script-capable markup — {$note}");
         }
@@ -626,13 +627,4 @@ final class GeneratedMarkup
         );
     }
 
-    private static function stripFences(string $text): string
-    {
-        $text = (string) preg_replace('/^\xEF\xBB\xBF/', '', $text);
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\r?\n/', '', $text);
-            $text = preg_replace('/\r?\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
-    }
 }
