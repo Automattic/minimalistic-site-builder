@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -103,9 +104,9 @@ final class CustomMotionStep implements Step
             'design_direction'  => DesignDirectionStep::readFor($project),
             'tagged_elements'   => implode("\n", $tagged),
         ]);
-        $css = self::stripFences(trim(
+        $css = CodeFences::strip(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
-        ));
+        );
 
         $problems = self::validate($css);
         if ($problems !== []) {
@@ -149,7 +150,7 @@ final class CustomMotionStep implements Step
     {
         $found = [];
         $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
-        foreach (FixBlocksStep::themeFiles($project) as $rel) {
+        foreach ($project->themeFiles() as $rel) {
             $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
             foreach ($doc->indices() as $i) {
                 if (preg_match_all('/<[a-z][^>]*class="[^"]*' . $token . '[^"]*"[^>]*>/i', $doc->ownHtml($i), $m) > 0) {
@@ -338,15 +339,5 @@ final class CustomMotionStep implements Step
         }
         $number = (float) $m[1];
         return ($m[2] === '%' ? $number / 100 : $number) <= 0.0;
-    }
-
-    /** Strip a leading/trailing markdown code fence if the model added one. */
-    private static function stripFences(string $text): string
-    {
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
     }
 }

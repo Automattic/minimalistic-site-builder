@@ -114,12 +114,12 @@ $builder = new SiteBuilder(
 // name rather than echoing the whole prompt.
 try {
     $project = $builder->createProject(
-        $prompt,
-        $slug,
-        $multiPage,
-        $pages,
-        $designConstraints,
-        $writingDirection,
+        prompt: $prompt,
+        slug: $slug,
+        multiPage: $multiPage,
+        pages: $pages,
+        designConstraints: $designConstraints,
+        writingDirection: $writingDirection,
     );
 } catch (InvalidArgumentException $e) {
     fwrite(STDERR, $e->getMessage() . "\n");

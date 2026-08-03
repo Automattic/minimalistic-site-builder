@@ -168,12 +168,12 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
 // seeded (and merged) inside createProject so demo orchestrators can pre-seed.
 try {
     $project = $builder->createProject(
-        $prompt,
-        $slug,
-        $multiPage,
-        $pages,
-        $designConstraints,
-        $writingDirection,
+        prompt: $prompt,
+        slug: $slug,
+        multiPage: $multiPage,
+        pages: $pages,
+        designConstraints: $designConstraints,
+        writingDirection: $writingDirection,
     );
 } catch (InvalidArgumentException $e) {
     fwrite(STDERR, $e->getMessage() . "\n");

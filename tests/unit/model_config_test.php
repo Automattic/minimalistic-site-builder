@@ -59,7 +59,7 @@ test('StepDefaults default (anthropic) reproduces the historical model mapping',
     assert_eq('claude-opus-5', $models['theme-json']);
     assert_eq('claude-opus-5', $models['sections']);
     assert_eq('claude-opus-5', $models['page-styles']);
-    assert_eq('claude-opus-5', $models['fonts-php']);
+    assert_true(!isset($models['fonts-php']), 'deterministic fonts-php has no model mapping');
 });
 
 test('StepDefaults follows the active provider tiers (openai)', function () {

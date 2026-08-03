@@ -1,0 +1,70 @@
+{
+    "name": "Hearth & Crumb",
+    "slug": "hearth-crumb",
+    "title": "Bread Made Slowly, Shared Daily",
+    "description": "A neighborhood bakery specializing in naturally leavened bread and seasonal pastries.",
+    "site_type": "business storefront",
+    "topic": "artisan bread and pastries",
+    "area": "bakery",
+    "audience": "neighborhood residents and visitors",
+    "language": "en",
+    "writing_direction": "ltr",
+    "persona_name": "",
+    "email_domain": "hearthandcrumb.com",
+    "invented": [
+        "name",
+        "email_domain"
+    ],
+    "visual_vibe": "warm and rustic",
+    "subject_is_visual_work": false,
+    "animation_request": "",
+    "sections": [
+        "Hero",
+        "Daily Selection",
+        "Our Process",
+        "Visit"
+    ],
+    "pages": [
+        {
+            "title": "Home",
+            "slug": "home",
+            "purpose": "Introduce the bakery, highlight the daily selection, and direct visitors to ordering and location details.",
+            "children": []
+        },
+        {
+            "title": "Menu",
+            "slug": "menu",
+            "purpose": "Present the bakery's current breads and pastries.",
+            "children": [
+                {
+                    "title": "Bread",
+                    "slug": "bread",
+                    "purpose": "List naturally leavened loaves with ingredients and availability.",
+                    "children": []
+                },
+                {
+                    "title": "Pastries",
+                    "slug": "pastries",
+                    "purpose": "List seasonal pastries with ingredients and availability.",
+                    "children": []
+                }
+            ]
+        },
+        {
+            "title": "Visit",
+            "slug": "visit",
+            "purpose": "Provide the bakery's address, opening hours, and contact details.",
+            "children": []
+        }
+    ],
+    "location": {
+        "street": "24 Market Street",
+        "city": "Portland",
+        "region": "Maine"
+    },
+    "hours": {
+        "tuesday_friday": "7:00 AM-3:00 PM",
+        "saturday_sunday": "8:00 AM-2:00 PM",
+        "monday": "Closed"
+    }
+}

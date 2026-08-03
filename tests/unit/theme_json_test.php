@@ -61,6 +61,49 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json deterministically enforces the direction font families', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A literary journal']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, overrides: [
+        'description' => 'Editorial typography.',
+        'type' => [
+            'heading' => [
+                'family' => 'Fraunces',
+                'weights' => [700, 900],
+                'italic' => false,
+                'axes' => ['opsz' => ['min' => 9.0, 'max' => 144.0]],
+            ],
+            'body' => [
+                'family' => 'Source Serif 4',
+                'weights' => [400, 600],
+                'italic' => true,
+                'axes' => [],
+            ],
+        ],
+    ]);
+
+    $payload = valid_theme_payload();
+    $payload['settings']['typography']['fontFamilies'] = [
+        ['slug' => 'heading', 'fontFamily' => '"Oswald", sans-serif', 'name' => 'Heading'],
+        ['slug' => 'body', 'fontFamily' => '"Lora", serif', 'name' => 'Body'],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $families = array_column(
+        $project->readJson('theme/theme.json')['settings']['typography']['fontFamilies'],
+        'fontFamily',
+        'slug',
+    );
+    assert_eq('"Fraunces", sans-serif', $families['heading']);
+    assert_eq('"Source Serif 4", serif', $families['body']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json delivers a deterministic base theme when repaired model JSON is still malformed', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

@@ -30,7 +30,6 @@
         "sections": "large",
         "page-styles": "large",
         "custom-motion": "large",
-        "fonts-php": "large",
         "image-prompt-repair": "small"
     }
 }

@@ -58,6 +58,23 @@ final class Project
     }
 
     /**
+     * Theme-relative paths (parts/*.html and templates/*.html) of every theme
+     * markup file, for steps that read or rewrite the theme in place.
+     *
+     * @return string[]
+     */
+    public function themeFiles(): array
+    {
+        $rels = [];
+        foreach (['parts', 'templates'] as $sub) {
+            foreach (glob($this->themePath($sub) . '/*.html') ?: [] as $file) {
+                $rels[] = $sub . '/' . basename($file);
+            }
+        }
+        return $rels;
+    }
+
+    /**
      * Absolute path under the project's logs/ directory, creating it on demand.
      * Steps route their verbose output here (one file per step) so the console
      * stays a concise summary and the full detail is kept for inspection.

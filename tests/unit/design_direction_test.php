@@ -28,6 +28,27 @@ function designdir_seeds(): array
     return array_map(fn (int $i) => "Seed {$i}", range(1, 4));
 }
 
+/** @return array<string,array<string,mixed>> */
+function designdir_type(): array
+{
+    return [
+        'heading' => [
+            'family' => 'Fraunces',
+            'weights' => [700, 900],
+            'italic' => false,
+            'axes' => ['opsz' => ['min' => 9, 'max' => 144]],
+            'character' => 'swaggering display serif',
+        ],
+        'body' => [
+            'family' => 'Source Sans 3',
+            'weights' => [400, 600],
+            'italic' => false,
+            'axes' => [],
+            'character' => 'clean editorial sans',
+        ],
+    ];
+}
+
 /** One full direction as the expansion call returns it. @return array<string,mixed> */
 function designdir_direction(): array
 {
@@ -38,7 +59,7 @@ function designdir_direction(): array
             'base' => '#FDF6EC', 'contrast' => '#26221E', 'primary' => '#8A5A2B',
             'secondary' => '#CC9988', 'accent' => '#E08A3C',
         ],
-        'type'             => ['heading' => 'Fraunces 700/900', 'body' => 'Source Sans 3 400/600'],
+        'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
         'signature_device' => 'hairline rules with small caps folios',
         'signature_device_slots' => ['hero', 'body'],
@@ -58,7 +79,8 @@ test('design-direction expands a picked seed into structured designDirection.jso
     $written = $project->readJson('designDirection.json');
     assert_eq('Hearth & Grain', $written['title']);
     assert_eq('#FDF6EC', $written['palette']['base']);
-    assert_eq('Fraunces 700/900', $written['type']['heading']);
+    assert_eq('Fraunces', $written['type']['heading']['family']);
+    assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
     assert_eq('hairline rules with small caps folios', $written['signature_device']);
     assert_eq(['hero', 'body'], $written['signature_device_slots']);
@@ -285,16 +307,91 @@ test('normalize keeps valid palette hexes, drops invalid ones, and requires a de
             'primary'   => '#8A5A2B',
             'weird'     => '#FFFFFF',   // unknown role → dropped
         ],
-        'type'        => ['heading' => 'Fraunces 900'],
+        'type'        => [
+            'heading' => [
+                'family' => 'Fraunces',
+                'weights' => [900],
+                'italic' => false,
+                'axes' => [],
+                'character' => '',
+            ],
+        ],
     ], 'cinematic-safe-zone');
     assert_eq('Forge & Flame', $direction['title']);
     assert_eq(['base' => '#FDF6EC', 'primary' => '#8A5A2B'], $direction['palette']);
-    assert_eq('Fraunces 900', $direction['type']['heading']);
-    assert_eq('', $direction['type']['body']);
+    assert_eq('Fraunces', $direction['type']['heading']['family']);
+    assert_eq([900], $direction['type']['heading']['weights']);
+    assert_eq('', $direction['type']['body']['family']);
     assert_eq('', $direction['image_grade']);
 
     assert_eq(null, DesignDirectionStep::normalize(['title' => 'Empty', 'description' => '   '], 'cinematic-safe-zone'));
     assert_eq(null, DesignDirectionStep::normalize('not an array', 'cinematic-safe-zone'));
+});
+
+test('design-direction persists structured typography and warns when an axis is removed', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $direction = designdir_direction();
+    $direction['type'] = [
+        'heading' => [
+            'family' => 'Fraunces',
+            'weights' => [700, 900],
+            'italic' => false,
+            'axes' => ['opsz' => ['min' => 9, 'max' => 144]],
+            'character' => 'swaggering display serif',
+        ],
+        'body' => [
+            'family' => 'Source Serif 4',
+            'weights' => [400, 600],
+            'italic' => true,
+            'axes' => ['CASL' => ['min' => 0, 'max' => 1]],
+            'character' => 'warm editorial text',
+        ],
+    ];
+    $llm->queueJson(['direction' => $direction]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $written = $project->readJson('designDirection.json');
+    assert_eq('Fraunces', $written['type']['heading']['family']);
+    assert_eq([700, 900], $written['type']['heading']['weights']);
+    assert_eq(['opsz' => ['min' => 9, 'max' => 144]], $written['type']['heading']['axes']);
+    assert_eq(true, $written['type']['body']['italic']);
+    assert_eq([], $written['type']['body']['axes'], 'unsupported axis removed');
+
+    $warnings = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('designDirection.json: type.body.axes.CASL', $warnings);
+    assert_contains('delivered removed', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('design-direction keeps hostile family values inert and warns for every lost commitment', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $direction = designdir_direction();
+    $direction['type']['heading'] = [
+        'family' => '*/ system($_GET["cmd"]); /*',
+        'weights' => [900],
+        'italic' => true,
+        'axes' => ['opsz' => ['min' => 9, 'max' => 144]],
+        'character' => 'dangerous display face',
+    ];
+    $llm->queueJson(['direction' => $direction]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $heading = $project->readJson('designDirection.json')['type']['heading'];
+    assert_eq(
+        ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''],
+        $heading,
+    );
+    $warnings = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('type.heading.family authored value', $warnings);
+    assert_contains('type.heading.weights authored value', $warnings);
+    assert_contains('type.heading.italic authored value', $warnings);
+    assert_contains('type.heading.axes.opsz authored value', $warnings);
+    assert_true(!str_contains(DesignDirectionStep::format($project->readJson('designDirection.json')), 'system('));
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('format renders the narrative plus the structured fact list', function () {
@@ -302,7 +399,22 @@ test('format renders the narrative plus the structured fact list', function () {
         'title'            => 'Archivo Silencioso',
         'description'      => 'Full-bleed black-and-white photography.',
         'palette'          => ['base' => '#F4F1EA', 'accent' => '#C33F2E'],
-        'type'             => ['heading' => 'Fraunces 900', 'body' => 'Source Sans 3 400'],
+        'type'             => [
+            'heading' => [
+                'family' => 'Fraunces',
+                'weights' => [900],
+                'italic' => false,
+                'axes' => [],
+                'character' => '',
+            ],
+            'body' => [
+                'family' => 'Source Sans 3',
+                'weights' => [400],
+                'italic' => false,
+                'axes' => [],
+                'character' => '',
+            ],
+        ],
         'image_grade'      => 'monochrome documentary',
         'signature_device' => 'hairline rules with folios',
         'signature_device_slots' => ['hero'],
@@ -311,7 +423,7 @@ test('format renders the narrative plus the structured fact list', function () {
     ]);
     assert_contains('# Archivo Silencioso', $text);
     assert_contains('base #F4F1EA', $text);
-    assert_contains('heading — Fraunces 900; body — Source Sans 3 400', $text);
+    assert_contains('heading — Fraunces; weights 900; body — Source Sans 3; weights 400', $text);
     assert_contains('Signature device', $text);
     assert_contains('placement slots', strtolower($text));
     assert_contains('monochrome documentary', $text);
@@ -320,6 +432,31 @@ test('format renders the narrative plus the structured fact list', function () {
 
     // Empty fields are omitted — a bare direction is just the narrative.
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
+test('format renders structured typography without losing its design character', function () {
+    $text = DesignDirectionStep::format([
+        'description' => 'Print-led warmth.',
+        'type' => [
+            'heading' => [
+                'family' => 'Fraunces',
+                'weights' => [700, 900],
+                'italic' => false,
+                'axes' => ['opsz' => ['min' => 9.0, 'max' => 144.0]],
+                'character' => 'swaggering display serif',
+            ],
+            'body' => [
+                'family' => 'Source Serif 4',
+                'weights' => [400, 600],
+                'italic' => true,
+                'axes' => [],
+                'character' => 'warm editorial text',
+            ],
+        ],
+    ]);
+
+    assert_contains('heading — Fraunces; weights 700/900; opsz 9..144; swaggering display serif', $text);
+    assert_contains('body — Source Serif 4; weights 400/600; true italics; warm editorial text', $text);
 });
 
 test('normalize commits a canvas: framed passes through, everything else is full-bleed', function () {
@@ -495,7 +632,22 @@ test('theme-json injects the design direction into its prompt', function () {
         'title'       => 'Hearth & Grain',
         'description' => 'Editorial-magazine direction.',
         'palette'     => ['base' => '#FDF6EC'],
-        'type'        => ['heading' => 'Fraunces 900', 'body' => 'Source Sans 3 400'],
+        'type'        => [
+            'heading' => [
+                'family' => 'Fraunces',
+                'weights' => [900],
+                'italic' => false,
+                'axes' => [],
+                'character' => '',
+            ],
+            'body' => [
+                'family' => 'Source Sans 3',
+                'weights' => [400],
+                'italic' => false,
+                'axes' => [],
+                'character' => '',
+            ],
+        ],
         'hero_blueprint' => \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
 
@@ -507,7 +659,11 @@ test('theme-json injects the design direction into its prompt', function () {
 
     assert_contains('Editorial-magazine', $llm->calls[0]['prompt']);
     assert_contains('base #FDF6EC', $llm->calls[0]['prompt'], 'structured palette reaches the theme prompt');
-    assert_contains('Fraunces 900', $llm->calls[0]['prompt'], 'structured type reaches the theme prompt');
+    assert_contains(
+        'heading — Fraunces; weights 900',
+        $llm->calls[0]['prompt'],
+        'structured type reaches the theme prompt',
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -822,4 +978,13 @@ test('batch request outside the visual-work gate remaps with provenance', functi
     assert_eq(1, count($w));
     assert_contains('subject_is_visual_work', $w[0]);
     assert_contains('typographic-poster', $w[0]);
+});
+
+test('directionFor returns nothing when no direction was committed', function () {
+    $project = new Project(sys_get_temp_dir() . '/design-direction-absent-' . uniqid());
+    try {
+        assert_eq([], DesignDirectionStep::dataFor($project));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($project->root));
+    }
 });

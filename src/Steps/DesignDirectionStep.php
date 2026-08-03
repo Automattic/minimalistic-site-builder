@@ -264,7 +264,10 @@ final class DesignDirectionStep implements Step
             'title'            => '',
             'description'      => $description,
             'palette'          => [],
-            'type'             => ['heading' => '', 'body' => ''],
+            'type'             => [
+                'heading' => self::emptyTypeSlot(),
+                'body'    => self::emptyTypeSlot(),
+            ],
             'image_grade'      => '',
             'canvas'           => $canvas,
             'motion'           => Motion::DEFAULT_PROFILE,
@@ -552,7 +555,7 @@ final class DesignDirectionStep implements Step
      */
     public static function normalize(
         mixed $raw,
-        string $assignedRecipe,
+        string $assignedRecipe = 'cinematic-safe-zone',
         string $conceptSeed = '',
         array &$repairs = [],
         array &$warnings = [],
@@ -622,8 +625,8 @@ final class DesignDirectionStep implements Step
             'description'      => $description,
             'palette'          => $palette,
             'type'             => [
-                'heading' => trim((string) ($type['heading'] ?? '')),
-                'body'    => trim((string) ($type['body'] ?? '')),
+                'heading' => self::normalizeTypeSlot($type['heading'] ?? null, 'heading', $warnings),
+                'body'    => self::normalizeTypeSlot($type['body'] ?? null, 'body', $warnings),
             ],
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
             // Anything that isn't an explicit "framed" commitment is full-bleed:
@@ -639,6 +642,164 @@ final class DesignDirectionStep implements Step
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
         ];
+    }
+
+    /**
+     * @param mixed $raw
+     * @param list<string> $warnings
+     * @return array{family:string,weights:list<int>,italic:bool,axes:array<string,array{min:float,max:float}>,character:string}
+     */
+    private static function normalizeTypeSlot($raw, string $slot, array &$warnings): array
+    {
+        $empty = self::emptyTypeSlot();
+        if ($raw === null) {
+            return $empty;
+        }
+        if (!is_array($raw)) {
+            $warnings[] = 'designDirection.json: type.' . $slot . ' authored value '
+                . self::warningValue($raw) . '; delivered ' . self::warningValue($empty)
+                . '; disposition malformed prose typography replaced by the structured empty contract';
+            return $empty;
+        }
+
+        $rawFamily = $raw['family'] ?? null;
+        $family = is_string($rawFamily) ? trim($rawFamily) : '';
+        if (array_key_exists('family', $raw) && !is_string($rawFamily)) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                . self::warningValue($rawFamily) . '; delivered ""; disposition non-string family name removed';
+        } elseif (
+            $family !== ''
+            && preg_match("/^\\p{L}[\\p{L}\\p{N} .&'_-]{0,99}$/u", $family) !== 1
+        ) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                . self::warningValue($rawFamily) . '; delivered ""; disposition invalid family name removed';
+            $family = '';
+        }
+
+        $rawWeights = $raw['weights'] ?? [];
+        $rawAxes = $raw['axes'] ?? [];
+        if ($family === '') {
+            if ($rawWeights !== []) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
+                    . self::warningValue($rawWeights)
+                    . '; delivered []; disposition requirements removed because no deliverable family remained';
+            }
+            if (array_key_exists('italic', $raw) && $raw['italic'] !== false) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
+                    . self::warningValue($raw['italic'])
+                    . '; delivered false; disposition requirement removed because no deliverable family remained';
+            }
+            if (is_array($rawAxes)) {
+                foreach ($rawAxes as $tag => $range) {
+                    $warnings[] = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag
+                        . ' authored value ' . self::warningValue($range)
+                        . '; delivered removed; disposition axis removed because no deliverable family remained';
+                }
+            } elseif ($rawAxes !== []) {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
+                    . self::warningValue($rawAxes)
+                    . '; delivered {}; disposition axes removed because no deliverable family remained';
+            }
+            if (array_key_exists('character', $raw) && $raw['character'] !== '') {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.character authored value '
+                    . self::warningValue($raw['character'])
+                    . '; delivered ""; disposition rationale removed because no deliverable family remained';
+            }
+            return $empty;
+        }
+
+        $weights = [];
+        $invalidWeights = false;
+        if (is_array($rawWeights) && array_is_list($rawWeights)) {
+            foreach ($rawWeights as $weight) {
+                if (
+                    (is_int($weight) || (is_string($weight) && ctype_digit($weight)))
+                    && (int) $weight >= 100
+                    && (int) $weight <= 900
+                    && (int) $weight % 100 === 0
+                ) {
+                    $weights[] = (int) $weight;
+                } else {
+                    $invalidWeights = true;
+                }
+            }
+        } elseif ($rawWeights !== []) {
+            $invalidWeights = true;
+        }
+        $weights = array_values(array_unique($weights));
+        sort($weights);
+        if ($family !== '' && $weights === []) {
+            $weights = [400];
+        }
+        if ($invalidWeights) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
+                . self::warningValue($rawWeights) . '; delivered ' . self::warningValue($weights)
+                . '; disposition invalid weights removed';
+        }
+
+        $italic = is_bool($raw['italic'] ?? null) ? $raw['italic'] : false;
+        if (array_key_exists('italic', $raw) && !is_bool($raw['italic'])) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
+                . self::warningValue($raw['italic']) . '; delivered false; disposition non-boolean value removed';
+        }
+
+        $axes = [];
+        if (is_array($rawAxes)) {
+            foreach ($rawAxes as $tag => $range) {
+                $path = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag;
+                if ($tag !== 'opsz') {
+                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                        . '; delivered removed; disposition axis is not supported by the deterministic CSS2 contract';
+                    continue;
+                }
+                $min = is_array($range) ? ($range['min'] ?? null) : null;
+                $max = is_array($range) ? ($range['max'] ?? null) : null;
+                if (
+                    !is_int($min) && !is_float($min)
+                    || !is_int($max) && !is_float($max)
+                    || !is_finite((float) $min)
+                    || !is_finite((float) $max)
+                    || (float) $min <= 0
+                    || (float) $max < (float) $min
+                    || (float) $max > 1000
+                ) {
+                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                        . '; delivered removed; disposition invalid optical-size range';
+                    continue;
+                }
+                $axes['opsz'] = ['min' => (float) $min, 'max' => (float) $max];
+            }
+        } elseif ($rawAxes !== []) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
+                . self::warningValue($rawAxes) . '; delivered {}; disposition non-object axes removed';
+        }
+
+        $character = is_string($raw['character'] ?? null) ? trim($raw['character']) : '';
+        if (array_key_exists('character', $raw) && !is_string($raw['character'])) {
+            $warnings[] = 'designDirection.json: type.' . $slot . '.character authored value '
+                . self::warningValue($raw['character'])
+                . '; delivered ""; disposition non-string typography rationale removed';
+        }
+
+        return [
+            'family'    => $family,
+            'weights'   => $weights,
+            'italic'    => $italic,
+            'axes'      => $axes,
+            'character' => $character,
+        ];
+    }
+
+    /** @return array{family:string,weights:list<int>,italic:bool,axes:array<string,array{min:float,max:float}>,character:string} */
+    private static function emptyTypeSlot(): array
+    {
+        return ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''];
+    }
+
+    private static function warningValue(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : get_debug_type($value);
     }
 
     /**
@@ -669,10 +830,31 @@ final class DesignDirectionStep implements Step
         $type = is_array($direction['type'] ?? null) ? $direction['type'] : [];
         $pair = [];
         foreach (['heading', 'body'] as $slot) {
-            $family = trim((string) ($type[$slot] ?? ''));
-            if ($family !== '') {
-                $pair[] = "{$slot} — {$family}";
+            $typeSlot = is_array($type[$slot] ?? null) ? $type[$slot] : [];
+            $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
+            if ($family === '') {
+                continue;
             }
+            $details = ["{$slot} — {$family}"];
+            $weights = is_array($typeSlot['weights'] ?? null) ? $typeSlot['weights'] : [];
+            if ($weights !== []) {
+                $details[] = 'weights ' . implode('/', array_map('intval', $weights));
+            }
+            if (($typeSlot['italic'] ?? false) === true) {
+                $details[] = 'true italics';
+            }
+            $axes = is_array($typeSlot['axes'] ?? null) ? $typeSlot['axes'] : [];
+            foreach ($axes as $tag => $range) {
+                if (is_array($range) && isset($range['min'], $range['max'])) {
+                    $details[] = $tag . ' ' . self::formatNumber((float) $range['min'])
+                        . '..' . self::formatNumber((float) $range['max']);
+                }
+            }
+            $character = is_string($typeSlot['character'] ?? null) ? trim($typeSlot['character']) : '';
+            if ($character !== '') {
+                $details[] = $character;
+            }
+            $pair[] = implode('; ', $details);
         }
         if ($pair !== []) {
             $facts[] = '- **Type**: ' . implode('; ', $pair);
@@ -725,6 +907,11 @@ final class DesignDirectionStep implements Step
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
+    }
+
+    private static function formatNumber(float $value): string
+    {
+        return rtrim(rtrim(number_format($value, 4, '.', ''), '0'), '.');
     }
 
     /**
@@ -801,6 +988,23 @@ final class DesignDirectionStep implements Step
     public static function heroRecipeFor(Project $project): string
     {
         return HeroBlueprint::recipe(self::heroBlueprintFor($project));
+    }
+
+    /**
+     * The whole committed direction, or none. The accessors below answer one
+     * field each; callers needing a whole block read through this.
+     *
+     * The full graph cannot reach these callers without a direction —
+     * StepGraph::validate() rejects a composition that drops the writer. The
+     * tolerance is for steps run on their own, where the file is simply not
+     * there: unit tests, and any host that runs a span of the graph rather
+     * than the whole of it.
+     *
+     * @return array<mixed>
+     */
+    public static function dataFor(Project $project): array
+    {
+        return $project->exists(self::FILE) ? $project->readJson(self::FILE) : [];
     }
 
     /**
