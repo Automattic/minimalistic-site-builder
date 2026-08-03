@@ -193,10 +193,18 @@ test('siteSpec schema invented enum matches the identities normalization can inv
     foreach ($invented as $key) {
         assert_true(in_array($key, $allowed, true), "schema enum is missing invented key '{$key}'");
     }
+    exec('rm -rf ' . escapeshellarg($tmp));
+
+    // Reverse direction: a spec claiming every enum key as invented must keep
+    // them all — normalization strips identity keys it cannot invent, so a
+    // stale enum entry would go missing here.
+    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: false, siteSpec: ['invented' => $allowed]);
+    (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
+
+    $kept = $project->readJson('siteSpec.json')['invented'];
     sort($allowed);
-    $normalizable = $allowed;
-    sort($normalizable);
-    assert_eq($allowed, $normalizable);
+    sort($kept);
+    assert_eq($allowed, $kept, 'schema enum lists a key normalization cannot invent');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
