@@ -18,6 +18,12 @@ final class HtmlNode
     public const TEXT = 'text';
     public const COMMENT = 'comment';
 
+    /** HTML void elements: no closing tag, no children. */
+    public const VOID_TAGS = [
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr',
+    ];
+
     /** @var list<self> */
     private array $children = [];
 
@@ -327,10 +333,7 @@ final class HtmlNode
 
     public static function isVoidTag(string $tag): bool
     {
-        return in_array(strtolower($tag), [
-            'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-            'link', 'meta', 'param', 'source', 'track', 'wbr',
-        ], true);
+        return in_array(strtolower($tag), self::VOID_TAGS, true);
     }
 
     private static function escapeText(string $text, ?string $parentTag): string
