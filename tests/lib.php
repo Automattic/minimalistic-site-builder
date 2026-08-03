@@ -55,12 +55,15 @@ function assert_contains(string $needle, string $haystack, string $msg = ''): vo
     }
 }
 
-function assert_throws(callable $fn, string $msg = ''): void
+/** Assert the callable throws, and return the Throwable so callers can inspect it. */
+function assert_throws(callable $fn, string $msg = ''): Throwable
 {
     try {
         $fn();
-    } catch (Throwable) {
-        return;
+    } catch (TestSkipped $e) {
+        throw $e;
+    } catch (Throwable $e) {
+        return $e;
     }
     throw new RuntimeException('assert_throws failed: no exception' . ($msg !== '' ? ": {$msg}" : ''));
 }
@@ -72,17 +75,22 @@ function run_tests(): int
     $fail = 0;
     $skip = 0;
     foreach ($GLOBALS['__tests'] as [$name, $fn]) {
+        $obLevel = ob_get_level();
         try {
             $fn();
-            echo "  PASS  {$name}\n";
+            $line = "  PASS  {$name}\n";
             $pass++;
         } catch (TestSkipped $e) {
-            echo "  SKIP  {$name}\n        {$e->getMessage()}\n";
+            $line = "  SKIP  {$name}\n        {$e->getMessage()}\n";
             $skip++;
         } catch (Throwable $e) {
-            echo "  FAIL  {$name}\n        {$e->getMessage()}\n";
+            $line = "  FAIL  {$name}\n        {$e->getMessage()}\n";
             $fail++;
         }
+        while (ob_get_level() > $obLevel) {
+            ob_end_clean();
+        }
+        echo $line;
     }
     echo "\n{$pass} passed, {$fail} failed, {$skip} skipped\n";
     return $fail === 0 ? 0 : 1;

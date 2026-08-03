@@ -11,6 +11,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib.php';
 
 $files = glob(__DIR__ . '/integration/*_test.php') ?: [];
+if ($files === []) {
+    fwrite(STDERR, "No integration test files matched tests/integration/*_test.php\n");
+    exit(1);
+}
 $live = getenv('RUN_LIVE') === '1';
 foreach ($files as $f) {
     if (str_ends_with($f, '_live_test.php') && !$live) {

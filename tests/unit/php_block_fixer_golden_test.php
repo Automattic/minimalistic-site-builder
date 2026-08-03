@@ -93,6 +93,13 @@ $phpBlockFixerGoldenRoot = dirname(__DIR__) . '/fixtures/block-fixer/cases';
 $phpBlockFixerGoldenCases = glob($phpBlockFixerGoldenRoot . '/*', GLOB_ONLYDIR) ?: [];
 sort($phpBlockFixerGoldenCases, SORT_STRING);
 
+test('PhpBlockFixer golden corpus has at least one case', function () use (
+    $phpBlockFixerGoldenCases,
+    $phpBlockFixerGoldenRoot,
+): void {
+    assert_true($phpBlockFixerGoldenCases !== [], "no case directories found under {$phpBlockFixerGoldenRoot}");
+});
+
 foreach ($phpBlockFixerGoldenCases as $phpBlockFixerGoldenCase) {
     $phpBlockFixerGoldenName = basename($phpBlockFixerGoldenCase);
     test("PhpBlockFixer matches the pinned fixed-point golden: {$phpBlockFixerGoldenName}", function () use (
