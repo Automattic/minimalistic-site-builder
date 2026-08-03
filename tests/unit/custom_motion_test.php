@@ -89,9 +89,7 @@ test('custom-motion no-ops without an LLM call when no animation was requested',
     [$project, $tmp] = cm_project('builder_cm_skip_', '');
     $llm = new FakeLlm(); // any call would throw
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     assert_eq([], $llm->calls);
     assert_true(!str_contains($project->readText('theme/style.css'), 'Custom motion'));
@@ -103,9 +101,7 @@ test('custom-motion skips without an LLM call when the markup carries no tag', f
     $project->writeText('theme/parts/section-hero.html', '<!-- wp:heading --><h1>Hi</h1><!-- /wp:heading -->');
     $llm = new FakeLlm();
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     assert_eq([], $llm->calls);
     assert_contains('no', $project->readText('logs/custom-motion.log'));
@@ -148,9 +144,7 @@ test('custom-motion appends validated CSS wrapped in the reduced-motion media qu
     $llm = new FakeLlm();
     $llm->queueText(CM_VALID_CSS);
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     $style = $project->readText('theme/style.css');
     assert_contains('@media screen and (prefers-reduced-motion: no-preference) {', $style, 'deterministic wrapper added (screen: print must not render a paused entrance)');
@@ -171,9 +165,7 @@ test('custom-motion rejects bad CSS, logs, and leaves style.css untouched', func
     $llm = new FakeLlm();
     $llm->queueText('.logo { display: none; }');
 
-    ob_start();
-    (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
-    ob_end_clean();
+    quietly(fn () => (new CustomMotionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
 
     assert_eq($before, $project->readText('theme/style.css'));
     assert_contains('PROBLEMS', $project->readText('logs/custom-motion.log'));
