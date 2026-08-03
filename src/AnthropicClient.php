@@ -518,16 +518,15 @@ final class AnthropicClient implements Llm
     }
 
     /**
-     * Run a set of streaming Messages requests through the rolling pool — at
-     * most MAX_CONCURRENCY in flight, the freed slot refilled the moment any
-     * transfer completes — and classify each transfer. Pure transport — no
-     * retry, no request counting, no throwing on a single failure (the
-     * orchestrator decides). Bounding in-flight transfers keeps a wide fan-out
-     * (every planned section at once) from tripping the API's rate limits, and
-     * a 429 on any member holds all further launches for the round: the held
-     * members come back transient, so retryTextBatch re-sends them after its
-     * backoff instead of the pool firing the whole batch into a rate-limit
-     * event as fast as the 429s bounce back.
+     * Run a set of streaming Messages requests through the shared curl_multi
+     * rolling pool — at most MAX_CONCURRENCY in flight, the freed slot
+     * refilled the moment any transfer completes — and classify each transfer
+     * via interpretStream. Pure transport — no retry, no request counting, no
+     * throwing on a single failure (the orchestrator decides). Bounding
+     * in-flight transfers keeps a wide fan-out (every planned section at
+     * once) from tripping the API's rate limits; the pool's 429-hold and
+     * refused-add handling (see CurlMultiPool) return transient/held
+     * outcomes that retryTextBatch re-sends after its backoff.
      *
      * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
      * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,cache_read_input_tokens?:int,cache_creation_input_tokens?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,stop_reason?:?string}>
@@ -537,33 +536,9 @@ final class AnthropicClient implements Llm
         if ($bodies === []) {
             return [];
         }
-        $multi = curl_multi_init();
-        /** @var array<array-key,\CurlHandle> $handles */
-        $handles = [];
-        /** @var array<int,string|int> $keysById spl_object_id(handle) => request key */
-        $keysById = [];
         $raw = [];
 
-        /** @var array<array-key,array<string,mixed>> $queuedOutcomes synthetic transient outcomes (refused adds, held launches) drained by $await before any I/O */
-        $queuedOutcomes = [];
-        // Once any member 429s, further launches this round are held: firing
-        // the rest of the batch into a rate-limit event as fast as the 429s
-        // bounce back only extends the penalty. Held members return transient
-        // and retryTextBatch re-sends them after its backoff round.
-        $holding = false;
-
-        $start = function (string|int $key, array $body) use ($multi, &$handles, &$keysById, &$raw, &$queuedOutcomes, &$holding): void {
-            if ($holding) {
-                $queuedOutcomes[$key] = [
-                    'ok' => false,
-                    'transient' => true,
-                    // Never sent: retryTextBatch retries held keys without
-                    // charging its finite transient budget.
-                    'held' => true,
-                    'error' => 'launch held: a sibling request was rate-limited (HTTP 429)',
-                ];
-                return;
-            }
+        $buildHandle = function (string|int $key, array $body) use (&$raw): \CurlHandle {
             $raw[$key] = '';
             $ch = curl_init(self::ENDPOINT);
             curl_setopt_array($ch, [
@@ -583,86 +558,24 @@ final class AnthropicClient implements Llm
                     return strlen($chunk);
                 },
             ]);
-            // A refused add would otherwise be a phantom in-flight transfer
-            // that never produces a CURLMSG_DONE. Queue it as a transient
-            // outcome instead; retryTextBatch re-sends it on a fresh stack.
-            if (curl_multi_add_handle($multi, $ch) !== CURLM_OK) {
-                curl_close($ch);
-                unset($raw[$key]);
-                $queuedOutcomes[$key] = [
-                    'ok' => false,
-                    'transient' => true,
-                    'error' => 'curl_multi_add_handle refused the transfer',
-                ];
-                return;
-            }
-            $handles[$key] = $ch;
-            $keysById[spl_object_id($ch)] = $key;
+            return $ch;
         };
 
-        // Classify one finished transfer and release its handle (and slot).
-        $finish = function (string|int $key, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$raw, &$holding): array {
-            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            if ($httpStatus === 429) {
-                $holding = true;
-            }
+        // interpretStream marks severed streams and never-responded transfers
+        // (status 0, the pool's CURLM-failure fallback) transient.
+        $classify = function (string|int $key, \CurlHandle $ch) use (&$raw): array {
             $outcome = self::interpretStream(
                 $raw[$key],
                 curl_errno($ch),
                 curl_error($ch),
-                $httpStatus,
+                (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
                 (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
             );
-            unset($handles[$key], $keysById[spl_object_id($ch)], $raw[$key]);
-            curl_multi_remove_handle($multi, $ch);
-            curl_close($ch);
+            unset($raw[$key]);
             return $outcome;
         };
 
-        $await = function () use ($multi, &$handles, &$keysById, &$queuedOutcomes, $finish): array {
-            if ($queuedOutcomes !== []) {
-                $done = $queuedOutcomes;
-                $queuedOutcomes = [];
-                return $done;
-            }
-            // Drive the stack until at least one transfer finishes (see
-            // WpcomImageClient::multiRequest for the -1 busy-spin guard).
-            do {
-                $status = curl_multi_exec($multi, $running);
-                $done = [];
-                while (($msg = curl_multi_info_read($multi)) !== false) {
-                    if ($msg['msg'] !== CURLMSG_DONE) {
-                        continue;
-                    }
-                    $key = $keysById[spl_object_id($msg['handle'])]
-                        ?? throw new \RuntimeException('rolling pool got a completion for an unregistered curl handle');
-                    $done[$key] = $finish($key, $msg['handle']);
-                }
-                if ($done !== []) {
-                    return $done;
-                }
-                if ($running && $status === CURLM_OK && curl_multi_select($multi, 1.0) === -1) {
-                    usleep(1000);
-                }
-            } while ($running && $status === CURLM_OK);
-
-            // The multi stack stopped without reporting a completion (a CURLM
-            // failure). Classify what every remaining transfer holds so far —
-            // interpretStream marks severed streams and never-responded
-            // transfers (status 0) transient — rather than hanging the pool
-            // or discarding sibling responses.
-            $done = [];
-            foreach ($handles as $key => $ch) {
-                $done[$key] = $finish($key, $ch);
-            }
-            return $done;
-        };
-
-        try {
-            return RollingPool::run($bodies, $start, $await, self::MAX_CONCURRENCY);
-        } finally {
-            curl_multi_close($multi);
-        }
+        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, self::MAX_CONCURRENCY);
     }
 
     /**

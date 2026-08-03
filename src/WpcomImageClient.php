@@ -149,14 +149,13 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * Run a set of generateContent requests through a rolling pool — at most
-     * MAX_CONCURRENCY in flight, the freed slot refilled the moment any
-     * transfer completes — and classify each transfer. Pure transport — no
-     * retry, no request counting. A 429 on any member holds all further
-     * launches for the round: held members come back transient with
-     * `held: true`, so GeminiImage::retryBatch re-sends them after its backoff
-     * without charging its budget, and the pool doesn't fire the whole batch
-     * into a rate-limit event as fast as the 429s bounce back.
+     * Run a set of generateContent requests through the shared curl_multi
+     * rolling pool — at most MAX_CONCURRENCY in flight, the freed slot
+     * refilled the moment any transfer completes — and classify each
+     * transfer. Pure transport — no retry, no request counting. The pool's
+     * 429-hold and refused-add handling (see CurlMultiPool) return
+     * transient/held outcomes that GeminiImage::retryBatch re-sends after its
+     * backoff without charging its budget.
      *
      * With $onBytes, a successful transfer's decoded, MIME-verified bytes are
      * handed to the callback immediately and the returned outcome is
@@ -170,58 +169,11 @@ final class WpcomImageClient implements ImageClient
      */
     private function multiRequest(array $bodies, array $requestedMimes, ?callable $onBytes = null): array
     {
-        $multi = curl_multi_init();
-        /** @var array<int,\CurlHandle> $handles */
-        $handles = [];
-        /** @var array<int,int> $keysById spl_object_id(handle) => request index */
-        $keysById = [];
-        /** @var array<int,array<string,mixed>> $queuedOutcomes synthetic transient outcomes (refused adds, held launches) drained by $await before any I/O */
-        $queuedOutcomes = [];
-        $holding = false;
-
-        $start = function (string|int $i, array $body) use ($multi, &$handles, &$keysById, &$queuedOutcomes, &$holding): void {
-            if ($holding) {
-                $queuedOutcomes[$i] = [
-                    'ok' => false,
-                    'transient' => true,
-                    'held' => true,
-                    'error' => 'launch held: a sibling request was rate-limited (HTTP 429)',
-                ];
-                return;
-            }
-            $ch = $this->buildHandle($body);
-            if (curl_multi_add_handle($multi, $ch) !== CURLM_OK) {
-                curl_close($ch);
-                $queuedOutcomes[$i] = [
-                    'ok' => false,
-                    'transient' => true,
-                    'error' => 'curl_multi_add_handle refused the transfer',
-                ];
-                return;
-            }
-            $handles[$i] = $ch;
-            $keysById[spl_object_id($ch)] = $i;
-        };
-
-        // Classify one finished transfer and release its handle (and slot).
-        $finish = function (string|int $i, \CurlHandle $ch) use (
-            $multi,
-            &$handles,
-            &$keysById,
-            &$holding,
-            $requestedMimes,
-            $onBytes,
-        ): array {
+        $classify = function (string|int $i, \CurlHandle $ch) use ($requestedMimes, $onBytes): array {
             $raw    = (string) curl_multi_getcontent($ch);
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
             $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            if ($httpStatus === 429) {
-                $holding = true;
-            }
-            unset($handles[$i], $keysById[spl_object_id($ch)]);
-            curl_multi_remove_handle($multi, $ch);
-            curl_close($ch);
 
             try {
                 self::throwOnTransportError($errno, $error);
@@ -253,49 +205,12 @@ final class WpcomImageClient implements ImageClient
             return ['ok' => true, 'bytes' => $bytes];
         };
 
-        $await = function () use ($multi, &$handles, &$keysById, &$queuedOutcomes, $finish): array {
-            if ($queuedOutcomes !== []) {
-                $done = $queuedOutcomes;
-                $queuedOutcomes = [];
-                return $done;
-            }
-            // Drive the stack until at least one transfer finishes. The -1
-            // guard prevents a busy-spin while there is no socket yet (DNS).
-            do {
-                $status = curl_multi_exec($multi, $running);
-                $done = [];
-                while (($msg = curl_multi_info_read($multi)) !== false) {
-                    if ($msg['msg'] !== CURLMSG_DONE) {
-                        continue;
-                    }
-                    $i = $keysById[spl_object_id($msg['handle'])]
-                        ?? throw new \RuntimeException('rolling pool got a completion for an unregistered curl handle');
-                    $done[$i] = $finish($i, $msg['handle']);
-                }
-                if ($done !== []) {
-                    return $done;
-                }
-                if ($running && $status === CURLM_OK && curl_multi_select($multi, 1.0) === -1) {
-                    usleep(1000);
-                }
-            } while ($running && $status === CURLM_OK);
-
-            // The multi stack stopped without reporting a completion (a CURLM
-            // failure). Classify what every remaining transfer holds so far —
-            // $finish marks never-responded transfers transient — rather than
-            // hanging the pool or discarding sibling responses.
-            $done = [];
-            foreach ($handles as $i => $ch) {
-                $done[$i] = $finish($i, $ch);
-            }
-            return $done;
-        };
-
-        try {
-            return RollingPool::run($bodies, $start, $await, self::MAX_CONCURRENCY);
-        } finally {
-            curl_multi_close($multi);
-        }
+        return (new CurlMultiPool())->run(
+            $bodies,
+            fn (string|int $i, array $body): \CurlHandle => $this->buildHandle($body),
+            $classify,
+            self::MAX_CONCURRENCY,
+        );
     }
 
     /**
