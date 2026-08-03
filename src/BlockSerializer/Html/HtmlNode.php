@@ -336,9 +336,15 @@ final class HtmlNode
         return in_array(strtolower($tag), self::VOID_TAGS, true);
     }
 
+    /** Raw-text elements whose data is never entity-decoded or escaped. */
+    public static function isRawTextTag(?string $tag): bool
+    {
+        return $tag === 'script' || $tag === 'style';
+    }
+
     private static function escapeText(string $text, ?string $parentTag): string
     {
-        if ($parentTag === 'script' || $parentTag === 'style') {
+        if (self::isRawTextTag($parentTag)) {
             return $text;
         }
         return str_replace(
