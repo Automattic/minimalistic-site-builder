@@ -175,7 +175,16 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    $stepIds = ['scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction', 'theme-json+page-plan', 'sections', 'collect-images', 'fix-blocks', 'assemble-pages', 'finalize-theme'];
+    // Derive the columns from the step ids actually recorded (in run order),
+    // so a renamed pipeline step can never silently render as "–".
+    $stepIds = [];
+    foreach ($results as $r) {
+        foreach (array_keys($r['timings']) as $sid) {
+            if (!in_array($sid, $stepIds, true)) {
+                $stepIds[] = $sid;
+            }
+        }
+    }
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
     $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . default_llm_model() . "\n\n";
@@ -231,9 +240,19 @@ function write_report(array $results): void
         $md .= "None — all sites structurally valid.\n";
     }
 
-    @mkdir(repo_path('eval'), 0775, true);
-    file_put_contents(repo_path('eval/report.md'), $md);
-    file_put_contents(repo_path('eval/results.json'), json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    $evalDir = repo_path('eval');
+    if (!is_dir($evalDir) && !mkdir($evalDir, 0775, true)) {
+        fwrite(STDERR, "Failed to create {$evalDir}\n");
+        exit(1);
+    }
+    if (file_put_contents($evalDir . '/report.md', $md) === false) {
+        fwrite(STDERR, "Failed to write {$evalDir}/report.md\n");
+        exit(1);
+    }
+    if (file_put_contents($evalDir . '/results.json', json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+        fwrite(STDERR, "Failed to write {$evalDir}/results.json\n");
+        exit(1);
+    }
 }
 
 function short(string $stepId): string

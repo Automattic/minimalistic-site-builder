@@ -41,9 +41,15 @@ function parseArgs(argv) {
   const positional = [];
   for (const a of argv) {
     if (a === '--no-scroll') opts.scroll = false;
-    else if (a.startsWith('--width=')) opts.width = parseInt(a.slice(8), 10);
+    else if (a.startsWith('--width=')) {
+      opts.width = parseInt(a.slice(8), 10);
+      if (!Number.isFinite(opts.width) || opts.width <= 0) throw new Error(`--width must be a positive integer: ${a}`);
+    }
     else if (a.startsWith('--chrome=')) opts.chrome = a.slice(9);
-    else if (a.startsWith('--timeout=')) opts.timeout = parseInt(a.slice(10), 10);
+    else if (a.startsWith('--timeout=')) {
+      opts.timeout = parseInt(a.slice(10), 10);
+      if (!Number.isFinite(opts.timeout) || opts.timeout <= 0) throw new Error(`--timeout must be a positive integer (ms): ${a}`);
+    }
     else if (a.startsWith('--')) throw new Error(`unknown option: ${a}`);
     else positional.push(a);
   }
