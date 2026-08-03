@@ -331,14 +331,68 @@ test('PagePlanStep validates action anchors only after the whole delivered plan 
     $untouchedSibling = $pages[1];
     $warnings = [];
     $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $warnings);
-    assert_eq(null, $delivered[0]['sections'][0]['primary_action']);
+    assert_eq(
+        '/menu/#pastries',
+        $delivered[0]['sections'][0]['primary_action']['destination'],
+        'dead cross-page fragment retargets to the target page\'s surviving section',
+    );
+    assert_eq('See breads', $delivered[0]['sections'][0]['primary_action']['label'], 'label survives the retarget');
     assert_eq($untouchedSibling, $delivered[1], 'target-page sibling is byte-for-byte unchanged');
     assert_contains('/menu/#breads', $warnings[0]);
-    assert_contains('delivered=null', $warnings[0]);
+    assert_contains('/menu/#pastries', $warnings[0]);
+    assert_contains('retargeted', $warnings[0]);
 
     $fixedPointWarnings = [];
     assert_eq($delivered, PagePlanStep::validatePrimaryActionAnchors($delivered, $fixedPointWarnings));
     assert_eq([], $fixedPointWarnings);
+});
+
+test('PagePlanStep retargets a dead same-page fragment to the closing section instead of deleting the action', function () {
+    $action = [
+        'label' => 'Start a Free Trial',
+        'intent' => 'Drive signup.',
+        'destination' => '#trial-signup',
+    ];
+    $pages = [[
+        'slug' => 'home',
+        'path' => '/',
+        'sections' => [
+            array_merge(plan_section(['slug' => 'hero']), ['primary_action' => $action, 'role' => 'hero']),
+            array_merge(plan_section(['slug' => 'value-prop', 'title' => 'Value']), ['role' => 'content']),
+            array_merge(plan_section(['slug' => 'how-it-works', 'title' => 'How']), ['role' => 'closing']),
+        ],
+    ]];
+    $warnings = [];
+    $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $warnings);
+    $delivered_action = $delivered[0]['sections'][0]['primary_action'];
+    assert_eq('#how-it-works', $delivered_action['destination'], 'retargets to the closing-role section');
+    assert_eq('Start a Free Trial', $delivered_action['label']);
+    assert_eq(1, count($warnings));
+    assert_contains('retargeted', $warnings[0]);
+    assert_contains('#trial-signup', $warnings[0]);
+
+    $fixedPoint = [];
+    assert_eq($delivered, PagePlanStep::validatePrimaryActionAnchors($delivered, $fixedPoint));
+    assert_eq([], $fixedPoint);
+});
+
+test('PagePlanStep still removes the action when the only anchor candidate is the owning section', function () {
+    $action = [
+        'label' => 'Jump',
+        'intent' => 'Scroll somewhere.',
+        'destination' => '#nowhere',
+    ];
+    $pages = [[
+        'slug' => 'home',
+        'path' => '/',
+        'sections' => [
+            array_merge(plan_section(['slug' => 'hero']), ['primary_action' => $action]),
+        ],
+    ]];
+    $warnings = [];
+    $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $warnings);
+    assert_eq(null, $delivered[0]['sections'][0]['primary_action'], 'a CTA must not scroll to itself');
+    assert_contains('delivered=null', $warnings[0]);
 });
 
 test('PagePlanStep fallback preserves the recipe projection and always nulls actions', function () {

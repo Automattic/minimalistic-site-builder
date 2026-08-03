@@ -11,6 +11,12 @@ content off screen.
 - Structure: the root's one direct visual child is a `wp:cover` marked
   `hero-composition__media`; nested core-block groups create one bounded
   `hero-composition__copy` zone and the controlled type/color layers.
+- Safe zone discipline: the headline, the supporting copy, and any planned
+  action ALL live inside the one authored copy-safe zone over the image's
+  quiet area. Bound the zone's width explicitly (a constrained inner group or
+  column) so no line of supporting text runs past it into the busy or focal
+  area — when the copy does not fit the zone legibly, shorten the copy rather
+  than widening the zone.
 - Identity: the one root group carries exactly `.hero-composition--layered-poster`.
 - Media: exactly one wide cover image. Use group, cover, heading, paragraph,
   spacer or separator when structurally needed, and optional planned button;

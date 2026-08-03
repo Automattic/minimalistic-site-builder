@@ -13,6 +13,12 @@ the blueprint's order; never turn the subject into wallpaper or a tiny card.
 - Media: exactly one opaque foreground JPG-compatible image with a singular
   subject; never request transparency or a cutout. Use group, columns/column or
   media-text, image, heading, paragraph, and optional planned button only.
+- Exhibit height: the exhibit dominates through width and negative space, not
+  raw height. When the media column spans half the stage or more, request a
+  landscape or square crop; request a portrait crop only in a clearly narrower
+  column. A wide portrait plate renders taller than the first viewport and
+  drags the vertically-centered copy — headline, support line, and the planned
+  action — below the fold, which is an objective failure.
 - Surface/width: keep the planned solid base/tinted/contrast surface and the
   asymmetric-split projection; image scale must remain the dominant region.
 - Objective failure: a cover/background image, transparent asset, multiple

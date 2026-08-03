@@ -1007,7 +1007,11 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
     /**
      * Recheck same-page and cross-page fragments only after all page recovery
-     * paths have settled. A dead target removes only the action; every sibling
+     * paths have settled. A dead fragment on a known page is retargeted to
+     * that page's closing (else last) section anchor — the planner's action
+     * label and intent survive with a resolvable scroll target instead of the
+     * whole conversion control being deleted (rung 1 before rung 3). Only when
+     * no distinct retarget section exists is the action removed. Every sibling
      * and all non-action section fields remain byte-for-byte unchanged.
      *
      * @param array<int,array<string,mixed>> $pages
@@ -1051,6 +1055,26 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
 
                 $slug = (string) ($page['slug'] ?? '');
                 $path = self::sectionPath($slug, (int) $sectionIndex) . '.primary_action';
+
+                $owningSlug = $targetPath === $currentPath
+                    ? trim((string) ($section['slug'] ?? ''))
+                    : '';
+                $retargetSlug = self::retargetAnchorSlug($pages, $targetPath, $owningSlug);
+                if ($retargetSlug !== null) {
+                    $delivered = ($targetPath === $currentPath ? '' : rtrim($targetPath, '/') . '/')
+                        . '#' . $retargetSlug;
+                    $warnings[] = self::valueLossWarning(
+                        $path . '.destination',
+                        "'{$destination}'",
+                        "'{$delivered}'",
+                        "retargeted primary action: authored target '{$destination}' has no matching "
+                            . 'section anchor; delivered the closing-section anchor instead of removing the action',
+                        valuesAlreadyRendered: true,
+                    );
+                    $pages[$pageIndex]['sections'][$sectionIndex]['primary_action']['destination'] = $delivered;
+                    continue;
+                }
+
                 $warnings[] = self::valueLossWarning(
                     $path,
                     self::warningValue($section['primary_action']),
@@ -1193,6 +1217,42 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /** @return array{0:string,1:string}|null */
+    /**
+     * The anchor a dead primary-action fragment is deterministically
+     * retargeted to on the target page: the last section with the `closing`
+     * role, else the page's last section — where a landing page's terminal
+     * conversion moment lives. The section that owns the action is never a
+     * valid target (a CTA must not scroll to itself), so a page whose only
+     * candidate is the owner yields null and the caller falls back to removal.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     */
+    private static function retargetAnchorSlug(array $pages, string $targetPath, string $owningSlug): ?string
+    {
+        foreach ($pages as $page) {
+            if (!is_array($page) || self::normalizePagePath((string) ($page['path'] ?? '/')) !== $targetPath) {
+                continue;
+            }
+            $closing = null;
+            $last = null;
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $slug = trim((string) ($section['slug'] ?? ''));
+                if ($slug === '' || $slug === $owningSlug) {
+                    continue;
+                }
+                $last = $slug;
+                if ((string) ($section['role'] ?? '') === 'closing') {
+                    $closing = $slug;
+                }
+            }
+            return $closing ?? $last;
+        }
+        return null;
+    }
+
     private static function anchorTarget(string $destination, string $currentPath): ?array
     {
         if (str_starts_with($destination, '#')) {
