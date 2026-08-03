@@ -509,41 +509,27 @@ final class OpenAiCompatibleClient implements Llm
     }
 
     /**
+     * Run a set of streaming Chat Completions requests through the shared
+     * curl_multi rolling pool — at most maxConcurrency in flight, the freed
+     * slot refilled the moment any transfer completes — and classify each
+     * transfer via interpretStream. Previously windowed (a slow member
+     * stalled every request behind its window barrier); the rolling pool also
+     * brings the 429 launch-hold and refused-add handling (see CurlMultiPool)
+     * that the pooled clients already had, whose transient/held outcomes the
+     * batch retry layer re-sends after its backoff.
+     *
      * @param array<array-key,array<string,mixed>> $bodies
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,retry_after_at?:int,time?:float,stop_reason?:?string}>
      */
     private function streamMulti(array $bodies): array
     {
-        $out = [];
-        foreach (self::concurrencyWindows($bodies, $this->maxConcurrency) as $chunk) {
-            $out += $this->streamChunk($chunk);
+        if ($bodies === []) {
+            return [];
         }
-        return $out;
-    }
-
-    /**
-     * Windows of concurrent requests, delegating to the shared implementation
-     * so the two transports cannot drift apart on the default cap.
-     *
-     * @param array<array-key,array<string,mixed>> $bodies
-     * @return list<array<array-key,array<string,mixed>>>
-     */
-    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
-    {
-        return array_values(AnthropicClient::concurrencyWindows($bodies, $maxConcurrency));
-    }
-
-    /**
-     * @param array<array-key,array<string,mixed>> $bodies
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,retry_after_at?:int,time?:float,stop_reason?:?string}>
-     */
-    private function streamChunk(array $bodies): array
-    {
-        $multi = curl_multi_init();
-        $handles = [];
         $raw = [];
         $retryAfterDeadlines = [];
-        foreach ($bodies as $key => $body) {
+
+        $buildHandle = function (string|int $key, array $body) use (&$raw, &$retryAfterDeadlines): \CurlHandle {
             $raw[$key] = '';
             $ch = curl_init($this->endpoint);
             $options = [
@@ -568,31 +554,16 @@ final class OpenAiCompatibleClient implements Llm
                 };
             }
             curl_setopt_array($ch, $options);
-            $handles[$key] = $ch;
-            curl_multi_add_handle($multi, $ch);
-        }
+            return $ch;
+        };
 
-        do {
-            $status = curl_multi_exec($multi, $running);
-            if ($running && curl_multi_select($multi, 1.0) === -1) {
-                usleep(1000);
-            }
-        } while ($running && $status === CURLM_OK);
-
-        $out = [];
-        foreach ($handles as $key => $ch) {
-            $errno  = curl_errno($ch);
-            $error  = curl_error($ch);
-            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
-            curl_multi_remove_handle($multi, $ch);
-            curl_close($ch);
+        $classify = function (string|int $key, \CurlHandle $ch) use (&$raw, &$retryAfterDeadlines): array {
             $outcome = self::interpretStream(
                 $raw[$key],
-                $errno,
-                $error,
-                $httpStatus,
-                $time,
+                curl_errno($ch),
+                curl_error($ch),
+                (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+                (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
                 true,
                 $this->provider,
             );
@@ -606,11 +577,11 @@ final class OpenAiCompatibleClient implements Llm
                     $outcome['retry_after_at'] = $retryAfterDeadline;
                 }
             }
-            $out[$key] = $outcome;
-        }
+            unset($raw[$key]);
+            return $outcome;
+        };
 
-        curl_multi_close($multi);
-        return $out;
+        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, $this->maxConcurrency);
     }
 
     /**

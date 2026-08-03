@@ -579,20 +579,6 @@ final class AnthropicClient implements Llm
     }
 
     /**
-     * Split a batch into ordered windows of at most MAX_CONCURRENCY requests,
-     * preserving keys. The Anthropic transport itself now rolls a single pool
-     * (rollingPool above); this remains the shared chunking helper for the
-     * OpenAI-compatible client's windowed transport. Pure — unit-testable.
-     *
-     * @param array<array-key,array<string,mixed>> $bodies request body keyed by id
-     * @return array<int,array<array-key,array<string,mixed>>>
-     */
-    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
-    {
-        return array_chunk($bodies, max(1, $maxConcurrency ?? self::MAX_CONCURRENCY), true);
-    }
-
-    /**
      * Classify one completed streaming transfer into an outcome (never throws),
      * so the batch orchestrator can retry the transient ones. Same transient vs
      * permanent split as streamRequest(): connection-level cURL errors (incl. 6

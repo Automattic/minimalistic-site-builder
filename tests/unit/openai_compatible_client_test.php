@@ -1138,15 +1138,41 @@ test('parseSse recognizes nested choice errors only for OpenRouter', function ()
     }
 });
 
-test('OpenAiCompatibleClient concurrencyWindows applies a provider-specific cap', function () {
-    $bodies = [];
-    for ($i = 0; $i < 9; $i++) {
-        $bodies["r{$i}"] = ['model' => 'm'];
-    }
-    assert_eq([9], array_map('count', OpenAiCompatibleClient::concurrencyWindows($bodies)));
-    $windows = OpenAiCompatibleClient::concurrencyWindows($bodies, 4);
-    assert_eq([4, 4, 1], array_map('count', $windows));
-    assert_eq(array_keys($bodies), array_keys(array_merge(...$windows)), 'keys and order are preserved');
+test('OpenRouter batch retries pooled held launches without burning the transient budget', function () {
+    // The OpenAI-compatible transport now runs the shared rolling pool, so a
+    // held outcome ('held' => true, never sent after a sibling 429) can reach
+    // its retry layer too. It must ride retryOpenRouterBatch without charging
+    // the finite transient rounds and without capturing a Retry-After
+    // deadline it never received. delays = [0]: one transient round for
+    // really-attempted requests.
+    $bodies = ['real' => ['model' => 'm'], 'held' => ['model' => 'm']];
+    $round = 0;
+    $slept = [];
+    $results = OpenAiCompatibleClient::retryOpenRouterBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            $out = [];
+            foreach ($subset as $key => $_body) {
+                $out[$key] = match (true) {
+                    $key === 'real' && $round === 1 => ['ok' => false, 'transient' => true, 'error' => 'HTTP 429: slow down'],
+                    $key === 'held' && $round <= 2 => ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)'],
+                    default => ['ok' => true, 'text' => strtoupper((string) $key), 'input' => 1, 'output' => 1],
+                };
+            }
+            return $out;
+        },
+        [0],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+        static fn (): int => 100,
+    );
+    assert_eq('REAL', $results['real']['text']);
+    assert_eq('HELD', $results['held']['text'], 'a twice-held launch still gets its real attempt after the budget');
+    assert_eq(3, $round, 'held keys retry in their own round instead of aborting');
+    assert_eq([], $slept, 'no Retry-After deadline is invented for a request that was never sent');
 });
 
 test('OpenAiCompatibleClient interpretStream classifies a transfer with no response at all as transient', function () {
