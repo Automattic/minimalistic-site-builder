@@ -13,7 +13,6 @@ use Automattic\SiteBuild\Tests\FakeImageClient;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 require_once __DIR__ . '/../FakeImageClient.php';
-require_once __DIR__ . '/../FakeLlm.php';
 
 function generate_fixture(): array
 {
