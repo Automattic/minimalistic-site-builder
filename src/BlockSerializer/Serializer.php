@@ -86,7 +86,7 @@ final class Serializer implements TemplateTransformer
         // caller therefore retains the original bytes. Preserve that quirk so
         // PHP and the canonical fixed point agree on bytes, N, and K.
         $effectiveHtml = $post->html === $pre->html ? $html : $post->html;
-        return new TransformResult($effectiveHtml, $this->uniqueRepairs($repairs));
+        return new TransformResult($effectiveHtml, Repair::dedupe($repairs));
     }
 
     /** @return array{html:string,repairs:list<Repair>} */
@@ -145,16 +145,6 @@ final class Serializer implements TemplateTransformer
             return $inner;
         }
         return $this->comments->delimit($node->name, $node->attributes ?? new JsonObject(), $inner);
-    }
-
-    /** @param list<Repair> $repairs @return list<Repair> */
-    private function uniqueRepairs(array $repairs): array
-    {
-        $unique = [];
-        foreach ($repairs as $repair) {
-            $unique[$repair->blockPath . "\0" . $repair->code] = $repair;
-        }
-        return array_values($unique);
     }
 
     /** @return list<string> Paragraph paths in opening-delimiter order. */

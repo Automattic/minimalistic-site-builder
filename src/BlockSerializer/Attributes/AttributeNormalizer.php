@@ -9,6 +9,7 @@ use Automattic\SiteBuild\BlockSerializer\Json\JsonString;
 use Automattic\SiteBuild\BlockSerializer\NormalizedBlock;
 use Automattic\SiteBuild\BlockSerializer\Parser\BlockNode;
 use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
+use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\Save\SaveStrategyRegistry;
 use Automattic\SiteBuild\BlockSerializer\Supports\SupportDomainGuard;
 use Automattic\SiteBuild\BlockSerializer\Validation\Validator;
@@ -203,7 +204,7 @@ final class AttributeNormalizer
             $node->name,
             $typed,
             $finalAttributes,
-            $this->uniqueRepairs($repairRows),
+            Repair::dedupe($repairRows),
         );
     }
 
@@ -239,16 +240,6 @@ final class AttributeNormalizer
         $value = $attributes[$key] ?? null;
         return $value instanceof \Automattic\SiteBuild\BlockSerializer\Json\JsonValue
             ? JsonNative::value($value) : $value;
-    }
-
-    /** @param list<\Automattic\SiteBuild\BlockSerializer\Repair> $rows @return list<\Automattic\SiteBuild\BlockSerializer\Repair> */
-    private function uniqueRepairs(array $rows): array
-    {
-        $unique = [];
-        foreach ($rows as $row) {
-            $unique[$row->blockPath . "\0" . $row->code] = $row;
-        }
-        return array_values($unique);
     }
 
     private function jsTrim(string $value): string
