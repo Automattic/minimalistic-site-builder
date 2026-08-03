@@ -580,11 +580,11 @@ final class SectionRhythm
         array $shorthandProperties,
     ): string
     {
-        $tagHtml = self::wrapperTag($markup, $searchOffset);
+        $tagHtml = MarkupScan::wrapperTag($markup, $searchOffset);
         if ($tagHtml === null) {
             return $markup;
         }
-        $style = self::tagAttribute($tagHtml, 'style');
+        $style = MarkupScan::tagAttribute($tagHtml, 'style');
         if ($style === null) {
             return $markup;
         }
@@ -592,9 +592,8 @@ final class SectionRhythm
 
         $seen = [];
         $out = [];
-        foreach (explode(';', $value) as $segment) {
-            $colon = strpos($segment, ':');
-            $property = strtolower(trim($colon === false ? $segment : substr($segment, 0, $colon)));
+        foreach (MarkupScan::parseInlineStyle($value) as $declaration) {
+            $property = $declaration['property'];
             if (isset($owned[$property])) {
                 if (!isset($seen[$property])) {
                     $seen[$property] = true;
@@ -610,7 +609,7 @@ final class SectionRhythm
             if (in_array($property, self::SUPERSEDED_WRAPPER_PROPERTIES, true)) {
                 continue;
             }
-            $out[] = $segment;
+            $out[] = $declaration['segment'];
         }
 
         $newValue = implode(';', $out);
@@ -619,46 +618,6 @@ final class SectionRhythm
         }
         $newTag = substr_replace($tagHtml, $newValue, $valueOffset, strlen($value));
         return substr_replace($markup, $newTag, $searchOffset, strlen($tagHtml));
-    }
-
-    /** The first HTML element immediately following a block opener. */
-    private static function wrapperTag(string $markup, int $searchOffset): ?string
-    {
-        $rest = substr($markup, $searchOffset);
-        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?=[\x20\t\r\n\f\/>])/', $rest, $start) !== 1) {
-            return null;
-        }
-
-        $quote = null;
-        $length = strlen($rest);
-        for ($i = strlen($start[0]); $i < $length; $i++) {
-            $char = $rest[$i];
-            if ($quote !== null) {
-                if ($char === $quote) {
-                    $quote = null;
-                }
-                continue;
-            }
-            if ($char === '"' || $char === "'") {
-                $quote = $char;
-                continue;
-            }
-            if ($char === '>') {
-                return substr($rest, 0, $i + 1);
-            }
-        }
-        return null;
-    }
-
-    /** @return array{string,int}|null attribute value and its byte offset inside the tag */
-    private static function tagAttribute(string $tagHtml, string $name): ?array
-    {
-        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
-            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
-        if (preg_match($pattern, $tagHtml, $match, PREG_OFFSET_CAPTURE) !== 1) {
-            return null;
-        }
-        return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
     }
 
     /**
@@ -690,8 +649,8 @@ final class SectionRhythm
             }
         }
 
-        $tagHtml = self::wrapperTag($markup, $searchOffset);
-        $classAttr = $tagHtml === null ? null : self::tagAttribute($tagHtml, 'class');
+        $tagHtml = MarkupScan::wrapperTag($markup, $searchOffset);
+        $classAttr = $tagHtml === null ? null : MarkupScan::tagAttribute($tagHtml, 'class');
         if ($classAttr === null) {
             return $markup;
         }
@@ -770,8 +729,8 @@ final class SectionRhythm
         \stdClass $margin,
         string $label,
     ): array {
-        $tagHtml = self::wrapperTag($markup, $searchOffset);
-        $style = $tagHtml === null ? null : self::tagAttribute($tagHtml, 'style');
+        $tagHtml = MarkupScan::wrapperTag($markup, $searchOffset);
+        $style = $tagHtml === null ? null : MarkupScan::tagAttribute($tagHtml, 'style');
         if ($style === null) {
             return [];
         }
@@ -781,13 +740,12 @@ final class SectionRhythm
             'margin'  => ['right' => null, 'left' => null],
         ];
         $shorthandProperties = [];
-        foreach (explode(';', $style[0]) as $segment) {
-            $colon = strpos($segment, ':');
-            if ($colon === false) {
+        foreach (MarkupScan::parseInlineStyle($style[0]) as $declaration) {
+            if ($declaration['value'] === null) {
                 continue;
             }
-            $property = strtolower(trim(substr($segment, 0, $colon)));
-            $rawValue = substr($segment, $colon + 1);
+            $property = $declaration['property'];
+            $rawValue = $declaration['value'];
 
             if ($property === 'padding' || $property === 'margin') {
                 $shorthandProperties[$property] = true;
@@ -872,7 +830,7 @@ final class SectionRhythm
     {
         $raw = $value['important']
             ? self::cssSpacingValue($value['value'])
-            : self::blockSpacingValue($value['value']);
+            : MarkupScan::blockSpacingValue($value['value']);
         return $raw . ($value['important'] ? ' !important' : '');
     }
 
@@ -881,14 +839,6 @@ final class SectionRhythm
     {
         $raw = self::cssSpacingValue($value['value']);
         return $raw . ($value['important'] ? ' !important' : '');
-    }
-
-    /** Convert a rendered preset variable back to block-attribute syntax. */
-    private static function blockSpacingValue(string $value): string
-    {
-        return preg_match('/^var\(--wp--preset--spacing--([a-z0-9_-]+)\)$/', $value, $match) === 1
-            ? "var:preset|spacing|{$match[1]}"
-            : $value;
     }
 
     /**
