@@ -149,11 +149,6 @@ final class HtmlFragment
         return new self($source, $root);
     }
 
-    public function source(): string
-    {
-        return $this->source;
-    }
-
     public function root(): HtmlNode
     {
         return $this->root;
