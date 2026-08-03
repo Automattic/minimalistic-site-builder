@@ -272,96 +272,107 @@ final class ContrastFixStep implements Step
             }
         }
 
-        // Global link color on the page background.
-        $linkValue = $themeJson['styles']['elements']['link']['color']['text'] ?? null;
-        $link = is_string($linkValue) ? self::resolve($palette, $linkValue) : null;
-        if ($base !== null && $link !== null) {
-            $ratio = ContrastMath::ratio($link['rgb'], $base);
-            if ($ratio < ContrastMath::NORMAL_TEXT) {
-                [$slug, $best] = self::best($palette, ['primary', 'contrast', 'secondary', 'accent'], $base);
-                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
-                    $themeJson['styles']['elements']['link']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] global link color %s on base: %.2f < %.1f → %s (%.2f) (repaired)',
-                        $link['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $changed = true;
-                } else {
-                    $report[] = sprintf(
-                        '[theme.json] global link color %s on base: %.2f < %.1f and no palette color passes (warning)',
-                        $link['label'], $ratio, ContrastMath::NORMAL_TEXT
-                    );
-                    $warnings++;
-                }
-            }
-        }
-
-        // Global link hover color on the page background — hover text is
-        // body-size too, so it gets the same 4.5:1 bar as the resting state.
-        $hoverValue = $themeJson['styles']['elements']['link'][':hover']['color']['text'] ?? null;
-        $hover = is_string($hoverValue) ? self::resolve($palette, $hoverValue) : null;
-        if ($base !== null && $hover !== null) {
-            $ratio = ContrastMath::ratio($hover['rgb'], $base);
-            if ($ratio < ContrastMath::NORMAL_TEXT) {
-                [$slug, $best] = self::best($palette, ['primary', 'contrast', 'secondary', 'accent'], $base);
-                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
-                    $themeJson['styles']['elements']['link'][':hover']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] global link hover color %s on base: %.2f < %.1f → %s (%.2f) (repaired)',
-                        $hover['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $changed = true;
-                } else {
-                    $report[] = sprintf(
-                        '[theme.json] global link hover color %s on base: %.2f < %.1f and no palette color passes (warning)',
-                        $hover['label'], $ratio, ContrastMath::NORMAL_TEXT
-                    );
-                    $warnings++;
-                }
-            }
+        // Global link and link hover colors on the page background — hover
+        // text is body-size too, so it gets the same 4.5:1 bar as the
+        // resting state.
+        if ($base !== null) {
+            $onBase = ['rgb' => $base, 'label' => 'base'];
+            $candidates = ['primary', 'contrast', 'secondary', 'accent'];
+            $changed = $this->repairThemePair(
+                $themeJson, $palette, 'styles.elements.link.color.text',
+                'global link color', $onBase, $candidates, false,
+                $report, $repaired, $warnings
+            ) || $changed;
+            $changed = $this->repairThemePair(
+                $themeJson, $palette, 'styles.elements.link.:hover.color.text',
+                'global link hover color', $onBase, $candidates, false,
+                $report, $repaired, $warnings
+            ) || $changed;
         }
 
         // Button label on the button background.
         $btnBgValue = $themeJson['styles']['elements']['button']['color']['background'] ?? null;
-        $btnTextValue = $themeJson['styles']['elements']['button']['color']['text'] ?? null;
         $btnBg = is_string($btnBgValue) ? self::resolve($palette, $btnBgValue) : null;
-        $btnText = is_string($btnTextValue) ? self::resolve($palette, $btnTextValue) : null;
-        if ($btnBg !== null && $btnText !== null) {
-            $ratio = ContrastMath::ratio($btnText['rgb'], $btnBg['rgb']);
-            if ($ratio < ContrastMath::NORMAL_TEXT) {
-                [$slug, $best] = self::best($palette, ['base', 'contrast'], $btnBg['rgb']);
-                if ($slug !== null && $best >= ContrastMath::NORMAL_TEXT) {
-                    $themeJson['styles']['elements']['button']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) (repaired)',
-                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $changed = true;
-                } elseif ($slug !== null && $best > $ratio) {
-                    // Mid-tone button background nothing passes against: take
-                    // the improvement but keep the failure on the record.
-                    $themeJson['styles']['elements']['button']['color']['text'] = "var(--wp--preset--color--{$slug})";
-                    $report[] = sprintf(
-                        '[theme.json] button text %s on %s: %.2f < %.1f → %s (%.2f) — best available, still below threshold (repaired) (warning)',
-                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best
-                    );
-                    $repaired++;
-                    $warnings++;
-                    $changed = true;
-                } else {
-                    $report[] = sprintf(
-                        '[theme.json] button text %s on %s: %.2f < %.1f and no palette color improves it (warning)',
-                        $btnText['label'], $btnBg['label'], $ratio, ContrastMath::NORMAL_TEXT
-                    );
-                    $warnings++;
-                }
-            }
+        if ($btnBg !== null) {
+            $changed = $this->repairThemePair(
+                $themeJson, $palette, 'styles.elements.button.color.text',
+                'button text', $btnBg, ['base', 'contrast'], true,
+                $report, $repaired, $warnings
+            ) || $changed;
         }
 
         return $changed;
+    }
+
+    /**
+     * Check the theme.json foreground color at dot-separated $jsonPath
+     * against a background and repair it to the best-reading candidate slug.
+     * With $bestEffort, a candidate that merely improves a failing ratio is
+     * still taken (and the failure kept on the record) — for mid-tone
+     * backgrounds nothing passes against; otherwise only a passing candidate
+     * is written.
+     *
+     * @param array<mixed> $themeJson modified in place
+     * @param array<string,string> $palette
+     * @param string $label report label for the pair, e.g. 'global link color'
+     * @param array{rgb: array{0:int,1:int,2:int}, label: string} $bg
+     * @param list<string> $candidates repair slugs, best ratio wins
+     * @param list<string> $report
+     */
+    private function repairThemePair(
+        array &$themeJson,
+        array $palette,
+        string $jsonPath,
+        string $label,
+        array $bg,
+        array $candidates,
+        bool $bestEffort,
+        array &$report,
+        int &$repaired,
+        int &$warnings,
+    ): bool {
+        $keys = explode('.', $jsonPath);
+        $value = $themeJson;
+        foreach ($keys as $key) {
+            $value = is_array($value) ? ($value[$key] ?? null) : null;
+        }
+        $fg = is_string($value) ? self::resolve($palette, $value) : null;
+        if ($fg === null) {
+            return false;
+        }
+        $ratio = ContrastMath::ratio($fg['rgb'], $bg['rgb']);
+        if ($ratio >= ContrastMath::NORMAL_TEXT) {
+            return false;
+        }
+
+        [$slug, $best] = self::best($palette, $candidates, $bg['rgb']);
+        $passes = $slug !== null && $best >= ContrastMath::NORMAL_TEXT;
+        $improves = $bestEffort && $slug !== null && $best > $ratio;
+        if (!$passes && !$improves) {
+            $report[] = sprintf(
+                '[theme.json] %s %s on %s: %.2f < %.1f and no palette color %s (warning)',
+                $label, $fg['label'], $bg['label'], $ratio, ContrastMath::NORMAL_TEXT,
+                $bestEffort ? 'improves it' : 'passes'
+            );
+            $warnings++;
+            return false;
+        }
+
+        $node = &$themeJson;
+        foreach ($keys as $key) {
+            $node = &$node[$key];
+        }
+        $node = "var(--wp--preset--color--{$slug})";
+        $report[] = sprintf(
+            '[theme.json] %s %s on %s: %.2f < %.1f → %s (%.2f)%s',
+            $label, $fg['label'], $bg['label'], $ratio, ContrastMath::NORMAL_TEXT, $slug, $best,
+            $passes ? ' (repaired)' : ' — best available, still below threshold (repaired) (warning)'
+        );
+        $repaired++;
+        if (!$passes) {
+            $warnings++;
+        }
+        return true;
     }
 
     // ── theme.json readers (public: CoverContrastStep reuses them) ────────
