@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\AnthropicClient;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
-use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
@@ -39,11 +39,8 @@ function section_cache_input(string $slug = 'hero', string $title = 'Hero'): arr
     ];
 }
 
-/** @return array{0:\Automattic\SiteBuild\Project,1:string} */
-function section_cache_project(): array
+function seed_section_cache_project(Project $project): void
 {
-    $tmp = sys_get_temp_dir() . '/builder_section_cache_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('siteSpec.json', ['name' => 'Cache Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('pages.json', ['pages' => [[
@@ -69,7 +66,6 @@ function section_cache_project(): array
             ],
         ],
     ]]]);
-    return [$project, $tmp];
 }
 
 function queue_section_cache_parts(FakeLlm $llm, bool $includeProbe = true): void
@@ -166,41 +162,43 @@ test('section cached prefixes assemble byte-equally across Anthropic and OpenAI'
 });
 
 test('sections warms the exact first section prefixes before the concurrent fan-out', function () {
-    [$project, $tmp] = section_cache_project();
-    $llm = new FakeLlm();
-    queue_section_cache_parts($llm);
-    $step = new SectionsStep($llm, new PromptRenderer(repo_path('prompts')), 'cache-model');
-    $requests = $step->requests($project);
+    with_project('builder_section_cache_', function ($project) {
+        seed_section_cache_project($project);
+        $llm = new FakeLlm();
+        queue_section_cache_parts($llm);
+        $step = new SectionsStep($llm, new PromptRenderer(repo_path('prompts')), 'cache-model');
+        $requests = $step->requests($project);
 
-    $step->run($project);
+        $step->run($project);
 
-    assert_eq(1, $llm->completeCalls);
-    assert_eq(1, $llm->completeBatchCalls);
-    assert_eq(SECTION_CACHE_PROBE_PROMPT, $llm->calls[0]['prompt']);
-    assert_eq(1, $llm->calls[0]['opts']['max_tokens'] ?? null);
-    assert_eq(true, $llm->calls[0]['opts']['tolerate_empty'] ?? null);
-    assert_eq('section-cache-warm', $llm->calls[0]['opts']['log_label'] ?? null);
-    assert_eq('cache-model', $llm->calls[0]['opts']['model'] ?? null);
-    assert_eq(
-        $requests['page-home--hero']['cached_prefixes'],
-        $llm->calls[0]['opts']['cached_prefixes'] ?? null,
-        'probe reuses the first section request prefixes byte-for-byte',
-    );
-    assert_eq('Warm the cached section context.', $llm->calls[0]['prompt'], 'probe is first in call history');
-    exec('rm -rf ' . escapeshellarg($tmp));
+        assert_eq(1, $llm->completeCalls);
+        assert_eq(1, $llm->completeBatchCalls);
+        assert_eq(SECTION_CACHE_PROBE_PROMPT, $llm->calls[0]['prompt']);
+        assert_eq(1, $llm->calls[0]['opts']['max_tokens'] ?? null);
+        assert_eq(true, $llm->calls[0]['opts']['tolerate_empty'] ?? null);
+        assert_eq('section-cache-warm', $llm->calls[0]['opts']['log_label'] ?? null);
+        assert_eq('cache-model', $llm->calls[0]['opts']['model'] ?? null);
+        assert_eq(
+            $requests['page-home--hero']['cached_prefixes'],
+            $llm->calls[0]['opts']['cached_prefixes'] ?? null,
+            'probe reuses the first section request prefixes byte-for-byte',
+        );
+        assert_eq('Warm the cached section context.', $llm->calls[0]['prompt'], 'probe is first in call history');
+    });
 });
 
 test('section cache warm-up failure is non-fatal', function () {
-    [$project, $tmp] = section_cache_project();
-    $llm = new FakeLlm();
-    $llm->failPromptSubstrings[] = SECTION_CACHE_PROBE_PROMPT;
-    queue_section_cache_parts($llm, false);
+    with_project('builder_section_cache_', function ($project) {
+        seed_section_cache_project($project);
+        $llm = new FakeLlm();
+        $llm->failPromptSubstrings[] = SECTION_CACHE_PROBE_PROMPT;
+        queue_section_cache_parts($llm, false);
 
-    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+        (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
-    assert_eq(1, $llm->completeCalls);
-    assert_eq(1, $llm->completeBatchCalls);
-    assert_true($project->exists('theme/parts/page-home--hero.html'));
-    assert_true($project->exists('theme/parts/page-home--about.html'));
-    exec('rm -rf ' . escapeshellarg($tmp));
+        assert_eq(1, $llm->completeCalls);
+        assert_eq(1, $llm->completeBatchCalls);
+        assert_true($project->exists('theme/parts/page-home--hero.html'));
+        assert_true($project->exists('theme/parts/page-home--about.html'));
+    });
 });

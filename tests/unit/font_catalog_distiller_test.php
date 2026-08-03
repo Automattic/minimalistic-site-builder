@@ -51,25 +51,6 @@ function font_catalog_distiller_root(): string
     return $root;
 }
 
-function font_catalog_distiller_remove(string $root): void
-{
-    if (!is_dir($root)) {
-        return;
-    }
-    $files = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST,
-    );
-    foreach ($files as $file) {
-        if ($file->isDir() && !$file->isLink()) {
-            @rmdir($file->getPathname());
-        } else {
-            @unlink($file->getPathname());
-        }
-    }
-    @rmdir($root);
-}
-
 /** @return array<string,mixed> */
 function font_catalog_distiller_collection(array $settings = []): array
 {
@@ -163,7 +144,7 @@ test('font catalog distiller writes validated artifacts and provenance', functio
             $manifest['distiller']['sha256'],
         );
     } finally {
-        font_catalog_distiller_remove($root);
+        remove_tree($root);
     }
 });
 
@@ -190,7 +171,7 @@ test('font catalog distiller rejects every source outside the HTTPS gstatic orig
             assert_eq('catalog-before', file_get_contents($root . '/data/google-fonts/catalog.json'));
             assert_eq('manifest-before', file_get_contents($root . '/data/google-fonts/catalog-manifest.json'));
         } finally {
-            font_catalog_distiller_remove($root);
+            remove_tree($root);
         }
     }
 });
@@ -227,7 +208,7 @@ test('font catalog distiller rejects empty and malformed collections before writ
                 $label,
             );
         } finally {
-            font_catalog_distiller_remove($root);
+            remove_tree($root);
         }
     }
 });
@@ -245,7 +226,7 @@ test('font catalog distiller fails before replacing an invalid output target', f
         assert_eq('catalog-before', file_get_contents($root . '/data/google-fonts/catalog.json'));
         assert_true(is_dir($root . '/data/google-fonts/catalog-manifest.json'));
     } finally {
-        font_catalog_distiller_remove($root);
+        remove_tree($root);
     }
 });
 
@@ -268,7 +249,7 @@ test('font catalog distiller rolls back the first artifact when the second commi
         assert_eq('manifest-before', file_get_contents($root . '/data/google-fonts/catalog-manifest.json'));
         assert_eq([], glob($root . '/data/google-fonts/.block-fixer-*') ?: [], 'staged files must be cleaned');
     } finally {
-        font_catalog_distiller_remove($root);
+        remove_tree($root);
     }
 });
 
@@ -298,6 +279,6 @@ test('font catalog distiller preserves the prior bytes when rollback also fails'
         assert_eq(1, count($backups), 'the one needed recovery backup must survive cleanup');
         assert_eq('catalog-before', file_get_contents($backups[0]));
     } finally {
-        font_catalog_distiller_remove($root);
+        remove_tree($root);
     }
 });
