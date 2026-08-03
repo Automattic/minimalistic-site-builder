@@ -20,6 +20,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TextBatchResult;
 use Automattic\SiteBuild\Units\FooterUnit;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Units\HeaderUnit;
 use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;

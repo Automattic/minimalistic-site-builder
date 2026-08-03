@@ -209,18 +209,44 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: 16 / 7;
             object-fit: cover;
         }
+        /* A generated rail authored beside the media (instead of the recipe's
+           band-then-rail rows) would bottom-align a short image against a
+           taller copy column and open dead canvas above it; stretching the
+           media to the row keeps even that deviation composed. */
+        .hero-composition--panorama-rail .wp-block-columns:has(> .hero-composition__media) {
+            align-items: stretch;
+        }
+        .hero-composition--panorama-rail .wp-block-column.hero-composition__media .wp-block-image,
+        .hero-composition--panorama-rail .wp-block-column.hero-composition__media img {
+            height: 100%;
+        }
+        .hero-composition--panorama-rail .wp-block-column.hero-composition__media img {
+            aspect-ratio: auto;
+        }
+        /* Cap diptych plates to the first viewport so an over-tall portrait
+           frame cannot push the copy anchor below the fold, and keep the
+           secondary frame a clearly subordinate counterpoint. */
         .hero-composition--diptych-editorial .hero-composition__media img {
             width: 100%;
             height: 100%;
+            max-height: min(72vh, 44rem);
             object-fit: cover;
+        }
+        .hero-composition--diptych-editorial .hero-composition__media-secondary img {
+            max-height: min(30vh, 18rem);
         }
         .hero-composition--typographic-poster,
         .hero-composition--layered-poster {
             overflow: hidden;
         }
+        /* A display word that cannot fit its measure must hyphenate at a
+           language break as a last resort, never snap mid-word; the prompts
+           size headline presets so this rule stays dormant. */
+        .hero-composition__copy .wp-block-heading,
         .hero-composition--typographic-poster .wp-block-heading,
         .hero-composition--layered-poster .wp-block-heading {
-            overflow-wrap: anywhere;
+            overflow-wrap: break-word;
+            hyphens: auto;
         }
 
         /* Blueprint-selected mobile transformations. These rules act only on

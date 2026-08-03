@@ -144,6 +144,7 @@ final class DesignDirectionStep implements Step
             (string) ($specData['slug'] ?? $project->slug()),
             $seed,
             $warnings,
+            $specData,
         );
         $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
         $heroComposition = $this->renderer->render('hero-composition.md', [
@@ -363,26 +364,32 @@ final class DesignDirectionStep implements Step
      * Resolve one authoritative recipe from caller controls and the pure
      * compatibility-filtered selector. HERO_RECIPE is exact/fatal; the batch
      * assignment in meta.json is fallible and remaps with a durable warning.
+     * The site spec's subject_is_visual_work fact narrows the automatic pool
+     * to image-bearing recipes; it never overrides caller-owned constraints
+     * or the exact operator recipe.
      *
      * @param array<mixed> $meta
      * @param list<string> $warnings
+     * @param array<mixed> $spec
      */
     public static function selectHeroRecipe(
         array $meta,
         string $stableIdentifier,
         string $conceptSeed,
         array &$warnings = [],
+        array $spec = [],
     ): string {
-        $constraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
-        $pool = HeroComposition::compatible($constraints);
-        if ($pool === []) {
+        $callerConstraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
+        if (HeroComposition::compatible($callerConstraints) === []) {
             throw new \InvalidArgumentException('design_constraints leave no compatible hero recipe');
         }
+        $constraints = self::specGatedConstraints($callerConstraints, $spec, $warnings);
+        $pool = HeroComposition::compatible($constraints);
 
         $forced = trim((string) (Env::get(self::HERO_RECIPE_ENV) ?? ''));
         if ($forced !== '') {
             HeroComposition::assertKnown($forced);
-            if (!HeroComposition::isCompatible($forced, $constraints)) {
+            if (!HeroComposition::isCompatible($forced, $callerConstraints)) {
                 throw new \InvalidArgumentException(
                     self::HERO_RECIPE_ENV . "='{$forced}' is incompatible with caller-owned design_constraints"
                 );
@@ -415,7 +422,8 @@ final class DesignDirectionStep implements Step
                 ? 'batch assignment had no usable requested_recipe'
                 : (!in_array($requested, HeroComposition::RECIPES, true)
                     ? 'batch requested an unknown recipe'
-                    : 'batch request was incompatible with caller-owned design_constraints'));
+                    : 'batch request was outside the effective pool (caller design_constraints '
+                        . "plus the site spec's subject_is_visual_work gate)"));
             $warnings[] = "file='meta.json'; path=\"hero_assignment.requested_recipe\"; authored="
                 . self::describe($assignment['requested_recipe'] ?? null)
                 . '; delivered=' . self::describe($delivered)
@@ -429,6 +437,38 @@ final class DesignDirectionStep implements Step
             . '; delivered=' . self::describe($delivered)
             . '; disposition=malformed fallible batch assignment was remapped by the stable compatible-pool selector';
         return $delivered;
+    }
+
+    /**
+     * Narrow the automatic selection pool to image-bearing recipes when the
+     * site spec states the subject IS visual work (photography, art, food,
+     * architecture portfolios): an image-free hero misrepresents such a site.
+     * Caller-owned allowed_hero_media_modes always wins untouched, and the
+     * gate backs off with a durable warning rather than emptying the pool.
+     *
+     * @param array<mixed> $constraints validated caller constraints
+     * @param array<mixed> $spec
+     * @param list<string> $warnings
+     * @return array<mixed>
+     */
+    private static function specGatedConstraints(array $constraints, array $spec, array &$warnings): array
+    {
+        if (($spec['subject_is_visual_work'] ?? null) !== true) {
+            return $constraints;
+        }
+        if (array_key_exists('allowed_hero_media_modes', $constraints)) {
+            return $constraints;
+        }
+        $gated = $constraints;
+        $gated['allowed_hero_media_modes'] = array_values(array_diff(HeroComposition::MEDIA_MODES, ['none']));
+        $gated = HeroComposition::validateConstraints($gated);
+        if (HeroComposition::compatible($gated) === []) {
+            $warnings[] = "file='siteSpec.json'; path=\"subject_is_visual_work\"; authored=true; "
+                . 'delivered=ignored; disposition=image-bearing gate would leave no compatible hero recipe '
+                . 'under caller-owned design_constraints, so the ungated pool was kept';
+            return $constraints;
+        }
+        return $gated;
     }
 
     /** Validate the exact operator override before the seed LLM call. */

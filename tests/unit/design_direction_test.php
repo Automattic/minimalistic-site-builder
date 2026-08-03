@@ -742,3 +742,84 @@ test('invalid signature-device slots degrade to empty and clear hero placement w
     assert_true(count($warnings) >= 2);
     assert_contains('signature_device_slots', implode(' ', $warnings));
 });
+
+test('subject_is_visual_work gates the image-free recipe out of automatic selection', function () {
+    $ids = array_map(fn (int $i) => "gate-site-{$i}", range(1, 64));
+
+    // Ungated, the sweep must reach the image-free recipe at least once —
+    // otherwise the gated assertion below would be vacuous.
+    $ungated = [];
+    foreach ($ids as $id) {
+        $w = [];
+        $ungated[] = DesignDirectionStep::selectHeroRecipe([], $id, 'Committed seed', $w);
+    }
+    assert_true(in_array('typographic-poster', $ungated, true));
+
+    foreach ($ids as $id) {
+        $w = [];
+        $recipe = DesignDirectionStep::selectHeroRecipe(
+            [],
+            $id,
+            'Committed seed',
+            $w,
+            ['subject_is_visual_work' => true],
+        );
+        assert_true($recipe !== 'typographic-poster', "gated selection for {$id} must bear an image");
+        assert_eq([], $w);
+    }
+});
+
+test('subject_is_visual_work gate only fires on boolean true', function () {
+    // Find an identifier that reaches the image-free recipe ungated, then
+    // confirm non-boolean truthy spec values leave that selection unchanged.
+    $chosen = null;
+    foreach (range(1, 64) as $i) {
+        $w = [];
+        if (DesignDirectionStep::selectHeroRecipe([], "gate-site-{$i}", 'Committed seed', $w) === 'typographic-poster') {
+            $chosen = "gate-site-{$i}";
+            break;
+        }
+    }
+    assert_true($chosen !== null);
+    foreach (['true', 1, ['yes'], null] as $value) {
+        $w = [];
+        $recipe = DesignDirectionStep::selectHeroRecipe(
+            [],
+            $chosen,
+            'Committed seed',
+            $w,
+            ['subject_is_visual_work' => $value],
+        );
+        assert_eq('typographic-poster', $recipe);
+        assert_eq([], $w);
+    }
+});
+
+test('caller-owned media modes beat the subject_is_visual_work gate without warnings', function () {
+    $w = [];
+    $recipe = DesignDirectionStep::selectHeroRecipe(
+        ['design_constraints' => ['allowed_hero_media_modes' => ['none']]],
+        'gate-caller-wins',
+        'Committed seed',
+        $w,
+        ['subject_is_visual_work' => true],
+    );
+    assert_eq('typographic-poster', $recipe);
+    assert_eq([], $w);
+});
+
+test('batch request outside the visual-work gate remaps with provenance', function () {
+    $w = [];
+    $recipe = DesignDirectionStep::selectHeroRecipe(
+        ['hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'typographic-poster']],
+        'gate-batch-remap',
+        'Committed seed',
+        $w,
+        ['subject_is_visual_work' => true],
+    );
+    assert_true($recipe !== 'typographic-poster');
+    assert_true(in_array($recipe, HeroComposition::RECIPES, true));
+    assert_eq(1, count($w));
+    assert_contains('subject_is_visual_work', $w[0]);
+    assert_contains('typographic-poster', $w[0]);
+});

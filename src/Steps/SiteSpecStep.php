@@ -289,6 +289,11 @@ final class SiteSpecStep implements Step
         // motion feature is preset-driven and must not be triggered here.
         $spec['animation_request'] = trim((string) ($spec['animation_request'] ?? ''));
 
+        // Whether the site's core offering IS visual imagery. Anything but an
+        // explicit boolean true degrades to false: the field only ever narrows
+        // the hero recipe pool, so absence must never change behavior.
+        $spec['subject_is_visual_work'] = ($spec['subject_is_visual_work'] ?? null) === true;
+
         // Contact emails are minted from this domain; when the model returned
         // none (or something that is not a domain), derive it from the slug so
         // the identity stays coherent — and flag it as invented.
