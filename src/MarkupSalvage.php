@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
+
 /**
  * Best-effort repair of truncated generated block markup.
  *
@@ -25,10 +27,7 @@ namespace Automattic\SiteBuild;
 final class MarkupSalvage
 {
     /** HTML void elements: nothing to close when rebuilding a tag stack. */
-    private const VOID_TAGS = [
-        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-        'link', 'meta', 'param', 'source', 'track', 'wbr',
-    ];
+    private const VOID_TAGS = HtmlNode::VOID_TAGS;
 
     /**
      * Repair $markup when it is truncated; a complete document is returned
