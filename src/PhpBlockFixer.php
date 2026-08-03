@@ -75,9 +75,7 @@ final class PhpBlockFixer implements ReportingBlockFixer
                     $failure = "block transformation failed on pass {$pass}: {$error->getMessage()}";
                     break;
                 }
-                foreach ($result->repairs as $repair) {
-                    $repairs[$repair->blockPath . "\0" . $repair->code] = $repair;
-                }
+                $repairs = array_merge($repairs, $result->repairs);
                 if ($result->html === $current) {
                     $converged = true;
                     break;
@@ -93,7 +91,7 @@ final class PhpBlockFixer implements ReportingBlockFixer
             }
 
             $changed = $current !== $original;
-            $fileRepairs = $changed ? array_values($repairs) : [];
+            $fileRepairs = $changed ? Repair::dedupe($repairs) : [];
             $dropped = $changed ? $this->drops->detect($original, $current) : [];
             $reports[] = new FileReport(
                 $relative,

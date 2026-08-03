@@ -194,7 +194,11 @@ final class HtmlFragment
             return;
         }
         $raw = substr($source, $start, $end - $start);
-        $decoded = html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // Script/style contents are raw text: browsers never decode entities
+        // there, unlike RCDATA elements (textarea, title) and normal text.
+        $decoded = HtmlNode::isRawTextTag($parent->tagName())
+            ? $raw
+            : html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $node = new HtmlNode(
             $source,
             HtmlNode::TEXT,

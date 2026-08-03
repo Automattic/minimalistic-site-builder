@@ -17,10 +17,18 @@ final class JsonBatchRecovery
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>|string> $send
      * @return array<array-key,array<mixed>>
      */
-    public static function run(array $requests, callable $send, int $maxRetries = 1): array
+    public static function run(
+        array $requests,
+        callable $send,
+        int $maxRetries = 1,
+        int $defaultMaxTokens = 16000,
+    ): array
     {
         if ($maxRetries < 0) {
             throw new \InvalidArgumentException('maxRetries must be zero or greater');
+        }
+        if ($defaultMaxTokens < 1) {
+            throw new \InvalidArgumentException('defaultMaxTokens must be greater than zero');
         }
         if ($requests === []) {
             return [];
@@ -63,7 +71,7 @@ final class JsonBatchRecovery
 
                 $error = (string) ($result['error'] ?? 'unknown JSON decode error');
                 if ($attempt < $maxRetries) {
-                    $retry[$key] = self::repairRequest($key, $requests[$key], $response, $error);
+                    $retry[$key] = self::repairRequest($key, $requests[$key], $response, $error, $defaultMaxTokens);
                     continue;
                 }
                 $failures[$key] = self::failure($key, $requests[$key], $response, $error, $attempt);
@@ -148,6 +156,7 @@ final class JsonBatchRecovery
         array $request,
         array $response,
         string $error,
+        int $defaultMaxTokens,
     ): array {
         $label = (string) ($request['log_label'] ?? $key);
         $repair = $request;
@@ -156,11 +165,11 @@ final class JsonBatchRecovery
         $reason = is_string($response['stop_reason'] ?? null) ? trim($response['stop_reason']) : '';
 
         if (self::isTruncation($reason)) {
-            // Twice the explicit budget, or twice the clients' 16k default
-            // when the request relied on it.
+            // Twice the explicit budget, or twice the calling client's
+            // effective configurable default when the request relied on it.
             $repair['max_tokens'] = isset($request['max_tokens'])
                 ? ((int) $request['max_tokens']) * 2
-                : 32000;
+                : $defaultMaxTokens * 2;
             $repair['prompt'] = $prompt
                 . "\n\nYOUR PREVIOUS RESPONSE WAS CUT OFF BY THE OUTPUT LENGTH LIMIT ({$error}). "
                 . "Regenerate the COMPLETE JSON value from scratch, as compactly as the schema allows, "

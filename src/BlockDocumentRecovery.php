@@ -24,11 +24,7 @@ final class BlockDocumentRecovery
     ];
 
     /** Elements whose bodies are content, never structural wrapper markup. */
-    private const NON_WRAPPER_ELEMENTS = [
-        'script', 'style', 'textarea', 'title', 'xmp',
-        'iframe', 'object', 'applet', 'noembed', 'noframes', 'noscript',
-        'template', 'code', 'pre', 'plaintext',
-    ];
+    private const NON_WRAPPER_ELEMENTS = HtmlBlockContext::OPAQUE_ELEMENTS;
 
     /** @param list<string> $notes out-param for recoveries worth reporting */
     public static function recover(string $text, array &$notes = []): string

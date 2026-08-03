@@ -413,9 +413,7 @@ function overlay_lint_project(bool $overlay): array
 
 test('overlay header text is linted against every page opening section', function () {
     [$project, $tmp] = overlay_lint_project(overlay: true);
-    ob_start();
-    (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project));
     $log = $project->readText('logs/contrast-report.txt');
     assert_contains("overlay header text base floats over page 'menu'", $log);
     assert_true(
@@ -427,9 +425,7 @@ test('overlay header text is linted against every page opening section', functio
 
 test('non-overlay headers skip the overlay lint', function () {
     [$project, $tmp] = overlay_lint_project(overlay: false);
-    ob_start();
-    (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project));
     assert_true(
         !str_contains($project->readText('logs/contrast-report.txt'), 'overlay header'),
         'a solid header must not trigger overlay warnings'

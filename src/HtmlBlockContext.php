@@ -20,7 +20,7 @@ final class HtmlBlockContext
         'iframe', 'noembed', 'noframes', 'noscript',
     ];
 
-    private const OPAQUE_ELEMENTS = [
+    public const OPAQUE_ELEMENTS = [
         'script', 'style', 'textarea', 'title', 'xmp',
         'iframe', 'object', 'applet', 'noembed', 'noframes', 'noscript',
         'template', 'code', 'pre', 'plaintext',
