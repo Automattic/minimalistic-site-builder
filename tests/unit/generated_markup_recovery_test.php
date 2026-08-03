@@ -539,3 +539,40 @@ test('recovery stays linear on a run of unclosed opaque elements', function () {
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
     assert_true(microtime(true) - $start < 1.0, 'scans 24 KB of unclosed <code> in under a second');
 });
+
+test('recovery closes a delimiter attrs object missing one closing brace', function () {
+    // Regression: tbilisi2 lost its whole contact-hours section (and, in
+    // cascade, the hero CTA) because one nested group's attrs JSON was one
+    // `}` short. The repair closes the object; the misplaced key is inert.
+    $brokenAttrs = '{"style":{"spacing":{"padding":{"top":"var:preset|spacing|lg"},'
+        . '"elements":{"link":{"color":{"text":"var:preset|color|base"}}}},'
+        . '"layout":{"type":"constrained"}';  // <- one closing brace short
+    $inner = '<!-- wp:group ' . $brokenAttrs . ' -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>Reserve a table</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $text = '<!-- wp:group {"tagName":"section","anchor":"contact","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="contact">' . $inner . '</section>'
+        . '<!-- /wp:group -->';
+
+    $warnings = [];
+    $repairs = [];
+    $out = GeneratedMarkup::normalize($text, 'p', $warnings, $repairs);
+    assert_contains('Reserve a table', $out);
+    assert_contains($brokenAttrs . '}', $out, 'attrs object is closed in place');
+    $codes = array_column($repairs, 'code');
+    assert_true(in_array('delimiter-attrs-braces-closed', $codes, true), 'repair row recorded');
+
+    // Idempotent: the repaired document passes through unchanged.
+    $w2 = [];
+    $again = [];
+    assert_eq($out, GeneratedMarkup::normalize($out, 'p', $w2, $again));
+    assert_true(!in_array('delimiter-attrs-braces-closed', array_column($again, 'code'), true));
+});
+
+test('attrs brace repair leaves other malformed attrs alone', function () {
+    $notes = [];
+    $text = '<!-- wp:group {"style":"unterminated string} --><div></div><!-- /wp:group -->';
+    assert_eq($text, GeneratedMarkup::closeUnbalancedDelimiterAttrs($text, $notes));
+    assert_eq([], $notes);
+});

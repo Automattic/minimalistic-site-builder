@@ -61,6 +61,25 @@ final class GeneratedMarkup
         foreach ($sanitizerNotes as $note) {
             $record("sanitized script-capable markup — {$note}");
         }
+
+        // A single dropped `}` in one delimiter's attribute JSON otherwise
+        // poisons every containing frame and discards the whole part. Closing
+        // the object is bounded and idempotent; a key that consequently lands
+        // one nesting level deep is ignored by WordPress, which is strictly
+        // better than losing the section.
+        $attrsRepairs = [];
+        $text = self::closeUnbalancedDelimiterAttrs($text, $attrsRepairs);
+        foreach ($attrsRepairs as $note) {
+            Narrator::write("    (part '{$key}': {$note})\n");
+            $repairs[] = [
+                'code' => 'delimiter-attrs-braces-closed',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'parseable delimiter attributes',
+                'disposition' => 'repaired',
+            ];
+        }
+
         $recoveryNotes = [];
         try {
             $markup = BlockDocumentRecovery::recover($text, $recoveryNotes);
@@ -1525,5 +1544,41 @@ final class GeneratedMarkup
             $text = preg_replace('/\r?\n```$/', '', (string) $text);
         }
         return trim((string) $text);
+    }
+
+    /**
+     * Close delimiter attribute objects the model left short of `}`s.
+     *
+     * Matches the same lazy attrs shape as BlockMarkup::DELIMITER (opening
+     * delimiters only). When the captured JSON fails to parse but appending
+     * one to three closing braces makes it parse, the delimiter is rewritten
+     * in place and a note is recorded. Attributes broken any other way are
+     * left untouched for the recovery pass to isolate. Idempotent: repaired
+     * attrs parse, so a second pass matches nothing.
+     *
+     * @param list<string> $notes
+     */
+    public static function closeUnbalancedDelimiterAttrs(string $text, array &$notes = []): string
+    {
+        return (string) preg_replace_callback(
+            '/(?<head><!--\s+wp:[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?\s+)'
+            . '(?<attrs>\{(?:(?!-->).)*?\})(?<tail>\s+\/?-->)/s',
+            static function (array $m) use (&$notes): string {
+                $raw = $m['attrs'];
+                if (json_decode($raw) !== null || strtolower(trim($raw, "{} \t\r\n")) === 'null') {
+                    return $m[0];
+                }
+                for ($braces = 1; $braces <= 3; $braces++) {
+                    $candidate = $raw . str_repeat('}', $braces);
+                    if (is_object(json_decode($candidate))) {
+                        $notes[] = "closed {$braces} unbalanced attribute brace(s) in "
+                            . substr(trim($m['head']), 0, 40) . '…';
+                        return $m['head'] . $candidate . $m['tail'];
+                    }
+                }
+                return $m[0];
+            },
+            $text
+        );
     }
 }

@@ -20,6 +20,11 @@ dashboard-like panels.
 - Media: exactly one wide landscape image spanning the full wide width, never a
   cover background. Use group, image, columns/column when needed for the rail
   row, heading, paragraph, and an optional planned button only.
+- Band budget: the band and the rail share one first viewport. Request a truly
+  panoramic crop (clearly wider than 2:1) so the band stays around half the
+  viewport height, leaving the rail's headline, support line, and any planned
+  action inside the fold — a band tall enough to push the action below the
+  first viewport is an objective failure.
 - Surface/width: use the planned solid base/tinted/contrast surface and the
   mixed-width-editorial projection; the media band is visibly wider than rail.
 - Objective failure: a tall crop, media and rail as side-by-side columns, equal
