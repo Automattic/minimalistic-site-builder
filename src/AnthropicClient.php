@@ -654,7 +654,7 @@ final class AnthropicClient implements Llm
         // refusals and zero-token truncations) for the batch recovery layer.
         // An ordinary successful empty response remains transient.
         if (trim($parsed['text']) === ''
-            && JsonBatchRecovery::terminationError($parsed['stop_reason']) === null
+            && StopReasons::terminationError($parsed['stop_reason']) === null
         ) {
             return ['ok' => false, 'transient' => true, 'error' => 'no text content in streamed response', 'time' => $time];
         }

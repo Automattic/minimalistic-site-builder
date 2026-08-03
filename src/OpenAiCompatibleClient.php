@@ -668,12 +668,12 @@ final class OpenAiCompatibleClient implements Llm
                 : self::isLegacyTransientStreamError($parsed);
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
         }
-        $terminationError = JsonBatchRecovery::terminationError($parsed['stop_reason']);
+        $terminationError = StopReasons::terminationError($parsed['stop_reason']);
         // Batch callers preserve abnormal terminal responses so
         // TextBatchRecovery / JsonBatchRecovery can selectively regenerate
         // only the affected member. Keep the explicit false mode for callers
         // that need the legacy immediate rejection policy.
-        if (!$preserveAbnormalTerminal && self::isTruncationStopReason($parsed['stop_reason'])) {
+        if (!$preserveAbnormalTerminal && StopReasons::isTruncation($parsed['stop_reason'])) {
             return [
                 'ok' => false,
                 'transient' => false,
@@ -847,14 +847,12 @@ final class OpenAiCompatibleClient implements Llm
                 $result = $transport($body);
                 $empty = trim($result['text']) === '';
                 $stopReason = $result['stop_reason'] ?? null;
-                $normalizedStopReason = is_string($stopReason) ? trim($stopReason) : '';
-                $probeReachedOutputLimit = in_array(
-                    $normalizedStopReason,
-                    ['length', 'max_tokens'],
-                    true,
-                );
+                // Deliberately narrower than StopReasons::isTruncation: a
+                // context-window overflow is not the expected termination of a
+                // one-token cache probe and no output budget can repair it.
+                $probeReachedOutputLimit = StopReasons::isOutputLimit($stopReason);
                 $terminationError = $recoverTerminalReasons
-                    ? JsonBatchRecovery::terminationError($stopReason)
+                    ? StopReasons::terminationError($stopReason)
                     : null;
                 if ($terminationError !== null && !($tolerateEmpty && $probeReachedOutputLimit)) {
                     if ($probeReachedOutputLimit && !$retriedTruncation) {
@@ -1232,12 +1230,6 @@ final class OpenAiCompatibleClient implements Llm
             'error_type'  => $errorType,
             'stop_reason' => $stopReason,
         ];
-    }
-
-    private static function isTruncationStopReason(mixed $reason): bool
-    {
-        return is_string($reason)
-            && in_array(trim($reason), ['max_tokens', 'length', 'model_context_window_exceeded'], true);
     }
 
     private static function truncate(string $s, int $max = 300): string

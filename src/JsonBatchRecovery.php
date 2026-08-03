@@ -177,7 +177,7 @@ final class JsonBatchRecovery
             return $repair;
         }
 
-        if (in_array($reason, self::REFUSAL_REASONS, true)) {
+        if (StopReasons::isRefusal($reason)) {
             $repair['prompt'] = $prompt
                 . "\n\nYOUR PREVIOUS ATTEMPT RETURNED NO USABLE CONTENT ({$error}). "
                 . "Answer again, returning only the JSON value the instructions above describe.";
@@ -193,29 +193,20 @@ final class JsonBatchRecovery
         return $repair;
     }
 
-    /** Stop reasons that mean the response ran out of output budget. */
-    private const TRUNCATION_REASONS = ['max_tokens', 'length', 'model_context_window_exceeded'];
-
-    /** Stop reasons that mean the provider declined to answer. */
-    private const REFUSAL_REASONS = ['refusal', 'content_filter', 'safety'];
-
-    /** Whether a provider stop reason means the output budget ran out. */
+    /**
+     * Whether a provider stop reason means the output budget ran out.
+     * Delegates to the shared vocabulary; kept public because callers predate
+     * {@see StopReasons}.
+     */
     public static function isTruncation(mixed $reason): bool
     {
-        return is_string($reason) && in_array(trim($reason), self::TRUNCATION_REASONS, true);
+        return StopReasons::isTruncation($reason);
     }
 
     /** Classify provider stop reasons that mean a JSON response is incomplete. */
     public static function terminationError(mixed $reason): ?string
     {
-        $reason = is_string($reason) ? trim($reason) : '';
-        if (in_array($reason, self::TRUNCATION_REASONS, true)) {
-            return "generation was truncated (stop reason: {$reason})";
-        }
-        if (in_array($reason, self::REFUSAL_REASONS, true)) {
-            return "generation was refused or filtered (stop reason: {$reason})";
-        }
-        return null;
+        return StopReasons::terminationError($reason);
     }
 
     /** @param array<string,mixed> $request @param array<string,mixed> $response */
