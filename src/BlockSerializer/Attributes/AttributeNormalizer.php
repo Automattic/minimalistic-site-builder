@@ -6,9 +6,11 @@ namespace Automattic\SiteBuild\BlockSerializer\Attributes;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonNative;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
 use Automattic\SiteBuild\BlockSerializer\Json\JsonString;
+use Automattic\SiteBuild\BlockSerializer\JsString;
 use Automattic\SiteBuild\BlockSerializer\NormalizedBlock;
 use Automattic\SiteBuild\BlockSerializer\Parser\BlockNode;
 use Automattic\SiteBuild\BlockSerializer\Registry\BlockRegistry;
+use Automattic\SiteBuild\BlockSerializer\Repair;
 use Automattic\SiteBuild\BlockSerializer\Save\SaveStrategyRegistry;
 use Automattic\SiteBuild\BlockSerializer\Supports\SupportDomainGuard;
 use Automattic\SiteBuild\BlockSerializer\Validation\Validator;
@@ -96,7 +98,7 @@ final class AttributeNormalizer
         $this->supportDomain->assertSupported($node->name, $rawCommentValues, $blockPath);
         // normalizeRawBlock() trims every raw innerHTML string before sourcing,
         // validation, deprecation matching, and originalContent assignment.
-        $originalContent = $this->jsTrim($node->innerHTML);
+        $originalContent = JsString::trim($node->innerHTML);
         $attributes = $this->sourcer->source($schemas, $comment, $originalContent);
 
         $render = fn (array $candidate): string => $this->saves->save(
@@ -203,7 +205,7 @@ final class AttributeNormalizer
             $node->name,
             $typed,
             $finalAttributes,
-            $this->uniqueRepairs($repairRows),
+            Repair::dedupe($repairRows),
         );
     }
 
@@ -241,23 +243,4 @@ final class AttributeNormalizer
             ? JsonNative::value($value) : $value;
     }
 
-    /** @param list<\Automattic\SiteBuild\BlockSerializer\Repair> $rows @return list<\Automattic\SiteBuild\BlockSerializer\Repair> */
-    private function uniqueRepairs(array $rows): array
-    {
-        $unique = [];
-        foreach ($rows as $row) {
-            $unique[$row->blockPath . "\0" . $row->code] = $row;
-        }
-        return array_values($unique);
-    }
-
-    private function jsTrim(string $value): string
-    {
-        // ECMAScript WhiteSpace + LineTerminator characters relevant to HTML.
-        return preg_replace(
-            '/^[\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]+|[\x{0009}-\x{000D}\x{0020}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}]+$/u',
-            '',
-            $value,
-        ) ?? trim($value);
-    }
 }

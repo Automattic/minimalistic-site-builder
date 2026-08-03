@@ -31,8 +31,12 @@ foreach (array_slice($argv, 1) as $a) {
         $port = (int) substr($a, 7);
     } elseif (str_starts_with($a, '--workers=')) {
         $workers = substr($a, 10);
-    } elseif ($slug === null) {
+    } elseif ($slug === null && !str_starts_with($a, '--')) {
         $slug = $a;
+    } else {
+        fwrite(STDERR, "Unknown argument: {$a}\n");
+        fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
+        exit(1);
     }
 }
 

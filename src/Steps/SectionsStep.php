@@ -16,6 +16,7 @@ use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\HeaderUnit;
 use Automattic\SiteBuild\Units\MarkupUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM, concurrent): generate every part of every page in ONE batch — the
@@ -197,13 +198,7 @@ final class SectionsStep implements Step
                 $files[$job['file']] = $job['unit']->finish($parts[$key], $job['input'], $warnings);
                 array_push($warnings, ...$batch->notesFor($key));
             } catch (\RuntimeException $e) {
-                $authoredFailure = json_encode(
-                    $e->getMessage(),
-                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
-                );
-                if (!is_string($authoredFailure)) {
-                    $authoredFailure = get_debug_type($e->getMessage());
-                }
+                $authoredFailure = Warnings::value($e->getMessage());
                 $warningContext = "file='theme/{$job['file']}'; block='part root'; "
                     . "authored={$authoredFailure}; ";
                 if ($isChrome) {
@@ -798,6 +793,19 @@ final class SectionsStep implements Step
     }
 
     /**
+     * The section a page opens on — the only one that shares the viewport with
+     * the header, and so the one both sides of the seam ask about.
+     *
+     * @param array<string,mixed> $page
+     * @return array<string,mixed>|null
+     */
+    public static function openingSection(array $page): ?array
+    {
+        $first = ((array) ($page['sections'] ?? []))[0] ?? null;
+        return is_array($first) ? $first : null;
+    }
+
+    /**
      * The deterministic top-of-page contract (BIGR-735): decided once from the
      * plan, then injected into BOTH the header prompt and every hero-section
      * prompt, so the two parts compose instead of colliding blind.
@@ -813,19 +821,6 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $pages
      */
-    /**
-     * The section a page opens on — the only one that shares the viewport with
-     * the header, and so the one both sides of the seam ask about.
-     *
-     * @param array<string,mixed> $page
-     * @return array<string,mixed>|null
-     */
-    public static function openingSection(array $page): ?array
-    {
-        $first = ((array) ($page['sections'] ?? []))[0] ?? null;
-        return is_array($first) ? $first : null;
-    }
-
     public static function headerMode(array $pages, string $canvas = ''): string
     {
         $front = self::frontPage($pages);

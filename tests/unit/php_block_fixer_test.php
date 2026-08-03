@@ -127,16 +127,6 @@ function php_block_fixer_test_remove(string $path): void
     @rmdir($path);
 }
 
-function php_block_fixer_test_exception(callable $operation): Throwable
-{
-    try {
-        $operation();
-    } catch (Throwable $error) {
-        return $error;
-    }
-    throw new RuntimeException('Expected operation to throw');
-}
-
 test('PhpBlockFixer reaches a fixed point, reports exact drops and repairs, and is a no-op on retry', function () {
     $original = '<!-- wp:paragraph --><p class="keep lost" style=\'padding-top:4rem;color:red\'>dirty'
         . '<span class=\'lost lost\' style="padding-top:4rem"></span></p><!-- /wp:paragraph -->';
@@ -287,9 +277,9 @@ test('PhpBlockFixer rejects an empty, missing, or non-directory theme path', fun
     );
 
     try {
-        $emptyError = php_block_fixer_test_exception(static fn () => $fixer->fix(''));
-        $missingError = php_block_fixer_test_exception(static fn () => $fixer->fix($missing));
-        $fileError = php_block_fixer_test_exception(static fn () => $fixer->fix($file));
+        $emptyError = assert_throws(static fn () => $fixer->fix(''));
+        $missingError = assert_throws(static fn () => $fixer->fix($missing));
+        $fileError = assert_throws(static fn () => $fixer->fix($file));
 
         assert_true($emptyError instanceof RuntimeException);
         assert_contains('does not exist', $emptyError->getMessage());
@@ -685,7 +675,7 @@ test('PhpBlockFixer discards prior stages and writes nothing when a later stage 
     );
 
     try {
-        $error = php_block_fixer_test_exception(
+        $error = assert_throws(
             static fn () => (new PhpBlockFixer($transformer, writer: $writer))->fix($theme)
         );
 
@@ -721,7 +711,7 @@ test('PhpBlockFixer leaves only complete original or canonical bytes after mid-c
     $failingWriter = new PhpBlockFixerTestWriter(failReplaceAt: 2);
 
     try {
-        $error = php_block_fixer_test_exception(
+        $error = assert_throws(
             static fn () => (new PhpBlockFixer(
                 new PhpBlockFixerTestTransformer($transform),
                 writer: $failingWriter,
