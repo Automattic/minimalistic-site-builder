@@ -550,10 +550,10 @@ final class FixBlocksStep implements Step
      */
     public static function themeSpacingSlugs(Project $project): array
     {
-        if (!$project->exists('theme/theme.json')) {
+        $theme = self::readThemeJson($project);
+        if ($theme === null) {
             return [];
         }
-        $theme = json_decode($project->readText('theme/theme.json'), true);
         $sizes = $theme['settings']['spacing']['spacingSizes'] ?? [];
         if (!is_array($sizes)) {
             return [];
@@ -570,13 +570,28 @@ final class FixBlocksStep implements Step
     /** theme.json settings.layout.contentSize in px, when parseable. */
     public static function themeContentSize(Project $project): ?float
     {
-        if (!$project->exists('theme/theme.json')) {
+        $theme = self::readThemeJson($project);
+        if ($theme === null) {
             return null;
         }
-        $theme = json_decode($project->readText('theme/theme.json'), true);
         $size = $theme['settings']['layout']['contentSize'] ?? null;
         return is_string($size) && preg_match('/^([0-9.]+)px$/', $size, $m) === 1
             ? (float) $m[1]
             : null;
+    }
+
+    /**
+     * theme.json decoded fail-open: null when missing or malformed, so the
+     * theme helpers degrade to their defaults instead of throwing.
+     *
+     * @return array<mixed>|null
+     */
+    private static function readThemeJson(Project $project): ?array
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return null;
+        }
+        $theme = json_decode($project->readText('theme/theme.json'), true);
+        return is_array($theme) ? $theme : null;
     }
 }
