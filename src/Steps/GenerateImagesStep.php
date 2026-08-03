@@ -556,14 +556,11 @@ final class GenerateImagesStep implements Step
      */
     private function rewriteMarkup(Project $project, array $resolved): void
     {
-        foreach (['parts', 'templates'] as $dir) {
-            foreach (glob($project->themePath($dir . '/*.html')) ?: [] as $abs) {
-                $rel = $dir . '/' . basename($abs);
-                $content = $project->readText('theme/' . $rel);
-                $updated = strtr($content, $resolved);
-                if ($updated !== $content) {
-                    $project->writeText('theme/' . $rel, $updated);
-                }
+        foreach ($project->themeFiles() as $rel) {
+            $content = $project->readText('theme/' . $rel);
+            $updated = strtr($content, $resolved);
+            if ($updated !== $content) {
+                $project->writeText('theme/' . $rel, $updated);
             }
         }
 

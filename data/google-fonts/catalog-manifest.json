@@ -1,0 +1,17 @@
+{
+    "source": {
+        "repository": "WordPress/google-fonts-to-wordpress-collection",
+        "release": "wp-7.1",
+        "path": "collections/google-fonts.json",
+        "sha256": "e0835e4aa6c6b0ccdc76c070ed3c4cc087d8a60851fa78d74c4eedaab3575527"
+    },
+    "distiller": {
+        "script": "bin/distill-google-fonts-catalog.php",
+        "sha256": "b9c30cd991fa07389f5898500c1a0e03b655c7d53003278c6b2e7a2b087d8c23"
+    },
+    "catalog": {
+        "sha256": "5c305bd1b7e34f7a186565f01d9c5301b72f361f5b9faa722ebd5dc1fa036d67",
+        "families": 1949,
+        "faces": 7771
+    }
+}

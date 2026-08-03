@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -122,6 +123,7 @@ final class PageStylesStep implements Step
                 'designDirection.json',
                 'theme/parts/*',
                 'theme/templates/*',
+                'plugin/pages/*',
             ],
             writes: ['theme/style.css', 'warnings.json'],
             concurrent: false,
@@ -141,9 +143,9 @@ final class PageStylesStep implements Step
             'theme_json'       => $project->readText('theme/theme.json'),
             'used_classes'     => self::classList($used),
         ]);
-        $css = self::stripFences(trim(
+        $css = CodeFences::strip(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
-        ));
+        );
 
         $problems = self::validate($css);
         if ($problems !== []) {
@@ -461,15 +463,5 @@ final class PageStylesStep implements Step
             static fn (string $c): string => "- .{$c} — " . self::CLASSES[$c],
             $used
         ));
-    }
-
-    /** Strip a leading/trailing markdown code fence if the model added one. */
-    private static function stripFences(string $text): string
-    {
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
     }
 }

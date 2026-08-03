@@ -1,5 +1,5 @@
 {
-  "$comment": "Demo prompts persisted as inputs for building demo websites. Each build produced from these prompts serves as testing evidence for pipeline/theme changes. Build them all with: php bin/build-demos.php (or just one with --only=<slug>).",
+  "$comment": "Demo prompts persisted as inputs for building demo websites. Each build produced from these prompts serves as testing evidence for pipeline/theme changes. Build them all with: php bin/build-demos.php (or just one with --only=<slug>). An entry may carry a canonical `site_spec` object (see examples/site-spec.json): it is pre-seeded into the project's meta.json, so the site-spec step normalizes it deterministically instead of generating one via LLM — exercising the host-supplied-spec path of BIGR-754.",
   "version": 1,
   "prompts": [
     {
@@ -37,6 +37,73 @@
       "slug": "pulso",
       "site_type": "event",
       "prompt": "Create a website for an electronic music festival in Stockholm's art district: two nights of DJs, immersive installations, and daytime workshops. The design must be unmistakably vaporwave, trendy and futuristic."
+    },
+    {
+      "$comment": "Tests the host-supplied site spec path (BIGR-754): site_spec below is pre-seeded into meta.json, so the site-spec step makes no LLM call for this build. The spec mirrors the canonical contract example in examples/site-spec.json.",
+      "id": "hearth",
+      "slug": "hearth",
+      "site_type": "business storefront",
+      "prompt": "Create a warm, honest website for Hearth & Crumb, a neighborhood bakery in Portland, Maine that specializes in naturally leavened bread and seasonal pastries. Show the daily selection, explain the slow fermentation process, and make it easy to find the shop and its opening hours.",
+      "site_spec": {
+        "name": "Hearth & Crumb",
+        "slug": "hearth-crumb",
+        "title": "Bread Made Slowly, Shared Daily",
+        "description": "A neighborhood bakery specializing in naturally leavened bread and seasonal pastries.",
+        "site_type": "business storefront",
+        "topic": "artisan bread and pastries",
+        "area": "bakery",
+        "audience": "neighborhood residents and visitors",
+        "language": "en",
+        "persona_name": "",
+        "email_domain": "hearthandcrumb.com",
+        "invented": ["name", "email_domain"],
+        "visual_vibe": "warm and rustic",
+        "animation_request": "",
+        "sections": ["Hero", "Daily Selection", "Our Process", "Visit"],
+        "pages": [
+          {
+            "title": "Home",
+            "slug": "home",
+            "purpose": "Introduce the bakery, highlight the daily selection, and direct visitors to ordering and location details.",
+            "children": []
+          },
+          {
+            "title": "Menu",
+            "slug": "menu",
+            "purpose": "Present the bakery's current breads and pastries.",
+            "children": [
+              {
+                "title": "Bread",
+                "slug": "bread",
+                "purpose": "List naturally leavened loaves with ingredients and availability.",
+                "children": []
+              },
+              {
+                "title": "Pastries",
+                "slug": "pastries",
+                "purpose": "List seasonal pastries with ingredients and availability.",
+                "children": []
+              }
+            ]
+          },
+          {
+            "title": "Visit",
+            "slug": "visit",
+            "purpose": "Provide the bakery's address, opening hours, and contact details.",
+            "children": []
+          }
+        ],
+        "location": {
+          "street": "24 Market Street",
+          "city": "Portland",
+          "region": "Maine"
+        },
+        "hours": {
+          "tuesday_friday": "7:00 AM-3:00 PM",
+          "saturday_sunday": "8:00 AM-2:00 PM",
+          "monday": "Closed"
+        }
+      }
     }
   ]
 }
