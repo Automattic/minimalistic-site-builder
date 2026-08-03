@@ -57,10 +57,10 @@ final class FooterUnit extends AbstractMarkupUnit
         $archetype = $this->inputString($input, 'composition_archetype');
         FooterComposition::assertKnown($archetype);
         if ($this->pageCount($input) === 1) {
-            $markup = GeneratedMarkup::withoutSiteTitleLinks($markup);
+            $markup = FooterMarkup::withoutSiteTitleLinks($markup);
         }
-        $markup = GeneratedMarkup::withoutPortraitImagePlaceholders($markup, $notes);
-        $markup = GeneratedMarkup::withRootBackgroundColor(
+        $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $notes);
+        $markup = FooterMarkup::withRootBackgroundColor(
             $markup,
             FooterComposition::surface($archetype),
             $notes
