@@ -240,7 +240,6 @@ final class ContrastFixStep implements Step
         }
     }
 
-
     /**
      * Check and repair the theme.json global pairs: base↔contrast (report
      * only — swapping palette hexes would wreck the design), the global link
