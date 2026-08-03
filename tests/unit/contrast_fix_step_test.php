@@ -29,9 +29,7 @@ test('theme.json global link hover below 4.5:1 on base is repaired', function ()
         ]],
     ]));
 
-    ob_start();
-    (new ContrastFixStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new ContrastFixStep())->run($project));
 
     $theme = $project->readJson('theme/theme.json');
     $hover = $theme['styles']['elements']['link'][':hover']['color']['text'];
@@ -54,9 +52,7 @@ test('button repair on a mid-tone background keeps the failure on the record', f
         ]]],
     ]));
 
-    ob_start();
-    (new ContrastFixStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new ContrastFixStep())->run($project));
 
     $report = $project->readText('logs/contrast-report.txt');
     assert_contains('still below threshold', $report);
@@ -79,9 +75,7 @@ test('an unfixable failing button warns instead of disappearing', function () {
         ]]],
     ]));
 
-    ob_start();
-    (new ContrastFixStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new ContrastFixStep())->run($project));
 
     $theme = $project->readJson('theme/theme.json');
     assert_eq('var(--wp--preset--color--contrast)', $theme['styles']['elements']['button']['color']['text'],
@@ -105,9 +99,7 @@ test('theme.json passing global link hover is left alone', function () {
         ]],
     ]));
 
-    ob_start();
-    (new ContrastFixStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new ContrastFixStep())->run($project));
 
     $theme = $project->readJson('theme/theme.json');
     assert_eq('var(--wp--preset--color--contrast)', $theme['styles']['elements']['link'][':hover']['color']['text']);
