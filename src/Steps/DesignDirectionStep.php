@@ -16,6 +16,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM): commit to ONE distinctive creative concept for the site BEFORE any
@@ -657,7 +658,7 @@ final class DesignDirectionStep implements Step
         }
         if (!is_array($raw)) {
             $warnings[] = 'designDirection.json: type.' . $slot . ' authored value '
-                . self::warningValue($raw) . '; delivered ' . self::warningValue($empty)
+                . Warnings::value($raw) . '; delivered ' . Warnings::value($empty)
                 . '; disposition malformed prose typography replaced by the structured empty contract';
             return $empty;
         }
@@ -666,13 +667,13 @@ final class DesignDirectionStep implements Step
         $family = is_string($rawFamily) ? trim($rawFamily) : '';
         if (array_key_exists('family', $raw) && !is_string($rawFamily)) {
             $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
-                . self::warningValue($rawFamily) . '; delivered ""; disposition non-string family name removed';
+                . Warnings::value($rawFamily) . '; delivered ""; disposition non-string family name removed';
         } elseif (
             $family !== ''
             && preg_match("/^\\p{L}[\\p{L}\\p{N} .&'_-]{0,99}$/u", $family) !== 1
         ) {
             $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
-                . self::warningValue($rawFamily) . '; delivered ""; disposition invalid family name removed';
+                . Warnings::value($rawFamily) . '; delivered ""; disposition invalid family name removed';
             $family = '';
         }
 
@@ -681,28 +682,28 @@ final class DesignDirectionStep implements Step
         if ($family === '') {
             if ($rawWeights !== []) {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
-                    . self::warningValue($rawWeights)
+                    . Warnings::value($rawWeights)
                     . '; delivered []; disposition requirements removed because no deliverable family remained';
             }
             if (array_key_exists('italic', $raw) && $raw['italic'] !== false) {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
-                    . self::warningValue($raw['italic'])
+                    . Warnings::value($raw['italic'])
                     . '; delivered false; disposition requirement removed because no deliverable family remained';
             }
             if (is_array($rawAxes)) {
                 foreach ($rawAxes as $tag => $range) {
                     $warnings[] = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag
-                        . ' authored value ' . self::warningValue($range)
+                        . ' authored value ' . Warnings::value($range)
                         . '; delivered removed; disposition axis removed because no deliverable family remained';
                 }
             } elseif ($rawAxes !== []) {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
-                    . self::warningValue($rawAxes)
+                    . Warnings::value($rawAxes)
                     . '; delivered {}; disposition axes removed because no deliverable family remained';
             }
             if (array_key_exists('character', $raw) && $raw['character'] !== '') {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.character authored value '
-                    . self::warningValue($raw['character'])
+                    . Warnings::value($raw['character'])
                     . '; delivered ""; disposition rationale removed because no deliverable family remained';
             }
             return $empty;
@@ -733,14 +734,14 @@ final class DesignDirectionStep implements Step
         }
         if ($invalidWeights) {
             $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
-                . self::warningValue($rawWeights) . '; delivered ' . self::warningValue($weights)
+                . Warnings::value($rawWeights) . '; delivered ' . Warnings::value($weights)
                 . '; disposition invalid weights removed';
         }
 
         $italic = is_bool($raw['italic'] ?? null) ? $raw['italic'] : false;
         if (array_key_exists('italic', $raw) && !is_bool($raw['italic'])) {
             $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
-                . self::warningValue($raw['italic']) . '; delivered false; disposition non-boolean value removed';
+                . Warnings::value($raw['italic']) . '; delivered false; disposition non-boolean value removed';
         }
 
         $axes = [];
@@ -748,7 +749,7 @@ final class DesignDirectionStep implements Step
             foreach ($rawAxes as $tag => $range) {
                 $path = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag;
                 if ($tag !== 'opsz') {
-                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                    $warnings[] = $path . ' authored value ' . Warnings::value($range)
                         . '; delivered removed; disposition axis is not supported by the deterministic CSS2 contract';
                     continue;
                 }
@@ -763,7 +764,7 @@ final class DesignDirectionStep implements Step
                     || (float) $max < (float) $min
                     || (float) $max > 1000
                 ) {
-                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                    $warnings[] = $path . ' authored value ' . Warnings::value($range)
                         . '; delivered removed; disposition invalid optical-size range';
                     continue;
                 }
@@ -771,13 +772,13 @@ final class DesignDirectionStep implements Step
             }
         } elseif ($rawAxes !== []) {
             $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
-                . self::warningValue($rawAxes) . '; delivered {}; disposition non-object axes removed';
+                . Warnings::value($rawAxes) . '; delivered {}; disposition non-object axes removed';
         }
 
         $character = is_string($raw['character'] ?? null) ? trim($raw['character']) : '';
         if (array_key_exists('character', $raw) && !is_string($raw['character'])) {
             $warnings[] = 'designDirection.json: type.' . $slot . '.character authored value '
-                . self::warningValue($raw['character'])
+                . Warnings::value($raw['character'])
                 . '; delivered ""; disposition non-string typography rationale removed';
         }
 
@@ -794,12 +795,6 @@ final class DesignDirectionStep implements Step
     private static function emptyTypeSlot(): array
     {
         return ['family' => '', 'weights' => [], 'italic' => false, 'axes' => [], 'character' => ''];
-    }
-
-    private static function warningValue(mixed $value): string
-    {
-        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        return is_string($encoded) ? $encoded : get_debug_type($value);
     }
 
     /**

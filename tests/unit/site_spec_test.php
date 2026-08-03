@@ -452,8 +452,6 @@ test('site-spec requestedPages accepts titles and page maps, drops junk', functi
     assert_eq('directions', $requested[2]['children'][0]['slug']);
     assert_eq([], SiteSpecStep::requestedPages(null));
     assert_eq([], SiteSpecStep::requestedPages('Home, Menu'));      // a bare string is not a list
-
-    exec('true');
 });
 
 test('site-spec defaults pages to a single homepage when the model omits them', function () {
@@ -486,8 +484,6 @@ test('site-spec pages entries get title fallback from slug and drop junk entries
     assert_eq('about-us', $pages[0]['slug']);
     assert_eq(2, count($pages));
     assert_true($pages[1]['slug'] !== '', 'fallback slug non-empty');
-
-    exec('true');
 });
 
 test('site-spec throws when meta prompt missing', function () {

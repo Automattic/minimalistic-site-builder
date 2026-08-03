@@ -55,12 +55,15 @@ function assert_contains(string $needle, string $haystack, string $msg = ''): vo
     }
 }
 
-function assert_throws(callable $fn, string $msg = ''): void
+/** Assert the callable throws, and return the Throwable so callers can inspect it. */
+function assert_throws(callable $fn, string $msg = ''): Throwable
 {
     try {
         $fn();
-    } catch (Throwable) {
-        return;
+    } catch (TestSkipped $e) {
+        throw $e;
+    } catch (Throwable $e) {
+        return $e;
     }
     throw new RuntimeException('assert_throws failed: no exception' . ($msg !== '' ? ": {$msg}" : ''));
 }
@@ -114,6 +117,17 @@ function seed_test_design_direction(object $project, string $recipe = 'cinematic
     $project->writeJson('designDirection.json', test_design_direction($recipe, $overrides));
 }
 
+/** Run $fn with its output buffered and discarded — even when it throws. */
+function quietly(callable $fn): mixed
+{
+    ob_start();
+    try {
+        return $fn();
+    } finally {
+        ob_end_clean();
+    }
+}
+
 /** Run all registered tests, print results, return exit code. */
 function run_tests(): int
 {
@@ -121,17 +135,22 @@ function run_tests(): int
     $fail = 0;
     $skip = 0;
     foreach ($GLOBALS['__tests'] as [$name, $fn]) {
+        $obLevel = ob_get_level();
         try {
             $fn();
-            echo "  PASS  {$name}\n";
+            $line = "  PASS  {$name}\n";
             $pass++;
         } catch (TestSkipped $e) {
-            echo "  SKIP  {$name}\n        {$e->getMessage()}\n";
+            $line = "  SKIP  {$name}\n        {$e->getMessage()}\n";
             $skip++;
         } catch (Throwable $e) {
-            echo "  FAIL  {$name}\n        {$e->getMessage()}\n";
+            $line = "  FAIL  {$name}\n        {$e->getMessage()}\n";
             $fail++;
         }
+        while (ob_get_level() > $obLevel) {
+            ob_end_clean();
+        }
+        echo $line;
     }
     echo "\n{$pass} passed, {$fail} failed, {$skip} skipped\n";
     return $fail === 0 ? 0 : 1;

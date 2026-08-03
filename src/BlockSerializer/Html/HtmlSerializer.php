@@ -14,14 +14,6 @@ use Automattic\SiteBuild\BlockSerializer\Supports\StyleEngine;
 final class HtmlSerializer
 {
     /** @var array<string,true> */
-    private const VOID = [
-        'area' => true, 'base' => true, 'br' => true, 'col' => true,
-        'embed' => true, 'hr' => true, 'img' => true, 'input' => true,
-        'link' => true, 'meta' => true, 'param' => true, 'source' => true,
-        'track' => true, 'wbr' => true,
-    ];
-
-    /** @var array<string,true> */
     private const BOOLEAN = [
         'allowfullscreen' => true, 'async' => true, 'autofocus' => true,
         'autoplay' => true, 'checked' => true, 'controls' => true,
@@ -69,7 +61,7 @@ final class HtmlSerializer
 
         $tag = $node->tag;
         $out = '<' . $tag . $this->attributes($node->props);
-        if (isset(self::VOID[strtolower($tag)])) {
+        if (HtmlNode::isVoidTag($tag)) {
             return $out . '/>';
         }
         $out .= '>';

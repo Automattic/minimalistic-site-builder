@@ -5,9 +5,11 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Warnings;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
@@ -49,7 +51,7 @@ final class GeneratedMarkup
         // block-looking comments inside a script body are not payload.
         $sanitizerNotes = [];
         $trimmed = trim($text);
-        $unfenced = self::stripFences($trimmed);
+        $unfenced = CodeFences::strip($trimmed);
         if ($unfenced !== $trimmed) {
             $repairs[] = [
                 'code' => 'response-fence-removed',
@@ -1378,10 +1380,7 @@ final class GeneratedMarkup
         mixed $authored,
         string $color
     ): void {
-        $encoded = json_encode($authored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($encoded)) {
-            $encoded = get_debug_type($authored);
-        }
+        $encoded = Warnings::value($authored);
         $notes[] = "file='parts/{$part}.html'; block='root wp:group'; authored {$path}={$encoded}; "
             . "delivered=removed; disposition=opaque or malformed root styling removed so the assigned "
             . "'{$color}' {$part} surface cannot be overridden";
@@ -1517,13 +1516,4 @@ final class GeneratedMarkup
         );
     }
 
-    private static function stripFences(string $text): string
-    {
-        $text = (string) preg_replace('/^\xEF\xBB\xBF/', '', $text);
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\r?\n/', '', $text);
-            $text = preg_replace('/\r?\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
-    }
 }

@@ -224,9 +224,7 @@ test('motion-sanity step visits sections in plan order so the hero wins page bud
     );
     $project->writeText('theme/parts/page-home--hero.html', motion_group('ken-burns') . "\n");
 
-    ob_start();
-    (new MotionSanityStep())->run($project);
-    ob_end_clean();
+    quietly(fn () => (new MotionSanityStep())->run($project));
 
     assert_contains('ken-burns', $project->readText('theme/parts/page-home--hero.html'));
     assert_true(!str_contains($project->readText('theme/parts/page-home--about.html'), 'gradient-shift'));

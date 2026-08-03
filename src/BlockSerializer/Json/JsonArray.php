@@ -25,14 +25,6 @@ final class JsonArray extends JsonValue implements \Countable, \IteratorAggregat
         $this->items[] = $value;
     }
 
-    public function set(int $index, JsonValue $value): void
-    {
-        if ($index < 0 || $index >= count($this->items)) {
-            throw new \OutOfBoundsException("JSON array index out of bounds: {$index}");
-        }
-        $this->items[$index] = $value;
-    }
-
     public function get(int $index): JsonValue
     {
         if (!isset($this->items[$index])) {
