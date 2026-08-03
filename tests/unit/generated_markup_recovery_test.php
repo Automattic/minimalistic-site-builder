@@ -576,3 +576,43 @@ test('attrs brace repair leaves other malformed attrs alone', function () {
     assert_eq($text, GeneratedMarkup::closeUnbalancedDelimiterAttrs($text, $notes));
     assert_eq([], $notes);
 });
+
+test('dedupeHeadlineEcho removes a text block repeating the H1 verbatim', function () {
+    // Regression: pulso3 executed a "misregistered echo" signature device as
+    // a second paragraph carrying the exact headline text pulled over the H1
+    // with a negative margin — duplicated reading copy rendering as garble.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="hero">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Two nights the room drops into neon</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"textColor":"accent","style":{"spacing":{"margin":{"top":"-1.6rem"}}}} -->'
+        . '<p class="has-accent-color has-text-color" style="margin-top:-1.6rem">Two nights the room drops into neon</p>'
+        . '<!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>DJ sets until dawn.</p><!-- /wp:paragraph -->'
+        . '</section>'
+        . '<!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($doc, 'p', $repairs);
+    assert_eq(1, substr_count($out, 'Two nights the room drops into neon'), 'echo removed, H1 kept');
+    assert_contains('DJ sets until dawn.', $out);
+    assert_true(in_array('headline-echo-removed', array_column($repairs, 'code'), true));
+
+    // Idempotent + leaves distinct copy alone.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($out, 'p', $again));
+    assert_eq([], $again);
+});
+
+test('dedupeHeadlineEcho never matches short repeated labels or parts without an H1', function () {
+    $short = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Menu</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Menu</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $r = [];
+    assert_eq($short, Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($short, 'p', $r));
+    $noH1 = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">A heading of some length</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>A heading of some length</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq($noH1, Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($noH1, 'p', $r));
+    assert_eq([], $r);
+});

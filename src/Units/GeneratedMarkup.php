@@ -1536,6 +1536,85 @@ final class GeneratedMarkup
         );
     }
 
+    /**
+     * Remove text blocks that verbatim repeat the hero H1's reading text.
+     *
+     * Models render "echo"/"misregistration" signature devices as a second
+     * heading or paragraph carrying the exact headline text pulled over the
+     * H1 with negative margins — duplicated reading copy that renders as
+     * garble and reads twice to assistive tech. Removing an exact duplicate
+     * loses no words the visitor can read, so this is a repair, not a
+     * warning. Only whole paragraph/heading blocks whose entire normalized
+     * text equals the H1's are removed; short texts (< 10 characters) are
+     * left alone so repeated one-word labels never match.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function dedupeHeadlineEcho(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $h1 = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1 = $index;
+                break;
+            }
+        }
+        if ($h1 === null) {
+            return $markup;
+        }
+        $headline = self::readingText($document->innerHtml($h1));
+        if ($headline === '' || mb_strlen($headline, 'UTF-8') < 10) {
+            return $markup;
+        }
+
+        $echoes = [];
+        foreach ($document->indices() as $index) {
+            if ($index === $h1
+                || !in_array($document->name($index), ['heading', 'paragraph'], true)
+                || $document->endOffset($index) === null
+            ) {
+                continue;
+            }
+            if (self::readingText($document->innerHtml($index)) === $headline) {
+                $offset = $document->openingOffset($index);
+                $echoes[] = [
+                    'offset' => $offset,
+                    'length' => (int) $document->endOffset($index) - $offset,
+                    'name' => $document->name($index),
+                ];
+            }
+        }
+        if ($echoes === []) {
+            return $markup;
+        }
+
+        usort($echoes, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+        foreach ($echoes as $echo) {
+            $markup = substr_replace($markup, '', $echo['offset'], $echo['length']);
+        }
+        $repairs[] = [
+            'code' => 'headline-echo-removed',
+            'part' => $part,
+            'authored' => count($echoes) . ' wp:' . implode(', wp:', array_column($echoes, 'name'))
+                . ' block(s) repeating the H1 text verbatim',
+            'delivered' => 'one headline',
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    /** Visible reading text of a block's inner HTML, normalized for equality. */
+    private static function readingText(string $innerHtml): string
+    {
+        $text = (string) preg_replace('/<!--.*?-->/s', '', $innerHtml);
+        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = (string) preg_replace('/\s+/u', ' ', $text);
+        return mb_strtolower(trim($text), 'UTF-8');
+    }
+
     private static function stripFences(string $text): string
     {
         $text = (string) preg_replace('/^\xEF\xBB\xBF/', '', $text);
