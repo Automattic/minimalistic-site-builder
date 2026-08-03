@@ -169,11 +169,10 @@ final class WpcomImageClient implements ImageClient
      */
     private function multiRequest(array $bodies, array $requestedMimes, ?callable $onBytes = null): array
     {
-        $classify = function (string|int $i, \CurlHandle $ch) use ($requestedMimes, $onBytes): array {
+        $classify = function (string|int $i, \CurlHandle $ch, int $httpStatus) use ($requestedMimes, $onBytes): array {
             $raw    = (string) curl_multi_getcontent($ch);
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
-            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
             try {
                 self::throwOnTransportError($errno, $error);

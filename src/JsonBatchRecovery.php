@@ -195,8 +195,9 @@ final class JsonBatchRecovery
 
     /**
      * Whether a provider stop reason means the output budget ran out.
-     * Delegates to the shared vocabulary; kept public because callers predate
-     * {@see StopReasons}.
+     * Delegates to the shared vocabulary; kept public for embedding hosts that
+     * pinned this entry point before {@see StopReasons} existed (in-repo
+     * callers use StopReasons directly).
      */
     public static function isTruncation(mixed $reason): bool
     {

@@ -533,9 +533,6 @@ final class AnthropicClient implements Llm
      */
     private function streamMulti(array $bodies): array
     {
-        if ($bodies === []) {
-            return [];
-        }
         $raw = [];
 
         $buildHandle = function (string|int $key, array $body) use (&$raw): \CurlHandle {
@@ -563,12 +560,12 @@ final class AnthropicClient implements Llm
 
         // interpretStream marks severed streams and never-responded transfers
         // (status 0, the pool's CURLM-failure fallback) transient.
-        $classify = function (string|int $key, \CurlHandle $ch) use (&$raw): array {
+        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw): array {
             $outcome = self::interpretStream(
                 $raw[$key],
                 curl_errno($ch),
                 curl_error($ch),
-                (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+                $httpStatus,
                 (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
             );
             unset($raw[$key]);

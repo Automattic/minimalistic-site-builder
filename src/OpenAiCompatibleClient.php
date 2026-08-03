@@ -523,9 +523,6 @@ final class OpenAiCompatibleClient implements Llm
      */
     private function streamMulti(array $bodies): array
     {
-        if ($bodies === []) {
-            return [];
-        }
         $raw = [];
         $retryAfterDeadlines = [];
 
@@ -557,12 +554,12 @@ final class OpenAiCompatibleClient implements Llm
             return $ch;
         };
 
-        $classify = function (string|int $key, \CurlHandle $ch) use (&$raw, &$retryAfterDeadlines): array {
+        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw, &$retryAfterDeadlines): array {
             $outcome = self::interpretStream(
                 $raw[$key],
                 curl_errno($ch),
                 curl_error($ch),
-                (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+                $httpStatus,
                 (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
                 true,
                 $this->provider,
@@ -577,7 +574,7 @@ final class OpenAiCompatibleClient implements Llm
                     $outcome['retry_after_at'] = $retryAfterDeadline;
                 }
             }
-            unset($raw[$key]);
+            unset($raw[$key], $retryAfterDeadlines[$key]);
             return $outcome;
         };
 

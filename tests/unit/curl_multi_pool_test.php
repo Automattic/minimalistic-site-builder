@@ -106,10 +106,20 @@ class FakeCurlMultiPool extends CurlMultiPool
     }
 }
 
-/** @return array{0:callable,1:callable} buildHandle registering with the fake, classify echoing the key */
-function cmp_seams(FakeCurlMultiPool $pool): array
+/**
+ * buildHandle registering with the fake (appending each built key to $built
+ * when given), and a classify echoing the key.
+ *
+ * @return array{0:callable,1:callable}
+ */
+function cmp_seams(FakeCurlMultiPool $pool, ?array &$built = null): array
 {
-    $buildHandle = fn (string|int $key, mixed $item): \CurlHandle => $pool->register($key, curl_init('http://localhost/never-executed'));
+    $buildHandle = function (string|int $key, mixed $item) use ($pool, &$built): \CurlHandle {
+        if ($built !== null) {
+            $built[] = $key;
+        }
+        return $pool->register($key, curl_init('http://localhost/never-executed'));
+    };
     $classify = fn (string|int $key, \CurlHandle $ch): array => ['ok' => true, 'key' => $key];
     return [$buildHandle, $classify];
 }
@@ -133,11 +143,9 @@ test('CurlMultiPool holds launches after a sibling 429 with the exact held outco
     // and GeminiImage::retryBatch recognize (transient, held, the pinned string).
     $pool = new FakeCurlMultiPool([['a'], ['b']], ['a' => 429]);
     $built = [];
-    $buildHandle = function (string|int $key, mixed $item) use ($pool, &$built): \CurlHandle {
-        $built[] = $key;
-        return $pool->register($key, curl_init('http://localhost/never-executed'));
-    };
-    $classify = fn (string|int $key, \CurlHandle $ch): array => ['ok' => false, 'transient' => true, 'error' => "E:{$key}"];
+    [$buildHandle] = cmp_seams($pool, $built);
+    $classify = fn (string|int $key, \CurlHandle $ch, int $status): array
+        => ['ok' => false, 'transient' => true, 'error' => "E:{$key}:{$status}"];
 
     $out = $pool->run(['a' => 1, 'b' => 2, 'c' => 3], $buildHandle, $classify, 2);
 
@@ -148,7 +156,19 @@ test('CurlMultiPool holds launches after a sibling 429 with the exact held outco
         'held' => true,
         'error' => 'launch held: a sibling request was rate-limited (HTTP 429)',
     ], $out['c'], 'the held outcome carries the exact synthetic shape');
-    assert_eq('E:a', $out['a']['error'], 'really-attempted keys keep their own classification');
+    assert_eq('E:a:429', $out['a']['error'], 'really-attempted keys are classified with the status the pool read');
+});
+
+test('CurlMultiPool resolves an empty batch without touching curl_multi', function () {
+    $pool = new class([]) extends FakeCurlMultiPool {
+        protected function multiInit(): \CurlMultiHandle
+        {
+            throw new RuntimeException('multiInit must not be called for an empty batch');
+        }
+    };
+    [$buildHandle, $classify] = cmp_seams($pool);
+
+    assert_eq([], $pool->run([], $buildHandle, $classify, 2));
 });
 
 test('CurlMultiPool turns a refused add into a synthetic transient outcome', function () {
@@ -175,7 +195,7 @@ test('CurlMultiPool classifies every remaining transfer when the multi stack fai
     $pool = new FakeCurlMultiPool([]);
     $pool->failMulti = true;
     $classified = [];
-    $buildHandle = fn (string|int $key, mixed $item): \CurlHandle => $pool->register($key, curl_init('http://localhost/never-executed'));
+    [$buildHandle] = cmp_seams($pool);
     $classify = function (string|int $key, \CurlHandle $ch) use (&$classified): array {
         $classified[] = $key;
         return ['ok' => false, 'transient' => true, 'error' => 'no response received before the transfer stopped'];

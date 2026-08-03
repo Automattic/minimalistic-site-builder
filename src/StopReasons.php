@@ -33,19 +33,19 @@ final class StopReasons
     /** Whether a provider stop reason means the request's output budget ran out. */
     public static function isOutputLimit(mixed $reason): bool
     {
-        return is_string($reason) && in_array(trim($reason), self::OUTPUT_LIMIT, true);
+        return self::matches($reason, self::OUTPUT_LIMIT);
     }
 
     /** Whether a provider stop reason means the response ran out of token budget. */
     public static function isTruncation(mixed $reason): bool
     {
-        return is_string($reason) && in_array(trim($reason), self::TRUNCATION, true);
+        return self::matches($reason, self::TRUNCATION);
     }
 
     /** Whether a provider stop reason means the provider declined to answer. */
     public static function isRefusal(mixed $reason): bool
     {
-        return is_string($reason) && in_array(trim($reason), self::REFUSAL, true);
+        return self::matches($reason, self::REFUSAL);
     }
 
     /**
@@ -55,12 +55,18 @@ final class StopReasons
     public static function terminationError(mixed $reason): ?string
     {
         $reason = is_string($reason) ? trim($reason) : '';
-        if (in_array($reason, self::TRUNCATION, true)) {
+        if (self::isTruncation($reason)) {
             return "generation was truncated (stop reason: {$reason})";
         }
-        if (in_array($reason, self::REFUSAL, true)) {
+        if (self::isRefusal($reason)) {
             return "generation was refused or filtered (stop reason: {$reason})";
         }
         return null;
+    }
+
+    /** @param list<string> $vocabulary */
+    private static function matches(mixed $reason, array $vocabulary): bool
+    {
+        return is_string($reason) && in_array(trim($reason), $vocabulary, true);
     }
 }

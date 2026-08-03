@@ -21,6 +21,11 @@ test('StopReasons classifies truncation, output-limit, and refusal vocabularies'
     // can repair an oversized input, and the one-token cache probe must not
     // accept it as its expected termination.
     assert_true(!StopReasons::isOutputLimit('model_context_window_exceeded'), 'context window is not the output cap');
+    // The documented containment invariant: OUTPUT_LIMIT never gains a member
+    // that TRUNCATION does not also recognize.
+    foreach (StopReasons::OUTPUT_LIMIT as $reason) {
+        assert_true(in_array($reason, StopReasons::TRUNCATION, true), 'OUTPUT_LIMIT stays a subset of TRUNCATION');
+    }
 
     foreach (['refusal', 'content_filter', 'safety'] as $reason) {
         assert_true(StopReasons::isRefusal($reason), "{$reason} is a refusal");

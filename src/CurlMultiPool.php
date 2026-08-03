@@ -9,8 +9,7 @@ namespace Automattic\SiteBuild;
  * transfer completes, and classify each finished transfer into an outcome.
  * The client owns the two protocol-specific seams — building a configured
  * handle for a key and classifying a completed transfer — while everything
- * transport-generic lives here once (it was previously duplicated between
- * AnthropicClient::streamMulti and WpcomImageClient::multiRequest):
+ * transport-generic lives here once:
  *
  *  - Once any member completes with HTTP 429, further launches this pool run
  *    are HELD: firing the rest of the batch into a rate-limit event as fast
@@ -36,24 +35,27 @@ class CurlMultiPool
      * @param array<array-key,mixed> $items transfer input keyed by id
      * @param callable(string|int,mixed):\CurlHandle $buildHandle build one
      *        configured (not yet executed) handle for a key
-     * @param callable(string|int,\CurlHandle):array<string,mixed> $classify
-     *        classify one completed transfer into an outcome; called while the
-     *        handle is still open, before the pool removes and closes it
+     * @param callable(string|int,\CurlHandle,int):array<string,mixed> $classify
+     *        classify one completed transfer into an outcome, given the HTTP
+     *        status the pool already read for its 429 hold (the one reader of
+     *        that status); called while the handle is still open, before the
+     *        pool removes and closes it
      * @return array<array-key,array<string,mixed>> outcomes keyed and ordered
      *         as $items
      */
     public function run(array $items, callable $buildHandle, callable $classify, int $cap): array
     {
+        if ($items === []) {
+            return [];
+        }
         $multi = $this->multiInit();
-        /** @var array<array-key,\CurlHandle> $handles */
-        $handles = [];
-        /** @var array<int,string|int> $keysById spl_object_id(handle) => request key */
-        $keysById = [];
+        /** @var array<int,array{0:string|int,1:\CurlHandle}> $inFlight key + handle by spl_object_id(handle) */
+        $inFlight = [];
         /** @var array<array-key,array<string,mixed>> $queuedOutcomes synthetic transient outcomes (refused adds, held launches) drained by $await before any I/O */
         $queuedOutcomes = [];
         $holding = false;
 
-        $start = function (string|int $key, mixed $item) use ($multi, $buildHandle, &$handles, &$keysById, &$queuedOutcomes, &$holding): void {
+        $start = function (string|int $key, mixed $item) use ($multi, $buildHandle, &$inFlight, &$queuedOutcomes, &$holding): void {
             if ($holding) {
                 $queuedOutcomes[$key] = [
                     'ok' => false,
@@ -75,23 +77,23 @@ class CurlMultiPool
                 ];
                 return;
             }
-            $handles[$key] = $ch;
-            $keysById[spl_object_id($ch)] = $key;
+            $inFlight[spl_object_id($ch)] = [$key, $ch];
         };
 
         // Classify one finished transfer and release its handle (and slot).
-        $finish = function (string|int $key, \CurlHandle $ch) use ($multi, $classify, &$handles, &$keysById, &$holding): array {
-            if ($this->httpStatus($ch) === 429) {
+        $finish = function (string|int $key, \CurlHandle $ch) use ($multi, $classify, &$inFlight, &$holding): array {
+            $httpStatus = $this->httpStatus($ch);
+            if ($httpStatus === 429) {
                 $holding = true;
             }
-            $outcome = $classify($key, $ch);
-            unset($handles[$key], $keysById[spl_object_id($ch)]);
+            $outcome = $classify($key, $ch, $httpStatus);
+            unset($inFlight[spl_object_id($ch)]);
             $this->removeHandle($multi, $ch);
             $this->closeHandle($ch);
             return $outcome;
         };
 
-        $await = function () use ($multi, &$handles, &$keysById, &$queuedOutcomes, $finish): array {
+        $await = function () use ($multi, &$inFlight, &$queuedOutcomes, $finish): array {
             if ($queuedOutcomes !== []) {
                 $done = $queuedOutcomes;
                 $queuedOutcomes = [];
@@ -106,7 +108,7 @@ class CurlMultiPool
                     if ($msg['msg'] !== CURLMSG_DONE) {
                         continue;
                     }
-                    $key = $keysById[spl_object_id($msg['handle'])]
+                    [$key] = $inFlight[spl_object_id($msg['handle'])]
                         ?? throw new \RuntimeException('rolling pool got a completion for an unregistered curl handle');
                     $done[$key] = $finish($key, $msg['handle']);
                 }
@@ -122,7 +124,7 @@ class CurlMultiPool
             // failure). Classify what every remaining transfer holds so far
             // rather than hanging the pool or discarding sibling responses.
             $done = [];
-            foreach ($handles as $key => $ch) {
+            foreach ($inFlight as [$key, $ch]) {
                 $done[$key] = $finish($key, $ch);
             }
             return $done;
