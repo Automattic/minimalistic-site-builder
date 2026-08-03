@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (deterministic): write theme/fonts.php — the module that loads the
@@ -36,10 +38,7 @@ final class FontsPhpStep implements Step
     ];
 
     /** HTML elements that never establish an inherited-family stack frame. */
-    private const VOID_TAGS = [
-        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-        'link', 'meta', 'param', 'source', 'track', 'wbr',
-    ];
+    private const VOID_TAGS = HtmlNode::VOID_TAGS;
 
     public function id(): string
     {
@@ -321,14 +320,14 @@ final class FontsPhpStep implements Step
                 : '';
             if ($deliveredFamily === '') {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
-                    . self::warningValue($authoredFamily)
+                    . Warnings::value($authoredFamily)
                     . '; delivered removed; disposition theme.json has no Google-hosted family for this slot';
                 continue;
             }
             if (strcasecmp($authoredFamily, $deliveredFamily) !== 0) {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
-                    . self::warningValue($authoredFamily) . '; delivered '
-                    . self::warningValue($deliveredFamily)
+                    . Warnings::value($authoredFamily) . '; delivered '
+                    . Warnings::value($deliveredFamily)
                     . '; disposition theme font family differed from the committed direction';
             }
 
@@ -358,7 +357,7 @@ final class FontsPhpStep implements Step
             }
             if ($invalidWeights) {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.weights authored value '
-                    . self::warningValue($rawWeights) . '; delivered ' . self::warningValue($weights)
+                    . Warnings::value($rawWeights) . '; delivered ' . Warnings::value($weights)
                     . '; disposition invalid weights removed';
             }
 
@@ -366,27 +365,27 @@ final class FontsPhpStep implements Step
                 self::markFamilyItalic($requirements, $deliveredFamily);
             } elseif (array_key_exists('italic', $plan) && !is_bool($plan['italic'])) {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.italic authored value '
-                    . self::warningValue($plan['italic'])
+                    . Warnings::value($plan['italic'])
                     . '; delivered false; disposition non-boolean value removed';
             }
 
             $axes = $plan['axes'] ?? [];
             if (!is_array($axes)) {
                 $warnings[] = 'designDirection.json: type.' . $slot . '.axes authored value '
-                    . self::warningValue($axes)
+                    . Warnings::value($axes)
                     . '; delivered removed; disposition non-object axes removed';
                 continue;
             }
             foreach ($axes as $tag => $range) {
                 $path = 'designDirection.json: type.' . $slot . '.axes.' . (string) $tag;
                 if ($tag !== 'opsz') {
-                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                    $warnings[] = $path . ' authored value ' . Warnings::value($range)
                         . '; delivered removed; disposition axis is not supported by the deterministic CSS2 contract';
                     continue;
                 }
                 $normalizedRange = self::normalizeAxisRange($range);
                 if ($normalizedRange === null) {
-                    $warnings[] = $path . ' authored value ' . self::warningValue($range)
+                    $warnings[] = $path . ' authored value ' . Warnings::value($range)
                         . '; delivered removed; disposition invalid optical-size range';
                     continue;
                 }
@@ -694,12 +693,6 @@ final class FontsPhpStep implements Step
     private static function formatAxisNumber(float $value): string
     {
         return rtrim(rtrim(number_format($value, 4, '.', ''), '0'), '.');
-    }
-
-    private static function warningValue(mixed $value): string
-    {
-        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        return is_string($encoded) ? $encoded : get_debug_type($value);
     }
 
     /**

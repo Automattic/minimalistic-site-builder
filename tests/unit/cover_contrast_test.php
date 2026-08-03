@@ -227,12 +227,7 @@ function cover_step_run(Project $project, bool $failFixer = false): void
                 return 'block-fixer: ok';
             }
         };
-    ob_start();
-    try {
-        (new CoverContrastStep($fixer))->run($project);
-    } finally {
-        ob_end_clean();
-    }
+    quietly(fn () => (new CoverContrastStep($fixer))->run($project));
 }
 
 test('cover-contrast writes its own report without changing the shared contrast report', function () {
@@ -351,8 +346,11 @@ test('cover-contrast rolls back only files in a real PHP fixer FAILED report', f
 
     try {
         ob_start();
-        (new CoverContrastStep(new PhpBlockFixer()))->run($project);
-        $console = (string) ob_get_clean();
+        try {
+            (new CoverContrastStep(new PhpBlockFixer()))->run($project);
+        } finally {
+            $console = (string) ob_get_clean();
+        }
 
         assert_eq(
             $failed,

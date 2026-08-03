@@ -73,6 +73,23 @@ test('HTML fragment applies bounded optional-close and malformed nesting recover
     assert_eq('<div><span>x</span></div>after', $mismatched->innerHtml());
 });
 
+test('script and style raw text round-trips byte-for-byte while RCDATA still decodes', function () {
+    $script = '<script>if (a &amp;&amp; b &lt; c) { run(); }</script>';
+    $fragment = HtmlFragment::parse($script);
+    assert_eq($script, $fragment->innerHtml());
+    assert_eq(
+        'if (a &amp;&amp; b &lt; c) { run(); }',
+        $fragment->querySelector('script')?->textContent(),
+    );
+
+    $style = '<style>.a &gt; .b { content: "&amp;"; }</style>';
+    assert_eq($style, HtmlFragment::parse($style)->innerHtml());
+
+    $rcdata = HtmlFragment::parse('<textarea>a &amp;&amp; b</textarea>');
+    assert_eq('a && b', $rcdata->querySelector('textarea')?->textContent());
+    assert_eq('<textarea>a &amp;&amp; b</textarea>', $rcdata->innerHtml());
+});
+
 test('RichText keeps inline semantics while canonicalizing entities NBSP attributes and br', function () {
     $nbsp = "\u{00A0}";
     $input = "<STRONG data-X='A&amp;B'>A&#160;B{$nbsp}C &amp; D</STRONG>"
