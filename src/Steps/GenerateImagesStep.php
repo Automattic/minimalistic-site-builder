@@ -51,12 +51,17 @@ final class GenerateImagesStep implements Step
      *        null disables that repair (filtered images just fail)
      * @param ?string $repairModel model for the rewrite (the "small" tier);
      *        null falls back to the Llm client's default model
+     * @param ?PromptRenderer $renderer renders the repair prompt; null falls
+     *        back to the package's prompts/ dir
      */
     public function __construct(
         private ImageClient $images,
         private ?Llm $llm = null,
         private ?string $repairModel = null,
-    ) {}
+        private ?PromptRenderer $renderer = null,
+    ) {
+        $this->renderer ??= new PromptRenderer(Package::promptsDir());
+    }
 
     public function id(): string
     {
@@ -162,7 +167,6 @@ final class GenerateImagesStep implements Step
             );
 
             $repairs = []; // original index => the filtered failure's error
-            $handled = []; // batch position => true, so stragglers get exactly one pass
 
             // One image's FINAL result. A safety-filtered prompt (already
             // retried by the client) is repairable: log the failed attempt so
@@ -170,13 +174,9 @@ final class GenerateImagesStep implements Step
             // pass below instead of marking it failed outright. Everything
             // else finishes and persists immediately, so progress survives an
             // interruption while the rest of the batch is still generating.
-            $handle = function (int $pos, array $result) use (
-                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs, &$handled
+            $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
+                $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, &$repairs
             ): void {
-                if (isset($handled[$pos])) {
-                    return;
-                }
-                $handled[$pos] = true;
                 $i = $indices[$pos];
                 $filename = (string) $specs[$i]['filename'];
 
@@ -190,17 +190,7 @@ final class GenerateImagesStep implements Step
 
                 $this->finish($project, $specs, $i, $batchSpecs[$pos], $result, $resolved, $imageGrade);
                 $project->writeJsonAtomic('images.json', $specs);
-            };
-
-            $results = $this->images->generateBatch($batchSpecs, $handle);
-
-            // A client that omitted a result (or delivered no onResult) still
-            // yields exactly one final record per image.
-            foreach ($indices as $pos => $i) {
-                if (!isset($handled[$pos])) {
-                    $handle($pos, $results[$pos] ?? ['ok' => false, 'error' => 'no result returned']);
-                }
-            }
+            });
 
             if ($repairs !== []) {
                 $this->repairFiltered($project, $specs, $repairs, $siteContext, $imageGrade, $resolved);
@@ -468,11 +458,10 @@ final class GenerateImagesStep implements Step
         ));
 
         // Rewrite all the rejected subjects in one concurrent LLM batch.
-        $renderer = new PromptRenderer(Package::promptsDir());
         $requests = [];
         foreach ($repairs as $i => $error) {
             $requests[$i] = [
-                'prompt' => $renderer->render('image-prompt-repair.md', [
+                'prompt' => $this->renderer->render('image-prompt-repair.md', [
                     'subject' => (string) ($specs[$i]['subject'] ?? ''),
                     'reason'  => $error,
                 ]),
@@ -534,14 +523,9 @@ final class GenerateImagesStep implements Step
         // lose every successful repair if a later request is interrupted.
         $indices = array_keys($regenSpecs);
         $batchSpecs = array_values($regenSpecs);
-        $handled = [];
-        $handle = function (int $pos, array $result) use (
-            $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, $subjects, &$handled
+        $this->drainBatch($batchSpecs, function (int $pos, array $result) use (
+            $project, &$specs, $indices, $batchSpecs, $imageGrade, &$resolved, $subjects
         ): void {
-            if (isset($handled[$pos])) {
-                return;
-            }
-            $handled[$pos] = true;
             $i = $indices[$pos];
             $this->finish(
                 $project,
@@ -554,12 +538,33 @@ final class GenerateImagesStep implements Step
                 $subjects[$i]
             );
             $project->writeJsonAtomic('images.json', $specs);
+        });
+    }
+
+    /**
+     * Run one generation batch, guaranteeing $handle sees exactly one final
+     * result per spec: duplicate deliveries for a position are ignored, and a
+     * client that omitted a result (or delivered no onResult) still yields
+     * one final record per image.
+     *
+     * @param array<int,array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string}> $batchSpecs
+     * @param callable(int,array<string,mixed>):void $handle one batch position's final result
+     */
+    private function drainBatch(array $batchSpecs, callable $handle): void
+    {
+        $handled = []; // batch position => true, so stragglers get exactly one pass
+        $once = function (int $pos, array $result) use ($handle, &$handled): void {
+            if (isset($handled[$pos])) {
+                return;
+            }
+            $handled[$pos] = true;
+            $handle($pos, $result);
         };
 
-        $results = $this->images->generateBatch($batchSpecs, $handle);
-        foreach ($indices as $pos => $i) {
+        $results = $this->images->generateBatch($batchSpecs, $once);
+        foreach (array_keys($batchSpecs) as $pos) {
             if (!isset($handled[$pos])) {
-                $handle($pos, $results[$pos] ?? ['ok' => false, 'error' => 'no result returned']);
+                $once($pos, $results[$pos] ?? ['ok' => false, 'error' => 'no result returned']);
             }
         }
     }
