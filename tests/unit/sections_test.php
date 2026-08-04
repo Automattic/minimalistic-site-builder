@@ -42,7 +42,16 @@ function sections_fixture(): array
     $tmp = sys_get_temp_dir() . '/builder_sec_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'name' => 'Base', 'color' => '#ffffff'],
+            ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#111111'],
+            ['slug' => 'primary', 'name' => 'Primary', 'color' => '#274c77'],
+            ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#e5e7eb'],
+            ['slug' => 'accent', 'name' => 'Accent', 'color' => '#9a3412'],
+        ]]],
+    ]);
     $project->writeJson('designDirection.json', [
         'description' => 'A clear, confident direction.',
         'canvas' => 'full-bleed',
@@ -493,6 +502,41 @@ test('the canonical front contract reaches only the dedicated hero request', fun
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('an overlay-planned site whose palette fails the scrim check is briefed as stacked', function () {
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV); // a forced archetype would bypass the contract pool
+    [$project, $tmp] = sections_fixture(); // front hero is image-led → the PLAN alone says overlay
+    // Every palette role is a mid grey: the contract's token verification
+    // cannot prove a readable overlay foreground, so the resolved MODE
+    // diverges from the structural plan and both seams brief stacked.
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'name' => 'Base', 'color' => '#8A8A8A'],
+            ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#7A7A7A'],
+            ['slug' => 'primary', 'name' => 'Primary', 'color' => '#6E6E6E'],
+            ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#9A9A9A'],
+            ['slug' => 'accent', 'name' => 'Accent', 'color' => '#808080'],
+        ]]],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    $header = $reqs['header']['prompt'];
+    assert_contains('"mode": "stacked"', $header, 'the unreadable palette downgrades the briefed relation');
+    assert_true(
+        !str_contains($header, 'ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**'),
+        'the unreadable overlay must not be assigned'
+    );
+    assert_true(
+        !str_contains($header, 'DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid'),
+        'the behavior contract must not promise the overlay shell'
+    );
+    $hero = sections_request_text($reqs['page-home--hero']);
+    assert_contains('"mode": "stacked"', $hero, 'the hero composes for stacked chrome');
+    assert_true(!str_contains($hero, '"mode": "overlay"'), 'no overlay contract reaches the hero');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('HEADER_ARCHETYPE env forces the header archetype in the header prompt', function () {
     [$project, $tmp] = sections_fixture();
     putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV . '=branded-lockup');
@@ -517,6 +561,8 @@ test('the header prompt carries an archetype assignment and the full catalog', f
     assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $reqs['header']['prompt']);
     assert_contains('branded-lockup', $reqs['header']['prompt']); // new catalog entries render
     assert_contains('wp:site-logo', $reqs['header']['prompt']);
+    assert_contains('DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid', $reqs['header']['prompt']);
+    assert_contains('NEVER add `style.position`', $reqs['header']['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -39,11 +39,12 @@ test('HeaderUnit generates a constrained header from self-contained input', func
         'hero_brief' => 'PART-HERO-SENTINEL',
         'nav_rule'   => '- PART-NAV-SENTINEL',
         'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'branded-lockup'),
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
     ]));
     $markup = $result->markup;
 
     $prompt = $llm->calls[0]['prompt'];
-    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL', 'ABOVE-FOLD CONTRACT', 'branded-lockup'] as $sentinel) {
+    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL', 'ABOVE-FOLD CONTRACT', 'branded-lockup', 'PART-BEHAVIOR-SENTINEL'] as $sentinel) {
         assert_contains($sentinel, $prompt);
     }
     assert_eq('header', $llm->calls[0]['opts']['log_label'] ?? null);

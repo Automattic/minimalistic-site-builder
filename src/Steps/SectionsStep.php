@@ -8,6 +8,7 @@ use Automattic\SiteBuild\AboveFoldPartFacts;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FooterComposition;
+use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Llm;
@@ -607,10 +608,18 @@ final class SectionsStep implements Step
         $designDirection = DesignDirectionStep::readFor($project);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
 
+        // One read serves both consumers: the raw text goes verbatim into the
+        // prompts and the decoded palette drives the header-behavior preview.
+        $themeJsonText = $project->readText('theme/theme.json');
+        $themeJson = json_decode($themeJsonText, true);
+        if (!is_array($themeJson)) {
+            throw new \RuntimeException('sections: theme/theme.json is not valid JSON (run theme-json first)');
+        }
+
         $common = [
             'site_spec'        => $siteSpec,
             'language'         => SiteSpecStep::languageOf($project),
-            'theme_json'       => $project->readText('theme/theme.json'),
+            'theme_json'       => $themeJsonText,
             'design_direction' => $designDirection,
             'site_pages'       => PagePlanStep::sitePagesList($pages),
         ];
@@ -638,6 +647,17 @@ final class SectionsStep implements Step
             forcedHeaderArchetype: Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
         );
         $frontContract = AboveFoldContract::frontContract($contract);
+        // Preview the runtime header behavior for the contract's relation so
+        // the header author designs for its actual shell states (BIGR-762).
+        // HeaderHeroStep re-resolves against the delivered markup later; this
+        // brief is advisory, never a competing decision.
+        $headerBehavior = HeaderBehavior::resolve(
+            $pages,
+            (string) $contract['header']['mode'],
+            ContrastFixStep::paletteMap($project->readJson('theme/theme.json')),
+            (string) $contract['header']['archetype'] ?: null,
+            HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project)),
+        )['behavior'];
         $jobs = [
             'header' => [
                 'unit'  => $this->headerUnit,
@@ -646,6 +666,7 @@ final class SectionsStep implements Step
                     'hero_brief' => self::heroBrief($frontSections),
                     'nav_rule'   => self::navRuleFor(count($pages)),
                     'above_fold_contract' => $contract,
+                    'header_behavior' => HeaderBehavior::promptContract($headerBehavior),
                 ],
                 'file'  => 'parts/header.html',
             ],

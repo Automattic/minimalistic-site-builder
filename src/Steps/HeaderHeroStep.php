@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
+use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Narrator;
@@ -13,41 +14,57 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (deterministic): finalize the persisted two-phase above-fold contract
- * after section rhythm and layout normalization. Header, hero, and page
- * openings are independent generated units; this is their narrow objective
- * backstop, not a general aesthetic hero rewriter.
+ * after section rhythm and layout normalization, and resolve the header's
+ * runtime behavior. Header, hero, and page openings are independent generated
+ * units; this is their narrow objective backstop, not a general aesthetic
+ * hero rewriter.
  *
- * Input:  delivery-phase aboveFold.json + pages.json + siteSpec.json + parts
- * Output: matching part/page repairs + final-phase aboveFold.json, actionable
- *         loss warnings, and logs/header-hero.txt for successful repairs.
+ * Input:  delivery-phase aboveFold.json + pages.json + designDirection.json
+ *         + siteSpec.json + theme/theme.json + parts
+ * Output: matching part/page repairs + final-phase aboveFold.json + the
+ *         closed headerBehavior.json artifact, actionable loss warnings, and
+ *         logs/header-hero.txt for successful repairs.
  *
- * Objective repairs include:
- *  1. Overlay wiring — in overlay mode the header's top-level group MUST
- *     carry the `header-overlay` class (the theme CSS shipped unused 6/6
- *     audited builds) and must be transparent and non-sticky; in stacked
- *     mode a stray `header-overlay` class is removed.
- *  2. Fold budget — in stacked mode an opaque header consumes ~100px of the
-     *     first viewport, so a page-opening cover taller than 80vh is lowered to
+ * Objective repairs/contracts:
+ *  1. Header behavior — resolve static/sticky-soft/overlay-to-solid from the
+ *     final contract relation, the actual palette, and the motion profile,
+ *     then persist the closed six-field headerBehavior.json artifact. The
+ *     contract's foreground/protection tokens are the authored color inputs,
+ *     so resolved states stay consistent with the persisted relation.
+ *  2. Position ownership — remove the legacy inner `header-overlay` hook and
+ *     root/nested persistent position declarations (attrs and saved HTML).
+ *     The assembled outer shell exclusively owns absolute/sticky/fixed
+ *     geometry; the inner group owns visual states.
+ *  3. State colors — canonicalize the root visual-state classes and enforce
+ *     one palette-token foreground that remains readable on both opaque
+ *     states. Overlay starts transparent and stacked modes start opaque.
+ *  4. Nested Group padding — a legacy/generated theme may put vertical
+ *     padding on the global core/group style, which matches every structural
+ *     Group nested inside the header and compounds into a giant bar. Missing
+ *     descendant top/bottom values are set to zero while explicit padding
+ *     (including a double-decker strip) and the root's compact padding survive.
+ *  5. Fold budget — in stacked mode an opaque header consumes ~100px of the
+ *     first viewport, so a page-opening cover taller than 80vh is lowered to
  *     80vh (header + cover must fit ~100vh; audited covers ran 86-92vh and
  *     pushed the hero H1 and CTA below the fold). Only the cover half is
  *     enforced here: the header's own height is asked for in prompts/header.md
- *     and never measured, so the cap assumes a compliant header. A header that
- *     busts its budget still pushes content below the fold, and this step will
- *     not say so — estimating header height the way estimatedRowWidth()
- *     estimates width would be the way to close that.
- *  3. Nav collapse — WordPress's hamburger only engages below 600px, while
+ *     and never measured, so the cap assumes a compliant header.
+ *  6. Nav collapse — WordPress's hamburger only engages below 600px, while
  *     an over-wide title/nav row wraps into a 2-3 row header across the
  *     whole tablet range. When the estimated single-row width exceeds the
  *     budget, the navigation gets `"overlayMenu":"always"`.
- *  4. Title scale — a site title at `section-title`/`display` competes with
+ *  7. Title scale — a site title at `section-title`/`display` competes with
  *     the hero's display H1 (audited ratios collapsed to 1.33x); it is
  *     rewritten to `heading` unless the build forced the oversized-wordmark
  *     archetype, whose whole point is a display-scale wordmark.
- *  5. Exact root archetype marker and contract-owned foreground/protection
- *     tokens, plus authoritative primary-action correspondence.
+ *  8. Exact root archetype marker and contract-owned foreground/protection
+ *     tokens, plus authoritative primary-action correspondence, header echo
+ *     and duplicate-CTA dedupe against the delivered hero, and objective
+ *     overlay-evidence checks on the generated opening markup.
  *
  * Runs BEFORE fix-blocks on purpose (same rationale as contrast-fix and
  * motion-sanity): repairs rewrite only the block-comment JSON attributes,
@@ -59,7 +76,8 @@ final class HeaderHeroStep implements Step
 {
     private const REPORT_FILE = 'header-hero.txt';
 
-    private const OVERLAY_CLASS = 'header-overlay';
+    /** The retired inner positioning hook; the outer shell owns geometry. */
+    private const LEGACY_OVERLAY_CLASS = 'header-overlay';
 
     /** A stacked-mode page-opening cover above this many vh is lowered… */
     public const MAX_STACKED_COVER_VH = 80;
@@ -104,11 +122,19 @@ final class HeaderHeroStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['pages.json', 'aboveFold.json', 'designDirection.json', 'siteSpec.json', 'theme/parts/*'],
-            writes: ['theme/parts/*', 'pages.json', 'aboveFold.json', 'warnings.json'],
+            reads: [
+                'pages.json',
+                'aboveFold.json',
+                'designDirection.json',
+                'siteSpec.json',
+                'theme/theme.json',
+                'theme/parts/*',
+            ],
+            writes: ['theme/parts/*', 'pages.json', 'aboveFold.json', HeaderBehavior::FILE, 'warnings.json'],
             concurrent: false,
         );
     }
+
 
     public function run(Project $project): void
     {
@@ -132,11 +158,75 @@ final class HeaderHeroStep implements Step
         $siteName = (string) ($siteSpec['name'] ?? '');
         $pageTitles = array_map(static fn (array $p): string => (string) ($p['title'] ?? ''), $pages);
 
+        // Behavior inputs (BIGR-762): the theme palette, motion-derived
+        // transition, and page background feed the state resolver. The
+        // contract's tokens are the authored color inputs, so resolved states
+        // stay consistent with the persisted above-fold relation.
+        $theme = $project->exists('theme/theme.json') ? $project->readJson('theme/theme.json') : [];
+        $palette = ContrastFixStep::paletteMap($theme);
+        $transition = HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project));
+        $pageBackground = self::pageBackgroundSlug($theme);
+        $resolveBehavior = static function (
+            string $behaviorMode,
+            string $behaviorArchetype,
+            string $behaviorForeground,
+            string $behaviorProtection,
+        ) use ($pages, $palette, $transition, $pageBackground): array {
+            return HeaderBehavior::resolve(
+                $pages,
+                $behaviorMode,
+                $palette,
+                $behaviorArchetype !== '' ? $behaviorArchetype : null,
+                $transition,
+                $behaviorMode === AboveFoldContract::MODE_STACKED && $behaviorProtection !== ''
+                    ? $behaviorProtection
+                    : null,
+                $behaviorForeground !== '' ? $behaviorForeground : null,
+                $pageBackground,
+            );
+        };
+
         $report = [];
         $warnings = [];
         $writes = [];
         $headerRel = 'parts/header.html';
         $header = $project->readText('theme/' . $headerRel);
+        $authoredPositions = self::removedAuthoredPositions($header);
+
+        // Objective overlay evidence (BIGR-762): a planned overlay must be
+        // earned by the generated opening markup. Problems do not flip the
+        // relation here — they are injected into the contract facts below so
+        // the finalizer records the downgrade through its one reviewed path.
+        $openingProblems = $mode === AboveFoldContract::MODE_OVERLAY
+            ? self::overlayOpeningProblems($project, $pages)
+            : [];
+        $withOverlayEvidence = static function (array $facts) use ($openingProblems): array {
+            if ($openingProblems === []) {
+                return $facts;
+            }
+            $support = is_array($facts['opening_overlay_support'] ?? null)
+                ? $facts['opening_overlay_support']
+                : [];
+            foreach ($openingProblems as $problem) {
+                $file = (string) $problem['file'];
+                if (!str_starts_with($file, 'theme/parts/')) {
+                    continue;
+                }
+                $support[basename($file, '.html')] = false;
+            }
+            $facts['opening_overlay_support'] = $support;
+            return $facts;
+        };
+
+        $requestedBehavior = HeaderBehavior::behaviorFor($pages, $mode, $archetype !== '' ? $archetype : null);
+        $behavior = $resolveBehavior($mode, $archetype, $foreground, $protection);
+        if ($openingProblems === []
+            && ($behavior['behavior'] !== $requestedBehavior || $behavior['mode'] !== $mode)) {
+            $warnings[] = "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored='"
+                . $requestedBehavior . "' in mode '{$mode}'; delivered='"
+                . $behavior['behavior'] . "' in mode '{$behavior['mode']}'; disposition=behavior downgraded "
+                . 'because no palette-token foreground/surface pair could preserve readable top and scrolled states';
+        }
         $result = self::fixHeader(
             $header,
             $mode,
@@ -146,6 +236,8 @@ final class HeaderHeroStep implements Step
             $archetype,
             $foreground,
             $protection,
+            $behavior,
+            $theme,
         );
         $writes[$headerRel] = $result['markup'];
         foreach ($result['notes'] as $note) {
@@ -254,14 +346,17 @@ final class HeaderHeroStep implements Step
             }
         }
 
+
         $partBytes = self::partBytes($project, $writes);
-        $facts = AboveFoldPartFacts::inspect($pages, $partBytes, $delivery);
+        $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $delivery));
         $degradationOffset = count((array) ($delivery['degradations'] ?? []));
         $final = AboveFoldContract::finalizeMarkup($delivery, $pages, $facts);
 
         // Rhythm may have invalidated image protection after delivery. Apply
         // only the resulting objective relation to the already-generated
-        // header; no new aesthetic selection occurs here.
+        // header; no new aesthetic selection occurs here. The behavior
+        // artifact is re-resolved for the final relation so the persisted
+        // shell states never describe a mode the contract abandoned.
         if (($final['header']['mode'] ?? null) !== $mode
             || ($final['header']['archetype'] ?? null) !== $archetype
         ) {
@@ -269,6 +364,7 @@ final class HeaderHeroStep implements Step
             $archetype = (string) $final['header']['archetype'];
             $foreground = (string) $final['header']['foreground_token'];
             $protection = (string) $final['header']['protection_token'];
+            $behavior = $resolveBehavior($mode, $archetype, $foreground, $protection);
             $headerResult = self::fixHeader(
                 $writes[$headerRel],
                 $mode,
@@ -278,11 +374,34 @@ final class HeaderHeroStep implements Step
                 $archetype,
                 $foreground,
                 $protection,
+                $behavior,
+                $theme,
             );
             $writes[$headerRel] = $headerResult['markup'];
             foreach ($headerResult['notes'] as $note) {
                 $report[] = "[{$headerRel}] {$note}";
             }
+        }
+
+        // Overlay-evidence rows report the final resolved landing state, so
+        // they are emitted once the final behavior is known.
+        foreach ($openingProblems as $problem) {
+            $warnings[] = "file='{$problem['file']}'; block='page-opening composition'; authored="
+                . Warnings::value($problem['authored'])
+                . "; delivered='{$behavior['behavior']}' in mode '{$behavior['mode']}'; "
+                . 'disposition=overlay downgraded because the generated opening ' . $problem['reason'];
+        }
+
+        // Authored positioning is genuine loss only when the final resolved
+        // shell has no equivalent behavior for it.
+        foreach ($authoredPositions as $position) {
+            if (self::outerShellPreservesPosition($position, $behavior)) {
+                continue;
+            }
+            $warnings[] = "file='theme/{$headerRel}'; block='{$position['block']}'; authored="
+                . Warnings::value($position['value'])
+                . "; delivered=removed; disposition=inner {$position['type']} behavior removed because the "
+                . "resolved '{$behavior['behavior']}' outer shell has no equivalent behavior for that block";
         }
 
         // The height budget follows the delivered relation, not the initial
@@ -312,7 +431,7 @@ final class HeaderHeroStep implements Step
         $deliveryForRefinalize = $final;
         $deliveryForRefinalize['phase'] = AboveFoldContract::PHASE_DELIVERY;
         $partBytes = self::partBytes($project, $writes);
-        $facts = AboveFoldPartFacts::inspect($pages, $partBytes, $deliveryForRefinalize);
+        $facts = $withOverlayEvidence(AboveFoldPartFacts::inspect($pages, $partBytes, $deliveryForRefinalize));
         $final = AboveFoldContract::finalizeMarkup($deliveryForRefinalize, $pages, $facts);
         $mode = (string) $final['header']['mode'];
         array_push($warnings, ...AboveFoldContract::warningRows($final, $degradationOffset));
@@ -326,20 +445,34 @@ final class HeaderHeroStep implements Step
         $pagesArtifact['pages'] = $pages;
         $project->writeJson('pages.json', $pagesArtifact);
         $project->writeJson('aboveFold.json', $final);
+        $project->writeJson(HeaderBehavior::FILE, $behavior);
         $project->addWarnings($this->id(), $warnings);
         if ($report === []) {
-            $report[] = "Header mode '{$mode}': header and page-opening sections already satisfy the "
+            $report[] = "Header mode '{$mode}', behavior '{$behavior['behavior']}': header and page-opening "
+                . 'sections already satisfy the '
                 . 'repairs this step makes. Header height is prompt-enforced only and was not measured.';
         }
         $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
-        Narrator::write(sprintf("  header/hero: mode '%s' (details: logs/%s)\n", $mode, self::REPORT_FILE));
+        Narrator::write(sprintf(
+            "  header/hero: mode '%s', behavior '%s' (details: logs/%s)\n",
+            $mode,
+            $behavior['behavior'],
+            self::REPORT_FILE,
+        ));
     }
 
     /**
-     * Repair the header part against the contract. Pure — unit-testable.
+     * Repair the header part against the persisted contract and the resolved
+     * behavior. Pure — unit-testable.
      *
      * @param list<string> $pageTitles page-list nav labels (a wp:page-list
      *                                 renders one item per site page)
+     * @param array<mixed>|null $behavior resolved HeaderBehavior artifact;
+     *                                    null keeps this helper useful for
+     *                                    isolated legacy composition tests
+     * @param array<mixed> $theme generated theme.json; used only to neutralize
+     *                            recursive core/group padding on structural
+     *                            header descendants
      * @return array{markup:string, notes:string[]}
      */
     public static function fixHeader(
@@ -351,6 +484,8 @@ final class HeaderHeroStep implements Step
         string $archetype = '',
         string $foreground = '',
         string $protection = '',
+        ?array $behavior = null,
+        array $theme = [],
     ): array {
         $doc = BlockMarkup::parse($markup);
         $notes = [];
@@ -361,6 +496,7 @@ final class HeaderHeroStep implements Step
         } elseif ($top !== null) {
             self::stripOverlay($doc, $top, $notes);
         }
+        self::stripInnerPositions($doc, $top, $notes);
         if ($top !== null) {
             self::enforceContractIdentity(
                 $doc,
@@ -369,6 +505,19 @@ final class HeaderHeroStep implements Step
                 $archetype,
                 $foreground,
                 $protection,
+                $notes,
+            );
+        }
+        if ($top !== null && $behavior !== null) {
+            $behavior = HeaderBehavior::validateArtifact($behavior);
+            self::applyBehaviorClasses($doc, $top, $behavior, $notes);
+            self::applyRootSurfaces($doc, $top, $behavior, $notes);
+        }
+        if ($top !== null) {
+            self::neutralizeInheritedGroupPadding(
+                $doc,
+                $top,
+                self::inheritedCoreGroupPaddingSides($theme),
                 $notes,
             );
         }
@@ -409,12 +558,19 @@ final class HeaderHeroStep implements Step
         $rendered = $doc->render();
         if ($top !== null && $doc->name($top) === 'group') {
             $classRepairs = [];
-            if ($mode === AboveFoldContract::MODE_STACKED && $protection !== '') {
+            // The behavior artifact may deliberately start transparent (a
+            // glass/transparent top treatment); only a solid top state
+            // re-syncs an opaque surface into the saved HTML.
+            $topSurface = $behavior === null ? $protection : (string) $behavior['topSurface'];
+            if ($mode === AboveFoldContract::MODE_STACKED
+                && $topSurface !== ''
+                && $topSurface !== HeaderBehavior::TRANSPARENT
+            ) {
                 $surfaceNotes = [];
                 $beforeSurface = $rendered;
                 $rendered = GeneratedMarkup::withRootBackgroundColor(
                     $rendered,
-                    $protection,
+                    $topSurface,
                     $surfaceNotes,
                     'header',
                 );
@@ -423,10 +579,11 @@ final class HeaderHeroStep implements Step
                 }
                 array_push($notes, ...$surfaceNotes);
             }
-            if ($foreground !== '') {
+            $rootForeground = $behavior === null ? $foreground : (string) $behavior['foreground'];
+            if ($rootForeground !== '') {
                 $rendered = GeneratedMarkup::withRootTextColor(
                     $rendered,
-                    $foreground,
+                    $rootForeground,
                     'header',
                     $classRepairs,
                 );
@@ -440,20 +597,184 @@ final class HeaderHeroStep implements Step
                     $classRepairs,
                 );
             }
-            if ($mode === AboveFoldContract::MODE_OVERLAY) {
-                $rendered = GeneratedMarkup::withRootClassToken(
-                    $rendered,
-                    self::OVERLAY_CLASS,
-                    'header',
-                    $classRepairs,
-                );
-            }
             if ($classRepairs !== []) {
                 $notes[] = 'header root class hooks synchronized in block attributes and saved HTML';
             }
         }
-
+        [$rendered, $removedInlinePosition] = self::withoutInlinePosition($rendered);
+        if ($removedInlinePosition) {
+            $notes[] = 'removed inline position declaration(s) from the header part '
+                . '(the assembled outer shell exclusively owns header positioning)';
+        }
         return ['markup' => $rendered, 'notes' => $notes];
+    }
+
+    /**
+     * Verify the generated first visual band, not only the plan that prompted
+     * it. A missing image or a light leading group makes overlay aesthetically
+     * wrong even though the trusted scrim would keep its text technically
+     * readable, so the deterministic fallback uses ordinary stacked chrome.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @return list<array{file:string,authored:string,reason:string}>
+     */
+    private static function overlayOpeningProblems(Project $project, array $pages): array
+    {
+        $problems = [];
+        foreach ($pages as $page) {
+            $pageSlug = trim((string) ($page['slug'] ?? ''));
+            $opening = SectionsStep::openingSection($page);
+            $sectionSlug = is_array($opening) ? trim((string) ($opening['slug'] ?? '')) : '';
+            if ($pageSlug === '' || $sectionSlug === '') {
+                $problems[] = [
+                    'file' => HeaderBehavior::FILE,
+                    'authored' => "overlay-to-solid for page '{$pageSlug}'",
+                    'reason' => 'has no locatable first section',
+                ];
+                continue;
+            }
+            $rel = 'theme/parts/' . SectionsStep::partSlug($pageSlug, $sectionSlug) . '.html';
+            if (!$project->exists($rel)) {
+                $problems[] = [
+                    'file' => $rel,
+                    'authored' => "overlay-to-solid for page '{$pageSlug}'",
+                    'reason' => 'part is missing',
+                ];
+                continue;
+            }
+            $evidence = self::overlayOpeningEvidence($project->readText($rel));
+            if ($evidence === null) {
+                $problems[] = [
+                    'file' => $rel,
+                    'authored' => "overlay-to-solid for page '{$pageSlug}'",
+                    'reason' => 'does not begin with an image-backed cover or a contrast surface',
+                ];
+            }
+        }
+        return $problems;
+    }
+
+    /** Return the qualifying first-band evidence, or null when none exists. */
+    private static function overlayOpeningEvidence(string $markup): ?string
+    {
+        $doc = BlockMarkup::parse($markup);
+        $i = $doc->topLevel();
+        if ($i === null || self::hasVisibleLeadingMarkup($markup, $doc->openingOffset($i))) {
+            return null;
+        }
+        while ($i !== null) {
+            $attrs = $doc->attrs($i) ?? [];
+            if ($doc->name($i) === 'cover') {
+                $hasMedia = trim((string) ($attrs['url'] ?? '')) !== ''
+                    || isset($attrs['id'])
+                    || ($attrs['useFeaturedImage'] ?? false) === true
+                    || str_contains($doc->ownHtml($i), 'wp-block-cover__image-background');
+                if ($hasMedia) {
+                    return ($attrs['align'] ?? null) === 'full' ? 'image-backed cover' : null;
+                }
+                if (($attrs['overlayColor'] ?? null) === 'contrast'
+                    || ($attrs['backgroundColor'] ?? null) === 'contrast') {
+                    return 'contrast cover';
+                }
+                return null;
+            }
+            if (($attrs['backgroundColor'] ?? null) === 'contrast') {
+                return 'contrast surface';
+            }
+            if (!self::isTransparentZeroOffsetWrapper($doc, $i, $attrs)) {
+                return null;
+            }
+            $children = $doc->children($i);
+            $i = $children[0] ?? null;
+        }
+        return null;
+    }
+
+    /** Raw text or HTML before the first block would occupy the overlay's top edge. */
+    private static function hasVisibleLeadingMarkup(string $markup, int $firstBlockOffset): bool
+    {
+        $leading = substr($markup, 0, $firstBlockOffset);
+        $leading = preg_replace('/<!--.*?-->/s', '', $leading) ?? $leading;
+        $leading = str_starts_with($leading, "\xEF\xBB\xBF") ? substr($leading, 3) : $leading;
+        return trim($leading) !== '';
+    }
+
+    /**
+     * Only a neutral group may be traversed on the way to the first visual
+     * band. Any authored surface or top spacing means the nested cover does
+     * not actually meet the page's top edge beneath the viewport-wide header.
+     *
+     * @param array<mixed> $attrs
+     */
+    private static function isTransparentZeroOffsetWrapper(BlockMarkup $doc, int $i, array $attrs): bool
+    {
+        if ($doc->name($i) !== 'group') {
+            return false;
+        }
+
+        foreach ([
+            $attrs['backgroundColor'] ?? null,
+            $attrs['gradient'] ?? null,
+            $attrs['style']['color']['background'] ?? null,
+            $attrs['style']['color']['gradient'] ?? null,
+            $attrs['style']['background'] ?? null,
+        ] as $surface) {
+            if (self::hasAuthoredValue($surface)) {
+                return false;
+            }
+        }
+
+        $spacing = is_array($attrs['style']['spacing'] ?? null)
+            ? $attrs['style']['spacing']
+            : [];
+        foreach (['padding', 'margin'] as $property) {
+            $value = $spacing[$property] ?? null;
+            $top = is_array($value) ? ($value['top'] ?? null) : $value;
+            if (self::hasAuthoredValue($top) && !self::isZeroCssLength($top)) {
+                return false;
+            }
+        }
+
+        $ownHtml = $doc->ownHtml($i);
+        $neutralWrapper = preg_replace('/<!--(?!\s*wp:).*?-->/s', '', $ownHtml) ?? $ownHtml;
+        if (preg_match('/^\s*<(?:div|main|section|article|aside)\b[^>]*>\s*$/is', $neutralWrapper) !== 1) {
+            // Text, media, or raw HTML before the first child block occupies
+            // the top edge just as surely as document-level leading markup.
+            return false;
+        }
+        if (preg_match('/\bbackground(?:-color|-image)?\s*:/i', $ownHtml)
+            || preg_match('/\bclass\s*=\s*(["\'])[^"\']*\bhas-background\b[^"\']*\1/is', $ownHtml)
+            || preg_match('/\bhas-[a-z0-9-]+-background-color\b/i', $ownHtml)) {
+            return false;
+        }
+        if (preg_match_all(
+            '/\b(?:padding|margin)(?:-top|-block-start|-block)?\s*:\s*([^;"\']+)/i',
+            $ownHtml,
+            $matches,
+        )) {
+            foreach ($matches[1] as $value) {
+                $top = preg_split('/\s+/', trim($value), -1, PREG_SPLIT_NO_EMPTY)[0] ?? '';
+                if ($top !== '' && !self::isZeroCssLength($top)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static function hasAuthoredValue(mixed $value): bool
+    {
+        return $value !== null && $value !== '' && $value !== [];
+    }
+
+    private static function isZeroCssLength(mixed $value): bool
+    {
+        if (is_int($value) || is_float($value)) {
+            return (float) $value === 0.0;
+        }
+        return is_string($value)
+            && preg_match('/^[+-]?(?:0+(?:\.0*)?|\.0+)(?:[a-z%]+)?(?:\s*!important)?$/i', trim($value)) === 1;
     }
 
     /**
@@ -537,20 +858,137 @@ final class HeaderHeroStep implements Step
         $doc->setAttrs($top, $attrs);
     }
 
+
     /**
-     * Overlay mode: the top-level group must carry the `header-overlay` class
-     * hook (the shipped `.header-overlay` CSS does the floating) and must be
-     * transparent and non-sticky — an opaque or sticky overlay defeats it.
+     * Return the non-zero vertical sides a global core/group style applies to
+     * every Group block. Scalar padding is a four-side shorthand, so it
+     * activates both vertical sides. Malformed containers are left for the
+     * theme normalizer/validator instead of guessed at here.
+     *
+     * @param array<mixed> $theme
+     * @return list<string>
+     */
+    private static function inheritedCoreGroupPaddingSides(array $theme): array
+    {
+        $padding = $theme['styles']['blocks']['core/group']['spacing']['padding'] ?? null;
+        if (is_string($padding) || is_int($padding) || is_float($padding)) {
+            return self::isZeroCssLength($padding) ? [] : ['top', 'bottom'];
+        }
+        if (!is_array($padding) || ($padding !== [] && array_is_list($padding))) {
+            return [];
+        }
+
+        $sides = [];
+        foreach (['top', 'bottom'] as $side) {
+            if (self::hasAuthoredValue($padding[$side] ?? null)
+                && !self::isZeroCssLength($padding[$side])) {
+                $sides[] = $side;
+            }
+        }
+        return $sides;
+    }
+
+    /**
+     * Structural Groups beneath the header root must not inherit section-scale
+     * vertical padding. Add a zero only when a side has no authored value;
+     * explicit component padding survives unchanged. The root is excluded so
+     * its prompt-owned sm/md breathing room remains authoritative.
+     *
+     * @param list<string> $sides
+     * @param list<string> $notes
+     */
+    private static function neutralizeInheritedGroupPadding(
+        BlockMarkup $doc,
+        int $top,
+        array $sides,
+        array &$notes,
+    ): void {
+        if ($sides === []) {
+            return;
+        }
+
+        $changed = 0;
+        foreach ($doc->indices() as $i) {
+            if ($i === $top || $doc->name($i) !== 'group' || !self::isDescendantOf($doc, $i, $top)) {
+                continue;
+            }
+            $attrs = $doc->attrs($i) ?? [];
+            $style = $attrs['style'] ?? null;
+            if ($style !== null
+                && (!is_array($style) || ($style !== [] && array_is_list($style)))) {
+                continue;
+            }
+            $style = is_array($style) ? $style : [];
+            $spacing = $style['spacing'] ?? null;
+            if ($spacing !== null
+                && (!is_array($spacing) || ($spacing !== [] && array_is_list($spacing)))) {
+                continue;
+            }
+            $spacing = is_array($spacing) ? $spacing : [];
+            $padding = $spacing['padding'] ?? null;
+            // A scalar is an explicit four-side value. Preserve it rather than
+            // replacing authored component spacing under the guise of repair.
+            if ($padding !== null && !is_array($padding)) {
+                continue;
+            }
+            if (is_array($padding) && $padding !== [] && array_is_list($padding)) {
+                continue;
+            }
+
+            $nodeChanged = false;
+            foreach ($sides as $side) {
+                if (self::hasAuthoredValue($padding[$side] ?? null)) {
+                    continue;
+                }
+                $padding[$side] = '0';
+                $nodeChanged = true;
+            }
+            if ($nodeChanged) {
+                $spacing['padding'] = $padding;
+                $style['spacing'] = $spacing;
+                $attrs['style'] = $style;
+                $doc->setAttrs($i, $attrs);
+                $changed++;
+            }
+        }
+
+        if ($changed > 0) {
+            $notes[] = 'neutralized inherited core/group ' . implode('/', $sides)
+                . " padding on {$changed} descendant header group"
+                . ($changed === 1 ? '' : 's')
+                . ' (explicit component and root padding preserved)';
+        }
+    }
+
+    private static function isDescendantOf(BlockMarkup $doc, int $i, int $ancestor): bool
+    {
+        for ($parent = $doc->parent($i); $parent !== null; $parent = $doc->parent($parent)) {
+            if ($parent === $ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Overlay mode: the top-level group remains visually transparent. The
+     * legacy `header-overlay` hook is removed because it positioned the inner
+     * group absolutely; the assembled outer shell now owns that geometry.
      */
     private static function wireOverlay(BlockMarkup $doc, int $top, array &$notes): void
     {
         $attrs = $doc->attrs($top) ?? [];
         $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $changed = [];
-        if (!in_array(self::OVERLAY_CLASS, $tokens, true)) {
-            $tokens[] = self::OVERLAY_CLASS;
-            $attrs['className'] = implode(' ', $tokens);
-            $changed[] = "added the '" . self::OVERLAY_CLASS . "' class hook";
+        if (in_array(self::LEGACY_OVERLAY_CLASS, $tokens, true)) {
+            $tokens = array_values(array_diff($tokens, [self::LEGACY_OVERLAY_CLASS]));
+            if ($tokens === []) {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = implode(' ', $tokens);
+            }
+            $doc->removeClassTokenInOwnHtml($top, self::LEGACY_OVERLAY_CLASS);
+            $changed[] = "removed the legacy '" . self::LEGACY_OVERLAY_CLASS . "' positioning hook";
         }
         $background = (string) ($attrs['backgroundColor'] ?? '');
         if ($background !== '') {
@@ -559,10 +997,6 @@ final class HeaderHeroStep implements Step
             $doc->removeClassTokenInOwnHtml($top, "has-{$background}-background-color");
             $changed[] = "removed the opaque '{$background}' background";
         }
-        foreach (['base', 'contrast', 'primary', 'secondary', 'accent'] as $surface) {
-            $doc->removeClassTokenInOwnHtml($top, "has-{$surface}-background-color");
-        }
-        $doc->removeClassTokenInOwnHtml($top, 'has-background');
         $gradient = (string) ($attrs['gradient'] ?? '');
         if ($gradient !== '') {
             unset($attrs['gradient']);
@@ -570,14 +1004,13 @@ final class HeaderHeroStep implements Step
             $doc->removeClassTokenInOwnHtml($top, "has-{$gradient}-gradient-background");
             $changed[] = "removed the '{$gradient}' gradient background";
         }
-        if (isset($attrs['style']['color'])) {
-            unset($attrs['style']['color']);
+        if (isset($attrs['style']['color']['background'])) {
+            unset($attrs['style']['color']['background']);
+            if (($attrs['style']['color'] ?? null) === []) {
+                unset($attrs['style']['color']);
+            }
             $doc->removeClassTokenInOwnHtml($top, 'has-background');
             $changed[] = 'removed the custom background color';
-        }
-        if (isset($attrs['style']['position'])) {
-            unset($attrs['style']['position']);
-            $changed[] = 'removed the sticky position';
         }
         if (isset($attrs['style']) && $attrs['style'] === []) {
             unset($attrs['style']);
@@ -585,32 +1018,403 @@ final class HeaderHeroStep implements Step
         if ($changed !== []) {
             $doc->setAttrs($top, $attrs);
             $notes[] = 'overlay header wiring: ' . implode(', ', $changed)
-                . ' (overlay mode floats the header transparently over the hero cover)';
+                . ' (overlay mode starts transparently over the hero; the outer shell owns positioning)';
         }
     }
 
     /**
-     * Stacked mode: a stray `header-overlay` class would float the header
-     * over content that never reserved space for it — remove the hook.
+     * Remove the obsolete inner overlay-positioning class in every mode.
      */
     private static function stripOverlay(BlockMarkup $doc, int $top, array &$notes): void
     {
         $attrs = $doc->attrs($top) ?? [];
         $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        if (!in_array(self::OVERLAY_CLASS, $tokens, true)) {
+        if (!in_array(self::LEGACY_OVERLAY_CLASS, $tokens, true)) {
             return;
         }
-        $kept = array_values(array_diff($tokens, [self::OVERLAY_CLASS]));
+        $kept = array_values(array_diff($tokens, [self::LEGACY_OVERLAY_CLASS]));
         if ($kept === []) {
             unset($attrs['className']);
         } else {
             $attrs['className'] = implode(' ', $kept);
         }
         $doc->setAttrs($top, $attrs);
-        $doc->removeClassTokenInOwnHtml($top, self::OVERLAY_CLASS);
-        $notes[] = "removed the '" . self::OVERLAY_CLASS . "' class "
-            . '(stacked mode: the hero composed for an opaque bar above it, not a floating header)';
+        $doc->removeClassTokenInOwnHtml($top, self::LEGACY_OVERLAY_CLASS);
+        $notes[] = "removed the legacy '" . self::LEGACY_OVERLAY_CLASS . "' class "
+            . '(the assembled outer shell exclusively owns header positioning)';
     }
+
+    /**
+     * The part root may never position the header shell. Descendant relative
+     * positioning can be meaningful local layout and survives; only nested
+     * sticky/fixed behavior is removed as unsupported persistent chrome.
+     */
+    private static function stripInnerPositions(BlockMarkup $doc, ?int $top, array &$notes): void
+    {
+        $removed = [];
+        foreach ($doc->indices() as $i) {
+            $attrs = $doc->attrs($i) ?? [];
+            if (!isset($attrs['style']['position'])) {
+                continue;
+            }
+            $position = $attrs['style']['position'];
+            $type = is_array($position) ? strtolower(trim((string) ($position['type'] ?? ''))) : '';
+            if ($i !== $top && !in_array($type, ['sticky', 'fixed'], true)) {
+                continue;
+            }
+            unset($attrs['style']['position']);
+            if (($attrs['style'] ?? null) === []) {
+                unset($attrs['style']);
+            }
+            $doc->setAttrs($i, $attrs);
+            $removed[] = $doc->name($i) . '=' . json_encode($position, JSON_UNESCAPED_SLASHES);
+        }
+        if ($removed !== []) {
+            $notes[] = 'removed inner block position attribute(s) [' . implode(', ', $removed) . '] '
+                . '(the assembled outer shell exclusively owns header positioning)';
+        }
+    }
+
+    /**
+     * Canonicalize the generated root's visual-state hooks. Stale tokens are
+     * removed from both comment attrs and saved HTML so fix-blocks cannot
+     * resurrect an obsolete behavior; new tokens live in className and are
+     * serialized into HTML by that downstream pass.
+     *
+     * @param array<mixed> $behavior
+     */
+    private static function applyBehaviorClasses(
+        BlockMarkup $doc,
+        int $top,
+        array $behavior,
+        array &$notes,
+    ): void {
+        $expected = HeaderBehavior::rootClasses($behavior);
+        $attrs = $doc->attrs($top) ?? [];
+        $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $isOwned = static fn (string $token): bool => $token === self::LEGACY_OVERLAY_CLASS
+            || $token === 'header-transition-instant'
+            || (bool) preg_match('/^header-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+$/', $token);
+        $kept = array_values(array_filter($tokens, static fn (string $token): bool => !$isOwned($token)));
+        $canonical = array_values(array_unique(array_merge($kept, $expected)));
+        $changed = $canonical !== $tokens;
+        if ($canonical === []) {
+            unset($attrs['className']);
+        } else {
+            $attrs['className'] = implode(' ', $canonical);
+        }
+        if ($changed) {
+            $doc->setAttrs($top, $attrs);
+        }
+
+        $removedHtml = [];
+        if (preg_match_all(
+            '/\bheader-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+\b'
+                . '|\bheader-transition-instant\b|\bheader-overlay\b/',
+            $doc->ownHtml($top),
+            $matches,
+        )) {
+            foreach (array_values(array_unique($matches[0])) as $token) {
+                if (!in_array($token, $expected, true)) {
+                    $doc->removeClassTokenInOwnHtml($top, $token);
+                    $removedHtml[] = $token;
+                }
+            }
+        }
+        if ($changed || $removedHtml !== []) {
+            $notes[] = "root behavior classes canonicalized for '{$behavior['behavior']}'"
+                . ($removedHtml === [] ? '' : '; removed stale saved-HTML tokens ' . implode(', ', $removedHtml));
+        }
+    }
+
+    /** @param array<mixed> $behavior */
+    private static function applyRootSurfaces(
+        BlockMarkup $doc,
+        int $top,
+        array $behavior,
+        array &$notes,
+    ): void {
+        $attrs = $doc->attrs($top) ?? [];
+        $changed = [];
+        $oldBackground = trim((string) ($attrs['backgroundColor'] ?? ''));
+        $oldForeground = trim((string) ($attrs['textColor'] ?? ''));
+        $topSurface = (string) $behavior['topSurface'];
+        $foreground = (string) $behavior['foreground'];
+
+        if ($topSurface === HeaderBehavior::TRANSPARENT) {
+            if ($oldBackground !== '') {
+                unset($attrs['backgroundColor']);
+                $doc->removeClassTokenInOwnHtml($top, "has-{$oldBackground}-background-color");
+                $doc->removeClassTokenInOwnHtml($top, 'has-background');
+                $changed[] = "background '{$oldBackground}' removed for the transparent top state";
+            }
+        } elseif ($oldBackground !== $topSurface) {
+            $attrs['backgroundColor'] = $topSurface;
+            if ($oldBackground !== '') {
+                $doc->removeClassTokenInOwnHtml($top, "has-{$oldBackground}-background-color");
+            }
+            $changed[] = "background set to safe palette surface '{$topSurface}'";
+        }
+        if (isset($attrs['gradient'])) {
+            $gradient = (string) $attrs['gradient'];
+            unset($attrs['gradient']);
+            $doc->removeClassTokenInOwnHtml($top, "has-{$gradient}-gradient-background");
+            $changed[] = "gradient '{$gradient}' removed so the deterministic surface is authoritative";
+        }
+        if (isset($attrs['style']['color']['background'])) {
+            unset($attrs['style']['color']['background']);
+            $changed[] = 'custom background removed so the deterministic palette surface is authoritative';
+        }
+        if (isset($attrs['style']['color']['text'])) {
+            unset($attrs['style']['color']['text']);
+            $changed[] = 'custom text color removed so the deterministic foreground is authoritative';
+        }
+        if (($attrs['style']['color'] ?? null) === []) {
+            unset($attrs['style']['color']);
+        }
+        if (($attrs['style'] ?? null) === []) {
+            unset($attrs['style']);
+        }
+        if ($oldForeground !== $foreground) {
+            $attrs['textColor'] = $foreground;
+            if ($oldForeground !== '') {
+                $doc->removeClassTokenInOwnHtml($top, "has-{$oldForeground}-color");
+            }
+            $changed[] = "foreground set to safe palette token '{$foreground}'";
+        }
+        if ($changed !== []) {
+            $doc->setAttrs($top, $attrs);
+            $notes[] = 'root top/scrolled color contract: ' . implode(', ', $changed);
+        }
+    }
+
+    /**
+     * An HTML tag with its attributes; quoted values may contain `<`/`>`
+     * without ending the match. Both saved-HTML position passes below use it
+     * so only real tag attributes are ever inspected or rewritten.
+     */
+    private const HTML_TAG_PATTERN = '/<[a-z][a-z0-9-]*(?:[^<>"\']|"[^"]*"|\'[^\']*\')*>/i';
+
+    /**
+     * Inline HTML can repeat a block comment's `style.position`. Remove any
+     * root position, plus nested sticky/fixed declarations, while preserving
+     * local descendant relative positioning and every neighboring property.
+     *
+     * Regions come from the block parser: each block contributes only the
+     * HTML it owns, and only tags inside that HTML are edited — visible text
+     * that merely mentions `style="position:fixed"` is never rewritten
+     * (BlockMarkup::replaceInOwnHtml documents the same contract), and a
+     * leading non-block comment cannot displace the true root region.
+     *
+     * @return array{0:string,1:bool}
+     */
+    private static function withoutInlinePosition(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $top = $doc->topLevel();
+        $edits = [];
+        foreach ($doc->indices() as $i) {
+            $own = $doc->ownHtml($i);
+            [$stripped, $nodeChanged] = self::stripInlinePositionFromTags($own, $i !== $top);
+            if ($nodeChanged) {
+                $edits[] = [
+                    'start' => $doc->openingOffset($i) + $doc->openingLength($i),
+                    'length' => strlen($own),
+                    'content' => $stripped,
+                ];
+            }
+        }
+        if ($edits === []) {
+            return [$markup, false];
+        }
+        usort($edits, static fn (array $a, array $b): int => $b['start'] <=> $a['start']);
+        foreach ($edits as $edit) {
+            $markup = substr_replace($markup, $edit['content'], $edit['start'], $edit['length']);
+        }
+        return [$markup, true];
+    }
+
+    /**
+     * Apply the position strip only inside HTML tags, so text content in the
+     * same owned region survives verbatim.
+     *
+     * @return array{0:string,1:bool}
+     */
+    private static function stripInlinePositionFromTags(string $html, bool $persistentOnly): array
+    {
+        $changed = false;
+        $result = preg_replace_callback(
+            self::HTML_TAG_PATTERN,
+            static function (array $match) use (&$changed, $persistentOnly): string {
+                [$tag, $tagChanged] = self::stripInlinePositionDeclarations($match[0], $persistentOnly);
+                $changed = $changed || $tagChanged;
+                return $tag;
+            },
+            $html,
+        );
+        return [is_string($result) ? $result : $html, $changed];
+    }
+
+    /** @return array{0:string,1:bool} */
+    private static function stripInlinePositionDeclarations(string $html, bool $persistentOnly): array
+    {
+        $changed = false;
+        $result = preg_replace_callback(
+            '/\sstyle\s*=\s*(["\'])(.*?)\1/is',
+            static function (array $match) use (&$changed, $persistentOnly): string {
+                $kept = [];
+                $removed = false;
+                foreach (explode(';', $match[2]) as $declaration) {
+                    if (trim($declaration) === '') {
+                        continue;
+                    }
+                    $property = strtolower(trim((string) strstr($declaration, ':', true)));
+                    if ($property === 'position') {
+                        $value = strtolower(trim((string) substr($declaration, strpos($declaration, ':') + 1)));
+                        if ($persistentOnly && !in_array($value, ['sticky', 'fixed'], true)) {
+                            $kept[] = trim($declaration);
+                            continue;
+                        }
+                        $removed = true;
+                        continue;
+                    }
+                    $kept[] = trim($declaration);
+                }
+                if (!$removed) {
+                    return $match[0];
+                }
+                $changed = true;
+                return $kept === [] ? '' : ' style=' . $match[1] . implode(';', $kept) . $match[1];
+            },
+            $html,
+        );
+        return [is_string($result) ? $result : $html, $changed];
+    }
+
+    /**
+     * The palette slug theme.json paints behind the page body, in either of
+     * the preset spellings the pipeline emits. A transparent sticky start
+     * reveals exactly this color, so the resolver verifies against it; null
+     * (raw hex or absent) lets the resolver use its base-token convention.
+     *
+     * @param array<string,mixed> $theme
+     */
+    private static function pageBackgroundSlug(array $theme): ?string
+    {
+        $value = (string) ($theme['styles']['color']['background'] ?? '');
+        if (preg_match('/^var\(--wp--preset--color--([a-z0-9-]+)\)$/', trim($value), $match)
+            || preg_match('/^var:preset\|color\|([a-z0-9-]+)$/', trim($value), $match)) {
+            return $match[1];
+        }
+        return null;
+    }
+
+    /** @return array{0:?string,1:?string} */
+    private static function authoredRootColors(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $top = $doc->topLevel();
+        if ($top === null) {
+            return [null, null];
+        }
+        $attrs = $doc->attrs($top) ?? [];
+        $background = trim((string) ($attrs['backgroundColor'] ?? ''));
+        $foreground = trim((string) ($attrs['textColor'] ?? ''));
+        return [$background !== '' ? $background : null, $foreground !== '' ? $foreground : null];
+    }
+
+
+    /**
+     * Sticky/fixed authored behavior becomes genuine loss only when the final
+     * behavior is static. Return compact source evidence for actionable rows.
+     *
+     * @return list<array{block:string,type:string,value:mixed,root:bool}>
+     */
+    private static function removedAuthoredPositions(string $markup): array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $top = $doc->topLevel();
+        $findings = [];
+        foreach ($doc->indices() as $i) {
+            $position = ($doc->attrs($i) ?? [])['style']['position'] ?? null;
+            $type = is_array($position) ? strtolower(trim((string) ($position['type'] ?? ''))) : '';
+            if ($position === null || ($i !== $top && !in_array($type, ['sticky', 'fixed'], true))) {
+                continue;
+            }
+            $findings[] = [
+                'block' => 'wp:' . $doc->name($i) . '[' . $i . ']',
+                'type' => $type,
+                'value' => $position,
+                'root' => $i === $top,
+            ];
+        }
+        foreach ($doc->indices() as $i) {
+            $root = $i === $top;
+            foreach (self::inlineStylePositionTypes($doc->ownHtml($i)) as [$type, $evidence]) {
+                if (!$root && !in_array($type, ['sticky', 'fixed'], true)) {
+                    continue;
+                }
+                $duplicate = false;
+                foreach ($findings as $finding) {
+                    if ($finding['root'] === $root && $finding['type'] === $type) {
+                        $duplicate = true;
+                        break;
+                    }
+                }
+                if (!$duplicate) {
+                    $findings[] = [
+                        'block' => $root ? 'root saved HTML style attribute' : 'descendant saved HTML style attribute',
+                        'type' => $type,
+                        'value' => $evidence,
+                        'root' => $root,
+                    ];
+                }
+            }
+        }
+        return $findings;
+    }
+
+    /**
+     * Position declarations found in `style` attributes of real tags. Text
+     * content that mentions a declaration is not authored positioning.
+     *
+     * @return list<array{0:string,1:string}> [type, matched declaration]
+     */
+    private static function inlineStylePositionTypes(string $html): array
+    {
+        $found = [];
+        if (!preg_match_all(self::HTML_TAG_PATTERN, $html, $tags)) {
+            return $found;
+        }
+        foreach ($tags[0] as $tag) {
+            if (!preg_match_all('/\sstyle\s*=\s*(["\'])(.*?)\1/is', $tag, $styles, PREG_SET_ORDER)) {
+                continue;
+            }
+            foreach ($styles as $style) {
+                if (preg_match_all('/\bposition\s*:\s*([a-z-]+)\b/i', $style[2], $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $match) {
+                        $found[] = [strtolower($match[1]), $match[0]];
+                    }
+                }
+            }
+        }
+        return $found;
+    }
+
+    /** @param array{root:bool,type:string} $position @param array<mixed> $behavior */
+    private static function outerShellPreservesPosition(array $position, array $behavior): bool
+    {
+        if (!$position['root']) {
+            return false;
+        }
+        return match ($behavior['behavior']) {
+            HeaderBehavior::STICKY_SOFT => in_array($position['type'], ['sticky', 'fixed'], true),
+            HeaderBehavior::OVERLAY_TO_SOLID => in_array($position['type'], ['absolute', 'sticky', 'fixed'], true),
+            default => false,
+        };
+    }
+
+
 
     /**
      * Remove authored header lines that duplicate the hero's copy inside the

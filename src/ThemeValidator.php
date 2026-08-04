@@ -771,6 +771,15 @@ final class ThemeValidator
                 if (($theme['settings']['spacing'] ?? null) !== ($normalized['settings']['spacing'] ?? null)) {
                     $warnings[] = 'theme.json settings.spacing drifted from the bounded canonical profile';
                 }
+                $normalized = Steps\ThemeJsonStep::normalizeGroupBlockPadding($theme);
+                if ($theme !== $normalized) {
+                    $authored = $theme['styles']['blocks']['core/group']['spacing']['padding'] ?? null;
+                    $warnings[] = "file='theme/theme.json'; "
+                        . "block='styles.blocks.core/group.spacing.padding'; authored="
+                        . Warnings::value($authored)
+                        . '; delivered=unchanged; disposition=remove global top/bottom Group padding '
+                        . 'and place vertical spacing on explicit section or component roots';
+                }
             }
         }
 

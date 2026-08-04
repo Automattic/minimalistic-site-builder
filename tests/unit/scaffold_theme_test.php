@@ -110,6 +110,23 @@ test('scaffold-theme copies the static motion kit verbatim into the theme', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('scaffold-theme copies the trusted adaptive-header kit verbatim', function () {
+    $tmp = sys_get_temp_dir() . '/builder_scaffold_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    (new ScaffoldThemeStep())->run($project);
+
+    foreach (['header.css', 'header.js'] as $file) {
+        assert_eq(
+            file_get_contents(\Automattic\SiteBuild\Package::headerDir() . '/' . $file),
+            $project->readText('theme/assets/header/' . $file),
+            "{$file} copied byte-for-byte"
+        );
+    }
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('scaffold-theme has stable id and label', function () {
     $s = new ScaffoldThemeStep();
     assert_eq('scaffold-theme', $s->id());

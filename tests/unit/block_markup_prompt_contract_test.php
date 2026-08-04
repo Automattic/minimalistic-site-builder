@@ -39,6 +39,7 @@ test('markup generation units share one output-only contract', function () {
             'hero_brief' => 'A text-led hero.',
             'nav_rule' => '- Use wp:page-list.',
             'above_fold_contract' => test_above_fold_contract(),
+            'header_behavior' => 'DETERMINISTIC HEADER BEHAVIOR: static.',
         ]),
         'footer' => (new FooterUnit($llm, $renderer))->request($input + [
             'final_section_brief' => 'A quiet closing section.',
