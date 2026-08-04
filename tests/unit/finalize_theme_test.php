@@ -15,6 +15,8 @@ function finalize_static_header(\Automattic\SiteBuild\Project $project): void
         'topSurface' => 'base',
         'scrolledSurface' => 'base',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
 }
 
@@ -117,6 +119,8 @@ test('finalize-theme enqueues adaptive headers independently of motion', functio
         'topSurface' => 'base',
         'scrolledSurface' => 'primary',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
 
     quietly(fn () => (new FinalizeThemeStep())->run($project));
@@ -158,8 +162,10 @@ test('finalize-theme prunes the header kit for a static behavior', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('finalize-theme downgrades malformed or incomplete header behavior with a warning', function () {
-    foreach (['{"behavior":', '{"behavior":"sticky-soft"}'] as $artifact) {
+test('finalize-theme downgrades malformed, non-object, or incomplete header behavior with a warning', function () {
+    // '"static"' is valid JSON that is not the closed object contract: it must
+    // take the same fail-open static path as malformed JSON, never a TypeError.
+    foreach (['{"behavior":', '"static"', '{"behavior":"sticky-soft"}'] as $artifact) {
         $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
         $project = (new ProjectStore($tmp))->create('demo');
         (new ScaffoldThemeStep())->run($project);
@@ -170,9 +176,10 @@ test('finalize-theme downgrades malformed or incomplete header behavior with a w
         assert_true(!is_dir($project->themePath('assets/header')), 'invalid behavior was delivered as static');
         assert_true(!str_contains($project->readText('theme/functions.php'), 'assets/header/'));
         $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
-        assert_contains('headerBehavior.json', $warning);
-        assert_contains('authored value', $warning);
-        assert_contains('delivered value', $warning);
+        assert_contains("file='headerBehavior.json'", $warning);
+        assert_contains("block='behavior'", $warning);
+        assert_contains('authored=', $warning);
+        assert_contains("delivered='static'", $warning);
         assert_contains('downgraded', $warning);
 
         exec('rm -rf ' . escapeshellarg($tmp));
@@ -188,8 +195,49 @@ test('finalize-theme warns when header behavior artifact is missing', function (
 
     assert_true(!is_dir($project->themePath('assets/header')));
     $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
-    assert_contains('authored value missing', $warning);
-    assert_contains('delivered value {"behavior":"static"}', $warning);
+    assert_contains("file='headerBehavior.json'", $warning);
+    assert_contains('authored=<missing>', $warning);
+    assert_contains("delivered='static'", $warning);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme solidifies an overlay-prepared header when the behavior artifact is corrupt', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    (new ScaffoldThemeStep())->run($project);
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+        ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+    ]]]]);
+    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+        . 'header-scrolled-contrast header-foreground-base';
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"className":"' . $classes . '","textColor":"base","layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group ' . $classes . ' has-base-color has-text-color">'
+        . '<!-- wp:site-title /--></div>' . "\n"
+        . '<!-- /wp:group -->' . "\n"
+    );
+    $project->writeText('headerBehavior.json', '"static"');
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    // The kit is pruned for static — the markup must not still expect it:
+    // light text on a transparent in-flow root would be an invisible header.
+    assert_true(!is_dir($project->themePath('assets/header')), 'kit pruned for the degraded static behavior');
+    $header = $project->readText('theme/parts/header.html');
+    assert_true(!str_contains($header, 'header-start-transparent'), 'transparent-start class removed');
+    assert_contains('"backgroundColor":"base"', $header);
+    assert_contains('"textColor":"contrast"', $header);
+    assert_contains('has-base-background-color', $header);
+    assert_contains('has-contrast-color', $header);
+    assert_true(!str_contains($header, 'has-base-color'), 'the light overlay foreground class is gone');
+
+    $warning = implode(' ', $project->readJson('warnings.json')['finalize-theme'] ?? []);
+    assert_contains("file='theme/parts/header.html'", $warning);
+    assert_contains("block='overlay top state'", $warning);
+    assert_contains("delivered=opaque 'base' surface with 'contrast' foreground", $warning);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -205,6 +253,8 @@ test('finalize-theme treats a missing trusted asset as fatal for adaptive behavi
         'topSurface' => 'transparent',
         'scrolledSurface' => 'contrast',
         'foreground' => 'base',
+        'topTreatment' => 'transparent',
+        'scrolledTreatment' => 'solid',
     ]);
     unlink($project->themePath('assets/header/header.js'));
 

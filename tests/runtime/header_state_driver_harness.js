@@ -26,10 +26,15 @@ function fakeClassList(initial) {
 
 function fakeStyle() {
     const values = new Map();
+    const writes = new Map();
     return {
-        setProperty(name, value) { values.set(name, String(value)); },
+        setProperty(name, value) {
+            values.set(name, String(value));
+            writes.set(name, (writes.get(name) || 0) + 1);
+        },
         removeProperty(name) { values.delete(name); },
         getPropertyValue(name) { return values.get(name) || ''; },
+        writeCount(name) { return writes.get(name) || 0; },
     };
 }
 
@@ -86,9 +91,13 @@ function environment(options) {
         emit() { this.callback([]); }
     }
 
+    let adminBarLookups = 0;
+
     const document = {
         documentElement: root,
-        body,
+        // noBody models head-time execution ($in_footer=false): the script
+        // runs before <body> exists and the test attaches it later.
+        body: options.noBody ? null : body,
         readyState: options.readyState || 'complete',
         querySelector() {
             if (options.queryFailure) {
@@ -96,7 +105,13 @@ function environment(options) {
             }
             return header;
         },
-        getElementById(id) { return id === 'wpadminbar' ? adminBar : null; },
+        getElementById(id) {
+            if (id !== 'wpadminbar') {
+                return null;
+            }
+            adminBarLookups += 1;
+            return adminBar;
+        },
         addEventListener(type, callback, listenerOptions) {
             const callbacks = documentListeners.get(type) || [];
             callbacks.push({ callback, options: listenerOptions });
@@ -139,9 +154,14 @@ function environment(options) {
         document,
         root,
         header,
+        detachedBody: body,
         windowListeners,
         documentListeners,
         resizeObservers,
+        adminBarLookups() { return adminBarLookups; },
+        rerun() {
+            vm.runInNewContext(source, context, { filename: sourcePath });
+        },
         dispatch(type) {
             (windowListeners.get(type) || []).slice().forEach((entry) => entry.callback());
         },
@@ -180,10 +200,27 @@ function testInitialAndScrollState() {
     env.flushFrames();
     check(!env.root.classList.contains('header-is-scrolled'), 'top state was not restored after scrolling up');
 
-    env.context.pageYOffset = 25;
+    env.context.pageYOffset = 24;
     env.dispatch('scroll');
     env.flushFrames();
-    check(env.root.classList.contains('header-is-scrolled'), 'small threshold did not activate at 25px');
+    check(env.root.classList.contains('header-is-scrolled'), 'enter threshold did not activate at 24px');
+
+    // Hysteresis dead band: between the exit and enter thresholds the state
+    // must hold whatever it already was, in both directions.
+    env.context.pageYOffset = 12;
+    env.dispatch('scroll');
+    env.flushFrames();
+    check(env.root.classList.contains('header-is-scrolled'), 'dead band released the scrolled state on the way down');
+
+    env.context.pageYOffset = 8;
+    env.dispatch('scroll');
+    env.flushFrames();
+    check(!env.root.classList.contains('header-is-scrolled'), 'exit threshold did not release at 8px');
+
+    env.context.pageYOffset = 23;
+    env.dispatch('scroll');
+    env.flushFrames();
+    check(!env.root.classList.contains('header-is-scrolled'), 'dead band re-entered the scrolled state on the way up');
 }
 
 function testMeasurementAndAdminBar() {
@@ -224,6 +261,22 @@ function testMeasurementAndAdminBar() {
     scrollingBar.dispatch('scroll');
     scrollingBar.flushFrames();
     check(scrollingBar.root.style.getPropertyValue('--site-admin-bar-offset') === '0px', 'scrolled-away admin bar left a blank fixed-header gap');
+
+    // A fixed desktop bar has a constant offset: scroll frames must neither
+    // re-query the element nor rewrite an unchanged custom property.
+    const cachedBar = environment({ adminBar: true, adminBarElement: true, adminBarHeight: 32 });
+    const lookupsAfterInit = cachedBar.adminBarLookups();
+    const rootWritesAfterInit = cachedBar.root.style.writeCount('--site-admin-bar-offset');
+    const bodyWritesAfterInit = cachedBar.document.body.style.writeCount('--site-admin-bar-offset');
+    for (const offset of [200, 400]) {
+        cachedBar.context.pageYOffset = offset;
+        cachedBar.dispatch('scroll');
+        cachedBar.flushFrames();
+    }
+    check(cachedBar.adminBarLookups() === lookupsAfterInit, 'scroll frames re-queried the admin bar element');
+    check(cachedBar.root.style.writeCount('--site-admin-bar-offset') === rootWritesAfterInit, 'unchanged root admin offset was rewritten during scroll');
+    check(cachedBar.document.body.style.writeCount('--site-admin-bar-offset') === bodyWritesAfterInit, 'unchanged body admin offset was rewritten during scroll');
+    check(cachedBar.root.style.getPropertyValue('--site-admin-bar-offset') === '32px', 'cached fixed-bar offset lost its value');
 }
 
 function testLoadingAndRestoredState() {
@@ -240,6 +293,39 @@ function testLoadingAndRestoredState() {
     env.flushFrames();
     check(!env.root.classList.contains('header-is-scrolled'), 'pageshow did not refresh restored top state');
     check(env.root.style.getPropertyValue('--site-header-height') === '76px', 'pageshow did not refresh header height');
+}
+
+function testHeadTimeExecution() {
+    // PHP enqueues the driver with $in_footer=false, so the real script runs
+    // in <head> where document.body is still null.
+    const env = environment({
+        readyState: 'loading',
+        noBody: true,
+        adminBar: true,
+        pageYOffset: 80,
+        headerHeight: 70,
+    });
+    check(env.root.classList.contains('header-state-js'), 'head-time run without a body failed open');
+    check(env.root.classList.contains('header-is-scrolled'), 'head-time run missed the restored scroll position');
+    check(env.root.style.getPropertyValue('--site-header-height') === '', 'header measured before a body existed');
+
+    env.document.body = env.detachedBody;
+    env.dispatchDocument('DOMContentLoaded');
+    check(env.root.classList.contains('header-state-js'), 'setup after the body arrived failed open');
+    check(env.root.style.getPropertyValue('--site-header-height') === '70px', 'setup did not finish after the body arrived');
+    check(env.root.style.getPropertyValue('--site-admin-bar-offset') === '32px', 'admin fallback offset was not applied after the body arrived');
+    check(env.document.body.style.getPropertyValue('--site-admin-bar-offset') === '32px', 'late-arriving body did not receive the mirrored admin offset');
+}
+
+function testDoubleInitGuard() {
+    // An optimizer can inline and also enqueue the same file; the second copy
+    // must bail instead of installing a duplicate driver.
+    const env = environment({ pageYOffset: 80, headerHeight: 72 });
+    env.rerun();
+    check((env.windowListeners.get('scroll') || []).length === 1, 'second script copy installed a duplicate scroll listener');
+    check((env.windowListeners.get('pageshow') || []).length === 1, 'second script copy installed a duplicate pageshow listener');
+    check(env.resizeObservers.length === 1, 'second script copy installed a duplicate ResizeObserver');
+    check(env.root.classList.contains('header-state-js'), 'guarded rerun disturbed the enhancement scope');
 }
 
 function testFailOpen() {
@@ -264,6 +350,8 @@ function testFailOpen() {
 testInitialAndScrollState();
 testMeasurementAndAdminBar();
 testLoadingAndRestoredState();
+testHeadTimeExecution();
+testDoubleInitGuard();
 testFailOpen();
 
 process.stdout.write('header state driver runtime harness passed\n');

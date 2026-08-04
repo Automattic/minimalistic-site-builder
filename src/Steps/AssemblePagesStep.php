@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (deterministic): compose the site's pages from the (already fixed)
@@ -64,6 +66,7 @@ final class AssemblePagesStep implements Step
                 'plugin/pages/*',
                 'plugin/pages.json',
                 'plugin/images.json',
+                'theme/parts/header.html',
                 'theme/templates/page.html',
                 'theme/templates/index.html',
                 'theme/theme.json',
@@ -287,18 +290,19 @@ final class AssemblePagesStep implements Step
     private function readHeaderBehavior(Project $project, array &$warnings): string
     {
         if (!$project->exists('headerBehavior.json')) {
-            $warnings[] = 'file=headerBehavior.json; authored=<missing>; delivered=static; '
-                . 'disposition=missing generated header behavior, degraded to static header';
-            return 'static';
+            $warnings[] = "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored=<missing>; "
+                . "delivered='static'; disposition=missing generated header behavior, degraded to a static header";
+            return $this->degradeToStatic($project, $warnings);
         }
 
         $raw = $project->readText('headerBehavior.json');
         try {
             $artifact = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException $error) {
-            $warnings[] = 'file=headerBehavior.json; authored=<invalid JSON: ' . $error->getMessage() . '>; '
-                . 'delivered=static; disposition=malformed generated header behavior, degraded to static header';
-            return 'static';
+            $warnings[] = "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored=<invalid JSON: "
+                . $error->getMessage() . ">; delivered='static'; "
+                . 'disposition=malformed generated header behavior, degraded to a static header';
+            return $this->degradeToStatic($project, $warnings);
         }
 
         try {
@@ -308,15 +312,128 @@ final class AssemblePagesStep implements Step
             $artifact = HeaderBehavior::validateArtifact($artifact);
             return $artifact['behavior'];
         } catch (\InvalidArgumentException $error) {
-            $authoredSummary = json_encode(
-                $artifact,
-                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-            );
-            $warnings[] = 'file=headerBehavior.json; authored=' . ($authoredSummary === false ? '<unrepresentable>' : $authoredSummary)
-                . '; delivered=static; disposition=invalid generated header behavior (' . $error->getMessage()
-                . '), degraded to static header';
+            $warnings[] = "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored="
+                . Warnings::value($artifact)
+                . "; delivered='static'; disposition=invalid generated header behavior ("
+                . $error->getMessage() . '), degraded to a static header';
+            return $this->degradeToStatic($project, $warnings);
+        }
+    }
+
+    /**
+     * The static-degrade path may run AFTER HeaderHeroStep already rewrote the
+     * header part for the overlay contract (transparent root + light
+     * foreground). Delivering that markup without the adaptive shell ships an
+     * invisible header — light text, no background, in normal flow — so the
+     * part is rewritten onto a solid readable surface and the rewrite is
+     * recorded next to the degradation warning.
+     *
+     * @param list<string> $warnings
+     */
+    private function degradeToStatic(Project $project, array &$warnings): string
+    {
+        if (!$project->exists('theme/parts/header.html')) {
             return 'static';
         }
+        try {
+            $palette = $project->exists('theme/theme.json')
+                ? ContrastFixStep::paletteMap($project->readJson('theme/theme.json'))
+                : [];
+        } catch (\RuntimeException) {
+            // A corrupt theme.json must not abort the fail-open rewrite; the
+            // solidifier falls back to its safe default pair.
+            $palette = [];
+        }
+        $result = self::solidifyOverlayPreparedHeader($project->readText('theme/parts/header.html'), $palette);
+        if ($result === null) {
+            return 'static';
+        }
+        $project->writeText('theme/parts/header.html', $result['markup']);
+        $warnings[] = "file='theme/parts/header.html'; block='overlay top state'; authored=transparent start"
+            . ($result['previousForeground'] !== '' ? " with '{$result['previousForeground']}' foreground" : '')
+            . "; delivered=opaque '{$result['topSurface']}' surface with '{$result['foreground']}' foreground; "
+            . 'disposition=overlay-prepared header rewritten to a readable solid surface because the behavior '
+            . 'artifact degraded to static';
+        return 'static';
+    }
+
+    /**
+     * Rewrite an overlay-prepared header part (the `header-start-transparent`
+     * signature HeaderHeroStep writes) onto an opaque, contrast-safe palette
+     * pair. Runs after fix-blocks, so the comment attrs AND the saved-HTML
+     * classes are both rewritten here — no later re-serialization will sync
+     * them. Returns null when the markup is not overlay-prepared.
+     * Pure — unit-testable.
+     *
+     * @param array<string,string> $palette slug => hex
+     * @return array{markup:string,topSurface:string,foreground:string,previousForeground:string}|null
+     */
+    public static function solidifyOverlayPreparedHeader(string $markup, array $palette): ?array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $top = $doc->topLevel();
+        if ($top === null) {
+            return null;
+        }
+        $attrs = $doc->attrs($top) ?? [];
+        $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (!in_array('header-start-transparent', $tokens, true)
+            && !preg_match('/\bheader-start-transparent\b/', $doc->ownHtml($top))) {
+            return null;
+        }
+
+        // The same deterministic resolver HeaderHeroStep uses picks the
+        // contrast-safe opaque pair; an empty/unknown palette falls back to
+        // the closed base/contrast defaults instead of failing the build.
+        $solid = HeaderBehavior::resolve([], HeaderBehavior::MODE_STACKED, $palette);
+        $surface = $solid['topSurface'];
+        $foreground = $solid['foreground'];
+        $previousForeground = trim((string) ($attrs['textColor'] ?? ''));
+
+        $isOwned = static fn (string $token): bool => $token === 'header-transition-instant'
+            || (bool) preg_match('/^header-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+$/', $token);
+        $kept = array_values(array_filter($tokens, static fn (string $token): bool => !$isOwned($token)));
+        if ($kept === []) {
+            unset($attrs['className']);
+        } else {
+            $attrs['className'] = implode(' ', $kept);
+        }
+        $attrs['backgroundColor'] = $surface;
+        $attrs['textColor'] = $foreground;
+        $doc->setAttrs($top, $attrs);
+
+        if (preg_match_all(
+            '/\bheader-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+\b|\bheader-transition-instant\b/',
+            $doc->ownHtml($top),
+            $matches,
+        )) {
+            foreach (array_values(array_unique($matches[0])) as $token) {
+                $doc->removeClassTokenInOwnHtml($top, $token);
+            }
+        }
+        // Remove then re-add the color tokens so the result is deterministic
+        // regardless of which of them the overlay markup already carried.
+        $colorTokens = array_values(array_unique(array_filter([
+            $previousForeground !== '' ? "has-{$previousForeground}-color" : null,
+            "has-{$foreground}-color",
+            'has-text-color',
+            "has-{$surface}-background-color",
+            'has-background',
+        ])));
+        foreach ($colorTokens as $token) {
+            $doc->removeClassTokenInOwnHtml($top, $token);
+        }
+        $installed = "has-{$foreground}-color has-text-color has-{$surface}-background-color has-background ";
+        foreach (['class="', "class='"] as $prefix) {
+            $doc->replaceInOwnHtml($top, $prefix, $prefix . $installed);
+        }
+
+        return [
+            'markup' => $doc->render(),
+            'topSurface' => $surface,
+            'foreground' => $foreground,
+            'previousForeground' => $previousForeground,
+        ];
     }
 
     /**

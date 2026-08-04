@@ -373,7 +373,7 @@ test('gradient backgrounds are checked against every stop', function () {
 // ── overlay-header lint (ContrastFixStep) ────────────────────────────────
 
 /** Temp project with a palette, an overlay (or standard) header, and two pages. */
-function overlay_lint_project(bool $overlay): array
+function overlay_lint_project(bool $overlay, string $textColor = 'base'): array
 {
     $tmp = sys_get_temp_dir() . '/builder_overlay_' . uniqid();
     $project = (new Automattic\SiteBuild\ProjectStore($tmp))->create('demo');
@@ -383,20 +383,23 @@ function overlay_lint_project(bool $overlay): array
             ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
             ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
             ['slug' => 'primary', 'color' => '#1D4ED8', 'name' => 'Primary'],
+            // A mid grey that fails even against the scrim's worst case (#666).
+            ['slug' => 'secondary', 'color' => '#9E9E9E', 'name' => 'Secondary'],
         ]]],
     ]);
     $className = $overlay ? 'header-behavior-overlay-to-solid' : 'site-header';
     $project->writeText(
         'theme/parts/header.html',
-        '<!-- wp:group {"className":"' . $className . '","textColor":"base","layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group ' . $className . ' has-base-color has-text-color"><!-- wp:site-title /--></div>'
+        '<!-- wp:group {"className":"' . $className . '","textColor":"' . $textColor . '","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group ' . $className . ' has-' . $textColor . '-color has-text-color"><!-- wp:site-title /--></div>'
         . '<!-- /wp:group -->'
     );
     $project->writeJson('pages.json', ['pages' => [
         ['slug' => 'home', 'front' => true, 'sections' => [['slug' => 'hero']]],
         ['slug' => 'menu', 'front' => false, 'sections' => [['slug' => 'menu-hero']]],
     ]]);
-    // Homepage opens dark (light header text reads); menu opens on base (it doesn't).
+    // Homepage opens dark; menu opens on the light base surface — the trusted
+    // scrim decides whether the committed foreground still reads there.
     $project->writeText(
         'theme/parts/page-home--hero.html',
         '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
@@ -411,11 +414,37 @@ function overlay_lint_project(bool $overlay): array
     return [$project, $tmp];
 }
 
-test('overlay header text is linted against every page opening section', function () {
+test('overlay header lint composites the trusted scrim before judging opening backgrounds', function () {
     [$project, $tmp] = overlay_lint_project(overlay: true);
+    // A light no-media cover: raw composite (#111 at 40% over base) fails a
+    // white foreground, but the kit's 60% black scrim bounds every top-state
+    // pixel to <= #666, against which the foreground was already verified.
+    $project->writeText(
+        'theme/parts/page-menu--menu-hero.html',
+        '<!-- wp:cover {"overlayColor":"contrast","dimRatio":40} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-contrast-background-color has-background-dim-40 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"textColor":"contrast"} --><h2 class="wp-block-heading has-contrast-color has-text-color">Light cover</h2><!-- /wp:heading -->'
+        . '</div></div><!-- /wp:cover -->'
+    );
     quietly(fn () => (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project));
     $log = $project->readText('logs/contrast-report.txt');
-    assert_contains("overlay header text base floats over page 'menu'", $log);
+    assert_true(
+        !str_contains($log, 'overlay header text'),
+        'the scrimmed light cover and the dark homepage opening must both pass'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('overlay header lint still warns when the foreground fails against the scrimmed background', function () {
+    // #9E9E9E on scrimmed base (#666) is ~2.1:1 — genuinely unreadable in the
+    // kit's own top state, so the scrim-aware lint must keep warning.
+    [$project, $tmp] = overlay_lint_project(overlay: true, textColor: 'secondary');
+    quietly(fn () => (new Automattic\SiteBuild\Steps\ContrastFixStep())->run($project));
+    $log = $project->readText('logs/contrast-report.txt');
+    assert_contains("overlay header text secondary floats over page 'menu'", $log);
+    assert_contains('scrim', $log);
     assert_true(
         !str_contains($log, "floats over page 'home'"),
         'the dark homepage opening must pass'

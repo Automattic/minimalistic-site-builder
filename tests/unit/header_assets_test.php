@@ -28,6 +28,16 @@ function header_asset_css_block(string $css, string $needle): string
     throw new RuntimeException("CSS block is unbalanced: {$needle}");
 }
 
+/** Return the complete CSS block beginning at the LAST occurrence of the needle. */
+function header_asset_last_css_block(string $css, string $needle): string
+{
+    $start = strrpos($css, $needle);
+    if ($start === false) {
+        throw new RuntimeException("CSS block not found: {$needle}");
+    }
+    return header_asset_css_block(substr($css, $start), $needle);
+}
+
 test('header CSS keeps positioning progressive and state changes paint-only', function () {
     $css = (string) file_get_contents(repo_path('assets/header/header.css'));
 
@@ -61,11 +71,16 @@ test('header CSS keeps positioning progressive and state changes paint-only', fu
 test('header CSS maps the closed palette vocabulary and covers accessibility states', function () {
     $css = (string) file_get_contents(repo_path('assets/header/header.css'));
 
+    // The token vocabulary feeds the always-opaque -solid tier; the painted
+    // surface pair derives from it and only driver-scoped treatment rules
+    // may ever make the painted tier non-opaque.
     foreach (['base', 'contrast', 'primary', 'secondary', 'accent'] as $slug) {
-        assert_contains(".header-start-{$slug}", $css);
-        assert_contains(".header-scrolled-{$slug}", $css);
+        assert_contains(".header-start-{$slug} { --header-start-solid:", $css);
+        assert_contains(".header-scrolled-{$slug} { --header-scrolled-solid:", $css);
         assert_contains(".header-foreground-{$slug}", $css);
     }
+    assert_contains('--header-start-surface: var(--header-start-solid)', $css);
+    assert_contains('--header-scrolled-surface: var(--header-scrolled-solid)', $css);
     assert_contains('.header-start-transparent', $css);
     assert_true(!str_contains($css, '.header-scrolled-transparent'), 'solid state can never be transparent');
     assert_contains('.site-header-shell--force-solid', $css);
@@ -80,7 +95,9 @@ test('header CSS maps the closed palette vocabulary and covers accessibility sta
     assert_contains('.header-start-transparent { --header-start-surface: var(--header-overlay-scrim); }', $css);
     assert_eq(0.60, HeaderBehavior::OVERLAY_SCRIM_ALPHA);
     assert_eq([102, 102, 102], HeaderBehavior::OVERLAY_WORST_CASE_RGB);
-    $glass = header_asset_css_block($css, '@supports ((-webkit-backdrop-filter: blur(1px))');
+    // The overlay's progressive glass block is the LAST backdrop-filter
+    // @supports: the sticky treatment block earlier also gates on color-mix.
+    $glass = header_asset_last_css_block($css, '@supports ((-webkit-backdrop-filter: blur(1px))');
     assert_contains('.header-behavior-overlay-to-solid::before', $glass);
     assert_contains('-webkit-backdrop-filter: blur(14px) saturate(115%)', $glass);
     assert_contains('backdrop-filter: blur(14px) saturate(115%)', $glass);
@@ -110,36 +127,121 @@ test('header CSS maps the closed palette vocabulary and covers accessibility sta
     assert_contains('background: #ffffff !important', $print);
     assert_contains('color: #000000 !important', $print);
     assert_contains('transition: none !important', $print);
-    assert_contains('.wp-block-navigation__responsive-container.is-menu-open', $print);
-    assert_contains('position: static !important', $print);
-    assert_contains('background: #ffffff !important', $print);
-    assert_contains('.wp-block-navigation__responsive-container-open', $print);
-    assert_contains('.wp-block-navigation__responsive-container-close', $print);
-    assert_contains('display: none !important', $print);
-    assert_contains('.header-behavior-overlay-to-solid::before', $print);
-    assert_contains('content: none !important', $print);
-    assert_contains('backdrop-filter: none !important', $print);
+
+    // Scope the menu-open assertions to their own sub-block: matched against
+    // the whole print block they would only re-find the shell declarations
+    // above and could never fail.
+    $printMenu = header_asset_css_block($print, '.wp-block-navigation__responsive-container.is-menu-open');
+    assert_contains('position: static !important', $printMenu);
+    assert_contains('background: #ffffff !important', $printMenu);
+    assert_contains('color: #000000 !important', $printMenu);
+
+    $printToggles = header_asset_css_block($print, '.wp-block-navigation__responsive-container-open');
+    assert_contains('.wp-block-navigation__responsive-container-close', $printToggles);
+    assert_contains('display: none !important', $printToggles);
+
+    // Print disables the glass pseudo-element for BOTH persistent behaviors:
+    // the needle itself fails closed if sticky-soft loses its coverage.
+    $printGlass = header_asset_css_block(
+        $print,
+        ':is(.header-behavior-overlay-to-solid, .header-behavior-sticky-soft)::before',
+    );
+    assert_contains('content: none !important', $printGlass);
+    assert_contains('backdrop-filter: none !important', $printGlass);
 
     $instant = header_asset_css_block($css, '.site-header-shell .header-transition-instant');
     assert_true(!str_contains($instant, '*'), 'instant state does not disable descendant hover transitions');
 });
 
-test('header driver owns its scope, coalesces passive events, and fails open', function () {
+test('sticky treatment rules are driver-scoped, alpha-synced, and fail closed to opaque paint', function () {
+    $css = (string) file_get_contents(repo_path('assets/header/header.css'));
+
+    // Every selector that styles a treatment class must sit beneath the
+    // driver-owned html.header-state-js scope: without JavaScript (or after
+    // a failed driver removed the scope) the header keeps its opaque tokens.
+    // Comments are stripped so prose mentioning a class cannot mask a rule.
+    $rules = preg_replace('!/\*.*?\*/!s', '', $css) ?? $css;
+    preg_match_all('/[^{};]+\{/', $rules, $matches);
+    foreach (['header-top-transparent', 'header-top-glass', 'header-scrolled-glass'] as $token) {
+        $selectors = array_values(array_filter(
+            $matches[0],
+            static fn (string $selector): bool => str_contains($selector, $token),
+        ));
+        assert_true($selectors !== [], "the kit implements at least one {$token} rule");
+        foreach ($selectors as $selector) {
+            assert_contains(
+                'html.header-state-js',
+                $selector,
+                "every {$token} rule must be driver-scoped, found: " . trim($selector),
+            );
+        }
+    }
+
+    // The color-mix tint percentage is part of the contrast contract: the
+    // resolver proved the foreground against composites at exactly
+    // HeaderBehavior::GLASS_ALPHA, so the painted tint must match it.
+    $tint = sprintf('%d%%', (int) round(HeaderBehavior::GLASS_ALPHA * 100));
+    assert_contains("color-mix(in srgb, var(--header-start-solid) {$tint}, transparent)", $css);
+    assert_contains("color-mix(in srgb, var(--header-scrolled-solid) {$tint}, transparent)", $css);
+
+    // The sticky glass rules are additionally gated on support for BOTH
+    // backdrop-filter and color-mix; either missing keeps opaque tokens.
+    $glassSupports = header_asset_css_block($css, 'and (background-color: color-mix(');
+    assert_contains("color-mix(in srgb, red {$tint}, transparent)", $css, 'the @supports probe uses the same tint');
+    assert_contains('.header-top-glass', $glassSupports);
+    assert_contains('.header-scrolled-glass', $glassSupports);
+    $prelude = substr($css, 0, (int) strpos($css, 'and (background-color: color-mix('));
+    $prelude = substr($prelude, (int) strrpos($prelude, '@supports'));
+    assert_contains('backdrop-filter: blur(1px)', $prelude, 'glass needs backdrop-filter AND color-mix support');
+
+    // The responsive-nav modal and desktop submenu panels are full opaque
+    // surfaces behind text: they take the always-solid tier directly and may
+    // never inherit a treatment-aware (possibly translucent) surface.
+    $modal = header_asset_css_block($css, '.wp-block-navigation__responsive-container.is-menu-open');
+    assert_contains('background-color: var(--header-scrolled-solid) !important', $modal);
+    assert_true(
+        !str_contains($modal, '--header-scrolled-surface'),
+        'the menu modal must never paint the treatment-aware surface',
+    );
+    $submenu = header_asset_css_block($css, '.wp-block-navigation__submenu-container');
+    assert_contains('background-color: var(--header-scrolled-solid) !important', $submenu);
+    assert_true(
+        !str_contains($submenu, '--header-scrolled-surface'),
+        'submenu panels must never paint the treatment-aware surface',
+    );
+
+    // Users who ask for less transparency get the verified opaque pair back
+    // and the blur pseudo-element is fully disabled.
+    $reduced = header_asset_css_block($css, '@media (prefers-reduced-transparency: reduce)');
+    assert_contains('html.header-state-js', $reduced);
+    assert_contains('--header-start-surface: var(--header-start-solid)', $reduced);
+    assert_contains('--header-scrolled-surface: var(--header-scrolled-solid)', $reduced);
+    assert_contains('content: none', $reduced);
+    assert_contains('backdrop-filter: none', $reduced);
+});
+
+test('header driver keeps its public contract names and passive threshold shape', function () {
     $js = (string) file_get_contents(repo_path('assets/header/header.js'));
 
-    assert_contains("var ENHANCEMENT_CLASS = 'header-state-js'", $js);
-    assert_contains("var SCROLLED_CLASS = 'header-is-scrolled'", $js);
-    assert_contains('var SCROLL_THRESHOLD = 24', $js);
-    assert_contains('window.requestAnimationFrame', $js);
-    assert_contains("window.addEventListener('scroll', scheduleScrollState, { passive: true })", $js);
-    assert_contains("window.addEventListener('pageshow', refreshRestoredState, { passive: true })", $js);
-    assert_contains("root.style.setProperty('--site-header-height'", $js);
-    assert_contains("root.style.setProperty('--site-admin-bar-offset'", $js);
-    assert_contains("document.body.style.setProperty('--site-admin-bar-offset'", $js);
-    assert_contains("document.body.style.removeProperty('--site-admin-bar-offset'", $js);
-    assert_contains('resizeObserver.observe(header)', $js);
-    assert_contains('root.classList.remove(ENHANCEMENT_CLASS)', $js);
-    assert_contains('clearMeasuredHeight()', $js);
+    // Behavior (thresholds with hysteresis, event coalescing, admin-bar
+    // caching, double-init guard, fail-open) is exercised end-to-end by the
+    // runtime harness below. These checks only pin the names shared with the
+    // CSS kit plus loose structure, so a rename or reformat inside the driver
+    // cannot break them.
+    assert_contains("'header-state-js'", $js);
+    assert_contains("'header-is-scrolled'", $js);
+    assert_contains("'--site-header-height'", $js);
+    assert_contains("'--site-admin-bar-offset'", $js);
+    assert_contains("'wpadminbar'", $js);
+    assert_true(
+        preg_match('/\b(?:var|let|const)\s+\w*THRESHOLD\w*\s*=\s*\d+\b/', $js) === 1,
+        'driver declares a numeric scroll threshold constant'
+    );
+    assert_true(
+        preg_match("/addEventListener\\(\\s*'scroll'\\s*,[^)]*passive\\s*:\\s*true/s", $js) === 1,
+        'driver registers a passive scroll listener'
+    );
+    assert_contains('requestAnimationFrame', $js);
 });
 
 test('header driver runtime covers restored scroll, measurement, admin bar, and fail-open', function () {

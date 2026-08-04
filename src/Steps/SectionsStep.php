@@ -448,10 +448,18 @@ final class SectionsStep implements Step
         $siteSpec = $project->readText('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
 
+        // One read serves both consumers: the raw text goes verbatim into the
+        // prompts and the decoded palette drives the header-behavior preview.
+        $themeJsonText = $project->readText('theme/theme.json');
+        $themeJson = json_decode($themeJsonText, true);
+        if (!is_array($themeJson)) {
+            throw new \RuntimeException('sections: theme/theme.json is not valid JSON (run theme-json first)');
+        }
+
         $common = [
             'site_spec'        => $siteSpec,
             'language'         => SiteSpecStep::languageOf($project),
-            'theme_json'       => $project->readText('theme/theme.json'),
+            'theme_json'       => $themeJsonText,
             'design_direction' => $designDirection,
             'site_pages'       => PagePlanStep::sitePagesList($pages),
         ];
@@ -477,7 +485,7 @@ final class SectionsStep implements Step
         $headerPreview = HeaderBehavior::resolve(
             $pages,
             $requestedHeaderMode,
-            ContrastFixStep::paletteMap($project->readJson('theme/theme.json')),
+            ContrastFixStep::paletteMap($themeJson),
             Env::get(self::ARCHETYPE_ENV),
             HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project)),
         );

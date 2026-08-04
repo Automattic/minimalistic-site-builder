@@ -23,6 +23,8 @@ function assemble_fixture(): array
         'topSurface' => 'base',
         'scrolledSurface' => 'base',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
     $project->writeJson('pages.json', ['pages' => [
         [
@@ -151,6 +153,7 @@ test('assemble-pages keeps overlay on pages but forces the blog index to an opaq
     $behavior['behavior'] = 'overlay-to-solid';
     $behavior['mode'] = 'overlay';
     $behavior['topSurface'] = 'transparent';
+    $behavior['topTreatment'] = 'transparent';
     $project->writeJson('headerBehavior.json', $behavior);
 
     (new AssemblePagesStep())->run($project);
@@ -198,9 +201,10 @@ test('assemble-pages degrades a missing header behavior to static and records ac
         'missing behavior delivered as static'
     );
     $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
-    assert_contains('file=headerBehavior.json', $joined);
+    assert_contains("file='headerBehavior.json'", $joined);
+    assert_contains("block='behavior'", $joined);
     assert_contains('authored=<missing>', $joined);
-    assert_contains('delivered=static', $joined);
+    assert_contains("delivered='static'", $joined);
     assert_contains('disposition=', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -217,9 +221,10 @@ test('assemble-pages degrades malformed header behavior JSON to static and warns
         'malformed behavior delivered as static'
     );
     $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
-    assert_contains('file=headerBehavior.json', $joined);
+    assert_contains("file='headerBehavior.json'", $joined);
+    assert_contains("block='behavior'", $joined);
     assert_contains('authored=<invalid JSON:', $joined);
-    assert_contains('delivered=static', $joined);
+    assert_contains("delivered='static'", $joined);
     assert_contains('disposition=malformed generated header behavior', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -237,10 +242,96 @@ test('assemble-pages validates the complete behavior tuple before adding adaptiv
     );
     assert_true(!str_contains($project->readText('theme/templates/index.html'), 'site-header-shell'));
     $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
-    assert_contains('file=headerBehavior.json', $joined);
+    assert_contains("file='headerBehavior.json'", $joined);
     assert_contains('authored={"behavior":"overlay-to-solid"}', $joined);
-    assert_contains('delivered=static', $joined);
+    assert_contains("delivered='static'", $joined);
     assert_contains('must contain exactly', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages degrades a non-object header behavior artifact instead of aborting', function () {
+    [$project, $tmp] = assemble_fixture();
+    // Valid JSON, but not the closed object contract — a bare string must take
+    // the same fail-open static path as malformed JSON, never a TypeError.
+    $project->writeText('headerBehavior.json', '"static"');
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_true(
+        !str_contains($project->readText('theme/templates/page.html'), 'site-header-shell'),
+        'non-object behavior delivered as static'
+    );
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains("file='headerBehavior.json'", $joined);
+    assert_contains('authored="static"', $joined);
+    assert_contains("delivered='static'", $joined);
+    assert_contains('must be a JSON object', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/**
+ * Rewrite the fixture's header part to the overlay-prepared shape
+ * HeaderHeroStep + fix-blocks leave behind: transparent root, light
+ * palette foreground, behavior classes in attrs AND saved HTML.
+ */
+function assemble_overlay_prepared_header(\Automattic\SiteBuild\Project $project): void
+{
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF', 'name' => 'Base'],
+        ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
+    ]]]]);
+    $classes = 'header-behavior-overlay-to-solid header-start-transparent '
+        . 'header-scrolled-contrast header-foreground-base';
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"className":"' . $classes . '","textColor":"base","layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group ' . $classes . ' has-base-color has-text-color">'
+        . '<!-- wp:site-title /--></div>' . "\n"
+        . '<!-- /wp:group -->' . "\n"
+    );
+}
+
+test('assemble-pages solidifies an overlay-prepared header when the behavior artifact is corrupt', function () {
+    [$project, $tmp] = assemble_fixture();
+    assemble_overlay_prepared_header($project);
+    $project->writeText('headerBehavior.json', '{"behavior":'); // corrupt
+
+    (new AssemblePagesStep())->run($project);
+
+    // Without the rewrite this ships light text with no background in normal
+    // flow — an invisible header. The degrade path must deliver an opaque,
+    // contrast-safe surface in attrs AND saved HTML.
+    $header = $project->readText('theme/parts/header.html');
+    assert_true(!str_contains($header, 'header-start-transparent'), 'transparent-start class removed');
+    assert_true(!str_contains($header, 'header-behavior-overlay-to-solid'), 'behavior class removed');
+    assert_contains('"backgroundColor":"base"', $header);
+    assert_contains('"textColor":"contrast"', $header);
+    assert_contains('has-base-background-color', $header);
+    assert_contains('has-background', $header);
+    assert_contains('has-contrast-color', $header);
+    assert_true(!str_contains($header, 'has-base-color'), 'the light overlay foreground class is gone');
+
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains("file='theme/parts/header.html'", $joined);
+    assert_contains("block='overlay top state'", $joined);
+    assert_contains("delivered=opaque 'base' surface with 'contrast' foreground", $joined);
+    assert_contains('disposition=overlay-prepared header rewritten', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages leaves a non-overlay header part alone on the degrade path', function () {
+    [$project, $tmp] = assemble_fixture();
+    $before = $project->readText('theme/parts/header.html');
+    unlink($project->path('headerBehavior.json'));
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_eq($before, $project->readText('theme/parts/header.html'), 'ordinary header untouched');
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_true(!str_contains($joined, "block='overlay top state'"), 'no rewrite row for an ordinary header');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -62,6 +62,8 @@ test('overlay-to-solid removes legacy inner positioning and wires closed state c
         'topSurface' => HeaderBehavior::TRANSPARENT,
         'scrolledSurface' => 'contrast',
         'foreground' => 'base',
+        'topTreatment' => HeaderBehavior::TREATMENT_TRANSPARENT,
+        'scrolledTreatment' => HeaderBehavior::TREATMENT_SOLID,
     ];
     $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_OVERLAY, 'Demo', [], false, $behavior);
 
@@ -199,6 +201,8 @@ test('position cleanup moves root persistence but preserves descendant relative 
         'topSurface' => 'base',
         'scrolledSurface' => 'secondary',
         'foreground' => 'contrast',
+        'topTreatment' => HeaderBehavior::TREATMENT_SOLID,
+        'scrolledTreatment' => HeaderBehavior::TREATMENT_SOLID,
     ];
     $markup = '<!-- wp:group {"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}}} -->'
         . '<div class="wp-block-group" style="position:sticky;padding-top:1rem">'
@@ -212,6 +216,51 @@ test('position cleanup moves root persistence but preserves descendant relative 
     assert_contains('position:relative', $result['markup'], 'descendant inline layout survives');
     assert_contains('"position":{"type":"relative"}', $result['markup'], 'descendant block layout survives');
     assert_contains('padding-top:1rem', $result['markup'], 'neighboring root declaration survives');
+});
+
+test('inline position cleanup never rewrites visible text content', function () {
+    // A paragraph whose copy literally mentions style="position:fixed" is
+    // text, not authored positioning; only the real descendant tag's
+    // persistent inline declaration may be stripped.
+    $copy = 'Use style="position:fixed" to pin banners.';
+    $markup = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"layout":{"type":"flex"}} -->'
+        . '<div class="wp-block-group" style="position:sticky;top:0">'
+        . '<!-- wp:paragraph --><p>' . $copy . '</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo');
+    assert_contains($copy, $result['markup'], 'visible copy survives verbatim');
+    assert_true(
+        !str_contains($result['markup'], 'style="position:sticky'),
+        'real descendant persistent inline declaration is stripped',
+    );
+    assert_contains('style="top:0"', $result['markup'], 'neighboring declaration survives');
+});
+
+test('a leading non-block comment does not shield the real root from position cleanup', function () {
+    // LLM output sometimes opens with a plain HTML comment. The root region
+    // must still be the first actual block, whose inline absolute
+    // positioning belongs to the outer shell.
+    $markup = "<!-- generated note -->\n"
+        . '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group" style="position:absolute;top:0">'
+        . '<!-- wp:site-title /--></div>'
+        . '<!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo');
+    assert_contains('<!-- generated note -->', $result['markup'], 'leading comment survives');
+    assert_true(
+        !str_contains($result['markup'], 'position:absolute'),
+        'root inline absolute positioning is stripped despite the leading comment',
+    );
+    assert_contains('style="top:0"', $result['markup'], 'neighboring root declaration survives');
+    assert_contains(
+        'removed inline position declaration',
+        implode(' ', $result['notes']),
+    );
 });
 
 test('a display-scale site title is lowered to heading, syncing the saved HTML', function () {
@@ -363,12 +412,27 @@ test('resolver keeps one readable foreground across a subtle sticky surface chan
         $bg = ContrastMath::hexToRgb(hh_palette()[$surface]);
         assert_true($fg !== null && $bg !== null && ContrastMath::ratio($fg, $bg) >= 4.5);
     }
+
+    // The openings carry no token-backed background, so a transparent start
+    // is unverifiable — but both tints survive frosting at GLASS_ALPHA: the
+    // near-black foreground still clears each tint's worst-case composite
+    // (white at 0.80 over black is #CCCCCC, an ~11:1 pair), so the resolver
+    // legitimately grants the glass/glass ladder rung.
+    $fg = ContrastMath::hexToRgb(hh_palette()['contrast']);
+    foreach (['base', 'secondary'] as $tintSlug) {
+        $tint = ContrastMath::hexToRgb(hh_palette()[$tintSlug]);
+        assert_true($fg !== null && $tint !== null && HeaderBehavior::glassStateIsSafe($fg, $tint));
+    }
+    assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['topTreatment']);
+    assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['scrolledTreatment']);
     assert_eq(
         [
             'header-behavior-sticky-soft',
             'header-start-base',
             'header-scrolled-secondary',
             'header-foreground-contrast',
+            'header-top-glass',
+            'header-scrolled-glass',
         ],
         HeaderBehavior::rootClasses($artifact),
     );
@@ -397,6 +461,11 @@ test('overlay resolver proves the scrim and every planned solid opening before e
         'same foreground passes the planned contrast opening',
     );
 
+    // No single foreground passes both the worst-case scrim pixel and the
+    // planned light 'contrast' opening, so the overlay guarantee fails —
+    // but the stacked path still owns a contrast-safe opaque pair and the
+    // two-page depth that earns sticky-soft. The fallback resolves through
+    // that path instead of forcing static.
     $inverted = [
         'base' => '#101E2B',
         'contrast' => '#F2EDE3',
@@ -405,9 +474,45 @@ test('overlay resolver proves the scrim and every planned solid opening before e
         'accent' => '#273B4B',
     ];
     $fallback = HeaderBehavior::resolve($pages, HeaderBehavior::MODE_OVERLAY, $inverted);
-    assert_eq(HeaderBehavior::STATIC, $fallback['behavior']);
+    assert_eq(HeaderBehavior::STICKY_SOFT, $fallback['behavior']);
     assert_eq(HeaderBehavior::MODE_STACKED, $fallback['mode']);
-    assert_eq($fallback['topSurface'], $fallback['scrolledSurface']);
+    assert_eq('base', $fallback['topSurface']);
+    assert_eq('contrast', $fallback['foreground']);
+    foreach ([$fallback['topSurface'], $fallback['scrolledSurface']] as $surface) {
+        $fg = ContrastMath::hexToRgb($inverted[$fallback['foreground']]);
+        $bg = ContrastMath::hexToRgb($inverted[$surface]);
+        assert_true($fg !== null && $bg !== null && ContrastMath::ratio($fg, $bg) >= ContrastMath::NORMAL_TEXT);
+    }
+});
+
+test('overlay palette fallback keeps sticky-soft when the stacked path is safe', function () {
+    // Both openings sit on 'base' (white): white passes the worst-case scrim
+    // pixel but not its own opening, and every darker token fails the scrim,
+    // so overlay-to-solid is impossible with this palette.
+    $pages = [
+        ['slug' => 'home', 'sections' => [['slug' => 'hero', 'background' => 'base']]],
+        ['slug' => 'about', 'sections' => [['slug' => 'intro', 'background' => 'base']]],
+    ];
+    $artifact = HeaderBehavior::resolve($pages, HeaderBehavior::MODE_OVERLAY, hh_palette());
+    assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior'], 'stacked path grants its safe sticky-soft');
+    assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode']);
+    assert_eq('base', $artifact['topSurface']);
+    assert_eq('secondary', $artifact['scrolledSurface']);
+    assert_eq('contrast', $artifact['foreground']);
+
+    // When the stacked path's own palette safety check also fails, the
+    // fallback still ends at static even though the depth is sticky-eligible.
+    $midTones = [
+        'base' => '#7F7F7F',
+        'contrast' => '#8A8A8A',
+        'primary' => '#757575',
+        'secondary' => '#808080',
+        'accent' => '#8F8F8F',
+    ];
+    $unsafe = HeaderBehavior::resolve($pages, HeaderBehavior::MODE_OVERLAY, $midTones);
+    assert_eq(HeaderBehavior::STATIC, $unsafe['behavior'], 'both paths failing still ends at static');
+    assert_eq(HeaderBehavior::MODE_STACKED, $unsafe['mode']);
+    assert_eq($unsafe['topSurface'], $unsafe['scrolledSurface']);
 });
 
 test('overlay resolver degrades an all-dark palette instead of throwing on a missing foreground', function () {
@@ -434,9 +539,17 @@ test('closed behavior artifact rejects extra fields and impossible tuples', func
         'topSurface' => 'base',
         'scrolledSurface' => 'base',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ];
     assert_eq($valid, HeaderBehavior::validateArtifact($valid));
     assert_throws(static fn () => HeaderBehavior::validateArtifact($valid + ['extra' => 'nope']));
+    $legacy = $valid;
+    unset($legacy['topTreatment'], $legacy['scrolledTreatment']);
+    assert_throws(
+        static fn () => HeaderBehavior::validateArtifact($legacy),
+        'the closed contract is exactly eight fields; the pre-treatment shape is rejected',
+    );
     $invalid = $valid;
     $invalid['topSurface'] = 'transparent';
     assert_throws(static fn () => HeaderBehavior::validateArtifact($invalid));
@@ -537,6 +650,48 @@ test('removing authored sticky behavior from a resolved static header warns acti
     assert_contains('disposition=', $warnings);
     assert_true(!str_contains($project->readText('theme/parts/header.html'), '"position"'));
     assert_eq('instant', $project->readJson(HeaderBehavior::FILE)['transition']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the step warns actionably when an unreadable palette downgrades sticky-soft to static', function () {
+    $tmp = sys_get_temp_dir() . '/builder_hh_downgrade_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    // Every palette token sits near mid-gray: no foreground/surface pair
+    // reaches 4.5:1, so the requested sticky-soft cannot stay readable.
+    $palette = [];
+    foreach ([
+        'base' => '#7F7F7F',
+        'contrast' => '#8A8A8A',
+        'primary' => '#757575',
+        'secondary' => '#808080',
+        'accent' => '#8F8F8F',
+    ] as $slug => $color) {
+        $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $color];
+    }
+    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]]);
+    $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+    ]]);
+    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+
+    putenv(SectionsStep::ARCHETYPE_ENV);
+    (new HeaderHeroStep())->run($project);
+
+    $artifact = $project->readJson(HeaderBehavior::FILE);
+    assert_eq(HeaderBehavior::STATIC, $artifact['behavior'], 'unsafe palette downgrades sticky-soft');
+    assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode']);
+    assert_true($project->exists('warnings.json'), 'a behavior downgrade is actionable and must be queued');
+    $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+    assert_contains("file='" . HeaderBehavior::FILE . "'", $warnings);
+    assert_contains("block='behavior'", $warnings);
+    assert_contains("authored='sticky-soft' in mode 'stacked'", $warnings);
+    assert_contains("delivered='static' in mode 'stacked'", $warnings);
+    assert_contains('disposition=behavior downgraded', $warnings);
+    assert_contains('no palette-token foreground/surface pair', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -685,5 +840,89 @@ test('the step rejects opening markup whose image does not actually meet the vie
         assert_contains('disposition=overlay downgraded', $warnings, $label);
 
         exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('the step writes earned sticky treatments into both the header part and the artifact', function () {
+    $tmp = sys_get_temp_dir() . '/builder_hh_treatments_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $project->writeJson('theme/theme.json', hh_theme_json());
+    $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+    // Every opening is a token-backed 'base' band and theme.json paints no
+    // custom page background, so the near-black foreground is provable
+    // against everything a transparent start reveals; the scrolled state
+    // frosts the soft neutral it lands on.
+    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+    ]]);
+    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+
+    putenv(SectionsStep::ARCHETYPE_ENV);
+    (new HeaderHeroStep())->run($project);
+
+    $artifact = $project->readJson(HeaderBehavior::FILE);
+    assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior']);
+    assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $artifact['topTreatment']);
+    assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['scrolledTreatment']);
+    $header = $project->readText('theme/parts/header.html');
+    assert_contains('header-top-transparent', $header, 'earned top treatment reaches the written part');
+    assert_contains('header-scrolled-glass', $header, 'earned scrolled treatment reaches the written part');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme.json page background feeds the transparent-start contrast contract in both preset spellings', function () {
+    // The palette is built so a transparent start is provable against the
+    // default 'base' page background but not against 'secondary': the dark
+    // foreground clears white at ~19:1 yet reaches only ~1.7:1 on the dark
+    // secondary token a transparent header would reveal at rest.
+    $palette = [];
+    foreach (['base' => '#FFFFFF', 'contrast' => '#111111', 'secondary' => '#3B3B3B'] as $slug => $color) {
+        $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $color];
+    }
+    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+    $run = static function (?string $background) use ($palette, $section): array {
+        $tmp = sys_get_temp_dir() . '/builder_hh_pagebg_' . uniqid();
+        $project = (new ProjectStore($tmp))->create('demo');
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $theme = ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]];
+        if ($background !== null) {
+            $theme['styles']['color']['background'] = $background;
+        }
+        $project->writeJson('theme/theme.json', $theme);
+        $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ]]);
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        putenv(SectionsStep::ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        exec('rm -rf ' . escapeshellarg($tmp));
+        return $artifact;
+    };
+
+    $control = $run(null);
+    assert_eq(HeaderBehavior::STICKY_SOFT, $control['behavior']);
+    assert_eq(
+        HeaderBehavior::TREATMENT_TRANSPARENT,
+        $control['topTreatment'],
+        'without a custom page background the base convention proves the transparent start',
+    );
+
+    foreach ([
+        'var(--wp--preset--color--secondary)',
+        'var:preset|color|secondary',
+    ] as $spelling) {
+        $artifact = $run($spelling);
+        assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior'], $spelling);
+        assert_eq(
+            HeaderBehavior::TREATMENT_GLASS,
+            $artifact['topTreatment'],
+            "{$spelling}: the revealed dark page background must deny the transparent start",
+        );
     }
 });
