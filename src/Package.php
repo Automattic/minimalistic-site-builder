@@ -39,4 +39,10 @@ final class Package
     {
         return self::root() . '/assets/motion';
     }
+
+    /** The static adaptive-header kit (header.css and header.js). */
+    public static function headerDir(): string
+    {
+        return self::root() . '/assets/header';
+    }
 }
