@@ -89,6 +89,38 @@ test('collect-images recovers an AI_IMAGE spec left in a cover url', function ()
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images gives a recovered structured trailing ratio precedence over prose keywords', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/hero.html',
+        '<!-- wp:cover {"url":"AI_IMAGE:an ultrawide landscape at dawn|portrait feature context|photorealistic|square"} -->'
+        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('square', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images normalizes a recovered numeric trailing ratio before heuristic terms', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/feature.html',
+        '<img src="AI_IMAGE:a square ceramic tile|landscape feature context|photorealistic|2:1"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    // 2:1 is not a direct Gemini shape; it maps to the nearest supported ratio.
+    assert_eq('16:9', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images decodes serializer-equivalent cover values into one canonical image', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/parts/hero.html',

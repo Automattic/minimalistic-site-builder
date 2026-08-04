@@ -337,20 +337,31 @@ final class CollectImagesStep implements Step
     }
 
     /**
-     * The aspect ratio named anywhere in a recovered spec. Explicit supported
-     * ratios survive, unsupported numeric ratios are mapped by GeminiImage to the
-     * closest supported shape, and named ratios remain named. Defaults to
+     * The aspect ratio in a recovered spec. The documented structured form's
+     * trailing pipe field wins over ratio-like words in its subject, context or
+     * style; malformed forms then fall back to an explicit `ratio:` label and,
+     * finally, a heuristic keyword anywhere in the value. Explicit supported
+     * ratios survive, unsupported numeric ratios are mapped by GeminiImage to
+     * the closest supported shape, and named ratios remain named. Defaults to
      * landscape, the full-bleed default.
      */
     private static function sniffAspectRatio(string $body): string
     {
-        $matched = preg_match('/ratio:\s*(\d+:\d+|card-landscape|card-portrait|ultrawide|square|portrait|landscape)/i', $body, $m)
-            || preg_match('/\b(\d+:\d+|card-landscape|card-portrait|ultrawide|square|portrait|landscape)\b/i', $body, $m);
-        if (!$matched) {
-            return 'landscape';
+        $token = '(\d+:\d+|card-landscape|card-portrait|ultrawide|square|portrait|landscape)';
+        $patterns = [
+            // Canonical AI_IMAGE: subject | page context | style | aspect ratio.
+            '/\|\s*(?:ratio:\s*)?' . $token . '\s*$/i',
+            '/ratio:\s*' . $token . '/i',
+            '/\b' . $token . '\b/i',
+        ];
+        foreach ($patterns as $pattern) {
+            if (!preg_match($pattern, $body, $m)) {
+                continue;
+            }
+            $ratio = strtolower($m[1]);
+            return preg_match('/^\d+:\d+$/', $ratio) ? GeminiImage::aspectRatio($ratio) : $ratio;
         }
 
-        $ratio = strtolower($m[1]);
-        return preg_match('/^\d+:\d+$/', $ratio) ? GeminiImage::aspectRatio($ratio) : $ratio;
+        return 'landscape';
     }
 }
