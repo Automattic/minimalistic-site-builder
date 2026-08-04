@@ -268,8 +268,9 @@ final class InnerPagesDesignStep implements Step
                     $this->llm,
                     $repairPrompt,
                     $this->withOptions(['cached_prefixes' => $cachedPrefixes]),
-                    static fn (string $fragment): bool => $isValid(
-                        self::balanceFragment(trim($fragment)),
+                    static fn (string $fragment): bool => self::isClosedRepairCandidate(
+                        $fragment,
+                        $isValid,
                     ),
                 );
             } catch (TruncatedGenerationException $error) {
@@ -643,8 +644,9 @@ final class InnerPagesDesignStep implements Step
                 $this->llm,
                 $repairPrompt,
                 $this->withOptions(['cached_prefixes' => $cachedPrefixes]),
-                static fn (string $fragment): bool => $isValid(
-                    self::balanceFragment(trim($fragment)),
+                static fn (string $fragment): bool => self::isClosedRepairCandidate(
+                    $fragment,
+                    $isValid,
                 ),
             );
         } catch (TruncatedGenerationException $error) {
@@ -706,6 +708,28 @@ final class InnerPagesDesignStep implements Step
         $html = DesignMarkupSanitizer::sanitize($html, $path, $context, $warnings);
         $html = self::removeDocumentDeclarations($html, $path, $context, $warnings);
         return trim($html);
+    }
+
+    /** @param callable(string):bool $isValid */
+    private static function isClosedRepairCandidate(string $fragment, callable $isValid): bool
+    {
+        $candidate = trim($fragment);
+        $probeWarnings = [];
+        $sanitized = DesignMarkupSanitizer::sanitize(
+            $candidate,
+            'repair-probe.html',
+            'continuation closure probe',
+            $probeWarnings,
+        );
+        $sanitized = self::removeDocumentDeclarations(
+            $sanitized,
+            'repair-probe.html',
+            'continuation closure probe',
+            $probeWarnings,
+        );
+        $sanitized = trim($sanitized);
+        return $sanitized === $candidate
+            && $isValid(self::balanceFragment($sanitized));
     }
 
     /**
@@ -825,6 +849,7 @@ final class InnerPagesDesignStep implements Step
     {
         if (
             $fragment === ''
+            || preg_match('//u', $fragment) !== 1
             || self::isValidFragment($fragment)
             || self::isValidHomeBodyFragment($fragment)
         ) {
@@ -832,6 +857,10 @@ final class InnerPagesDesignStep implements Step
         }
 
         $rootName = 'site-build-fragment-root';
+        $suffix = 0;
+        while (stripos($fragment, $rootName) !== false) {
+            $rootName = 'site-build-fragment-root-' . ++$suffix;
+        }
         try {
             $dom = Html::loadUtf8Html(
                 '<!doctype html><html><body><' . $rootName . '>'
@@ -839,15 +868,71 @@ final class InnerPagesDesignStep implements Step
                     . '</' . $rootName . '></body></html>',
                 LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING,
             );
-            if ($dom === null) {
-                return $fragment;
-            }
-            $root = $dom->getElementsByTagName($rootName)->item(0);
-            if (!$root instanceof \DOMElement) {
-                return $fragment;
-            }
+        } catch (\DOMException | \ValueError) {
+            return $fragment;
+        }
+        if ($dom === null) {
+            return $fragment;
+        }
 
-            $balanced = '';
+        $roots = $dom->getElementsByTagName($rootName);
+        $bodies = $dom->getElementsByTagName('body');
+        $root = $roots->item(0);
+        $body = $bodies->item(0);
+        $htmlRoot = $dom->documentElement;
+        if (
+            $roots->length !== 1
+            || $bodies->length !== 1
+            || !$root instanceof \DOMElement
+            || !$body instanceof \DOMElement
+            || !$htmlRoot instanceof \DOMElement
+            || strtolower($htmlRoot->tagName) !== 'html'
+            || $root->parentNode !== $body
+            || $body->parentNode !== $htmlRoot
+        ) {
+            return $fragment;
+        }
+
+        foreach (iterator_to_array($body->childNodes) as $node) {
+            if (
+                $node !== $root
+                && !($node instanceof \DOMText && trim($node->nodeValue ?? '') === '')
+            ) {
+                return $fragment;
+            }
+        }
+        foreach (iterator_to_array($dom->childNodes) as $node) {
+            if ($node === $htmlRoot || $node instanceof \DOMDocumentType) {
+                continue;
+            }
+            if ($node instanceof \DOMText && trim($node->nodeValue ?? '') === '') {
+                continue;
+            }
+            return $fragment;
+        }
+        foreach (iterator_to_array($htmlRoot->childNodes) as $node) {
+            if ($node === $body) {
+                continue;
+            }
+            if ($node instanceof \DOMText && trim($node->nodeValue ?? '') === '') {
+                continue;
+            }
+            if ($node instanceof \DOMElement && strtolower($node->tagName) === 'head') {
+                foreach (iterator_to_array($node->childNodes) as $headChild) {
+                    if (
+                        !($headChild instanceof \DOMText)
+                        || trim($headChild->nodeValue ?? '') !== ''
+                    ) {
+                        return $fragment;
+                    }
+                }
+                continue;
+            }
+            return $fragment;
+        }
+
+        $balanced = '';
+        try {
             foreach (iterator_to_array($root->childNodes) as $node) {
                 $html = $dom->saveHTML($node);
                 if ($html === false) {
@@ -855,10 +940,12 @@ final class InnerPagesDesignStep implements Step
                 }
                 $balanced .= $html;
             }
-            return $balanced;
-        } catch (\Throwable) {
+        } catch (\DOMException | \ValueError) {
             return $fragment;
         }
+        return self::isValidFragment($balanced) || self::isValidHomeBodyFragment($balanced)
+            ? $balanced
+            : $fragment;
     }
 
     private static function isValidFragment(string $html): bool
