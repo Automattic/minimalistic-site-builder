@@ -20,11 +20,11 @@ Treat the cached site CSS and design preview as binding design authority. Reuse 
 
 ## Fragment contract
 
-Return one `<main>` fragment and nothing else. Do not wrap it in Markdown fences or add commentary.
+Return one `<main>` fragment and nothing else. Return only the fragment: no preamble, commentary, explanation, or prose before or after it, and no Markdown fences.
 
 - Omit `<!doctype>`, `<html>`, `<head>`, `<body>`, site header, and site footer.
 - The `<main>` must contain only this page's content and have one clear `h1`.
-- Reuse existing classes. Page-specific CSS is a last resort and must be small.
+- Prefer established site classes from the site CSS. Page-specific CSS is a last resort and must stay minimal and well under 16 KB.
 - When page-specific CSS is essential, put exactly one `<style data-page-css>` immediately before `<main>`. Never put a style element inside `<main>`.
 
 ## Supported HTML slice

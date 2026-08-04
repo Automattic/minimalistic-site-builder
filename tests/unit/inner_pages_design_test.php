@@ -250,6 +250,25 @@ test('inner-pages-design preserves only optional page CSS before main', function
     inner_pages_cleanup($tmp);
 });
 
+test('inner-pages-design accepts realistic page CSS while retaining a 16 KiB ceiling', function () {
+    $isValidFragment = new ReflectionMethod(InnerPagesDesignStep::class, 'isValidFragment');
+    $isValidFragment->setAccessible(true);
+
+    $realisticCss = str_repeat('.x{color:red}', 461);
+    $runawayCss = str_repeat('.x{color:red}', 1261);
+    assert_eq(5993, strlen($realisticCss));
+    assert_true(strlen($runawayCss) > 16384);
+
+    assert_true(!$isValidFragment->invoke(
+        null,
+        '<style data-page-css>' . $runawayCss . '</style><main><p>Runaway</p></main>',
+    ), 'page CSS over 16384 bytes remains rejected');
+    assert_true($isValidFragment->invoke(
+        null,
+        '<style data-page-css>' . $realisticCss . '</style><main><p>Realistic</p></main>',
+    ), 'page CSS between 4096 and 16384 bytes is accepted');
+});
+
 test('inner-pages-design sends every hostile fragment through shared hardened sanitizer', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'Welcome'),
@@ -321,9 +340,13 @@ test('page-generation prompts freeze fold-seeded inner and below-fold home contr
     foreach ([
         '<main>',
         'data-page-css',
-        'reuse existing classes',
+        'prefer established site classes',
         'last resort',
-        'must be small',
+        'minimal and well under 16 kb',
+        'no preamble',
+        'commentary',
+        'explanation',
+        'prose before or after',
         'headings',
         'paragraphs',
         'lists',
@@ -366,6 +389,12 @@ test('page-generation prompts freeze fold-seeded inner and below-fold home contr
         'do not emit a <header>',
         'do not repeat the hero',
         'design preview',
+        'prefer established site classes',
+        'minimize new page-specific classes',
+        'no preamble',
+        'commentary',
+        'explanation',
+        'prose before or after',
         'no javascript',
     ] as $required) {
         assert_contains($required, $homePrompt);

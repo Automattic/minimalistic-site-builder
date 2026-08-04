@@ -20,7 +20,7 @@ Treat the cached site CSS and design preview as binding design authority. Contin
 
 ## Fragment contract
 
-Return one `<main>` fragment for content below the fold followed immediately by one `<footer>` for the site, and nothing else. Do not wrap the output in Markdown fences or add commentary.
+Return one `<main>` fragment for content below the fold followed immediately by one `<footer>` for the site, and nothing else. Return only the fragment: no preamble, commentary, explanation, or prose before or after it, and no Markdown fences.
 
 - Do not emit a <header>.
 - Do not repeat the hero from the design preview. Start with the first section below the fold.
@@ -28,7 +28,7 @@ Return one `<main>` fragment for content below the fold followed immediately by 
 - Include exactly one `<main>` and exactly one `<footer>`.
 - Return a bare <main> with no attributes. Put all classes and IDs on its child sections.
 - Do not add a second `h1`; the design preview owns the homepage heading.
-- Reuse existing classes from the site CSS. Do not emit a `<style>` element.
+- Prefer established site classes from the site CSS and minimize new page-specific classes. Do not emit a `<style>` element.
 
 ## Supported HTML slice
 

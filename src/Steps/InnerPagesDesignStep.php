@@ -26,7 +26,8 @@ final class InnerPagesDesignStep implements Step
 {
     use LlmOptions;
 
-    private const MAX_PAGE_CSS_BYTES = 4096;
+    // Runaway-CSS backstop, not a design constraint: PageStylesStep merges page CSS downstream.
+    private const MAX_PAGE_CSS_BYTES = 16384;
     private const RESERVED_INNER_SLUGS = ['preview', 'home', 'site'];
     private const RESERVED_INTERNAL_PHYSICAL_SLUGS = ['home-body'];
     private const VOID_ELEMENTS = [
