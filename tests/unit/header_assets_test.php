@@ -80,6 +80,18 @@ test('header CSS maps the closed palette vocabulary and covers accessibility sta
     assert_contains('.header-start-transparent { --header-start-surface: var(--header-overlay-scrim); }', $css);
     assert_eq(0.60, HeaderBehavior::OVERLAY_SCRIM_ALPHA);
     assert_eq([102, 102, 102], HeaderBehavior::OVERLAY_WORST_CASE_RGB);
+    $glass = header_asset_css_block($css, '@supports ((-webkit-backdrop-filter: blur(1px))');
+    assert_contains('.header-behavior-overlay-to-solid::before', $glass);
+    assert_contains('-webkit-backdrop-filter: blur(14px) saturate(115%)', $glass);
+    assert_contains('backdrop-filter: blur(14px) saturate(115%)', $glass);
+    assert_contains('pointer-events: none', $glass);
+    assert_contains('html.header-is-scrolled', $glass);
+    assert_contains('.site-header-shell--force-solid', $glass);
+    assert_contains('backdrop-filter: none', $glass);
+    assert_true(
+        !str_contains($glass, 'transition-property: backdrop-filter'),
+        'the potentially expensive glass filter switches states without animation',
+    );
     assert_contains('.site-header-shell--overlay-to-solid + .wp-block-post-content', $css);
     assert_contains('margin-block-start: 0', $css);
 
@@ -104,6 +116,9 @@ test('header CSS maps the closed palette vocabulary and covers accessibility sta
     assert_contains('.wp-block-navigation__responsive-container-open', $print);
     assert_contains('.wp-block-navigation__responsive-container-close', $print);
     assert_contains('display: none !important', $print);
+    assert_contains('.header-behavior-overlay-to-solid::before', $print);
+    assert_contains('content: none !important', $print);
+    assert_contains('backdrop-filter: none !important', $print);
 
     $instant = header_asset_css_block($css, '.site-header-shell .header-transition-instant');
     assert_true(!str_contains($instant, '*'), 'instant state does not disable descendant hover transitions');

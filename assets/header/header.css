@@ -164,6 +164,38 @@ html.header-is-scrolled
     box-shadow: var(--header-scrolled-shadow);
 }
 
+/* Progressive glass enhancement for image-led opening compositions. The
+ * pseudo-element is not an ancestor of the navigation, so its filter cannot
+ * turn a fixed responsive menu into a header-relative containing block. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .site-header-shell .header-behavior-overlay-to-solid {
+        position: relative;
+    }
+
+    .site-header-shell .header-behavior-overlay-to-solid::before {
+        position: absolute;
+        z-index: 0;
+        inset: 0;
+        content: "";
+        pointer-events: none;
+        -webkit-backdrop-filter: blur(14px) saturate(115%);
+        backdrop-filter: blur(14px) saturate(115%);
+    }
+
+    .site-header-shell .header-behavior-overlay-to-solid > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    html.header-is-scrolled
+        .site-header-shell
+        .header-behavior-overlay-to-solid::before,
+    .site-header-shell--force-solid .header-behavior-overlay-to-solid::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
 /* A WordPress responsive-nav modal must never expose content behind its text. */
 .site-header-shell
     :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)
@@ -247,5 +279,11 @@ html.header-state-js {
             .wp-block-navigation__responsive-container-close
         ) {
         display: none !important;
+    }
+
+    .site-header-shell .header-behavior-overlay-to-solid::before {
+        content: none !important;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
     }
 }
