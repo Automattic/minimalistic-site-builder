@@ -42,6 +42,25 @@ final class GeminiImage
     ];
 
     /**
+     * Machine-readable Gemini outcomes that unambiguously mean a policy or
+     * safety filter rejected the prompt/candidate. Everything else is an
+     * ordinary no-image response: finish reasons such as MAX_TOKENS, NO_IMAGE,
+     * and MALFORMED_FUNCTION_CALL must not trigger safety retries or an LLM
+     * prompt rewrite.
+     */
+    private const FILTERED_REASONS = [
+        'SAFETY',
+        'RECITATION',
+        'BLOCKLIST',
+        'PROHIBITED_CONTENT',
+        'SPII',
+        'IMAGE_SAFETY',
+        'IMAGE_PROHIBITED_CONTENT',
+        'IMAGE_RECITATION',
+        'MODEL_ARMOR',
+    ];
+
+    /**
      * Budget for the text prompt (input tokens). Imagen enforced this as a
      * hard model cap; Gemini accepts far longer prompts, but the composition
      * pipeline is tuned to this budget — a tight prompt keeps the subject
@@ -595,7 +614,8 @@ final class GeminiImage
 
         $part = self::imagePart($data);
         if ($part === null) {
-            throw new \RuntimeException('Image proxy response had no image data: ' . substr($raw, 0, 300));
+            $detail = self::noImageReason($data) ?? substr($raw, 0, 300);
+            throw new \RuntimeException('Image proxy response had no image data: ' . $detail);
         }
 
         $bytes = base64_decode($part['data'], true);
@@ -663,14 +683,11 @@ final class GeminiImage
 
     /**
      * The safety-filter reason in a decoded generateContent response, or null
-     * when the response was not filtered. Gemini signals a rejection as an
-     * HTTP 200 in one of three shapes, all without image bytes: a prompt-level
-     * `promptFeedback.blockReason`, a candidate finishing for a non-STOP
-     * reason (IMAGE_SAFETY, PROHIBITED_CONTENT, SAFETY, RECITATION, …), or a
-     * text-only "I can't generate that" refusal that finishes STOP. All three
-     * are retryable and repairable by rewriting the prompt. A response that
-     * carries image data is never filtered, whatever else rides along. Public
-     * and pure so the classification is unit-testable.
+     * when the response was not filtered. Only explicit, machine-readable
+     * policy/safety outcomes qualify: neither an arbitrary non-STOP finish
+     * reason nor text without an image proves that safety filtering occurred.
+     * A response that carries image data is never filtered, whatever else
+     * rides along. Public and pure so the classification is unit-testable.
      *
      * @param ?array<mixed> $data decoded JSON response body
      */
@@ -680,26 +697,86 @@ final class GeminiImage
             return null;
         }
 
-        $block = $data['promptFeedback']['blockReason'] ?? null;
-        if (is_string($block) && trim($block) !== '') {
-            return 'prompt blocked: ' . trim($block);
+        $block = self::filteredOutcome($data['promptFeedback']['blockReason'] ?? null);
+        if ($block !== null) {
+            return 'prompt blocked: ' . $block;
         }
 
         foreach ((array) ($data['candidates'] ?? []) as $candidate) {
             if (!is_array($candidate)) {
                 continue;
             }
-            $finish = $candidate['finishReason'] ?? null;
-            if (is_string($finish) && $finish !== '' && $finish !== 'STOP') {
+            $finish = self::filteredOutcome($candidate['finishReason'] ?? null);
+            if ($finish !== null) {
                 return 'candidate finished: ' . $finish;
             }
+        }
+        return null;
+    }
+
+    /** Return a normalized policy/safety outcome, never a generic finish reason. */
+    private static function filteredOutcome(mixed $reason): ?string
+    {
+        if (!is_string($reason)) {
+            return null;
+        }
+        $reason = strtoupper(trim($reason));
+        return in_array($reason, self::FILTERED_REASONS, true) ? $reason : null;
+    }
+
+    /**
+     * Preserve the useful response detail when a non-policy response has no
+     * image. This remains an ordinary permanent per-image failure; it is not a
+     * safety signal and therefore does not enter retry or prompt-repair flows.
+     *
+     * @param ?array<mixed> $data decoded JSON response body
+     */
+    private static function noImageReason(?array $data): ?string
+    {
+        if ($data === null) {
+            return null;
+        }
+
+        $block = $data['promptFeedback']['blockReason'] ?? null;
+        if (is_string($block) && trim($block) !== '') {
+            return 'prompt block reason: ' . mb_substr(trim($block), 0, 200);
+        }
+
+        foreach ((array) ($data['candidates'] ?? []) as $candidate) {
+            if (!is_array($candidate)) {
+                continue;
+            }
+
+            $finish = $candidate['finishReason'] ?? null;
+            $finish = is_string($finish) && trim($finish) !== '' ? trim($finish) : null;
+            $message = $candidate['finishMessage'] ?? null;
+            $message = is_string($message) && trim($message) !== '' ? trim($message) : null;
+            $text = null;
             foreach ((array) ($candidate['content']['parts'] ?? []) as $part) {
-                $text = is_array($part) ? ($part['text'] ?? null) : null;
-                if (is_string($text) && trim($text) !== '') {
-                    return 'model refused with text: ' . mb_substr(trim($text), 0, 200);
+                $candidateText = is_array($part) ? ($part['text'] ?? null) : null;
+                if (is_string($candidateText) && trim($candidateText) !== '') {
+                    $text = trim($candidateText);
+                    break;
                 }
             }
+
+            if ($finish !== null && strtoupper($finish) !== 'STOP') {
+                $detail = 'candidate finished: ' . $finish;
+                if ($message !== null) {
+                    $detail .= ' (' . mb_substr($message, 0, 200) . ')';
+                } elseif ($text !== null) {
+                    $detail .= '; text: ' . mb_substr($text, 0, 200);
+                }
+                return $detail;
+            }
+            if ($text !== null) {
+                return 'text-only response: ' . mb_substr($text, 0, 200);
+            }
+            if ($finish !== null) {
+                return 'candidate finished: ' . $finish;
+            }
         }
+
         return null;
     }
 }

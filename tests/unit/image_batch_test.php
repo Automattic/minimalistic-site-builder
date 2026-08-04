@@ -137,7 +137,7 @@ test('retryBatch marks a filtered prompt that passes on a retry as a plain succe
     assert_eq(1, $out['succeeded']);
 });
 
-test('filteredReason spots each Gemini rejection shape, null otherwise', function () {
+test('filteredReason recognizes only explicit Gemini policy and safety outcomes', function () {
     // Prompt-level block: no candidates at all, just promptFeedback.
     $blocked = json_decode('{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"}}', true);
     assert_contains('PROHIBITED_CONTENT', (string) GeminiImage::filteredReason($blocked));
@@ -146,12 +146,24 @@ test('filteredReason spots each Gemini rejection shape, null otherwise', functio
     $safety = ['candidates' => [['finishReason' => 'IMAGE_SAFETY', 'content' => ['parts' => []]]]];
     assert_contains('IMAGE_SAFETY', (string) GeminiImage::filteredReason($safety));
 
-    // Text-only refusal that finishes STOP — still a repairable rejection.
-    $refusal = ['candidates' => [[
-        'finishReason' => 'STOP',
-        'content' => ['parts' => [['text' => 'I cannot generate that image.']]],
-    ]]];
-    assert_contains('cannot generate', (string) GeminiImage::filteredReason($refusal));
+    // Non-policy finish reasons are ordinary no-image outcomes, not evidence
+    // that a safety retry or LLM prompt rewrite could help.
+    foreach (['MAX_TOKENS', 'NO_IMAGE', 'MALFORMED_FUNCTION_CALL', 'OTHER', 'STOP'] as $finish) {
+        $response = ['candidates' => [['finishReason' => $finish, 'content' => ['parts' => []]]]];
+        assert_eq(null, GeminiImage::filteredReason($response), $finish . ' is not a safety outcome');
+    }
+    assert_eq(null, GeminiImage::filteredReason(['promptFeedback' => ['blockReason' => 'OTHER']]));
+
+    // Text alone is ambiguous: both a benign explanation and refusal-shaped
+    // prose remain ordinary no-image responses unless an explicit policy enum
+    // accompanies them.
+    foreach (['I was unable to create an image this time.', 'I cannot generate that image.'] as $text) {
+        $response = ['candidates' => [[
+            'finishReason' => 'STOP',
+            'content' => ['parts' => [['text' => $text]]],
+        ]]];
+        assert_eq(null, GeminiImage::filteredReason($response));
+    }
 
     // A response that carries image data is never filtered, whatever rides along.
     $ok = ['candidates' => [[
@@ -164,6 +176,29 @@ test('filteredReason spots each Gemini rejection shape, null otherwise', functio
     assert_eq(null, GeminiImage::filteredReason($ok));
     assert_eq(null, GeminiImage::filteredReason(['candidates' => []]));
     assert_eq(null, GeminiImage::filteredReason(null));
+});
+
+test('interpret degrades non-policy no-image outcomes as ordinary permanent errors', function () {
+    $responses = [
+        'MAX_TOKENS' => ['candidates' => [['finishReason' => 'MAX_TOKENS']]],
+        'NO_IMAGE' => ['candidates' => [['finishReason' => 'NO_IMAGE']]],
+        'MALFORMED_FUNCTION_CALL' => ['candidates' => [['finishReason' => 'MALFORMED_FUNCTION_CALL']]],
+        'text-only response' => ['candidates' => [[
+            'finishReason' => 'STOP',
+            'content' => ['parts' => [['text' => 'No image was produced.']]],
+        ]]],
+    ];
+
+    foreach ($responses as $detail => $response) {
+        try {
+            GeminiImage::interpret((string) json_encode($response), 200);
+            assert_true(false, 'expected RuntimeException for ' . $detail);
+        } catch (ImageFilteredException $e) {
+            assert_true(false, $detail . ' must not enter the safety retry/repair flow');
+        } catch (\RuntimeException $e) {
+            assert_contains($detail, $e->getMessage());
+        }
+    }
 });
 
 test('imageData finds the inline image part and skips narration text', function () {
