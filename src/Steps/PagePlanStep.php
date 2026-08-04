@@ -991,7 +991,28 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $reason = 'destination must be non-empty plain text';
         }
         if ($reason === '' && !self::initialDestinationIsKnown($destination, $context)) {
-            $reason = 'destination is not a known page, planned anchor, or spec-backed contact target';
+            // An invented absolute URL (observed: https://atlasfield.io/trial
+            // on a fabricated domain) must never ship — but deleting the
+            // conversion CTA over it is rung 3 when rung 1 exists. Rewrite it
+            // to an anchor named after the URL's last path segment; the later
+            // anchor validation resolves it to a real planned section or
+            // retargets it to the page's closing anchor.
+            if (preg_match('#^https?://#i', $destination) === 1) {
+                $segment = strtolower(trim((string) parse_url($destination, PHP_URL_PATH), '/'));
+                $segment = (string) preg_replace('/[^a-z0-9-]+/', '-', basename($segment));
+                $anchor = '#' . (trim($segment, '-') !== '' ? trim($segment, '-') : 'cta');
+                $warnings[] = self::valueLossWarning(
+                    $path . '.destination',
+                    "'{$destination}'",
+                    "'{$anchor}'",
+                    'invented external URL rewritten to a local anchor for the closing-section retarget '
+                        . 'instead of removing the action',
+                    valuesAlreadyRendered: true,
+                );
+                $destination = $anchor;
+            } else {
+                $reason = 'destination is not a known page, planned anchor, or spec-backed contact target';
+            }
         }
 
         if ($reason !== '') {

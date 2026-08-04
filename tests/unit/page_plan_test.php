@@ -1606,3 +1606,33 @@ test('PagePlanStep first-pass validation keeps anchor-shaped destinations for th
     assert_true(is_array($kept), 'placeholder # reaches the anchor validation instead of dying early');
     assert_eq([], $warnings);
 });
+
+test('PagePlanStep rewrites an invented external CTA URL to an anchor for the retarget pass', function () {
+    // Regression: atlas14's plan authored https://atlasfield.io/trial (a
+    // fabricated domain) and the whole "Start Free Trial" CTA was deleted.
+    $context = PagePlanStep::primaryActionContext([], [['slug' => 'home', 'path' => '/']]);
+    $warnings = [];
+    $kept = PagePlanStep::normalizePrimaryAction(
+        ['label' => 'Start Free Trial', 'intent' => 'Convert.', 'destination' => 'https://atlasfield.io/trial'],
+        true,
+        $context,
+        $warnings,
+    );
+    assert_true(is_array($kept), 'the CTA survives');
+    assert_eq('#trial', $kept['destination'], 'external URL becomes a local anchor');
+    assert_eq(1, count($warnings));
+    assert_contains('invented external URL', $warnings[0]);
+
+    // Downstream, the unknown anchor retargets to the closing section.
+    $pages = [[
+        'slug' => 'home', 'path' => '/', 'front' => true,
+        'sections' => [
+            array_merge(plan_section(['slug' => 'hero']), ['primary_action' => $kept]),
+            array_merge(plan_section(['slug' => 'features', 'title' => 'Features']), ['role' => 'content', 'layout_archetype' => 'centered-stack']),
+            array_merge(plan_section(['slug' => 'signup', 'title' => 'Signup']), ['role' => 'closing', 'layout_archetype' => 'asymmetric-split']),
+        ],
+    ]];
+    $anchorWarnings = [];
+    $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $anchorWarnings);
+    assert_eq('#signup', $delivered[0]['sections'][0]['primary_action']['destination']);
+});
