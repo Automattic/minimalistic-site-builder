@@ -10,8 +10,8 @@ use Automattic\SiteBuild\FontCatalog;
  * enforces.
  */
 
-$fontCatalogFixture = static function (): string {
-    $path = sys_get_temp_dir() . '/font-catalog-' . uniqid() . '.json';
+$fontCatalogFixture = static fn (): FontCatalog => with_temp_dir('font-catalog-', static function (string $dir): FontCatalog {
+    $path = $dir . '/font-catalog.json';
     file_put_contents($path, json_encode([
         'font_families' => [
             [
@@ -36,11 +36,11 @@ $fontCatalogFixture = static function (): string {
             ],
         ],
     ]));
-    return $path;
-};
+    return FontCatalog::load($path);
+});
 
 test('FontCatalog resolves names, slugs, and CSS stacks case-insensitively', function () use ($fontCatalogFixture) {
-    $catalog = FontCatalog::load($fontCatalogFixture());
+    $catalog = $fontCatalogFixture();
 
     assert_eq('Inter', $catalog->resolve('Inter')['name']);
     assert_eq('Inter', $catalog->resolve('inter')['name']);
@@ -55,7 +55,7 @@ test('FontCatalog resolves names, slugs, and CSS stacks case-insensitively', fun
 });
 
 test('FontCatalog selects exact faces and falls back to the nearest weight', function () use ($fontCatalogFixture) {
-    $catalog = FontCatalog::load($fontCatalogFixture());
+    $catalog = $fontCatalogFixture();
     $inter = $catalog->resolve('Inter');
 
     $srcs = array_column($catalog->faces($inter, [400, 700], false), 'src');
@@ -76,7 +76,7 @@ test('FontCatalog selects exact faces and falls back to the nearest weight', fun
 });
 
 test('FontCatalog includes italic faces only when the scan saw italics', function () use ($fontCatalogFixture) {
-    $catalog = FontCatalog::load($fontCatalogFixture());
+    $catalog = $fontCatalogFixture();
     $inter = $catalog->resolve('Inter');
 
     $styles = array_column($catalog->faces($inter, [400], true), 'fontStyle');

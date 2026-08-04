@@ -56,23 +56,6 @@ function php_block_fixer_golden_copy_tree(string $source, string $target): void
     }
 }
 
-function php_block_fixer_golden_remove(string $path): void
-{
-    if (is_link($path) || is_file($path)) {
-        @unlink($path);
-        return;
-    }
-    if (!is_dir($path)) {
-        return;
-    }
-    foreach (scandir($path) ?: [] as $name) {
-        if ($name !== '.' && $name !== '..') {
-            php_block_fixer_golden_remove($path . '/' . $name);
-        }
-    }
-    @rmdir($path);
-}
-
 /** @return list<array{file:string,blockPath:string,code:string}> */
 function php_block_fixer_golden_repairs(FixerReport $report): array
 {
@@ -182,7 +165,7 @@ foreach ($phpBlockFixerGoldenCases as $phpBlockFixerGoldenCase) {
                 'second invocation emits unexpected repair rows'
             );
         } finally {
-            php_block_fixer_golden_remove($temporary);
+            remove_tree($temporary);
         }
     });
 }

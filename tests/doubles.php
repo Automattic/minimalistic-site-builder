@@ -118,20 +118,3 @@ function php_block_fixer_test_theme(array $files = []): string
     }
     return $theme;
 }
-
-function php_block_fixer_test_remove(string $path): void
-{
-    if (is_link($path) || is_file($path)) {
-        @unlink($path);
-        return;
-    }
-    if (!is_dir($path)) {
-        return;
-    }
-    foreach (scandir($path) ?: [] as $name) {
-        if ($name !== '.' && $name !== '..') {
-            php_block_fixer_test_remove($path . '/' . $name);
-        }
-    }
-    @rmdir($path);
-}
