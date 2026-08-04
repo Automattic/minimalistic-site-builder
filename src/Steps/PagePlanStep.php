@@ -459,6 +459,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $out[] = $page;
         }
 
+        // The plan prompt demands a hero, at least 3 content sections, and a
+        // closing — a 1-2 section front page is a degenerate plan (observed:
+        // a SaaS brief delivered hero-only, shipping a 1.5-screen site).
+        // Pad below the delivered sections with reviewed generic briefs so
+        // the sections step still writes a whole page, and record the loss.
+        $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings);
+
         // Anchors cannot be judged until every normal, repair, and fallback
         // path has produced its final page/section set. Recheck the sole
         // eligible action now and null it atomically when its target vanished.
@@ -1190,7 +1197,14 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         }
 
         if (str_starts_with($destination, '#')) {
-            return preg_match('/^#[a-z0-9][a-z0-9-]*$/', $destination) === 1;
+            // Any anchor shape survives the first pass — including the
+            // placeholder "#" the prompt forbids but models still emit.
+            // validatePrimaryActionAnchors() always runs after every
+            // recovery path and retargets an unknown fragment to the
+            // page's closing section (or removes the action when no
+            // distinct target exists), which preserves the conversion CTA
+            // instead of deleting it over a placeholder.
+            return true;
         }
         if (!str_starts_with($destination, '/')) {
             return false;
@@ -1217,6 +1231,118 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /** @return array{0:string,1:string}|null */
+    /**
+     * Append reviewed generic section briefs below a front page whose
+     * delivered plan has fewer than three sections. The appended briefs are
+     * re-normalized together with the delivered ones so slug uniqueness,
+     * enum, and variety rules hold; positional roles then make the final
+     * appended section the page's closing anchor (which the primary-action
+     * retarget can use). Interior pages are never padded.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function padThinFrontPlan(
+        array $pages,
+        ?array $frontProjection,
+        array $actionContext,
+        array &$warnings = [],
+    ): array {
+        foreach ($pages as $index => $page) {
+            if (!is_array($page) || empty($page['front'])) {
+                continue;
+            }
+            $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
+            $missing = 3 - count($sections);
+            if ($missing <= 0) {
+                return $pages;
+            }
+
+            // A delivered plan of 2+ sections keeps its own final section in
+            // the closing position; the generic briefs slot in above it. A
+            // hero-only plan appends, so the appended tail takes the role.
+            // Each inserted archetype avoids both neighbors so the adjacency
+            // variety rule holds by construction.
+            $safeArchetypes = ['centered-stack', 'asymmetric-split', 'offset-grid'];
+            $briefs = [
+                [
+                    'slug'          => 'overview',
+                    'title'         => 'Overview',
+                    'type'          => 'content',
+                    'purpose'       => 'Substantiate the hero promise with the core offering, grounded in the site spec.',
+                    'content_notes' => 'Two or three short paragraphs or a compact list; every claim comes from the site spec, nothing invented.',
+                    'background'    => 'contrast',
+                    'handoff'       => 'Sits between the hero above and the closing section below.',
+                ],
+                [
+                    'slug'          => 'closing',
+                    'title'         => 'Next Step',
+                    'type'          => 'cta',
+                    'purpose'       => 'Close the page with the one next step a visitor should take.',
+                    'content_notes' => 'One heading, one short supporting line, and the conversion or contact path stated in the site spec.',
+                    'background'    => 'base',
+                    'handoff'       => 'Sits between the previous section and the site footer.',
+                ],
+            ];
+            $insertAt = count($sections) >= 2 ? count($sections) - 1 : count($sections);
+            $above = $insertAt > 0
+                ? (string) ($sections[$insertAt - 1]['layout_archetype'] ?? '')
+                : '';
+            $below = isset($sections[$insertAt])
+                ? (string) ($sections[$insertAt]['layout_archetype'] ?? '')
+                : '';
+            $inserted = [];
+            foreach (array_slice($briefs, 0, $missing) as $brief) {
+                $archetype = $safeArchetypes[0];
+                foreach ($safeArchetypes as $candidate) {
+                    if ($candidate !== $above && $candidate !== $below) {
+                        $archetype = $candidate;
+                        break;
+                    }
+                }
+                $above = $archetype;
+                $inserted[] = $brief + [
+                    'layout_archetype' => $archetype,
+                    'vertical_density' => 'standard',
+                    'primary_action'   => null,
+                ];
+            }
+            $padded = array_merge(
+                array_slice($sections, 0, $insertAt),
+                $inserted,
+                array_slice($sections, $insertAt),
+            );
+            $repairs = [];
+            try {
+                $pages[$index]['sections'] = self::normalize(
+                    $padded,
+                    true,
+                    $frontProjection,
+                    $actionContext,
+                    $warnings,
+                    (string) ($page['slug'] ?? ''),
+                    $repairs,
+                );
+            } catch (\Throwable) {
+                // Padding must never make a deliverable plan worse: keep the
+                // thin-but-valid delivered sections when the padded list
+                // cannot be normalized.
+                return $pages;
+            }
+            $warnings[] = self::valueLossWarning(
+                "pages[slug='" . (string) ($page['slug'] ?? '') . "'].sections",
+                count($sections) . ' delivered section(s)',
+                count($pages[$index]['sections']) . ' section(s) after padding',
+                'front-page plan was thinner than the contract minimum of a hero plus supporting and closing '
+                    . 'sections; reviewed generic briefs were appended below the delivered ones',
+                valuesAlreadyRendered: true,
+            );
+            return $pages;
+        }
+        return $pages;
+    }
+
     /**
      * The anchor a dead primary-action fragment is deterministically
      * retargeted to on the target page: the last section with the `closing`

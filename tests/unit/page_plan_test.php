@@ -276,7 +276,8 @@ test('PagePlanStep primary action validation nulls the whole invalid action with
         ['label' => '<strong>Go</strong>', 'intent' => 'Navigate.', 'destination' => '/menu/'],
         ['label' => str_repeat('x', 81), 'intent' => 'Navigate.', 'destination' => '/menu/'],
         ['label' => 'Go', 'intent' => "Bad\nintent", 'destination' => '/menu/'],
-        ['label' => 'Go', 'intent' => 'Navigate.', 'destination' => '#'],
+        // '#' and other anchor shapes now pass the first pass by design:
+        // validatePrimaryActionAnchors() retargets or removes them later.
         ['label' => 'Go', 'intent' => 'Navigate.', 'destination' => '/invented/'],
     ];
     foreach ($cases as $case) {
@@ -932,7 +933,10 @@ test('page-plan writes pages.json with sections per page', function () {
         'intent' => 'Help visitors explore the current menu.',
         'destination' => '/menu/',
     ], $plan['pages'][0]['sections'][0]['primary_action']);
-    assert_eq('closing', $plan['pages'][0]['sections'][1]['role']);
+    // The 2-section home plan is padded to the contract minimum; the
+    // delivered cta keeps the closing position below the inserted brief.
+    assert_eq(['hero', 'overview', 'cta'], array_column($plan['pages'][0]['sections'], 'slug'));
+    assert_eq('closing', $plan['pages'][0]['sections'][2]['role']);
     assert_eq('menu', $plan['pages'][1]['slug']);
     assert_eq('/menu/', $plan['pages'][1]['path']);
     assert_eq('menu-hero', $plan['pages'][1]['sections'][0]['slug']);
@@ -1000,10 +1004,12 @@ test('page-plan removes a generated footer before recomputing variety and roles'
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $sections = $project->readJson('pages.json')['pages'][0]['sections'];
-    assert_eq(['welcome', 'reserve'], array_column($sections, 'slug'));
-    assert_eq(['hero', 'closing'], array_column($sections, 'role'));
+    // The surviving 2-section plan is padded to the contract minimum, with
+    // the delivered closing kept last and the insert avoiding both neighbors.
+    assert_eq(['welcome', 'overview', 'reserve'], array_column($sections, 'slug'));
+    assert_eq(['hero', 'content', 'closing'], array_column($sections, 'role'));
     assert_eq(
-        ['full-bleed-cover', 'asymmetric-split'],
+        ['full-bleed-cover', 'centered-stack', 'asymmetric-split'],
         array_column($sections, 'layout_archetype'),
         'variety is validated against the surviving adjacency'
     );
@@ -1039,9 +1045,10 @@ test('page-plan substitutes a valid page when the generated footer was its only 
     (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $sections = $project->readJson('pages.json')['pages'][0]['sections'];
-    assert_eq(1, count($sections));
+    assert_eq(3, count($sections), 'the synthesized single section is padded to the contract minimum');
     assert_eq('content', $sections[0]['slug']);
     assert_eq('hero', $sections[0]['role']);
+    assert_eq('closing', $sections[2]['role']);
     PagePlanStep::normalize($sections);
     assert_eq(1, count($llm->calls), 'footer-only content is degraded deterministically, without another model call');
 
@@ -1328,7 +1335,7 @@ test('page-plan repairs an empty page plan and falls back when the repair is emp
     (new PagePlanStep($llm, $renderer))->run($project);
 
     $sections = $project->readJson('pages.json')['pages'][0]['sections'];
-    assert_eq(1, count($sections));
+    assert_eq(3, count($sections), 'the synthesized fallback is padded to the contract minimum');
     assert_eq('content', $sections[0]['slug']);
     assert_eq('hero', $sections[0]['role']);
     // The empty plan went through the repair path before degrading.
@@ -1361,7 +1368,11 @@ test('page-plan generated JSON fallback preserves valid page siblings', function
     );
 
     $pages = $project->readJson('pages.json')['pages'];
-    assert_eq(['welcome'], array_column($pages[0]['sections'], 'slug'), 'valid sibling stays authored');
+    assert_eq(
+        ['welcome', 'overview', 'closing'],
+        array_column($pages[0]['sections'], 'slug'),
+        'the authored front section stays first; the thin plan is padded below it'
+    );
     assert_eq(['content'], array_column($pages[1]['sections'], 'slug'), 'failed sibling gets one fallback');
     assert_eq('centered-stack', $pages[1]['sections'][0]['layout_archetype'], 'interior fallback stays compact');
     assert_eq(null, $pages[1]['sections'][0]['primary_action'], 'every fallback action is explicit null');
@@ -1411,7 +1422,7 @@ test('page-plan degrades when a rejected plan receives unusable repair JSON', fu
     ]]]);
 
     $sections = $project->readJson('pages.json')['pages'][0]['sections'];
-    assert_eq(['content'], array_column($sections, 'slug'));
+    assert_eq(['content', 'overview', 'closing'], array_column($sections, 'slug'));
     $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
     assert_contains('authored=unusable generated repair JSON', $joined);
     assert_contains('repair response remained truncated', $joined);
@@ -1536,4 +1547,62 @@ test('PagePlanStep::repairFields hands repairVariety no new work', function () {
     // Interior page: the opening section must not have become a cover.
     assert_eq(false, $archetypes[0] === 'full-bleed-cover');
     PagePlanStep::normalize(PagePlanStep::repairVariety($out, false), false);
+});
+
+test('PagePlanStep pads a degenerate front plan and lets the placeholder-# CTA retarget to closing', function () {
+    // Regression: atlas5 delivered a 1-section SaaS landing plan whose hero
+    // CTA destination was the literal placeholder "#": the plan shipped a
+    // hero-only page and the conversion CTA was deleted outright.
+    $hero = array_merge(plan_section(['slug' => 'hero']), ['primary_action' => [
+        'label' => 'Start Free Trial',
+        'intent' => 'Begin the trial.',
+        'destination' => '#',
+    ]]);
+    $pages = [[
+        'slug' => 'home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [$hero],
+    ]];
+    $warnings = [];
+    $padded = PagePlanStep::padThinFrontPlan($pages, null, [], $warnings);
+    $sections = $padded[0]['sections'];
+    assert_true(count($sections) >= 3, 'thin plan padded to the contract minimum');
+    assert_eq('hero', $sections[0]['slug'], 'delivered hero stays first');
+    assert_eq('closing', $sections[count($sections) - 1]['role'], 'appended tail takes the closing role');
+    assert_true(count($warnings) >= 1);
+
+    $anchorWarnings = [];
+    $delivered = PagePlanStep::validatePrimaryActionAnchors($padded, $anchorWarnings);
+    $action = $delivered[0]['sections'][0]['primary_action'];
+    assert_true(is_array($action), 'placeholder-# CTA survives via retarget');
+    assert_eq('Start Free Trial', $action['label']);
+    assert_true(str_starts_with($action['destination'], '#'), 'destination is a real anchor now');
+    assert_true($action['destination'] !== '#');
+
+    // A full plan is never padded.
+    $full = [[
+        'slug' => 'home', 'path' => '/', 'front' => true,
+        'sections' => [
+            plan_section(['slug' => 'hero']),
+            array_merge(plan_section(['slug' => 'story', 'title' => 'Story']), ['layout_archetype' => 'centered-stack']),
+            array_merge(plan_section(['slug' => 'visit', 'title' => 'Visit']), ['layout_archetype' => 'asymmetric-split']),
+        ],
+    ]];
+    $w2 = [];
+    assert_eq($full, PagePlanStep::padThinFrontPlan($full, null, [], $w2));
+    assert_eq([], $w2);
+});
+
+test('PagePlanStep first-pass validation keeps anchor-shaped destinations for the retarget pass', function () {
+    $context = PagePlanStep::primaryActionContext([], [['slug' => 'home', 'path' => '/']]);
+    $warnings = [];
+    $kept = PagePlanStep::normalizePrimaryAction(
+        ['label' => 'Go', 'intent' => 'Jump.', 'destination' => '#'],
+        true,
+        $context,
+        $warnings,
+    );
+    assert_true(is_array($kept), 'placeholder # reaches the anchor validation instead of dying early');
+    assert_eq([], $warnings);
 });

@@ -1836,20 +1836,21 @@ final class GeneratedMarkup
     }
 
     /**
-     * Clamp a media-led hero root's top padding to the `sm` preset.
+     * Clamp an oversized hero-root top padding preset.
      *
-     * hero.md requires it ("when the recipe leads with media... the root
-     * group's top padding is at most the `sm` spacing preset") but models
-     * keep authoring `xl`, opening a dead band between the header and the
-     * media that pushes the copy — sometimes the whole rail — below the
-     * fold. Fires only when the root's first child is the recipe's media
-     * (wp:image/wp:cover marked hero-composition__media) and the authored
-     * top padding is a larger spacing preset. Preset swap only; explicit
-     * pixel values and smaller presets pass through untouched.
+     * hero.md caps a media-led hero's root top padding at `sm` (the media is
+     * the section's first visual element, sitting tight under the header),
+     * but models keep authoring `xl` — and copy-led heroes author the same
+     * `xl`, opening a quarter-viewport dead band that pushes the support
+     * line and CTA below the fold. Media-led roots (first child wp:image/
+     * wp:cover marked hero-composition__media) clamp to `sm`; every other
+     * hero root clamps to `md`, keeping the copy-led breathing room without
+     * the dead band. Preset swap only; explicit pixel values and presets at
+     * or under the cap pass through untouched.
      *
      * @param list<array<string,mixed>> $repairs
      */
-    public static function clampMediaLedTopPadding(string $markup, string $part, array &$repairs = []): string
+    public static function clampHeroTopPadding(string $markup, string $part, array &$repairs = []): string
     {
         $document = BlockMarkup::parse($markup);
         $root = $document->topLevel();
@@ -1861,18 +1862,17 @@ final class GeneratedMarkup
             return $markup;
         }
         $first = $children[0];
-        if (!in_array($document->name($first), ['image', 'cover'], true)
-            || !str_contains(
+        $mediaLed = in_array($document->name($first), ['image', 'cover'], true)
+            && str_contains(
                 (string) (($document->attrs($first) ?? [])['className'] ?? ''),
                 'hero-composition__media'
-            )
-        ) {
-            return $markup;
-        }
+            );
+        $cap = $mediaLed ? 'sm' : 'md';
+        $oversized = $mediaLed ? 'md|lg|xl|xxl' : 'lg|xl|xxl';
 
         $attrs = $document->attrs($root) ?? [];
         $top = $attrs['style']['spacing']['padding']['top'] ?? null;
-        if (!is_string($top) || preg_match('/^var:preset\|spacing\|(md|lg|xl)$/', $top, $m) !== 1) {
+        if (!is_string($top) || preg_match("/^var:preset\\|spacing\\|({$oversized})\$/", $top, $m) !== 1) {
             return $markup;
         }
 
@@ -1882,32 +1882,29 @@ final class GeneratedMarkup
         // JSON needle carries the "top" key so a matching sibling value
         // (e.g. bottom padding) is never touched.
         $commentEnd = $document->openingOffset($root) + $document->openingLength($root);
-        $children = $document->children($root);
-        $htmlEnd = $children === []
-            ? $document->innerEndOffset($root)
-            : $document->openingOffset($children[0]);
+        $htmlEnd = $document->openingOffset($children[0]);
         $patched = self::replaceFirstInSpan(
             $markup,
             $document->openingOffset($root),
             $commentEnd,
             "\"top\":\"var:preset|spacing|{$m[1]}\"",
-            '"top":"var:preset|spacing|sm"',
+            "\"top\":\"var:preset|spacing|{$cap}\"",
         );
         $patched = self::replaceFirstInSpan(
             $patched,
             $commentEnd,
             $htmlEnd,
             "padding-top:var(--wp--preset--spacing--{$m[1]})",
-            'padding-top:var(--wp--preset--spacing--sm)',
+            "padding-top:var(--wp--preset--spacing--{$cap})",
         );
         if ($patched === $markup) {
             return $markup;
         }
         $repairs[] = [
-            'code' => 'media-led-top-padding-clamped',
+            'code' => 'hero-top-padding-clamped',
             'part' => $part,
             'authored' => $top,
-            'delivered' => 'var:preset|spacing|sm',
+            'delivered' => "var:preset|spacing|{$cap}",
             'disposition' => 'repaired',
         ];
         return $patched;

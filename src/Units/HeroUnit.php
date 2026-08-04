@@ -95,7 +95,7 @@ final class HeroUnit extends AbstractPageSectionUnit
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
         $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
-        $markup = GeneratedMarkup::clampMediaLedTopPadding($markup, $key, $repairs);
+        $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
         $before = $markup;
         $markup = GeneratedMarkup::constrainedPart($markup);
         if ($markup !== $before) {
