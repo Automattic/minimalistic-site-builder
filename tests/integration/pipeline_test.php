@@ -5,6 +5,7 @@ require_once __DIR__ . '/../FakeFontFetcher.php';
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockFixers;
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
@@ -182,6 +183,81 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     assert_contains('Plugin Name: Hearth & Crumb Content', $project->readText('plugin/site-content.php'));
     assert_eq(3, $project->readJson('theme/theme.json')['version']);
 
+    // The two-page composition benefits from persistent navigation, while its
+    // mixed opening treatments make an overlay unsafe. The deterministic
+    // resolver therefore commits a closed sticky-soft contract whose palette
+    // pair remains readable in both visual states.
+    $headerBehavior = $project->readJson('headerBehavior.json');
+    assert_eq([
+        'behavior',
+        'mode',
+        'transition',
+        'topSurface',
+        'scrolledSurface',
+        'foreground',
+    ], array_keys($headerBehavior), 'header behavior artifact is closed');
+    assert_eq('sticky-soft', $headerBehavior['behavior']);
+    assert_eq('stacked', $headerBehavior['mode']);
+    assert_true(in_array($headerBehavior['transition'], ['smooth', 'instant'], true));
+    $headerPalette = array_column(
+        $project->readJson('theme/theme.json')['settings']['color']['palette'],
+        'color',
+        'slug',
+    );
+    foreach (['topSurface', 'scrolledSurface', 'foreground'] as $field) {
+        assert_true(isset($headerPalette[$headerBehavior[$field]]), "{$field} is a canonical palette slug");
+    }
+    $headerForeground = ContrastMath::hexToRgb($headerPalette[$headerBehavior['foreground']]);
+    assert_true($headerForeground !== null, 'header foreground resolves to RGB');
+    foreach (['topSurface', 'scrolledSurface'] as $surfaceField) {
+        $surface = ContrastMath::hexToRgb($headerPalette[$headerBehavior[$surfaceField]]);
+        assert_true($surface !== null, "{$surfaceField} resolves to RGB");
+        assert_true(
+            ContrastMath::ratio($headerForeground, $surface) >= ContrastMath::NORMAL_TEXT,
+            "header foreground clears 4.5:1 on {$surfaceField}",
+        );
+    }
+
+    $headerMarkup = $project->readText('theme/parts/header.html');
+    foreach ([
+        'header-behavior-sticky-soft',
+        'header-start-' . $headerBehavior['topSurface'],
+        'header-scrolled-' . $headerBehavior['scrolledSurface'],
+        'header-foreground-' . $headerBehavior['foreground'],
+    ] as $class) {
+        assert_contains($class, $headerMarkup, "header carries canonical {$class} hook");
+    }
+    if ($headerBehavior['transition'] === 'instant') {
+        assert_contains('header-transition-instant', $headerMarkup);
+    } else {
+        assert_true(!str_contains($headerMarkup, 'header-transition-instant'), 'smooth transition has no instant hook');
+    }
+    assert_true(!str_contains($headerMarkup, 'header-overlay'), 'legacy inner overlay positioning is absent');
+    $headerBlocks = BlockMarkup::parse($headerMarkup);
+    $headerTop = $headerBlocks->topLevel();
+    assert_true($headerTop !== null, 'header has a top-level block');
+    $headerRoot = $headerBlocks->attrs($headerTop);
+    assert_true(!isset($headerRoot['style']['position']), 'outer template-part owns sticky positioning');
+
+    $pageTemplate = $project->readText('theme/templates/page.html');
+    assert_contains(
+        '"className":"site-header-shell site-header-shell--sticky-soft"',
+        $pageTemplate,
+    );
+    $indexTemplate = $project->readText('theme/templates/index.html');
+    assert_contains(
+        '"className":"site-header-shell site-header-shell--sticky-soft"',
+        $indexTemplate,
+    );
+    assert_true(!str_contains($indexTemplate, 'site-header-shell--overlay-to-solid'), 'blog index never starts transparent');
+    assert_true($project->exists('theme/assets/header/header.css'), 'trusted header stylesheet ships');
+    assert_true($project->exists('theme/assets/header/header.js'), 'trusted header driver ships');
+    $headerValidationWarnings = array_values(array_filter(
+        $project->readJson('warnings.json')['validate-theme'] ?? [],
+        static fn (string $warning): bool => str_starts_with($warning, 'header behavior contract:'),
+    ));
+    assert_eq([], $headerValidationWarnings, 'final validation accepts the resolved header contract');
+
     // Structural role is constrained independently while semantic section
     // types remain open-ended and survive the complete pipeline.
     $plannedPages = $project->readJson('pages.json')['pages'];
@@ -299,6 +375,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     );
     $functions = $project->readText('theme/functions.php');
     assert_contains('get_stylesheet_uri()', $functions);
+    assert_contains("get_theme_file_uri('assets/header/header.css')", $functions);
+    assert_contains("get_theme_file_uri('assets/header/header.js')", $functions);
     assert_true(!str_contains($functions, 'googleapis'), 'nothing hotlinks Google');
 
     exec('rm -rf ' . escapeshellarg($tmp));

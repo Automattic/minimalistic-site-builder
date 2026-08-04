@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -11,15 +13,16 @@ use Automattic\SiteBuild\StepDeclaration;
 /**
  * Final step (deterministic): write theme/functions.php.
  *
- * Input:  designDirection.json (the committed motion profile) + the motion kit
- *         scaffold-theme copied into theme/assets/motion/.
+ * Input:  designDirection.json (the committed motion profile),
+ *         headerBehavior.json (the resolved header treatment), and the trusted
+ *         kits scaffold-theme copied into theme/assets/.
  * Output: theme/functions.php — a fixed, deterministic loader this step alone
  *         owns; no model output is ever written into it (telex-style split:
  *         canonical wiring here, generated modules in their own files). It
  *         - enqueues style.css: WordPress does NOT load a block theme's
  *           style.css automatically (it only reads the header for metadata),
- *           so the utility CSS shipped there — .equal-cards, .header-overlay,
- *           and the page-styles layout appendix — would silently never apply
+ *           so the utility CSS shipped there — .equal-cards and the
+ *           page-styles layout appendix — would silently never apply
  *           without an explicit enqueue. Also registered as an editor style so
  *           the editor previews match the front end.
  *         - when the motion profile isn't `none`, enqueues the static motion
@@ -30,6 +33,10 @@ use Automattic\SiteBuild\StepDeclaration;
  *           cannot replace its choreography or timings.
  *         - prunes the motion kit to what the theme ships: unused profile
  *           files always; the whole kit when the profile is `none`.
+ *         - independently enqueues the adaptive-header kit for a non-static
+ *           resolved behavior, even when site motion is `none`; static headers
+ *           prune the whole kit. The script is head-loaded so its fixed-overlay
+ *           enhancement scope is present before paint.
  *         - require_once's the generated fonts.php (written by the fonts-php
  *           step) when present, guarded so a fontless theme stays valid.
  */
@@ -50,8 +57,18 @@ final class FinalizeThemeStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['designDirection.json', 'theme/assets/motion/*'],
-            writes: ['theme/functions.php', 'theme/assets/motion/*'],
+            reads: [
+                'designDirection.json',
+                'headerBehavior.json',
+                'theme/assets/motion/*',
+                'theme/assets/header/*',
+            ],
+            writes: [
+                'theme/functions.php',
+                'theme/assets/motion/*',
+                'theme/assets/header/*',
+                'warnings.json',
+            ],
             concurrent: false,
         );
     }
@@ -62,11 +79,80 @@ final class FinalizeThemeStep implements Step
         $motion = $profile !== 'none' && $project->exists('theme/assets/motion/motion.css')
             ? $profile
             : null;
+        [$headerBehavior, $headerWarnings] = self::headerBehaviorFor($project);
+        $header = $headerBehavior !== 'static';
+        if ($header) {
+            self::assertHeaderKit($project);
+        }
         self::pruneMotionKit($project, $motion);
-        $project->writeText('theme/functions.php', self::functionsPhp($project->slug(), $motion));
-        echo $motion === null
+        self::pruneHeaderKit($project, $header);
+        if ($headerWarnings !== []) {
+            $project->addWarnings($this->id(), $headerWarnings);
+        }
+        $project->writeText('theme/functions.php', self::functionsPhp($project->slug(), $motion, $header));
+        Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
-            : "  motion: '{$motion}' profile enqueued\n";
+            : "  motion: '{$motion}' profile enqueued\n");
+        Narrator::write($header
+            ? "  header: '{$headerBehavior}' state kit enqueued\n"
+            : "  header: static (kit not shipped)\n");
+    }
+
+    /**
+     * Generated behavior metadata degrades to static instead of aborting the
+     * build. readText() remains outside the JSON catch: an actual filesystem
+     * read failure is infrastructure, not an imperfect generated value.
+     *
+     * @return array{0:'static'|'sticky-soft'|'overlay-to-solid',1:list<string>}
+     */
+    private static function headerBehaviorFor(Project $project): array
+    {
+        if (!$project->exists('headerBehavior.json')) {
+            return ['static', [
+                'headerBehavior.json $: authored value missing; delivered value {"behavior":"static"}; '
+                . 'disposition: missing generated behavior artifact was downgraded and the '
+                . 'adaptive-header kit was removed',
+            ]];
+        }
+
+        $json = $project->readText('headerBehavior.json');
+        try {
+            $data = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException $error) {
+            return ['static', [
+                'headerBehavior.json $.behavior: authored value invalid JSON; delivered value '
+                . '"static"; disposition: malformed generated behavior was downgraded and the '
+                . 'adaptive-header kit was removed',
+            ]];
+        }
+
+        try {
+            if (!is_array($data)) {
+                throw new \InvalidArgumentException('header behavior artifact must be a JSON object');
+            }
+            $data = HeaderBehavior::validateArtifact($data);
+            return [$data['behavior'], []];
+        } catch (\InvalidArgumentException $error) {
+            $encoded = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            return ['static', [
+                'headerBehavior.json $: authored value ' . ($encoded === false ? 'unrepresentable' : $encoded)
+                . '; delivered value {"behavior":"static"}; disposition: invalid closed artifact ('
+                . $error->getMessage() . ') was downgraded and the adaptive-header kit was removed',
+            ]];
+        }
+    }
+
+    /** A non-static resolved behavior contractually requires both trusted files. */
+    private static function assertHeaderKit(Project $project): void
+    {
+        foreach (['header.css', 'header.js'] as $file) {
+            $path = $project->themePath('assets/header/' . $file);
+            if (!is_file($path) || !is_readable($path)) {
+                throw new \RuntimeException(
+                    "Missing or unreadable trusted header asset for non-static behavior: {$path}"
+                );
+            }
+        }
     }
 
     /**
@@ -101,7 +187,23 @@ final class FinalizeThemeStep implements Step
         }
     }
 
-    private static function functionsPhp(string $slug, ?string $motion): string
+    /** Remove the scaffolded header kit when the resolved behavior is static. */
+    private static function pruneHeaderKit(Project $project, bool $keep): void
+    {
+        $dir = $project->themePath('assets/header');
+        if ($keep || !is_dir($dir)) {
+            return;
+        }
+        foreach (glob("{$dir}/*") ?: [] as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+        @rmdir($dir);
+        @rmdir($project->themePath('assets'));
+    }
+
+    private static function functionsPhp(string $slug, ?string $motion, bool $header): string
     {
         $slug = ProjectStore::slugify($slug);
 
@@ -121,6 +223,19 @@ final class FinalizeThemeStep implements Step
             PHP;
         }
 
+        $headerEnqueues = '';
+        if ($header) {
+            $headerEnqueues = <<<PHP
+
+                // Trusted adaptive-header chrome is independent of the site's
+                // content-motion profile. CSS loads after generated style.css;
+                // header.js runs in <head> so only its owned scope may fix an
+                // overlay to the viewport before first paint.
+                wp_enqueue_style('{$slug}-header', get_theme_file_uri('assets/header/header.css'), array('{$slug}-style'), \$ver);
+                wp_enqueue_script('{$slug}-header', get_theme_file_uri('assets/header/header.js'), array(), \$ver, false);
+            PHP;
+        }
+
         return <<<PHP
             <?php
             /**
@@ -131,7 +246,7 @@ final class FinalizeThemeStep implements Step
                 \$ver = wp_get_theme()->get('Version');{$motionEnqueues}
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
-                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$headerEnqueues}
             });
 
             // Mirror style.css into the editor so previews match the front end.

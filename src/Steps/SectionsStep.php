@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\FooterComposition;
+use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
@@ -106,7 +107,7 @@ final class SectionsStep implements Step
     /** Footer composition menu shared with the stateless FooterUnit. */
     public const FOOTER_ARCHETYPES = FooterComposition::ARCHETYPES;
 
-    /** Floats transparently over the hero, so it needs an image-led hero under it. */
+    /** Floats translucently over the hero, so it needs an image-led hero under it. */
     private const OVERLAY_ARCHETYPE = 'minimal-overlay';
 
     /** Splits the site's pages across two navs, so it needs pages to split. */
@@ -118,7 +119,7 @@ final class SectionsStep implements Step
     /** Multi-row centered masthead — too tall to stack above a viewport-scale cover. */
     private const MASTHEAD_ARCHETYPE = 'centered-masthead';
 
-    /** Header mode: the header floats transparently over the hero cover. */
+    /** Header mode: the header floats translucently over the hero cover. */
     public const MODE_OVERLAY = 'overlay';
 
     /** Header mode: the header is an opaque bar stacked above the hero. */
@@ -467,7 +468,21 @@ final class SectionsStep implements Step
         // than taking it as an argument, which keeps its signature usable from
         // tests.
         $canvas = DesignDirectionStep::canvasFor($project);
-        $headerMode = self::headerMode($pages, $canvas);
+        // Resolve against the real palette before prompting either side of
+        // the seam. A plan may structurally qualify for overlay while its
+        // actual `contrast` token is light, or while no foreground can read
+        // on the trusted image scrim; those builds are briefed as stacked
+        // from the outset and HeaderHeroStep verifies the decision again.
+        $requestedHeaderMode = HeaderHeroStep::expectedMode($pages, $canvas);
+        $headerPreview = HeaderBehavior::resolve(
+            $pages,
+            $requestedHeaderMode,
+            ContrastFixStep::paletteMap($project->readJson('theme/theme.json')),
+            Env::get(self::ARCHETYPE_ENV),
+            HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project)),
+        );
+        $headerMode = $headerPreview['mode'];
+        $headerBehavior = $headerPreview['behavior'];
         // Fixed for the whole build, so the hero brief is built once, not once
         // per hero section.
         $headerContract = self::headerContract($headerMode);
@@ -480,7 +495,8 @@ final class SectionsStep implements Step
                     'outline'    => self::outline($frontSections),
                     'hero_brief' => self::heroBrief($frontSections),
                     'nav_rule'   => self::navRuleFor(count($pages)),
-                    'archetype_assignment' => self::headerAssignment($pages, $canvas),
+                    'archetype_assignment' => self::headerAssignment($pages, $canvas, $headerMode),
+                    'header_behavior' => HeaderBehavior::promptContract($headerBehavior),
                 ],
                 'file'  => 'parts/header.html',
             ],
@@ -841,9 +857,8 @@ final class SectionsStep implements Step
      * The header archetypes compatible with the header mode and the site's
      * shape. In overlay mode the pool IS minimal-overlay: the mode exists so
      * that an image-led full-bleed hero reliably gets the floating header the
-     * theme's `.header-overlay` CSS was written for, instead of losing a
-     * random draw to an opaque bar (the audited projects shipped that dead CSS
-     * 6 times out of 6). In stacked mode:
+     * trusted outer shell implements, instead of losing a random draw to an
+     * opaque bar. In stacked mode:
      *  - minimal-overlay is out (nothing image-led to float on),
      *  - split-nav needs pages to split, so a one-page site drops it,
      *  - oversized-wordmark is out when the plan has a hero: every planned
@@ -857,9 +872,13 @@ final class SectionsStep implements Step
      * @param array<int,array<string,mixed>> $pages
      * @return string[]
      */
-    public static function headerArchetypePool(array $pages, string $canvas = ''): array
+    public static function headerArchetypePool(
+        array $pages,
+        string $canvas = '',
+        ?string $resolvedMode = null,
+    ): array
     {
-        if (self::headerMode($pages, $canvas) === self::MODE_OVERLAY) {
+        if (($resolvedMode ?? self::headerMode($pages, $canvas)) === self::MODE_OVERLAY) {
             return [self::OVERLAY_ARCHETYPE];
         }
         $frontSections = (array) (self::frontPage($pages)['sections'] ?? []);
@@ -872,6 +891,13 @@ final class SectionsStep implements Step
         }
         if (self::imageLedHero($frontSections)) {
             $excluded[] = self::MASTHEAD_ARCHETYPE;
+        }
+        if (HeaderBehavior::behaviorFor($pages, self::MODE_STACKED) === HeaderBehavior::STICKY_SOFT) {
+            // Persistent chrome must stay compact at every breakpoint. These
+            // multi-row/display-scale compositions remain available for short
+            // static sites and explicit operator overrides, but never enter a
+            // randomly assigned sticky pool.
+            array_push($excluded, ...HeaderBehavior::TALL_ARCHETYPES);
         }
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
@@ -886,7 +912,11 @@ final class SectionsStep implements Step
      *
      * @param array<int,array<string,mixed>> $pages
      */
-    public static function headerAssignment(array $pages, string $canvas = ''): string
+    public static function headerAssignment(
+        array $pages,
+        string $canvas = '',
+        ?string $resolvedMode = null,
+    ): string
     {
         $forced = Env::get(self::ARCHETYPE_ENV);
         if ($forced !== null && $forced !== '') {
@@ -898,15 +928,21 @@ final class SectionsStep implements Step
                     implode(', ', self::HEADER_ARCHETYPES),
                 ));
             }
+            if ($forced === self::OVERLAY_ARCHETYPE && $resolvedMode === self::MODE_STACKED) {
+                return 'ASSIGNED HEADER ARCHETYPE for this build: **standard-row**. Build exactly this one. '
+                    . 'The requested minimal-overlay could not preserve the verified foreground/surface contract, '
+                    . 'so the deterministic safety fallback requires compact stacked chrome.';
+            }
             return "ASSIGNED HEADER ARCHETYPE for this build: **{$forced}**. Build exactly this one.";
         }
 
-        $pool = self::headerArchetypePool($pages, $canvas);
+        $pool = self::headerArchetypePool($pages, $canvas, $resolvedMode);
         if ($pool === [self::OVERLAY_ARCHETYPE]) {
             return 'ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**. '
                 . 'The planned hero is an image-led, full-bleed cover and every page opens on a dark band, '
                 . 'so the header floats over the imagery instead of stacking above it. Build exactly this one; '
-                . 'its top-level wp:group MUST carry "className":"header-overlay" (a deterministic pass verifies it). '
+                . 'keep its top-level wp:group transparent and do not add positioning or the legacy header-overlay '
+                . 'class (the trusted outer shell owns those states). '
                 . 'Every other catalog entry below is reference only and is OFF the table for this build.';
         }
         $first = array_splice($pool, random_int(0, count($pool) - 1), 1)[0];
@@ -929,8 +965,8 @@ final class SectionsStep implements Step
     {
         if ($mode === self::MODE_OVERLAY) {
             return "HEADER CONTRACT (this is a page-opening section):\n"
-                . "The site header floats TRANSPARENTLY over the very top of this section — a slim overlay bar "
-                . "(~60px) with no background of its own. Compose for it:\n"
+                . "The site header floats TRANSLUCENTLY over the very top of this section — a slim overlay bar "
+                . "(~60px) whose trusted contrast veil still reveals the image. Compose for it:\n"
                 . "- The cover's dim/gradient protection MUST reach the very top edge of the image: the header's "
                 . "text sits on your top ~80px, not only behind your headline.\n"
                 . "- A full-viewport cover (\"minHeight\":90-100 with \"minHeightUnit\":\"vh\") is welcome — nothing "

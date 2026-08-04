@@ -327,6 +327,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Last: the scaffold references the preset slugs repaired above, and
         // every well-shaped model-authored leaf wins over the wiring it fills in.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
+        $theme = self::normalizeGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
             $colorWarnings,
@@ -457,6 +458,66 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 return $theme;
             }
         }
+        return $theme;
+    }
+
+    /**
+     * Remove vertical padding from the global core/group block style.
+     *
+     * Group is a recursive layout primitive: WordPress expands this path to a
+     * selector matching every .wp-block-group, including structural wrappers
+     * nested inside headers, sections and cards. Section-scale padding there
+     * therefore compounds at every nesting level. Vertical rhythm belongs to
+     * explicit block instances (SectionRhythmStep, header/footer roots and
+     * authored components), while a model-authored horizontal treatment may
+     * still survive here.
+     *
+     * Scalar padding applies to all four sides. Preserve its horizontal intent
+     * by rewriting it to left/right longhands while dropping the unsafe
+     * vertical default. Empty containers are pruned so theme.json retains the
+     * object shapes WordPress expects. Pure and idempotent — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function normalizeGroupBlockPadding(array $theme): array
+    {
+        $padding = $theme['styles']['blocks']['core/group']['spacing']['padding'] ?? null;
+        $pathExists = isset($theme['styles']['blocks']['core/group']['spacing'])
+            && is_array($theme['styles']['blocks']['core/group']['spacing'])
+            && array_key_exists('padding', $theme['styles']['blocks']['core/group']['spacing']);
+        if (!$pathExists) {
+            return $theme;
+        }
+
+        if (is_string($padding) || is_int($padding) || is_float($padding)) {
+            $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
+                'left' => $padding,
+                'right' => $padding,
+            ];
+            return $theme;
+        }
+        if (!is_array($padding) || ($padding !== [] && array_is_list($padding))) {
+            return $theme;
+        }
+
+        unset(
+            $theme['styles']['blocks']['core/group']['spacing']['padding']['top'],
+            $theme['styles']['blocks']['core/group']['spacing']['padding']['bottom'],
+        );
+        if ($theme['styles']['blocks']['core/group']['spacing']['padding'] === []) {
+            unset($theme['styles']['blocks']['core/group']['spacing']['padding']);
+        }
+        if ($theme['styles']['blocks']['core/group']['spacing'] === []) {
+            unset($theme['styles']['blocks']['core/group']['spacing']);
+        }
+        if ($theme['styles']['blocks']['core/group'] === []) {
+            unset($theme['styles']['blocks']['core/group']);
+        }
+        if ($theme['styles']['blocks'] === []) {
+            unset($theme['styles']['blocks']);
+        }
+
         return $theme;
     }
 
