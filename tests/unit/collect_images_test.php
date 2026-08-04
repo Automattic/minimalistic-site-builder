@@ -80,7 +80,7 @@ test('collect-images recovers an AI_IMAGE spec left in a cover url', function ()
     // Recovery immediately installs a serializer-stable canonical path.
     assert_eq('theme:./assets/' . $images[0]['filename'], $images[0]['src']);
     assert_contains('dense fog over the dunes', $images[0]['subject']);
-    assert_eq('16:9', $images[0]['aspectRatio']);
+    assert_eq('21:9', $images[0]['aspectRatio']);
     assert_eq('.jpg', substr($images[0]['filename'], -4));
     $markup = $project->readText('theme/parts/hero.html');
     assert_contains($images[0]['src'], $markup);
@@ -103,7 +103,7 @@ test('collect-images decodes serializer-equivalent cover values into one canonic
     $images = $project->readJson('images.json');
     // JSON \u0026 and HTML &amp; represent the same prompt — one image/path.
     assert_eq(1, count($images));
-    assert_eq('16:9', $images[0]['aspectRatio']);
+    assert_eq('21:9', $images[0]['aspectRatio']);
     $markup = $project->readText('theme/parts/hero.html');
     assert_eq(2, substr_count($markup, $images[0]['src']));
     assert_true(!str_contains($markup, 'AI_IMAGE:'), 'both malformed source contexts normalized');

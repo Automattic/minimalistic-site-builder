@@ -147,7 +147,7 @@ test('recovered cover survives serialization, ships with the plugin, and generat
     (new CollectImagesStep())->run($project);
     $specs = $project->readJson('images.json');
     assert_eq(1, count($specs));
-    assert_eq('16:9', $specs[0]['aspectRatio']);
+    assert_eq('21:9', $specs[0]['aspectRatio']);
     assert_eq('theme:./assets/' . $specs[0]['filename'], $specs[0]['src']);
 
     (new PhpBlockFixer())->fix($project->themePath());
@@ -165,7 +165,7 @@ test('recovered cover survives serialization, ships with the plugin, and generat
     (new GenerateImagesStep($images))->run($project);
 
     assert_eq(1, count($images->calls));
-    assert_eq('16:9', $images->calls[0]['opts']['aspect_ratio']);
+    assert_eq('21:9', $images->calls[0]['opts']['aspect_ratio']);
     assert_true($project->exists('theme/assets/' . $specs[0]['filename']));
     assert_true($project->exists('plugin/images/' . $specs[0]['filename']));
     $page = $project->readText('plugin/pages/home.html');

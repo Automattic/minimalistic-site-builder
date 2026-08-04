@@ -160,6 +160,25 @@ test('FooterUnit caps portrait image placeholders to square in alt and mirrored 
     assert_eq($once, $unit->finish($once, $input), 'portrait capping reaches a fixed point');
 });
 
+test('portrait cap covers card-portrait and tall numeric ratios, leaves wide ones alone', function () {
+    $markup = '<img src="theme:./assets/a.jpg" alt="AI_IMAGE: A potter | footer | photorealistic | card-portrait"/>'
+        . '<img src="theme:./assets/b.jpg" alt="AI_IMAGE: A kiln | footer | photorealistic | 9:16"/>'
+        . '<img src="theme:./assets/c.jpg" alt="AI_IMAGE: A studio | footer | photorealistic | 16:9"/>'
+        . '<img src="theme:./assets/d.jpg" alt="AI_IMAGE: A wheel | footer | photorealistic | card-landscape"/>';
+
+    $notes = [];
+    $out = GeneratedMarkup::withoutPortraitImagePlaceholders($markup, $notes);
+
+    assert_eq(2, substr_count($out, '| square"'), 'card-portrait and 9:16 are both capped');
+    assert_contains('| 16:9', $out);
+    assert_contains('| card-landscape', $out);
+    $joined = implode("\n", $notes);
+    assert_contains('authored aspect-ratio=card-portrait', $joined);
+    assert_contains('authored aspect-ratio=9:16', $joined);
+    assert_eq(2, count($notes), 'wide ratios record no rewrite');
+    assert_eq($out, GeneratedMarkup::withoutPortraitImagePlaceholders($out), 'capping reaches a fixed point');
+});
+
 test('FooterUnit rejects an unknown composition before generation', function () {
     $llm = new FakeLlm();
     $unit = new FooterUnit($llm, new PromptRenderer(repo_path('prompts')));

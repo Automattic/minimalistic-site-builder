@@ -4,13 +4,13 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild;
 
 /**
- * Image generation transport via the WPCOM AI proxy (Google Vertex Imagen).
+ * Image generation transport via the WPCOM AI proxy (Google Vertex Gemini).
  *
  * The wpcom-specific half of image generation: the proxy endpoint, the
  * feature-slugged auth header, and the cURL I/O. Everything protocol-shaped
  * (request bodies, response classification, prompt-spec math, batch-retry
- * orchestration) lives in {@see Imagen}, so a different host can ship its own
- * ImageClient over the same protocol without copying any of this.
+ * orchestration) lives in {@see GeminiImage}, so a different host can ship its
+ * own ImageClient over the same protocol without copying any of this.
  *
  * Zero dependencies: a plain cURL POST, matching AnthropicClient's style. This
  * is the one proxy route that works for the builder — the GOOGLE_VERTEX_API_TOKEN
@@ -20,10 +20,10 @@ namespace Automattic\SiteBuild;
 final class WpcomImageClient implements ImageClient
 {
     private const ENDPOINT_TPL =
-        'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/publishers/google/models/%s:predict';
+        'https://public-api.wordpress.com/wpcom/v2/ai-api-proxy/v1/publishers/google/models/%s:generateContent';
 
     /**
-     * Most concurrent in-flight predict requests. The rolling pool keeps up to
+     * Most concurrent in-flight generateContent requests. The rolling pool keeps up to
      * this many transfers running and refills a slot the moment its transfer
      * completes, so a wide batch is bounded without stalling behind a barrier.
      */
@@ -39,7 +39,7 @@ final class WpcomImageClient implements ImageClient
      */
     public function __construct(
         private string $apiToken,
-        private string $model = 'imagen-4.0-generate-001',
+        private string $model = 'gemini-3.1-flash-image',
         private string $feature = 'builder-theme-image',
         private array $retryDelays = [2, 5, 12],
     ) {}
@@ -50,7 +50,7 @@ final class WpcomImageClient implements ImageClient
         return $this->requests;
     }
 
-    /** The Imagen model this client generates with (used for request logging). */
+    /** The image model this client generates with (used for request logging). */
     public function model(): string
     {
         return $this->model;
@@ -58,9 +58,9 @@ final class WpcomImageClient implements ImageClient
 
     public function generate(string $prompt, array $opts = []): string
     {
-        $bytes = $this->requestWithRetry(Imagen::buildBody($prompt, $opts));
+        $bytes = $this->requestWithRetry(GeminiImage::buildBody($prompt, $opts));
         $this->requests++;
-        return $bytes;
+        return $this->encodeForMime($bytes, ($opts['mime'] ?? null) ?: 'image/jpeg');
     }
 
     /**
@@ -80,13 +80,16 @@ final class WpcomImageClient implements ImageClient
             return [];
         }
 
-        // Bodies keyed by the caller's index.
+        // Bodies keyed by the caller's index. The requested mime stays local:
+        // Gemini has no output-format knob, so JPEG assets are re-encoded
+        // client-side as each success is delivered.
         $bodies = [];
+        $mimes = [];
         foreach ($specs as $i => $spec) {
-            $bodies[$i] = Imagen::buildBody((string) $spec['prompt'], [
+            $mimes[$i] = ($spec['mime'] ?? null) ?: 'image/jpeg';
+            $bodies[$i] = GeminiImage::buildBody((string) $spec['prompt'], [
                 'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
                 'sample_image_size' => $spec['sample_image_size'] ?? null,
-                'mime'              => $spec['mime'] ?? null,
             ]);
         }
 
@@ -97,10 +100,10 @@ final class WpcomImageClient implements ImageClient
         // once (52 images ≈ 150MB — over PHP's default limit). retryBatch
         // then reports only the FAILURES, whose finality it alone knows.
         $onBytes = $onResult === null ? null
-            : static function (int $i, string $bytes) use ($onResult): void {
-                $onResult($i, ['ok' => true, 'bytes' => $bytes]);
+            : function (int $i, string $bytes) use ($onResult, $mimes): void {
+                $onResult($i, ['ok' => true, 'bytes' => $this->encodeForMime($bytes, $mimes[$i])]);
             };
-        $out = Imagen::retryBatch(
+        $out = GeminiImage::retryBatch(
             $bodies,
             fn (array $subset): array => $this->multiRequest($subset, $onBytes),
             $this->retryDelays,
@@ -115,16 +118,36 @@ final class WpcomImageClient implements ImageClient
                 },
         );
         $this->requests += $out['succeeded'];
-        return $out['results'];
+        $results = $out['results'];
+        if ($onResult === null) {
+            // No callback delivery: the returned records still carry bytes,
+            // which must honor the requested mime just like the callback path.
+            foreach ($results as $i => $result) {
+                if (($result['ok'] ?? false) && isset($result['bytes'])) {
+                    $results[$i]['bytes'] = $this->encodeForMime($result['bytes'], $mimes[$i]);
+                }
+            }
+        }
+        return $results;
     }
 
     /**
-     * Run a set of predict requests through a rolling pool — at most
+     * Honor the asset's requested output format: Gemini emits PNG, so JPEG
+     * assets are re-encoded here at the delivery boundary. PNG assets pass
+     * through untouched (their transparency keying happens downstream).
+     */
+    private function encodeForMime(string $bytes, string $mime): string
+    {
+        return $mime === 'image/jpeg' ? GeminiImage::toJpeg($bytes) : $bytes;
+    }
+
+    /**
+     * Run a set of generateContent requests through a rolling pool — at most
      * MAX_CONCURRENCY in flight, the freed slot refilled the moment any
      * transfer completes — and classify each transfer. Pure transport — no
      * retry, no request counting. A 429 on any member holds all further
      * launches for the round: held members come back transient with
-     * `held: true`, so Imagen::retryBatch re-sends them after its backoff
+     * `held: true`, so GeminiImage::retryBatch re-sends them after its backoff
      * without charging its budget, and the pool doesn't fire the whole batch
      * into a rate-limit event as fast as the 429s bounce back.
      *
@@ -192,7 +215,7 @@ final class WpcomImageClient implements ImageClient
                     // operational, not the prompt's fault — retry it.
                     throw new TransientApiException('no response received before the transfer stopped');
                 }
-                $bytes = Imagen::interpret($raw, $httpStatus);
+                $bytes = GeminiImage::interpret($raw, $httpStatus);
             } catch (ImageFilteredException $e) {
                 // The safety filter is non-deterministic: retry like a
                 // transient failure, but keep the filtered flag so the caller
@@ -290,7 +313,7 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * One predict call. Returns decoded image bytes.
+     * One generateContent call. Returns decoded image bytes.
      *
      * @param array<string,mixed> $body
      * @throws TransientApiException on a retryable failure (429, 5xx, stall)
@@ -305,7 +328,7 @@ final class WpcomImageClient implements ImageClient
         curl_close($ch);
 
         self::throwOnTransportError($errno, $error);
-        return Imagen::interpret((string) $raw, (int) $status);
+        return GeminiImage::interpret((string) $raw, (int) $status);
     }
 
     /**
@@ -328,7 +351,7 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * Build a configured cURL handle for one predict request. Used by both the
+     * Build a configured cURL handle for one generateContent request. Used by both the
      * single (curl_exec) and batched (curl_multi) paths.
      *
      * @param array<string,mixed> $body

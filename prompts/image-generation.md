@@ -22,19 +22,22 @@ AI_IMAGE: subject | page-context | style | aspect-ratio
 - `subject` — What the image shows and from what point of view (see subject guidelines below). This is the actual thing to render.
 - `page-context` — Where and how the image is used on the page. This is NOT part of what gets drawn; it only helps the generator pick a fitting subject, mood and composition. Examples: `full-bleed hero section with text overlaid on top`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`, `team member headshot in a row of bios`, `background of a call-to-action band`.
 - `style` — One of the style options below
-- `aspect-ratio` — One of: `square`, `landscape`, `portrait`
+- `aspect-ratio` — One of: `square`, `landscape`, `ultrawide`, `portrait`, `card-landscape`, `card-portrait`
 
 The filename is extracted from the `src` attribute automatically. Keep `subject` and `page-context` as two distinct fields — do not fold the placement into the subject.
 
 **Aspect ratio options:**
-- `square`: 1:1 ratio (1024x1024) — only when the layout slot is genuinely 1:1
-- `landscape`: 16:9 ratio (1792x1024) — usually for hero and banner images; also the default for wide feature/gallery rows
-- `portrait`: 9:16 ratio (1024x1792) — usually for tall images
+- `square`: 1:1 ratio — only when the layout slot is genuinely 1:1
+- `landscape`: 16:9 ratio — the default for hero and banner images and for wide feature/gallery rows
+- `ultrawide`: 21:9 ratio — ONLY for full-bleed hero/cover/banner backgrounds that span the viewport edge to edge; matches the wide desktop banner shape so less of the composition is cropped away. Never use it for contained images, cards, or columns.
+- `portrait`: 9:16 ratio — dramatic tall images: a full-height editorial shot, a tall side-by-side hero panel
+- `card-landscape`: 4:3 ratio — contained landscape slots: product cards, blog thumbnails, feature images in columns
+- `card-portrait`: 3:4 ratio — the natural portrait-card shape: team headshots, tall product cards, framed insets. Prefer this over `portrait` for anything rendered as a card or inside a column — 9:16 is usually too tall for those slots.
 
-A full-bleed hero/cover BACKGROUND image MUST be `landscape` — never `square` or `portrait` — so it fills the wide banner without being cropped. This applies only to the background: a `framed` or foreground image inside the hero (e.g. a portrait shot in a contained frame, or a second image layered over the background) picks whatever aspect ratio fits its own slot. Generally, match each image's aspect ratio to the shape of the slot it fills so it is not cropped toward an unintended shape.
+A full-bleed hero/cover BACKGROUND image MUST be `landscape` or `ultrawide` — never `square`, `portrait`, or a card ratio — so it fills the wide banner without being cropped. This applies only to the background: a `framed` or foreground image inside the hero (e.g. a portrait shot in a contained frame, or a second image layered over the background) picks whatever aspect ratio fits its own slot. Generally, match each image's aspect ratio to the shape of the slot it fills so it is not cropped toward an unintended shape.
 
 **Grid and row consistency:**
-When creating multiple images that will be displayed together in a row or grid (e.g. team members, product cards, blog post thumbnails, gallery items), ALL images in that group MUST use the same aspect ratio and orientation. This ensures visual alignment and a cohesive layout. For example, if you have three cards in a row, all three images should be `landscape`, `portrait`, or `square` — never a mix.
+When creating multiple images that will be displayed together in a row or grid (e.g. team members, product cards, blog post thumbnails, gallery items), ALL images in that group MUST use the same aspect ratio and orientation. This ensures visual alignment and a cohesive layout. For example, if you have three cards in a row, all three images should be `card-landscape`, `card-portrait`, or `square` — never a mix.
 
 **Style options:**
 - `photorealistic` — Photographic, realistic images

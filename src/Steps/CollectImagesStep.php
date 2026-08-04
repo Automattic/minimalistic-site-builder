@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\Imagen;
+use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
@@ -338,19 +338,19 @@ final class CollectImagesStep implements Step
 
     /**
      * The aspect ratio named anywhere in a recovered spec. Explicit supported
-     * ratios survive, unsupported numeric ratios are mapped by Imagen to the
+     * ratios survive, unsupported numeric ratios are mapped by GeminiImage to the
      * closest supported shape, and named ratios remain named. Defaults to
      * landscape, the full-bleed default.
      */
     private static function sniffAspectRatio(string $body): string
     {
-        $matched = preg_match('/ratio:\s*(\d+:\d+|square|portrait|landscape)/i', $body, $m)
-            || preg_match('/\b(\d+:\d+|square|portrait|landscape)\b/i', $body, $m);
+        $matched = preg_match('/ratio:\s*(\d+:\d+|card-landscape|card-portrait|ultrawide|square|portrait|landscape)/i', $body, $m)
+            || preg_match('/\b(\d+:\d+|card-landscape|card-portrait|ultrawide|square|portrait|landscape)\b/i', $body, $m);
         if (!$matched) {
             return 'landscape';
         }
 
         $ratio = strtolower($m[1]);
-        return preg_match('/^\d+:\d+$/', $ratio) ? Imagen::aspectRatio($ratio) : $ratio;
+        return preg_match('/^\d+:\d+$/', $ratio) ? GeminiImage::aspectRatio($ratio) : $ratio;
     }
 }

@@ -1,10 +1,12 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\Imagen;
+use Automattic\SiteBuild\GeminiImage;
+use Automattic\SiteBuild\ImageFilteredException;
+use Automattic\SiteBuild\TransientApiException;
 
 /**
- * Unit tests for the batch retry orchestration (Imagen::retryBatch).
+ * Unit tests for the batch retry orchestration (GeminiImage::retryBatch).
  * The transport is faked so we exercise the transient-retry accounting without
  * any network or real backoff sleeps (delays are [0, 0]).
  */
@@ -13,7 +15,7 @@ test('retryBatch returns one result per body, keyed and ordered by index', funct
     $bodies = [0 => ['b' => 0], 1 => ['b' => 1], 2 => ['b' => 2]];
     $transport = fn (array $subset) => array_map(fn () => ['ok' => true, 'bytes' => 'X'], $subset);
 
-    $out = Imagen::retryBatch($bodies, $transport, [0, 0]);
+    $out = GeminiImage::retryBatch($bodies, $transport, [0, 0]);
 
     assert_eq([0, 1, 2], array_keys($out['results']));
     assert_eq(3, $out['succeeded']);
@@ -41,7 +43,7 @@ test('retryBatch retries only the transient failures, then succeeds', function (
         return $out;
     };
 
-    $out = Imagen::retryBatch($bodies, $transport, [0, 0, 0]);
+    $out = GeminiImage::retryBatch($bodies, $transport, [0, 0, 0]);
 
     assert_eq([[0, 1, 2], [1]], $seenSubsets, 'second round retries only the failed index');
     assert_eq(3, $out['succeeded']);
@@ -57,7 +59,7 @@ test('retryBatch gives up after the configured retries and marks failed', functi
         return [array_key_first($subset) => ['ok' => false, 'transient' => true, 'error' => 'always down']];
     };
 
-    $out = Imagen::retryBatch($bodies, $transport, [0, 0]); // 2 retries
+    $out = GeminiImage::retryBatch($bodies, $transport, [0, 0]); // 2 retries
 
     assert_eq(3, $calls, 'initial attempt + 2 retries');
     assert_eq(0, $out['succeeded']);
@@ -73,7 +75,7 @@ test('retryBatch does not retry permanent failures', function () {
         return [array_key_first($subset) => ['ok' => false, 'transient' => false, 'error' => 'HTTP 400']];
     };
 
-    $out = Imagen::retryBatch($bodies, $transport, [0, 0]);
+    $out = GeminiImage::retryBatch($bodies, $transport, [0, 0]);
 
     assert_eq(1, $calls, 'permanent failure tried exactly once');
     assert_eq(false, $out['results'][0]['ok']);
@@ -93,7 +95,7 @@ test('retryBatch retries safety-filtered failures and keeps the flag on give-up'
         ]];
     };
 
-    $out = Imagen::retryBatch($bodies, $transport, [0, 0, 0]); // 3 retries
+    $out = GeminiImage::retryBatch($bodies, $transport, [0, 0, 0]); // 3 retries
 
     assert_eq(4, $calls, 'initial attempt + 3 retries');
     assert_eq(false, $out['results'][0]['ok']);
@@ -111,86 +113,156 @@ test('retryBatch marks a filtered prompt that passes on a retry as a plain succe
             : ['ok' => true, 'bytes' => 'X']];
     };
 
-    $out = Imagen::retryBatch($bodies, $transport, [0, 0]);
+    $out = GeminiImage::retryBatch($bodies, $transport, [0, 0]);
 
     assert_eq(true, $out['results'][0]['ok']);
     assert_eq(1, $out['succeeded']);
 });
 
-test('filteredReason spots an Imagen RAI rejection, null otherwise', function () {
-    // The exact shape the proxy returned for a real filtered request.
-    $filtered = json_decode('{"predictions":[{"raiFilteredReason":'
-        . '"Unable to show generated images. Support codes: 29578790"}]}', true);
-    assert_contains('29578790', (string) Imagen::filteredReason($filtered));
+test('filteredReason spots each Gemini rejection shape, null otherwise', function () {
+    // Prompt-level block: no candidates at all, just promptFeedback.
+    $blocked = json_decode('{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"}}', true);
+    assert_contains('PROHIBITED_CONTENT', (string) GeminiImage::filteredReason($blocked));
 
-    assert_eq(null, Imagen::filteredReason(['predictions' => [['bytesBase64Encoded' => 'QUJD']]]));
-    assert_eq(null, Imagen::filteredReason(['predictions' => []]));
-    assert_eq(null, Imagen::filteredReason(null));
+    // Candidate-level safety finish without an image part.
+    $safety = ['candidates' => [['finishReason' => 'IMAGE_SAFETY', 'content' => ['parts' => []]]]];
+    assert_contains('IMAGE_SAFETY', (string) GeminiImage::filteredReason($safety));
+
+    // Text-only refusal that finishes STOP — still a repairable rejection.
+    $refusal = ['candidates' => [[
+        'finishReason' => 'STOP',
+        'content' => ['parts' => [['text' => 'I cannot generate that image.']]],
+    ]]];
+    assert_contains('cannot generate', (string) GeminiImage::filteredReason($refusal));
+
+    // A response that carries image data is never filtered, whatever rides along.
+    $ok = ['candidates' => [[
+        'finishReason' => 'STOP',
+        'content' => ['parts' => [
+            ['text' => 'Here is your image.'],
+            ['inlineData' => ['mimeType' => 'image/png', 'data' => 'QUJD']],
+        ]],
+    ]]];
+    assert_eq(null, GeminiImage::filteredReason($ok));
+    assert_eq(null, GeminiImage::filteredReason(['candidates' => []]));
+    assert_eq(null, GeminiImage::filteredReason(null));
+});
+
+test('imageData finds the inline image part and skips narration text', function () {
+    $ok = ['candidates' => [['content' => ['parts' => [
+        ['text' => 'Sure — here it is.'],
+        ['inlineData' => ['mimeType' => 'image/png', 'data' => 'QUJD']],
+    ]]]]];
+    assert_eq('QUJD', GeminiImage::imageData($ok));
+
+    // snake_case variant of the inline-data key is accepted too.
+    $snake = ['candidates' => [['content' => ['parts' => [
+        ['inline_data' => ['mime_type' => 'image/png', 'data' => 'QUJD']],
+    ]]]]];
+    assert_eq('QUJD', GeminiImage::imageData($snake));
+
+    assert_eq(null, GeminiImage::imageData(['candidates' => []]));
+    assert_eq(null, GeminiImage::imageData(null));
+});
+
+test('interpret decodes a Gemini success and classifies the failure shapes', function () {
+    $ok = json_encode(['candidates' => [['finishReason' => 'STOP', 'content' => ['parts' => [
+        ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode('PNGBYTES')]],
+    ]]]]]);
+    assert_eq('PNGBYTES', GeminiImage::interpret((string) $ok, 200));
+
+    try {
+        GeminiImage::interpret((string) json_encode(['promptFeedback' => ['blockReason' => 'SAFETY']]), 200);
+        assert_true(false, 'expected ImageFilteredException');
+    } catch (ImageFilteredException $e) {
+        assert_contains('SAFETY', $e->getMessage());
+    }
+
+    try {
+        GeminiImage::interpret('{"candidates":[]}', 200);
+        assert_true(false, 'expected RuntimeException for missing image data');
+    } catch (\RuntimeException $e) {
+        assert_contains('no image data', $e->getMessage());
+    }
+
+    try {
+        GeminiImage::interpret('overloaded', 529);
+        assert_true(false, 'expected TransientApiException');
+    } catch (TransientApiException $e) {
+        assert_contains('529', $e->getMessage());
+    }
 });
 
 /**
- * The 480-token input cap (Imagen::fitToTokens). ImagePromptComposer
+ * The 480-token input cap (GeminiImage::fitToTokens). ImagePromptComposer
  * leans on this to keep a fully-composed prompt under the model's hard limit.
  */
 
 test('fitToTokens returns the text unchanged when it is within the cap', function () {
     $text = 'A sourdough loaf on a board. Style: photorealistic';
-    assert_eq($text, Imagen::fitToTokens($text, Imagen::MAX_PROMPT_TOKENS));
+    assert_eq($text, GeminiImage::fitToTokens($text, GeminiImage::MAX_PROMPT_TOKENS));
 });
 
 test('fitToTokens trims from the end to fit the cap, keeping the lead intact', function () {
     $lead = 'A specific sourdough loaf on a floured board';
     $text = $lead . ' ' . str_repeat('trailing context word ', 2000); // far over budget
-    $out = Imagen::fitToTokens($text, Imagen::MAX_PROMPT_TOKENS);
+    $out = GeminiImage::fitToTokens($text, GeminiImage::MAX_PROMPT_TOKENS);
 
-    assert_true(Imagen::estimateTokens($out) <= Imagen::MAX_PROMPT_TOKENS, 'within token cap');
+    assert_true(GeminiImage::estimateTokens($out) <= GeminiImage::MAX_PROMPT_TOKENS, 'within token cap');
     assert_contains($lead, $out);                  // the leading text survives
     assert_true($out !== '', 'still returns something');
 });
 
 test('sampleImageSize renders wide (full-bleed) images at 2K, the rest at 1K', function () {
-    assert_eq('2K', Imagen::sampleImageSize('16:9'));
-    assert_eq('1K', Imagen::sampleImageSize('1:1'));
-    assert_eq('1K', Imagen::sampleImageSize('9:16'));
+    assert_eq('2K', GeminiImage::sampleImageSize('16:9'));
+    assert_eq('2K', GeminiImage::sampleImageSize('21:9'));
+    assert_eq('1K', GeminiImage::sampleImageSize('1:1'));
+    assert_eq('1K', GeminiImage::sampleImageSize('9:16'));
+    assert_eq('1K', GeminiImage::sampleImageSize('4:3'));
 });
 
-test('aspectRatio emits only Imagen-supported ratios and clamps arbitrary shapes', function () {
-    foreach (['1:1', '3:4', '4:3', '9:16', '16:9'] as $supported) {
-        assert_eq($supported, Imagen::aspectRatio($supported));
+test('aspectRatio emits only supported ratios and clamps arbitrary shapes', function () {
+    foreach (['1:1', '3:4', '4:3', '9:16', '16:9', '21:9'] as $supported) {
+        assert_eq($supported, GeminiImage::aspectRatio($supported));
     }
-    assert_eq('1:1', Imagen::aspectRatio('square'));
-    assert_eq('9:16', Imagen::aspectRatio('portrait'));
-    assert_eq('16:9', Imagen::aspectRatio('landscape'));
+    assert_eq('1:1', GeminiImage::aspectRatio('square'));
+    assert_eq('9:16', GeminiImage::aspectRatio('portrait'));
+    assert_eq('16:9', GeminiImage::aspectRatio('landscape'));
+    assert_eq('21:9', GeminiImage::aspectRatio('ultrawide'));
+    assert_eq('4:3', GeminiImage::aspectRatio('card-landscape'));
+    assert_eq('3:4', GeminiImage::aspectRatio('card-portrait'));
 
-    assert_eq('16:9', Imagen::aspectRatio('21:9'));
-    assert_eq('4:3', Imagen::aspectRatio('8:6'));
-    assert_eq('3:4', Imagen::aspectRatio('6:8'));
-    assert_eq('1:1', Imagen::aspectRatio('2:2'));
-    assert_eq('16:9', Imagen::aspectRatio('0:0'));
-    assert_eq('16:9', Imagen::aspectRatio('not-a-ratio'));
+    assert_eq('21:9', GeminiImage::aspectRatio('32:9'));
+    assert_eq('16:9', GeminiImage::aspectRatio('2:1'));
+    assert_eq('4:3', GeminiImage::aspectRatio('8:6'));
+    assert_eq('3:4', GeminiImage::aspectRatio('6:8'));
+    assert_eq('1:1', GeminiImage::aspectRatio('2:2'));
+    assert_eq('16:9', GeminiImage::aspectRatio('0:0'));
+    assert_eq('16:9', GeminiImage::aspectRatio('not-a-ratio'));
 });
 
 test('buildBody normalizes an invalid ratio at the transport boundary', function () {
-    $body = Imagen::buildBody('A wide landscape', ['aspect_ratio' => '21:9']);
-    assert_eq('16:9', $body['parameters']['aspectRatio']);
+    $body = GeminiImage::buildBody('A wide landscape', ['aspect_ratio' => '2:1']);
+    assert_eq('16:9', $body['generationConfig']['imageConfig']['aspectRatio']);
+    assert_eq('A wide landscape', $body['contents'][0]['parts'][0]['text']);
 });
 
 test('sampleImageSize keeps transparent decoratives at 1K even when wide', function () {
-    assert_eq('1K', Imagen::sampleImageSize('16:9', true));
-    assert_eq('1K', Imagen::sampleImageSize('1:1', true));
-    assert_eq('2K', Imagen::sampleImageSize('16:9', false));
+    assert_eq('1K', GeminiImage::sampleImageSize('16:9', true));
+    assert_eq('1K', GeminiImage::sampleImageSize('1:1', true));
+    assert_eq('2K', GeminiImage::sampleImageSize('16:9', false));
 });
 
 test('mimeForFilename maps .png assets to PNG and everything else to JPEG', function () {
-    assert_eq('image/png', Imagen::mimeForFilename('grapevine-flourish.png'));
-    assert_eq('image/png', Imagen::mimeForFilename('ORNAMENT.PNG'));
-    assert_eq('image/jpeg', Imagen::mimeForFilename('hero-dawn.jpg'));
-    assert_eq('image/jpeg', Imagen::mimeForFilename('hero-dawn.jpeg'));
+    assert_eq('image/png', GeminiImage::mimeForFilename('grapevine-flourish.png'));
+    assert_eq('image/png', GeminiImage::mimeForFilename('ORNAMENT.PNG'));
+    assert_eq('image/jpeg', GeminiImage::mimeForFilename('hero-dawn.jpg'));
+    assert_eq('image/jpeg', GeminiImage::mimeForFilename('hero-dawn.jpeg'));
 });
 
 test('estimateTokens is conservative and grows with length', function () {
-    assert_eq(0, Imagen::estimateTokens('   '));
-    assert_true(Imagen::estimateTokens('a b c d e') >= 5, 'at least one token per short word');
+    assert_eq(0, GeminiImage::estimateTokens('   '));
+    assert_true(GeminiImage::estimateTokens('a b c d e') >= 5, 'at least one token per short word');
 });
 
 test('retryBatch retries held launches without burning the transient budget', function () {
@@ -198,7 +270,7 @@ test('retryBatch retries held launches without burning the transient budget', fu
     // the finite retry rounds, and a twice-held image still gets a real
     // attempt instead of degrading to a never-attempted placeholder failure.
     $round = 0;
-    $out = Imagen::retryBatch(
+    $out = GeminiImage::retryBatch(
         [0 => ['p' => 'real'], 1 => ['p' => 'held']],
         function (array $subset) use (&$round): array {
             $round++;
@@ -222,7 +294,7 @@ test('retryBatch retries held launches without burning the transient budget', fu
 
 test('retryBatch gives a previously held image its own transient retry budget', function () {
     $round = 0;
-    $out = Imagen::retryBatch(
+    $out = GeminiImage::retryBatch(
         [0 => ['p' => 'real'], 1 => ['p' => 'held']],
         function (array $subset) use (&$round): array {
             $round++;
@@ -252,7 +324,7 @@ test('retryBatch gives a previously held image its own transient retry budget', 
 
 test('retryBatch survives a held launch with an empty delay schedule', function () {
     $round = 0;
-    $out = Imagen::retryBatch(
+    $out = GeminiImage::retryBatch(
         [0 => ['p' => 'h']],
         function (array $subset) use (&$round): array {
             $round++;
@@ -270,7 +342,7 @@ test('retryBatch reports each result once, at its final state, via onResult', fu
     // out-of-retries failure), never for a transient outcome that will retry.
     $seen = [];
     $round = 0;
-    $out = Imagen::retryBatch(
+    $out = GeminiImage::retryBatch(
         [0 => ['p' => 'slow-ok'], 1 => ['p' => 'ok'], 2 => ['p' => 'dies']],
         function (array $subset) use (&$round): array {
             $round++;
@@ -301,7 +373,7 @@ test('retryBatch releases image bytes after onResult delivers them', function ()
     // results held ~150MB on a 52-image build and hit PHP's memory limit.
     // The returned record keeps the outcome, not the payload.
     $onResultBytes = [];
-    $out = Imagen::retryBatch(
+    $out = GeminiImage::retryBatch(
         [0 => ['p' => 'a'], 1 => ['p' => 'b']],
         fn (array $subset): array => array_map(fn ($body): array => ['ok' => true, 'bytes' => 'BYTES-' . $body['p']], $subset),
         [],
@@ -316,7 +388,7 @@ test('retryBatch releases image bytes after onResult delivers them', function ()
     assert_eq(2, $out['succeeded']);
 
     // Without onResult the return value is the only delivery path - bytes stay.
-    $out = Imagen::retryBatch(
+    $out = GeminiImage::retryBatch(
         [0 => ['p' => 'a']],
         fn (array $subset): array => [0 => ['ok' => true, 'bytes' => 'BYTES']],
         [],
@@ -330,7 +402,7 @@ test('retryBatch accepts a success outcome whose bytes were already delivered ou
     // outcome without bytes - the pool must never accumulate every image.
     // retryBatch records the outcome without warning and without inventing
     // a bytes key.
-    $out = Imagen::retryBatch(
+    $out = GeminiImage::retryBatch(
         [0 => ['p' => 'a']],
         fn (array $subset): array => [0 => ['ok' => true]],
         [],
