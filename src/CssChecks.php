@@ -54,10 +54,10 @@ final class CssChecks
     public static function hiddenContentProblems(string $css): array
     {
         $problems = [];
-        if (preg_match('/(?<![-\w])display\s*:\s*none/i', $css) === 1) {
+        if (preg_match('/(?<![-\w])display\s*:\s*none(?:\s*!important)?\s*(?=;|}|$)/i', $css) === 1) {
             $problems[] = 'display:none hides generated content';
         }
-        if (preg_match('/(?<![-\w])visibility\s*:\s*hidden/i', $css) === 1) {
+        if (preg_match('/(?<![-\w])visibility\s*:\s*hidden(?:\s*!important)?\s*(?=;|}|$)/i', $css) === 1) {
             $problems[] = 'visibility:hidden hides generated content';
         }
         return $problems;

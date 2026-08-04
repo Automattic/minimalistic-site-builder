@@ -35,6 +35,13 @@ test('hiddenContentProblems flags display:none and visibility:hidden anywhere', 
         ['visibility:hidden hides generated content'],
         CssChecks::hiddenContentProblems('.a { visibility: hidden !important; }')
     );
+    assert_eq(
+        [],
+        CssChecks::hiddenContentProblems(
+            '.a[data-example="visibility:hidden"]::before { content: "display:none"; }'
+        ),
+        'inert selector and string values are not hiding declarations'
+    );
 });
 
 test('disallowedAtRules honors the per-caller allowlist', function () {
