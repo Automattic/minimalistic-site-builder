@@ -68,6 +68,7 @@ final class GeneratedMarkup
         // one nesting level deep is ignored by WordPress, which is strictly
         // better than losing the section.
         $attrsRepairs = [];
+        $text = self::closeTruncatedDelimiterComment($text, $attrsRepairs);
         $text = self::closeUnbalancedDelimiterAttrs($text, $attrsRepairs);
         foreach ($attrsRepairs as $note) {
             Narrator::write("    (part '{$key}': {$note})\n");
@@ -1976,7 +1977,53 @@ final class GeneratedMarkup
                         return $m['head'] . $candidate . $m['tail'];
                     }
                 }
+                // The inverse slip: one SURPLUS closing brace inside a run
+                // (observed: `"blockGap":"0"}}},"layout"` closed the style
+                // object one level early and poisoned a whole header part).
+                // Dropping a single brace from each run is bounded and only
+                // accepted when the result parses.
+                $offset = 0;
+                while (preg_match('/\}{2,}/', $raw, $run, PREG_OFFSET_CAPTURE, $offset) === 1) {
+                    $at = (int) $run[0][1];
+                    $candidate = substr_replace($raw, '', $at, 1);
+                    if (is_object(json_decode($candidate))) {
+                        $notes[] = 'removed 1 surplus attribute brace in '
+                            . substr(trim($m['head']), 0, 40) . '…';
+                        return $m['head'] . $candidate . $m['tail'];
+                    }
+                    $offset = $at + strlen($run[0][0]);
+                }
                 return $m[0];
+            },
+            $text
+        );
+    }
+
+    /**
+     * Repair a delimiter comment the model terminated with a bare `>`.
+     *
+     * Observed: `<!-- wp:paragraph {"align":"center"> <p …` — the attrs lost
+     * their closing `"}` and the comment its ` -->`, so at the HTML layer the
+     * "comment" swallows real content up to the next closer and the whole
+     * part is discarded. When the fragment plus `}` parses as a JSON object,
+     * rewrite the bare `>` to `} -->`; anything else is left for recovery.
+     * The lookahead requires the `>` to sit directly before markup, so a `>`
+     * inside a legitimate attribute string never matches.
+     *
+     * @param list<string> $notes
+     */
+    public static function closeTruncatedDelimiterComment(string $text, array &$notes = []): string
+    {
+        return (string) preg_replace_callback(
+            '/(?<head><!--\s+wp:[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?\s+)'
+            . '(?<attrs>\{(?:(?!-->)[^{}>])*)>(?=\s*<)/',
+            static function (array $m) use (&$notes): string {
+                if (!is_object(json_decode($m['attrs'] . '}'))) {
+                    return $m[0];
+                }
+                $notes[] = 'closed a `>`-truncated delimiter comment in '
+                    . substr(trim($m['head']), 0, 40) . '…';
+                return $m['head'] . $m['attrs'] . '} -->';
             },
             $text
         );

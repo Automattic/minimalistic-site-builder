@@ -703,3 +703,46 @@ test('clampHeroTopPadding lowers xl to sm on media-led and to md on copy-led her
     assert_eq($atMd, Automattic\SiteBuild\Units\GeneratedMarkup::clampHeroTopPadding($atMd, 'p', $r3));
     assert_eq([], $r3);
 });
+
+test('a `>`-truncated delimiter comment is closed when its attrs fragment parses', function () {
+    // Regression: pulso11 lost its workshops section to
+    // `<!-- wp:paragraph {"align":"center"> <p …` — attrs lost `"}` and the
+    // comment its ` -->`, swallowing real content at the HTML layer.
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph {"align":"center">' . "\n"
+        . '<p class="has-text-align-center">A practical session.</p>' . "\n"
+        . '<!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($doc, $notes);
+    assert_contains('<!-- wp:paragraph {"align":"center"} -->', $out);
+    assert_contains('A practical session.', $out);
+    assert_eq(1, count($notes));
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // A `>` inside a legitimate attribute string never matches.
+    $legit = '<!-- wp:paragraph {"metadata":{"name":"a > b"}} --><p>x</p><!-- /wp:paragraph -->';
+    $n2 = [];
+    assert_eq($legit, Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($legit, $n2));
+    assert_eq([], $n2);
+});
+
+test('a surplus closing brace inside a delimiter attrs run is removed', function () {
+    // Regression: atlas11 lost its generated header to
+    // `"blockGap":"0"}}},"layout"` — one extra brace closed the style object
+    // early and made the root opener unparseable.
+    $doc = '<!-- wp:group {"className":"site-header","style":{"spacing":{"blockGap":"0"}}},"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group site-header"><!-- wp:paragraph --><p>Nav</p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedDelimiterAttrs($doc, $notes);
+    assert_contains('"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}', $out);
+    assert_eq(1, count($notes));
+    assert_contains('surplus', $notes[0]);
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedDelimiterAttrs($out, $again));
+    assert_eq([], $again);
+});
