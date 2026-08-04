@@ -55,10 +55,10 @@ final class StopReasons
     public static function terminationError(mixed $reason): ?string
     {
         $reason = is_string($reason) ? trim($reason) : '';
-        if (self::isTruncation($reason)) {
+        if (in_array($reason, self::TRUNCATION, true)) {
             return "generation was truncated (stop reason: {$reason})";
         }
-        if (self::isRefusal($reason)) {
+        if (in_array($reason, self::REFUSAL, true)) {
             return "generation was refused or filtered (stop reason: {$reason})";
         }
         return null;

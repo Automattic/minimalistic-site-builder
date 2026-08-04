@@ -428,6 +428,9 @@ final class OpenAiCompatibleClient implements Llm
         /** @var array<array-key,int> $retryAfterDeadlineByKey */
         $retryAfterDeadlineByKey = [];
         $clock ??= static fn (): int => time();
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
 
         $wrappedTransport = function (array $subset) use (
             $transport,
@@ -444,11 +447,7 @@ final class OpenAiCompatibleClient implements Llm
                 );
                 if ($remainingWait > 0) {
                     Narrator::write("    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n");
-                    if ($sleeper !== null) {
-                        $sleeper($remainingWait);
-                    } else {
-                        sleep($remainingWait);
-                    }
+                    $sleeper($remainingWait);
                 }
                 foreach (array_keys($retryingDeadlines) as $key) {
                     unset($retryAfterDeadlineByKey[$key]);
@@ -810,6 +809,9 @@ final class OpenAiCompatibleClient implements Llm
         ?callable $sleeper = null,
     ): array
     {
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
         $attempt = 0;
         $retriedTruncation = false;
         while (true) {
@@ -817,9 +819,7 @@ final class OpenAiCompatibleClient implements Llm
                 $result = $transport($body);
                 $empty = trim($result['text']) === '';
                 $stopReason = $result['stop_reason'] ?? null;
-                // Deliberately narrower than StopReasons::isTruncation: a
-                // context-window overflow is not the expected termination of a
-                // one-token cache probe and no output budget can repair it.
+                // Deliberately narrower than isTruncation — see StopReasons::OUTPUT_LIMIT.
                 $probeReachedOutputLimit = StopReasons::isOutputLimit($stopReason);
                 $terminationError = $recoverTerminalReasons
                     ? StopReasons::terminationError($stopReason)
@@ -850,11 +850,7 @@ final class OpenAiCompatibleClient implements Llm
                     : max($fallback, (int) $retryDelay($fallback));
                 $attempt++;
                 Narrator::write("    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
-                if ($sleeper !== null) {
-                    $sleeper($wait);
-                } else {
-                    sleep($wait);
-                }
+                $sleeper($wait);
             } catch (\RuntimeException $e) {
                 $param = self::rejectedParam($e->getMessage());
                 if ($param === null || !array_key_exists($param, $body)) {

@@ -148,6 +148,22 @@ class CurlMultiPool
         }
     }
 
+    /**
+     * Backoff for a retry wave that may consist only of held launches.
+     *
+     * A held-only wave (the rate-limited sibling itself resolved another way,
+     * so no request owns a backoff slot) still waits the first backoff: the
+     * hold only exists because a sibling really hit a 429, and re-sending
+     * immediately would fire straight into the still-active rate limit.
+     *
+     * @param list<int> $retryWaits backoff seconds owned by really-attempted transients in the wave
+     * @param array<int,int> $delays the retry schedule
+     */
+    public static function heldWaveWait(array $retryWaits, array $delays): int
+    {
+        return $retryWaits === [] ? ($delays[0] ?? 0) : max($retryWaits);
+    }
+
     protected function multiInit(): \CurlMultiHandle
     {
         return curl_multi_init();

@@ -115,12 +115,10 @@ class FakeCurlMultiPool extends CurlMultiPool
  *
  * @return array{0:callable,1:callable}
  */
-function cmp_seams(FakeCurlMultiPool $pool, ?array &$built = null): array
+function cmp_seams(FakeCurlMultiPool $pool, array &$built = []): array
 {
     $buildHandle = function (string|int $key, mixed $item) use ($pool, &$built): \CurlHandle {
-        if ($built !== null) {
-            $built[] = $key;
-        }
+        $built[] = $key;
         return $pool->register($key, curl_init('http://localhost/never-executed'));
     };
     $classify = fn (string|int $key, \CurlHandle $ch): array => ['ok' => true, 'key' => $key];
@@ -222,14 +220,8 @@ test('CurlMultiPool closes the finished handle and in-flight siblings when class
         throw new RuntimeException("disk full while saving '{$key}'");
     };
 
-    $err = null;
-    try {
-        $pool->run(['a' => 1, 'b' => 2], $buildHandle, $classify, 2);
-    } catch (RuntimeException $e) {
-        $err = $e->getMessage();
-    }
-
-    assert_eq("disk full while saving 'a'", $err, 'the classify failure propagates to the caller');
+    $e = assert_throws(fn () => $pool->run(['a' => 1, 'b' => 2], $buildHandle, $classify, 2));
+    assert_eq("disk full while saving 'a'", $e->getMessage(), 'the classify failure propagates to the caller');
     $closed = $pool->closed;
     sort($closed);
     assert_eq(['a', 'b'], $closed, 'the finished handle and the in-flight sibling are both closed');
@@ -258,11 +250,6 @@ test('CurlMultiPool rejects a completion for an unregistered curl handle', funct
     };
     [$buildHandle, $classify] = cmp_seams($pool);
 
-    $err = null;
-    try {
-        $pool->run(['a' => 1], $buildHandle, $classify, 1);
-    } catch (RuntimeException $e) {
-        $err = $e->getMessage();
-    }
-    assert_true(is_string($err) && str_contains($err, 'unregistered curl handle'), 'an unknown handle is a loud failure');
+    $e = assert_throws(fn () => $pool->run(['a' => 1], $buildHandle, $classify, 1));
+    assert_contains('unregistered curl handle', $e->getMessage(), 'an unknown handle is a loud failure');
 });

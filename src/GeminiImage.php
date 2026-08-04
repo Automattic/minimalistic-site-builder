@@ -515,6 +515,9 @@ final class GeminiImage
         ?callable $sleeper = null,
     ): array
     {
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
         $results = [];
         $succeeded = 0;
         $pending = array_keys($bodies);
@@ -566,21 +569,14 @@ final class GeminiImage
             $pending = $retry;
             if ($pending !== []) {
                 // Wait long enough for every really-attempted transient in
-                // this wave. A held-only wave (the rate-limited sibling itself
-                // resolved another way, so no request owns a backoff slot)
-                // still waits the first backoff: the hold only exists because
-                // a sibling really hit a 429, and re-sending immediately would
-                // fire straight into the still-active rate limit.
-                $wait = $retryWaits === [] ? ($delays[0] ?? 0) : max($retryWaits);
+                // this wave; held-only waves charge the first backoff (see
+                // CurlMultiPool::heldWaveWait).
+                $wait = CurlMultiPool::heldWaveWait($retryWaits, $delays);
                 $retryWave++;
                 if ($onRetry !== null) {
                     $onRetry(count($pending), $retryWave, $wait);
                 }
-                if ($sleeper !== null) {
-                    $sleeper($wait);
-                } else {
-                    sleep($wait);
-                }
+                $sleeper($wait);
             }
         }
 
