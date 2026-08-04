@@ -230,7 +230,14 @@ final class ContrastFix
 
     private function plan(bool $repair): void
     {
-        // Text/background pairs.
+        $this->planTexts($repair);
+        $this->planLinks($repair);
+        $this->planCoverDims($repair);
+    }
+
+    // Text/background pairs.
+    private function planTexts(bool $repair): void
+    {
         foreach ($this->texts as $row) {
             if ($row['bg'] === null || !$row['hasText']) {
                 continue; // image-backed cover (phase 2) or nothing visible
@@ -273,10 +280,13 @@ final class ContrastFix
                 ];
             }
         }
+    }
 
-        // Link/background pairs, one decision per background region and
-        // distinct link color: a passing first paragraph must not hide a
-        // second whose links inherit a different (failing) color.
+    // Link/background pairs, one decision per background region and
+    // distinct link color: a passing first paragraph must not hide a
+    // second whose links inherit a different (failing) color.
+    private function planLinks(bool $repair): void
+    {
         $groups = []; // provider key => rows with anchors
         foreach ($this->texts as $row) {
             if ($row['bg'] === null || !$row['hasAnchor']) {
@@ -331,8 +341,11 @@ final class ContrastFix
                 }
             }
         }
+    }
 
-        // Cover dim floor.
+    // Cover dim floor.
+    private function planCoverDims(bool $repair): void
+    {
         foreach ($this->covers as $cover) {
             if ($cover['dim'] >= self::COVER_DIM_FLOOR) {
                 continue;
