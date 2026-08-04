@@ -5,6 +5,7 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\StepGraph;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
@@ -14,7 +15,6 @@ use Automattic\SiteBuild\Tests\FakeImageClient;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 require_once __DIR__ . '/../FakeImageClient.php';
-require_once __DIR__ . '/../FakeLlm.php';
 
 function generate_fixture(): array
 {
@@ -677,6 +677,27 @@ test('generate-images repairs a safety-filtered prompt with the small model and 
     $specs = $project->readJson('images.json');
     assert_eq('completed', $specs[0]['status']);
     assert_true($project->exists('theme/assets/hero.jpg'), 'asset written after repair');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images uses an injected PromptRenderer for the repair prompt', function () {
+    [$project, $tmp] = generate_fixture(); // subject: "A bakery at dawn"
+    $promptsDir = $tmp . '/prompts';
+    mkdir($promptsDir, 0775, true);
+    file_put_contents(
+        $promptsDir . '/image-prompt-repair.md',
+        'CUSTOM TEMPLATE {{subject}} — {{reason}}'
+    );
+    $images = new FakeImageClient('JPEGDATA');
+    $images->filterPromptSubstrings = ['A bakery at dawn'];
+    $llm = new FakeLlm();
+    $llm->queueText('a warm bread display at sunrise');
+
+    (new GenerateImagesStep($images, $llm, 'small-model', new PromptRenderer($promptsDir)))->run($project);
+
+    assert_eq(1, count($llm->calls), 'one rewrite request');
+    assert_contains('CUSTOM TEMPLATE A bakery at dawn', $llm->calls[0]['prompt']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

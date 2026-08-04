@@ -84,7 +84,7 @@ final class TextBatchRecovery
                         $texts[$key] = (string) $candidates[$key]['text'];
                         unset($active[$key]);
                         $message = str_replace(["\r", "\n"], ' ', $e->getMessage());
-                        $termination = JsonBatchRecovery::terminationError(
+                        $termination = StopReasons::terminationError(
                             $candidates[$key]['stop_reason'] ?? null
                         ) ?? 'the response ended abnormally';
                         $notes[$key][] = self::retainedNote(
@@ -108,7 +108,7 @@ final class TextBatchRecovery
             $retry = [];
             foreach ($active as $key => $_request) {
                 $response = self::responseRecord($responses[$key], $key);
-                $error = JsonBatchRecovery::terminationError($response['stop_reason'] ?? null);
+                $error = StopReasons::terminationError($response['stop_reason'] ?? null);
                 if ($error === null) {
                     $texts[$key] = (string) $response['text'];
                     continue;
@@ -190,7 +190,7 @@ final class TextBatchRecovery
         $retry['log_label'] = $label . '-regenerate';
         $prompt = (string) ($request['prompt'] ?? '');
 
-        if (JsonBatchRecovery::isTruncation($response['stop_reason'] ?? null)) {
+        if (StopReasons::isTruncation($response['stop_reason'] ?? null)) {
             // Twice the explicit budget, or twice the calling client's
             // effective configurable default when the request relied on it.
             $retry['max_tokens'] = isset($request['max_tokens'])
@@ -239,8 +239,8 @@ final class TextBatchRecovery
         if (trim((string) $current['text']) === '') {
             return true;
         }
-        return JsonBatchRecovery::isTruncation($candidate['stop_reason'] ?? null)
-            && !JsonBatchRecovery::isTruncation($current['stop_reason'] ?? null);
+        return StopReasons::isTruncation($candidate['stop_reason'] ?? null)
+            && !StopReasons::isTruncation($current['stop_reason'] ?? null);
     }
 
     /**
