@@ -627,6 +627,7 @@ test('page-plan writes pages.json with sections per page', function () {
     assert_eq('bread-catalog', $plan['pages'][1]['sections'][1]['type']);
     assert_eq('menu', $plan['pages'][2]['parent']);
     assert_eq(20, $plan['pages'][2]['menu_order']);
+    assert_eq(0, $llm->remaining(), 'every queued page response was consumed');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -868,6 +869,7 @@ test('page-plan repairs every invalid page in ONE batched round', function () {
     assert_eq('page-plan-about-repair', $llm->calls[4]['opts']['log_label'] ?? null);
     assert_contains('IT WAS REJECTED', $llm->calls[3]['prompt']);
     assert_contains('IT WAS REJECTED', $llm->calls[4]['prompt']);
+    assert_eq(0, $llm->remaining(), 'fan-out and repair rounds consumed the whole queue');
     assert_eq(
         ['name' => 'page_plan', 'schema' => PagePlanStep::jsonSchema()],
         $llm->calls[4]['opts']['json_schema'] ?? null,
