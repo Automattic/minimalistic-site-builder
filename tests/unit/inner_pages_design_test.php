@@ -407,7 +407,7 @@ test('inner-pages-design deterministically suffixes reserved inner slugs without
     inner_pages_cleanup($tmp);
 });
 
-test('inner-pages-design rejects safe-tag structural damage and document-wrapped repairs per page', function () {
+test('inner-pages-design balances safe-tag structural damage and document wrappers per page', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'Welcome'),
         inner_page('repairable', 'Repairable', 'Repair crossed safe tags'),
@@ -429,25 +429,29 @@ test('inner-pages-design rejects safe-tag structural damage and document-wrapped
     $sibling = '<main id="sibling-main"><h1>Valid sibling</h1></main>';
     $llm->queueText($sibling);
 
-    // One serial semantic repair for each malformed page, in page order.
-    $repairable = '<main><section><h1>A repaired</h1></section></main>';
-    $llm->queueText($repairable);
+    // Only the no-main response needs semantic repair.
     $llm->queueText('<html><body><main><h1>Still wrapped</h1></main></body></html>');
-    $llm->queueText('<main><article><h1>Still crossed</h1></section></main>');
-    $llm->queueText(
-        '<main><head><title>Still nested</title></head>'
-        . '<body><p>Still nested body</p></body></main>',
-    );
 
     inner_pages_run($project, $llm);
 
     assert_eq(1, $llm->completeBatchCalls);
-    assert_eq(4, $llm->completeCalls, 'every malformed safe-tag envelope gets one serial repair');
-    assert_eq($repairable, $project->readText('design/repairable.html'));
+    assert_eq(1, $llm->completeCalls, 'only the no-main fragment gets one serial repair');
+    assert_eq(
+        '<main><section><h1>A</h1></section></main>',
+        $project->readText('design/repairable.html'),
+    );
+    assert_eq(
+        '<main><h1>Still wrapped</h1></main>',
+        $project->readText('design/wrapped-repair.html'),
+    );
+    assert_eq('<main><h1>Stray</h1></main>', $project->readText('design/stray-closer.html'));
+    assert_eq(
+        '<main>Nested<p>Nested body</p></main>',
+        $project->readText('design/nested-document.html'),
+    );
     assert_eq($sibling, $project->readText('design/sibling.html'));
-    foreach (['wrapped-repair', 'stray-closer', 'nested-document'] as $failed) {
-        assert_true(!$project->exists("design/{$failed}.html"));
-        assert_true($project->exists("design/{$failed}.failed"));
+    foreach (['repairable', 'wrapped-repair', 'stray-closer', 'nested-document', 'sibling'] as $slug) {
+        assert_true(!$project->exists("design/{$slug}.failed"));
     }
     inner_pages_cleanup($tmp);
 });
