@@ -27,8 +27,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * and rewrites the reference. The prose alt is never touched: it is the
  * generation prompt AND the accessibility text.
  *
- * design/preview.html is an additive, unconsumed seed in the current graph.
- * Leave it byte-identical until a later slice explicitly owns its image path.
+ * design/preview.html seeds the composed page; design/home-body.html is its
+ * intermediate below-fold source. Only the composed design/home.html is
+ * delivered, so both source artifacts stay byte-identical.
  */
 final class AssignImageSourcesStep implements Step
 {
@@ -64,7 +65,7 @@ final class AssignImageSourcesStep implements Step
         $notes = [];
         foreach (glob($project->path('design/*.html')) ?: [] as $abs) {
             $name = basename($abs);
-            if ($name === 'preview.html') {
+            if (in_array($name, ['preview.html', 'home-body.html'], true)) {
                 continue;
             }
             $rel = 'design/' . $name;

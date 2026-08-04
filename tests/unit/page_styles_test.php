@@ -58,6 +58,11 @@ function ps_project(string $prefix): array
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeText('theme/style.css', "/*\nTheme Name: Demo\n*/\n");
     $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('design/page-artifact-map.json', [
+        'home' => 'home',
+        'about' => 'about',
+        'zeta' => 'zeta',
+    ]);
     return [$project, $tmp];
 }
 
@@ -320,7 +325,7 @@ test('page-styles declares HTML-first design and delivered markup reads only whe
         'legacy declaration stays unchanged',
     );
     assert_eq(
-        [...$legacyReads, 'design/*', 'plugin/pages/*'],
+        [...$legacyReads, 'design/page-artifact-map.json', 'design/*', 'plugin/pages/*'],
         (new PageStylesStep($llm, $renderer, htmlFirst: true))->declaration()->reads,
         'HTML-first declaration covers every deterministic CSS and delivered-markup input',
     );

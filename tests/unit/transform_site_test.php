@@ -29,6 +29,14 @@ function transform_site_fixture(string $home, array $inner = [], int $repairBudg
         'language' => 'English',
         'pages' => $pages,
     ]);
+    $artifactMap = ['home' => 'home'];
+    if (array_key_exists('about', $inner)) {
+        $artifactMap['about'] = 'about';
+    }
+    if (array_key_exists('team', $inner)) {
+        $artifactMap['team'] = 'team';
+    }
+    $project->writeJson('design/page-artifact-map.json', $artifactMap);
     $project->writeJson('designDirection.json', ['description' => 'Crisp editorial system']);
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => []]);
     $project->writeJson('images.json', []);

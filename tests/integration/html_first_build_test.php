@@ -86,28 +86,13 @@ function html_first_direction(): array
     ]];
 }
 
-function html_first_home_document(string $marker = 'HTML-FIRST-HOME'): string
+function html_first_home_body(string $marker = 'HTML-FIRST-HOME'): string
 {
     $html = <<<'HTML'
-<!doctype html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-.site-shell { color: #251d16; background-color: #fff8ea; font-family: "Source Sans 3", sans-serif; }
-.hero { color: #251d16; background-color: #fff8ea; font-family: Fraunces, serif; padding: 4rem 1rem; }
-.story { color: #251d16; background-color: #fff8ea; padding: 3rem 1rem; }
-</style>
-</head>
-<body class="site-shell">
-<header class="site-shell"><p>Hearth &amp; Crumb</p></header>
 <main>
-<section id="hero" class="hero"><h1 class="has-display-font-size">HTML-FIRST-HOME</h1><p>Fresh loaves every morning.</p><img src="" alt="A baker sliding a peel of sourdough into a stone oven"></section>
-<section id="story" class="story"><h2>Our bakehouse</h2><p>Slow fermentation, local grain.</p></section>
+<section id="story" class="story"><h2>HTML-FIRST-HOME</h2><p>Slow fermentation, local grain.</p></section>
 </main>
 <footer class="site-shell"><p>Visit the neighborhood oven.</p></footer>
-</body>
-</html>
 HTML;
 
     return str_replace('HTML-FIRST-HOME', $marker, $html);
@@ -121,23 +106,20 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '<style>:root { --content-size: 800px; --wide-size: 1280px; }'
         . 'body { margin: 0; font-family: system-ui, sans-serif; }</style>'
         . '</head><body><header><nav aria-label="Primary"><a href="/">Home</a></nav></header>'
-        . '<main><section id="hero"><h1>' . $marker . '</h1>'
+        . '<main><section id="hero"><h1 class="has-display-font-size">' . $marker . '</h1>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . '</section></main></body></html>';
 }
 
-function html_first_queue_success(FakeLlm $llm, array $siteSpec, string $home): void
+function html_first_queue_success(FakeLlm $llm, array $siteSpec, string $homeBody): void
 {
     $llm->queueText('A warm neighborhood bakery site with a clear visit path.');
     $llm->queueText(html_first_preview_document());
-    $llm->queueText($home);
+    $llm->queueText($homeBody);
 
     $llm->queueJson($siteSpec);
     $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
     $llm->queueJson(html_first_direction());
-    $llm->queueJson(['seeds' => ['Editorial bread ledger']]);
-    // One design candidate, so homepage-design never calls the judge.
-    $llm->queueJson(['verdict' => 'pass', 'notes' => []]);
     $llm->queueJson(html_first_theme_payload());
 }
 
@@ -147,10 +129,10 @@ test('HTML-first default builds and validates every single-page artifact', funct
     putenv('SITE_BUILD_LEGACY');
     try {
         $llm = new FakeLlm();
-        $homeDocument = html_first_home_document();
+        $homeBody = html_first_home_body();
         html_first_queue_success($llm, html_first_site_spec([
             ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
-        ]), $homeDocument);
+        ]), $homeBody);
 
         $builder = html_first_integration_builder($llm, $tmp);
         $project = $builder->createProject('A neighborhood bakery', 'demo');
@@ -163,8 +145,7 @@ test('HTML-first default builds and validates every single-page artifact', funct
 
         foreach ([
             'design/preview.html',
-            'design/candidate-1.html',
-            'design/critique-1.json',
+            'design/home-body.html',
             'design/home.html',
             'design/site.css',
             'design/transform-report.json',
@@ -186,11 +167,17 @@ test('HTML-first default builds and validates every single-page artifact', funct
         }
 
         assert_eq(html_first_preview_document(), $project->readText('design/preview.html'));
+        assert_eq($homeBody, $project->readText('design/home-body.html'));
         assert_true($project->exists('design/home.html'), 'homepage design output exists');
+        assert_contains('DESIGN-PREVIEW', $project->readText('design/home.html'));
         assert_contains(
             'HTML-FIRST-HOME',
             $project->readText('design/home.html'),
             'homepage content survives downstream image-source assignment',
+        );
+        assert_true(
+            trim($project->readText('theme/parts/footer.html')) !== '',
+            'single-page full build lifts non-empty home-body footer part',
         );
 
         $home = $project->readText('plugin/pages/home.html');
@@ -200,7 +187,10 @@ test('HTML-first default builds and validates every single-page artifact', funct
         // the exact theme path the delivered markup references.
         $images = $project->readJson('images.json');
         assert_eq(1, count($images), 'the design image was collected');
-        assert_eq('A baker sliding a peel of sourdough into a stone oven', $images[0]['subject']);
+        assert_eq(
+            'A baker sliding a sourdough loaf into a stone oven, viewed from counter height',
+            $images[0]['subject'],
+        );
         assert_contains('theme:./assets/', $images[0]['src']);
         assert_contains($images[0]['src'], $home);
 

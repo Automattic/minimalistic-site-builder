@@ -531,7 +531,7 @@ test('theme-json declares design CSS only for the HTML-first graph', function ()
     assert_eq(
         ['meta.json', 'siteSpec.json', 'designDirection.json', 'design/site.css'],
         (new ThemeJsonStep($llm, $renderer, htmlFirst: true))->declaration()->reads,
-        'HTML-first graph declares the CSS token source produced by homepage-design',
+        'HTML-first graph declares the CSS token source produced by design-preview',
     );
 });
 

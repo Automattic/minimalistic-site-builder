@@ -13,7 +13,7 @@ use Automattic\SiteBuild\Tests\FakeLlm;
  * @param list<array<string,mixed>> $pages
  * @return array{0:Project,1:FakeLlm,2:string}
  */
-function inner_pages_fixture(array $pages, ?string $home = null): array
+function inner_pages_fixture(array $pages, ?string $preview = null): array
 {
     $tmp = sys_get_temp_dir() . '/builder_inner_pages_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -27,13 +27,19 @@ function inner_pages_fixture(array $pages, ?string $home = null): array
         "/* EXACT-SITE-CSS-5F7D */\n:root{--ink:#18222d}.shared-shell{max-width:72rem}\n",
     );
     $project->writeText(
-        'design/home.html',
-        $home ?? '<!doctype html><html><head><style>.ignored{color:red}</style></head>'
-            . '<body><header>Shared header</header>'
-            . '<main id="home-main"><section><h1>EXACT-HOME-MAIN-9C2A</h1></section></main>'
-            . '<footer>Shared footer</footer></body></html>',
+        'design/preview.html',
+        $preview ?? '<!doctype html><html><head><style>.ignored{color:red}</style></head>'
+            . '<body><header>EXACT-FOLD-HEADER-9C2A</header>'
+            . '<main><section id="hero"><h1>EXACT-FOLD-HERO-6D1F</h1></section></main>'
+            . '</body></html>',
     );
     return [$project, new FakeLlm(), $tmp];
+}
+
+function inner_pages_home_body(string $marker = 'EXACT-HOME-BODY-84E3'): string
+{
+    return '<main><section id="story"><h2>' . $marker . '</h2></section></main>'
+        . '<footer><p>EXACT-HOME-FOOTER-7A4C</p></footer>';
 }
 
 function inner_pages_run(Project $project, FakeLlm $llm): InnerPagesDesignStep
@@ -74,7 +80,7 @@ function inner_pages_has_live_script(string $html): bool
     return $loaded && $dom->getElementsByTagName('script')->length > 0;
 }
 
-test('inner-pages-design declares and batches every flattened non-home page against exact cache layers', function () {
+test('inner-pages-design batches home body and every inner page against exact fold cache layers', function () {
     $pages = [
         inner_page('home', 'Home', 'Welcome visitors'),
         inner_page('about', 'About', 'Explain the studio', [
@@ -84,12 +90,14 @@ test('inner-pages-design declares and batches every flattened non-home page agai
     ];
     [$project, $llm, $tmp] = inner_pages_fixture($pages);
     $css = $project->readText('design/site.css');
-    $homeMain = '<main id="home-main"><section><h1>EXACT-HOME-MAIN-9C2A</h1></section></main>';
+    $preview = $project->readText('design/preview.html');
+    $homeBody = inner_pages_home_body();
     $responses = [
         '<main id="about-main"><h1>About</h1></main>',
         '<main id="team-main"><h1>Team</h1></main>',
         '<main id="contact-main"><h1>Contact</h1></main>',
     ];
+    $llm->queueText($homeBody);
     foreach ($responses as $response) {
         $llm->queueText($response);
     }
@@ -99,13 +107,13 @@ test('inner-pages-design declares and batches every flattened non-home page agai
     $declaration = $step->declaration();
     assert_eq('inner-pages-design', $step->id());
     assert_eq(
-        ['siteSpec.json', 'design/site.css', 'design/home.html'],
+        ['meta.json', 'siteSpec.json', 'designDirection.json', 'design/site.css', 'design/preview.html'],
         $declaration->reads,
     );
     assert_eq(['design/*', 'warnings.json'], $declaration->writes);
     assert_true($declaration->concurrent);
     assert_eq(1, $llm->completeBatchCalls, 'one completeBatch call owns all page requests');
-    assert_eq(3, count($llm->calls), 'one request per flattened non-home page');
+    assert_eq(4, count($llm->calls), 'one home-body request plus one request per inner page');
     $sharedPrefixes = null;
     foreach ($llm->calls as $call) {
         $prefixes = $call['opts']['cached_prefixes'] ?? [];
@@ -113,36 +121,36 @@ test('inner-pages-design declares and batches every flattened non-home page agai
         $sharedPrefixes ??= $prefixes;
         assert_eq($sharedPrefixes, $prefixes, 'every page gets byte-identical cache layers');
         assert_contains($css, $prefixes[0]);
-        assert_contains($homeMain, $prefixes[1]);
+        assert_contains($preview, $prefixes[1]);
         assert_true(!str_contains($call['prompt'], $css), 'site.css bytes live only in cached prefix');
-        assert_true(!str_contains($call['prompt'], $homeMain), 'home main bytes live only in cached prefix');
+        assert_true(!str_contains($call['prompt'], $preview), 'fold bytes live only in cached prefix');
     }
-    assert_contains('About', $llm->calls[0]['prompt']);
-    assert_contains('Explain the studio', $llm->calls[0]['prompt']);
-    assert_contains('Team', $llm->calls[1]['prompt']);
-    assert_contains('Introduce the team', $llm->calls[1]['prompt']);
-    assert_contains('Contact', $llm->calls[2]['prompt']);
-    assert_contains('Give practical contact details', $llm->calls[2]['prompt']);
+    assert_contains('About', $llm->calls[1]['prompt']);
+    assert_contains('Explain the studio', $llm->calls[1]['prompt']);
+    assert_contains('Team', $llm->calls[2]['prompt']);
+    assert_contains('Introduce the team', $llm->calls[2]['prompt']);
+    assert_contains('Contact', $llm->calls[3]['prompt']);
+    assert_contains('Give practical contact details', $llm->calls[3]['prompt']);
+    assert_eq($homeBody, $project->readText('design/home-body.html'));
     assert_eq($responses[0], $project->readText('design/about.html'));
     assert_eq($responses[1], $project->readText('design/team.html'));
     assert_eq($responses[2], $project->readText('design/contact.html'));
-    assert_true(!$project->exists('design/home.failed'));
+    assert_true(!$project->exists('design/home-body.failed'));
     inner_pages_cleanup($tmp);
 });
 
-test('inner-pages-design with no non-home pages writes nothing and calls no LLM method', function () {
+test('inner-pages-design with no inner pages still generates one home body in one batch', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'One-page site'),
     ]);
-    $before = glob($project->path('design/*')) ?: [];
-    sort($before);
+    $homeBody = inner_pages_home_body('SINGLE-PAGE-HOME-BODY');
+    $llm->queueText($homeBody);
 
     inner_pages_run($project, $llm);
 
-    $after = glob($project->path('design/*')) ?: [];
-    sort($after);
-    assert_eq($before, $after);
-    assert_eq(0, $llm->completeBatchCalls);
+    assert_eq($homeBody, $project->readText('design/home-body.html'));
+    assert_eq(1, $llm->completeBatchCalls);
+    assert_eq(1, count($llm->calls));
     assert_eq(0, $llm->completeCalls);
     assert_eq(0, $llm->completeJsonCalls);
     assert_eq(0, $llm->completeJsonBatchCalls);
@@ -157,6 +165,7 @@ test('inner-pages-design repairs one malformed page serially then marks only tha
         inner_page('broken', 'Broken', 'Must isolate failure'),
     ]);
     $valid = '<main id="valid-main"><h1>Valid sibling lands</h1></main>';
+    $llm->queueText(inner_pages_home_body());
     $llm->queueText($valid);
     $llm->queueText('<section>Broken authored fragment</section>');
     $llm->queueText('<div>Still no main after repair</div>');
@@ -169,7 +178,7 @@ test('inner-pages-design repairs one malformed page serially then marks only tha
     assert_true(!$project->exists('design/valid.failed'));
     assert_true(!$project->exists('design/broken.html'));
     assert_true($project->exists('design/broken.failed'));
-    assert_contains('Broken authored fragment', $llm->calls[2]['prompt']);
+    assert_contains('Broken authored fragment', $llm->calls[3]['prompt']);
 
     $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
     assert_contains('design/broken.html', $warnings);
@@ -187,6 +196,7 @@ test('inner-pages-design rerun clears stale failed markers after primary and rep
         inner_page('repaired', 'Repaired', 'Succeed after repair on rerun'),
     ]);
 
+    $llm->queueText(inner_pages_home_body('FIRST-RUN-HOME-BODY'));
     $llm->queueText('<section>Primary first failure</section>');
     $llm->queueText('<section>Repaired first failure</section>');
     $llm->queueText('<div>Primary repair still invalid</div>');
@@ -197,6 +207,7 @@ test('inner-pages-design rerun clears stale failed markers after primary and rep
 
     $primary = '<main id="primary-main"><h1>Primary now valid</h1></main>';
     $repaired = '<main id="repaired-main"><h1>Repair now valid</h1></main>';
+    $llm->queueText(inner_pages_home_body('SECOND-RUN-HOME-BODY'));
     $llm->queueText($primary);
     $llm->queueText('<section>Needs one rerun repair</section>');
     $llm->queueText($repaired);
@@ -219,6 +230,7 @@ test('inner-pages-design preserves only optional page CSS before main', function
     ]);
     $allowed = '<style data-page-css>.accent{color:#b20}</style>'
         . '<main id="allowed-main"><p class="accent">Allowed</p></main>';
+    $llm->queueText(inner_pages_home_body());
     $llm->queueText($allowed);
     $llm->queueText(
         '<main id="body-main"><style data-page-css>.unsafe{position:fixed}</style>'
@@ -247,6 +259,7 @@ test('inner-pages-design sends every hostile fragment through shared hardened sa
         inner_page('overlap', 'Overlap', 'Probe overlapping removals'),
         inner_page('quoted-doctype', 'Quoted doctype', 'Probe declaration boundary'),
     ]);
+    $llm->queueText(inner_pages_home_body());
     $llm->queueText(
         '<main id="comment-main"><p>Before</p><!--><script>COMMENT_PWNED()</script>'
         . '<p id="comment-survivor">After</p></main>',
@@ -300,7 +313,7 @@ test('inner-pages-design sends every hostile fragment through shared hardened sa
     inner_pages_cleanup($tmp);
 });
 
-test('inner-page prompt freezes supported slice responsive and small-CSS contract', function () {
+test('page-generation prompts freeze fold-seeded inner and below-fold home contracts', function () {
     $path = repo_path('prompts/inner-page-design.md');
     assert_true(is_file($path), 'inner-page-design.md must exist');
     $prompt = strtolower((string) file_get_contents($path));
@@ -336,9 +349,62 @@ test('inner-page prompt freezes supported slice responsive and small-CSS contrac
         'focus states',
         'readable contrast',
         'reduced-motion',
+        'design preview',
     ] as $required) {
         assert_contains($required, $prompt);
     }
+    assert_true(!str_contains($prompt, '{{home_body}}'), 'inner prompt has no full-home cache placeholder');
+    assert_true(!str_contains($prompt, 'homepage <main>'), 'inner prompt never names full-home main as seed');
+
+    $homePath = repo_path('prompts/home-body-design.md');
+    assert_true(is_file($homePath), 'home-body-design.md must exist');
+    $homePrompt = strtolower((string) file_get_contents($homePath));
+    foreach ([
+        '<main>',
+        '<footer>',
+        'below the fold',
+        'do not emit a <header>',
+        'do not repeat the hero',
+        'design preview',
+        'no javascript',
+    ] as $required) {
+        assert_contains($required, $homePrompt);
+    }
+
+    $source = (string) file_get_contents(repo_path('src/Steps/InnerPagesDesignStep.php'));
+    assert_true(!str_contains($source, 'homeReference('), 'full-home source helper is retired');
+});
+
+test('inner-pages-design deterministically suffixes reserved inner slugs without overwriting artifacts', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('landing', 'Landing', 'Front page'),
+        inner_page('preview', 'Preview page', 'Reserved preview collision'),
+        inner_page('home', 'Home page', 'Reserved home collision'),
+        inner_page('site', 'Site page', 'Reserved site collision'),
+    ]);
+    $originalPreview = $project->readText('design/preview.html');
+    $originalCss = $project->readText('design/site.css');
+    $project->writeText('design/home.html', 'EXISTING-COMPOSED-HOME-MUST-SURVIVE');
+
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText('<main><p>RESERVED-PREVIEW-PAGE</p></main>');
+    $llm->queueText('<main><p>RESERVED-HOME-PAGE</p></main>');
+    $llm->queueText('<main><p>RESERVED-SITE-PAGE</p></main>');
+
+    inner_pages_run($project, $llm);
+
+    assert_eq($originalPreview, $project->readText('design/preview.html'));
+    assert_eq($originalCss, $project->readText('design/site.css'));
+    assert_eq('EXISTING-COMPOSED-HOME-MUST-SURVIVE', $project->readText('design/home.html'));
+    assert_contains('RESERVED-PREVIEW-PAGE', $project->readText('design/preview-2.html'));
+    assert_contains('RESERVED-HOME-PAGE', $project->readText('design/home-2.html'));
+    assert_contains('RESERVED-SITE-PAGE', $project->readText('design/site-2.html'));
+    assert_true(!$project->exists('design/site.html'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+    foreach (['preview', 'preview-2', 'home', 'home-2', 'site', 'site-2', 'disposition renamed'] as $needle) {
+        assert_contains($needle, $warnings);
+    }
+    inner_pages_cleanup($tmp);
 });
 
 test('inner-pages-design rejects safe-tag structural damage and document-wrapped repairs per page', function () {
@@ -351,7 +417,8 @@ test('inner-pages-design rejects safe-tag structural damage and document-wrapped
         inner_page('sibling', 'Sibling', 'Land valid sibling'),
     ]);
 
-    // One batch response per non-front page.
+    // One home-body response, then one batch response per inner page.
+    $llm->queueText(inner_pages_home_body());
     $llm->queueText('<main><section><h1>A</h1></main>');
     $llm->queueText('<section>Missing main before wrapped repair</section>');
     $llm->queueText('<main><h1>Stray</h1></section></main>');
@@ -385,27 +452,27 @@ test('inner-pages-design rejects safe-tag structural damage and document-wrapped
     inner_pages_cleanup($tmp);
 });
 
-test('inner-pages-design caches real homepage main despite fake main text in head style and comment', function () {
-    $realMain = '<main id="real-home-main"><section><h1>REAL-MAIN-721B</h1></section></main>';
-    $home = '<!doctype html><html><head>'
+test('inner-pages-design caches the whole fold despite fake main text in head style and comment', function () {
+    $preview = '<!doctype html><html><head>'
         . '<style>.bait::before{content:"<main id=\'fake-style-main\'>FAKE STYLE</main>"}</style>'
         . '<!-- <main id="fake-comment-main">FAKE COMMENT</main> -->'
-        . '</head><body><header>Header</header>'
-        . $realMain
-        . '<footer>HEAD-TAIL-MUST-NOT-CACHE</footer></body></html>';
+        . '</head><body><header>EXACT-FOLD-HEADER</header>'
+        . '<main><section id="hero">EXACT-FOLD-HERO</section></main></body></html>';
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'Welcome'),
         inner_page('about', 'About', 'Explain the studio'),
-    ], $home);
+    ], $preview);
+    $llm->queueText(inner_pages_home_body());
     $llm->queueText('<main><h1>About</h1></main>');
 
     inner_pages_run($project, $llm);
 
-    $homePrefix = $llm->calls[0]['opts']['cached_prefixes'][1] ?? '';
-    assert_eq($realMain . "\n\n", $homePrefix);
-    assert_true(!str_contains($homePrefix, 'fake-style-main'));
-    assert_true(!str_contains($homePrefix, 'fake-comment-main'));
-    assert_true(!str_contains($homePrefix, 'HEAD-TAIL-MUST-NOT-CACHE'));
+    $foldPrefix = $llm->calls[0]['opts']['cached_prefixes'][1] ?? '';
+    assert_eq($preview . "\n\n", $foldPrefix);
+    assert_contains('fake-style-main', $foldPrefix, 'fold seed is byte-faithful, not DOM-normalized');
+    assert_contains('fake-comment-main', $foldPrefix, 'inert fold comment bytes remain in cache');
+    assert_contains('EXACT-FOLD-HEADER', $foldPrefix);
+    assert_contains('EXACT-FOLD-HERO', $foldPrefix);
     inner_pages_cleanup($tmp);
 });
 
@@ -414,6 +481,7 @@ test('inner-pages-design cache separators assemble byte-identically across provi
         inner_page('home', 'Home', 'Welcome'),
         inner_page('about', 'About', 'Explain the studio'),
     ]);
+    $llm->queueText(inner_pages_home_body());
     $llm->queueText('<main><h1>About</h1></main>');
 
     inner_pages_run($project, $llm);

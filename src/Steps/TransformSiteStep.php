@@ -32,6 +32,7 @@ final class TransformSiteStep implements Step
     use LlmOptions;
 
     private const DEFAULT_REPAIR_BUDGET = 12;
+    private const PAGE_ARTIFACT_MAP = 'design/page-artifact-map.json';
 
     private const SUPPORTED_SLICE = 'Headings, paragraphs, lists, quotes, code, tables, images, links, buttons, '
         . 'and semantic or presentational wrappers. No script, SVG, form controls, custom elements, iframe, '
@@ -76,6 +77,7 @@ final class TransformSiteStep implements Step
                 'siteSpec.json',
                 'designDirection.json',
                 'theme/theme.json',
+                self::PAGE_ARTIFACT_MAP,
                 'design/*',
             ],
             writes: [
@@ -94,16 +96,17 @@ final class TransformSiteStep implements Step
         $meta = $project->readJson('meta.json');
         $siteSpec = $project->readJson('siteSpec.json');
         $allPages = PagePlanStep::flattenPages($siteSpec);
+        $artifactMap = self::pageArtifactMap($project, $allPages);
         $pages = [];
         $failedPages = [];
-        // The additive design preview is not a page/compiler input yet.
-        $excludedHtml = ['preview.html' => true];
+        $failedArtifacts = [];
         foreach ($allPages as $page) {
             $slug = (string) $page['slug'];
-            $failedPath = "design/{$slug}.failed";
+            $artifactSlug = $artifactMap[$slug];
+            $failedPath = "design/{$artifactSlug}.failed";
             if (empty($page['front']) && $project->exists($failedPath)) {
                 $failedPages[] = $page;
-                $excludedHtml["{$slug}.html"] = true;
+                $failedArtifacts[$slug] = $artifactSlug;
                 continue;
             }
             $pages[] = $page;
@@ -112,7 +115,7 @@ final class TransformSiteStep implements Step
         $project->readJson('designDirection.json');
         $siteCss = $project->readText(TransformArtifacts::SITE_CSS);
 
-        [$artifact, $sourceHtml] = $this->artifact($project, $pages, $siteCss, $excludedHtml);
+        [$artifact, $sourceHtml] = $this->artifact($project, $pages, $artifactMap, $siteCss);
         $warnings = [];
         $fallbackCodes = [];
         $repairOutcomes = [];
@@ -146,7 +149,7 @@ final class TransformSiteStep implements Step
         $chromeKeys = [];
         foreach ($pages as $pageIndex => $page) {
             $slug = (string) $page['slug'];
-            $source = !empty($page['front']) ? 'home.html' : "{$slug}.html";
+            $source = $artifactMap[$slug] . '.html';
             $html = $sourceHtml[$source] ?? null;
             if (!is_string($html)) {
                 throw new \RuntimeException("transform-site: required design artifact design/{$source} is absent");
@@ -417,7 +420,7 @@ final class TransformSiteStep implements Step
                 $section['role'] = SectionRole::forPosition($index, count($sections));
             }
             unset($section);
-            $source = 'design/' . (!empty($page['front']) ? 'home.html' : "{$page['slug']}.html");
+            $source = 'design/' . $artifactMap[(string) $page['slug']] . '.html';
             if ($sections === [] && !empty($page['front'])) {
                 $fallbackSlug = 'content';
                 $path = 'theme/parts/' . SectionsStep::partSlug((string) $page['slug'], $fallbackSlug) . '.html';
@@ -484,7 +487,7 @@ final class TransformSiteStep implements Step
 
             foreach ($failedPages as $failedPage) {
                 $slug = (string) $failedPage['slug'];
-                $marker = "design/{$slug}.failed";
+                $marker = 'design/' . $failedArtifacts[$slug] . '.failed';
                 $deliveredPaths = [];
                 foreach ((array) ($legacyBySlug[$slug]['sections'] ?? []) as $section) {
                     if (!is_array($section)) {
@@ -548,23 +551,21 @@ final class TransformSiteStep implements Step
 
     /**
      * @param array<int,array<string,mixed>> $pages
-     * @param array<string,true> $excludedHtml
+     * @param array<string,string> $artifactMap semantic page slug => physical design basename
      * @return array{0:array<string,mixed>,1:array<string,string>}
      */
-    private function artifact(Project $project, array $pages, string $siteCss, array $excludedHtml = []): array
+    private function artifact(Project $project, array $pages, array $artifactMap, string $siteCss): array
     {
         $files = [];
         $sources = [];
-        $expected = ['home.html' => true];
+        $expected = [];
         foreach ($pages as $page) {
-            if (empty($page['front'])) {
-                $expected[(string) $page['slug'] . '.html'] = true;
-            }
+            $slug = (string) $page['slug'];
+            $expected[$artifactMap[$slug] . '.html'] = true;
         }
-        foreach (glob($project->path('design/*.html')) ?: [] as $path) {
-            $name = basename($path);
-            if (isset($excludedHtml[$name])) {
-                continue;
+        foreach (array_keys($expected) as $name) {
+            if (!$project->exists("design/{$name}")) {
+                throw new \RuntimeException("transform-site: required design artifact design/{$name} is absent");
             }
             $content = $project->readText("design/{$name}");
             $files[] = [
@@ -573,14 +574,7 @@ final class TransformSiteStep implements Step
                 'kind' => 'html',
                 'entrypoint' => $name === 'home.html',
             ];
-            if (isset($expected[$name])) {
-                $sources[$name] = $content;
-            }
-        }
-        foreach (array_keys($expected) as $name) {
-            if (!isset($sources[$name])) {
-                throw new \RuntimeException("transform-site: required design artifact design/{$name} is absent");
-            }
+            $sources[$name] = $content;
         }
         usort($files, static function (array $left, array $right): int {
             if (($left['path'] === 'home.html') !== ($right['path'] === 'home.html')) {
@@ -594,6 +588,80 @@ final class TransformSiteStep implements Step
             'entrypoint' => 'home.html',
             'files' => $files,
         ], $sources];
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $pages
+     * @return array<string,string> semantic page slug => physical design basename
+     */
+    private static function pageArtifactMap(Project $project, array $pages): array
+    {
+        try {
+            $map = $project->readJson(self::PAGE_ARTIFACT_MAP);
+        } catch (\RuntimeException $error) {
+            throw new \RuntimeException(
+                'transform-site: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                    . ': ' . $error->getMessage(),
+                previous: $error,
+            );
+        }
+
+        foreach ($map as $semanticSlug => $artifactSlug) {
+            $semanticKey = is_string($semanticSlug) || is_int($semanticSlug)
+                ? (string) $semanticSlug
+                : '';
+            if (
+                $semanticKey === ''
+                || !is_string($artifactSlug)
+                || preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/D', $artifactSlug) !== 1
+            ) {
+                throw new \RuntimeException(
+                    'transform-site: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ': expected direct semantic-slug to physical-basename string map',
+                );
+            }
+        }
+
+        $resolved = [];
+        $claimed = [];
+        foreach ($pages as $page) {
+            $semanticSlug = (string) ($page['slug'] ?? '');
+            if (!array_key_exists($semanticSlug, $map)) {
+                throw new \RuntimeException(
+                    'transform-site: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": missing semantic slug '{$semanticSlug}'",
+                );
+            }
+            $artifactSlug = $map[$semanticSlug];
+            if (!is_string($artifactSlug)) {
+                throw new \RuntimeException(
+                    'transform-site: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": non-string physical basename for '{$semanticSlug}'",
+                );
+            }
+            if (!empty($page['front']) && $artifactSlug !== 'home') {
+                throw new \RuntimeException(
+                    'transform-site: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": front page '{$semanticSlug}' must map to 'home'",
+                );
+            }
+            if (empty($page['front']) && in_array($artifactSlug, ['home', 'preview', 'home-body'], true)) {
+                throw new \RuntimeException(
+                    'transform-site: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": inner page '{$semanticSlug}' maps to reserved basename '{$artifactSlug}'",
+                );
+            }
+            if (isset($claimed[$artifactSlug])) {
+                throw new \RuntimeException(
+                    'transform-site: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": physical basename '{$artifactSlug}' is shared by '{$claimed[$artifactSlug]}'"
+                        . " and '{$semanticSlug}'",
+                );
+            }
+            $claimed[$artifactSlug] = $semanticSlug;
+            $resolved[$semanticSlug] = $artifactSlug;
+        }
+        return $resolved;
     }
 
     /**

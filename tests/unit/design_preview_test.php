@@ -49,6 +49,13 @@ function design_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '</body></html>';
 }
 
+function design_preview_css(): string
+{
+    return ':root { --content-size: 800px; --wide-size: 1280px; }'
+        . 'body { margin: 0; font-family: system-ui, sans-serif; }'
+        . 'main { max-width: var(--wide-size); margin-inline: auto; }';
+}
+
 function design_preview_run(
     Project $project,
     FakeLlm $llm,
@@ -161,11 +168,11 @@ test('design-preview freezes its public id and declaration', function () {
     $declaration = $step->declaration();
 
     assert_eq('design-preview', $step->id());
-    assert_eq(['design/preview.html', 'warnings.json'], $declaration->writes);
+    assert_eq(['design/preview.html', 'design/site.css', 'warnings.json'], $declaration->writes);
     assert_eq(false, $declaration->concurrent);
 });
 
-test('design-preview makes one configured text call and writes exact preview bytes only', function () {
+test('design-preview makes one configured text call and writes exact preview and style bytes', function () {
     [$project, $llm, $tmp] = design_preview_fixture();
     $preview = design_preview_document();
     $llm->queueText($preview);
@@ -183,10 +190,11 @@ test('design-preview makes one configured text call and writes exact preview byt
     assert_contains('Hearth & Crumb', $llm->calls[0]['prompt']);
     assert_contains('Flour Archive', $llm->calls[0]['prompt']);
     assert_eq($preview, $project->readText('design/preview.html'));
+    assert_eq(design_preview_css(), $project->readText('design/site.css'));
 
     $designFiles = array_map('basename', glob($project->path('design/*')) ?: []);
     sort($designFiles);
-    assert_eq(['preview.html'], $designFiles, 'no homepage, site CSS, or candidate artifact written');
+    assert_eq(['preview.html', 'site.css'], $designFiles, 'only fold HTML and byte-faithful CSS are written');
     design_preview_cleanup($tmp);
 
     [$wiredProject, $wiredLlm, $wiredTmp] = design_preview_fixture();
@@ -230,6 +238,7 @@ test('design-preview makes one configured text call and writes exact preview byt
         ($wiredLlm->calls[0]['opts']['temperature'] ?? null) !== 0.91,
         'preview does not inherit homepage temperature',
     );
+    assert_eq(design_preview_css(), $wiredProject->readText('design/site.css'));
     design_preview_cleanup($wiredTmp);
 });
 
@@ -344,6 +353,7 @@ test('design-preview repairs one malformed response once and warns', function ()
     assert_eq(0, $llm->completeBatchCalls);
     assert_eq(2, count($llm->calls), 'one repair attempt only');
     assert_eq($replacement, $project->readText('design/preview.html'));
+    assert_eq(design_preview_css(), $project->readText('design/site.css'));
     design_preview_assert_shape($project->readText('design/preview.html'));
     $warnings = design_preview_warnings($project);
     assert_contains('malformed_design', $warnings);
@@ -357,6 +367,7 @@ test('design-preview repairs one malformed response once and warns', function ()
 
 test('design-preview degrades two malformed responses to one deterministic safe scaffold', function () {
     $outputs = [];
+    $styles = [];
     for ($run = 0; $run < 2; $run++) {
         [$project, $llm, $tmp] = design_preview_fixture();
         $llm->queueText('MALFORMED-INITIAL');
@@ -374,8 +385,15 @@ test('design-preview degrades two malformed responses to one deterministic safe 
         assert_eq(0, $llm->completeBatchCalls);
         assert_eq(2, count($llm->calls), 'repair capped at one attempt');
         assert_true($project->exists('design/preview.html'), 'safe scaffold written');
+        assert_true($project->exists('design/site.css'), 'safe scaffold CSS written');
         $outputs[] = $project->readText('design/preview.html');
+        $styles[] = $project->readText('design/site.css');
         design_preview_assert_shape($outputs[$run]);
+        $dom = Html::loadUtf8Html($outputs[$run], LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        assert_true($dom instanceof DOMDocument);
+        $style = (new DOMXPath($dom))->query('/html/head/style')->item(0);
+        assert_true($style instanceof DOMElement);
+        assert_eq($style->textContent, $styles[$run], 'degraded CSS equals delivered head style bytes');
 
         $warnings = design_preview_warnings($project);
         assert_contains('file design/preview.html', $warnings);
@@ -389,4 +407,5 @@ test('design-preview degrades two malformed responses to one deterministic safe 
     }
 
     assert_eq($outputs[0], $outputs[1], 'safe scaffold is deterministic');
+    assert_eq($styles[0], $styles[1], 'safe scaffold CSS is deterministic');
 });

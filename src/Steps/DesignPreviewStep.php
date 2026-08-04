@@ -31,6 +31,12 @@ final class DesignPreviewStep implements Step
 
     private const PATH = 'design/preview.html';
 
+    private const CSS_PATH = 'design/site.css';
+
+    private const RAW_TEXT_ELEMENTS = [
+        'iframe', 'noembed', 'noframes', 'script', 'style', 'textarea', 'title', 'xmp',
+    ];
+
     private const IMAGE_ALT_PATTERN = '/^AI_IMAGE: [^|\r\n]+ \| [^|\r\n]+ \| '
         . '(?:photorealistic|digital-art|illustration|minimalist|flat-design|3d-render|abstract|watercolor) '
         . '\| (?:square|landscape|portrait)$/D';
@@ -58,7 +64,7 @@ final class DesignPreviewStep implements Step
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
-            writes: [self::PATH, 'warnings.json'],
+            writes: [self::PATH, self::CSS_PATH, 'warnings.json'],
             concurrent: false,
         );
     }
@@ -88,7 +94,7 @@ final class DesignPreviewStep implements Step
                 );
             } catch (\RuntimeException $error) {
                 $scaffold = self::safeScaffold($siteSpec, $brief);
-                $project->writeText(self::PATH, $scaffold);
+                self::writePreview($project, $scaffold);
                 $warnings[] = self::degradedWarning(
                     'initial LLM request failed: ' . $error->getMessage(),
                     $scaffold,
@@ -110,7 +116,7 @@ final class DesignPreviewStep implements Step
             }
 
             if ($issue === null) {
-                $project->writeText(self::PATH, $candidate);
+                self::writePreview($project, $candidate);
                 array_push($warnings, ...$initialSanitizerWarnings);
                 return;
             }
@@ -131,7 +137,7 @@ final class DesignPreviewStep implements Step
                     throw new \RuntimeException("repair remained invalid: {$repairedIssue}");
                 }
 
-                $project->writeText(self::PATH, $repaired);
+                self::writePreview($project, $repaired);
                 array_push($warnings, ...$repairSanitizerWarnings);
                 $warnings[] = 'malformed_design file design/preview.html block_path document '
                     . 'authored_value ' . self::warningValue($authored)
@@ -139,7 +145,7 @@ final class DesignPreviewStep implements Step
                     . 'disposition repaired; defect ' . self::warningValue($issue);
             } catch (\RuntimeException $error) {
                 $scaffold = self::safeScaffold($siteSpec, $brief);
-                $project->writeText(self::PATH, $scaffold);
+                self::writePreview($project, $scaffold);
                 $warnings[] = self::degradedWarning(
                     $authored . '; repair failure: ' . $error->getMessage(),
                     $scaffold,
@@ -148,6 +154,149 @@ final class DesignPreviewStep implements Step
         } finally {
             $project->addWarnings($this->id(), $warnings);
         }
+    }
+
+    private static function writePreview(Project $project, string $html): void
+    {
+        $css = self::headStyleContents($html);
+        if ($css === null) {
+            throw new \RuntimeException('validated preview has no inline head style');
+        }
+
+        $project->writeText(self::PATH, $html);
+        $project->writeText(self::CSS_PATH, $css);
+    }
+
+    private static function headStyleContents(string $html): ?string
+    {
+        $length = strlen($html);
+        $offset = 0;
+        $insideHead = false;
+        while ($offset < $length) {
+            $start = strpos($html, '<', $offset);
+            if ($start === false) {
+                return null;
+            }
+            if (substr($html, $start, 4) === '<!--') {
+                $end = strpos($html, '-->', $start + 4);
+                if ($end === false) {
+                    return null;
+                }
+                $offset = $end + 3;
+                continue;
+            }
+            if (substr($html, $start, 2) === '<!' || substr($html, $start, 2) === '<?') {
+                $end = self::sourceMarkupEnd($html, $start + 2);
+                if ($end === null) {
+                    return null;
+                }
+                $offset = $end;
+                continue;
+            }
+
+            $tag = self::sourceTagAt($html, $start);
+            if ($tag === null) {
+                $offset = $start + 1;
+                continue;
+            }
+            $offset = $tag['end'];
+            if ($tag['closing']) {
+                if ($tag['name'] === 'head') {
+                    $insideHead = false;
+                }
+                continue;
+            }
+            if ($tag['name'] === 'head') {
+                $insideHead = true;
+                continue;
+            }
+            if (!in_array($tag['name'], self::RAW_TEXT_ELEMENTS, true)) {
+                continue;
+            }
+
+            $closing = self::rawTextClosingTag($html, $tag['name'], $offset);
+            if ($closing === null) {
+                return null;
+            }
+            if ($insideHead && $tag['name'] === 'style') {
+                return substr($html, $offset, $closing['start'] - $offset);
+            }
+            $offset = $closing['end'];
+        }
+        return null;
+    }
+
+    /** @return array{name:string,closing:bool,start:int,end:int}|null */
+    private static function sourceTagAt(string $html, int $start): ?array
+    {
+        if (($html[$start] ?? '') !== '<') {
+            return null;
+        }
+        $length = strlen($html);
+        $cursor = $start + 1;
+        $closing = ($html[$cursor] ?? '') === '/';
+        if ($closing) {
+            $cursor++;
+        }
+        if (!isset($html[$cursor]) || preg_match('/[A-Za-z]/A', substr($html, $cursor, 1)) !== 1) {
+            return null;
+        }
+
+        $nameStart = $cursor;
+        while (isset($html[$cursor]) && preg_match('/[A-Za-z0-9:-]/A', $html[$cursor]) === 1) {
+            $cursor++;
+        }
+        if (isset($html[$cursor]) && !ctype_space($html[$cursor]) && $html[$cursor] !== '>' && $html[$cursor] !== '/') {
+            return null;
+        }
+        $end = self::sourceMarkupEnd($html, $cursor);
+        if ($end === null || $end > $length) {
+            return null;
+        }
+
+        return [
+            'name' => strtolower(substr($html, $nameStart, $cursor - $nameStart)),
+            'closing' => $closing,
+            'start' => $start,
+            'end' => $end,
+        ];
+    }
+
+    private static function sourceMarkupEnd(string $html, int $offset): ?int
+    {
+        $quote = '';
+        $length = strlen($html);
+        for ($cursor = $offset; $cursor < $length; $cursor++) {
+            $byte = $html[$cursor];
+            if ($quote !== '') {
+                if ($byte === $quote) {
+                    $quote = '';
+                }
+                continue;
+            }
+            if ($byte === '"' || $byte === "'") {
+                $quote = $byte;
+                continue;
+            }
+            if ($byte === '>') {
+                return $cursor + 1;
+            }
+        }
+        return null;
+    }
+
+    /** @return array{name:string,closing:bool,start:int,end:int}|null */
+    private static function rawTextClosingTag(string $html, string $name, int $offset): ?array
+    {
+        $needle = '</' . $name;
+        while (($start = stripos($html, $needle, $offset)) !== false) {
+            $tag = self::sourceTagAt($html, $start);
+            if ($tag !== null && $tag['closing'] && $tag['name'] === $name) {
+                return $tag;
+            }
+            $offset = $start + 2;
+        }
+        return null;
     }
 
     /**

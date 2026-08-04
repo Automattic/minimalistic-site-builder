@@ -16,7 +16,6 @@ use Automattic\SiteBuild\Steps\FixBlocksStep;
 use Automattic\SiteBuild\Steps\FixPagesStep;
 use Automattic\SiteBuild\Steps\FontsPhpStep;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
-use Automattic\SiteBuild\Steps\HomepageDesignStep;
 use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
 use Automattic\SiteBuild\Steps\MotionSanityStep;
 use Automattic\SiteBuild\Steps\NormalizeLayoutStep;
@@ -28,6 +27,7 @@ use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
+use Automattic\SiteBuild\Steps\SpliceHomeDesignStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\TransformSiteStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
@@ -106,12 +106,6 @@ final class StepComposition
                 $models['design-preview'] ?? null,
                 $temps['design-preview'] ?? null,
             ),
-            new HomepageDesignStep(
-                $llm,
-                $renderer,
-                $models['homepage-design'] ?? null,
-                $temps['homepage-design'] ?? null,
-            ),
             new ThemeJsonStep(
                 llm: $llm,
                 renderer: $renderer,
@@ -124,7 +118,14 @@ final class StepComposition
                 $renderer,
                 $models['inner-pages-design'] ?? null,
                 $temps['inner-pages-design'] ?? null,
+                new PagePlanStep(
+                    $llm,
+                    $renderer,
+                    $models['page-plan'],
+                    $temps['page-plan'],
+                ),
             ),
+            new SpliceHomeDesignStep(),
             // Right before transform-site: the design <img> tags need a real
             // theme asset path or the transformer drops them, and the path has
             // to be the one collect-images/generate-images will use later.

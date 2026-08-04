@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
+use Automattic\SiteBuild\Steps\HomepageDesignStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /**
@@ -36,7 +37,7 @@ test('SiteBuilder pipeline exposes the default step order and stop ids', functio
 
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'design-preview', 'homepage-design', 'theme-json', 'inner-pages-design', 'assign-image-sources', 'transform-site', 'section-rhythm',
+        'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'section-rhythm',
         // normalize-layout MUST precede contrast-fix and motion-sanity: the
         // attribute repair can activate previously-inert color/motion
         // attributes, which those policy passes must be able to see.
@@ -130,9 +131,10 @@ test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('SiteBuilder accepts partial model overrides without fatalling', function () {
+test('SiteBuilder accepts a retired homepage model override without restoring the step', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
     $builder = make_test_builder(new FakeLlm(), $tmp, models: ['homepage-design' => 'claude-haiku-4-5']);
-    assert_true(in_array('homepage-design', $builder->pipeline()->stepIds(), true));
+    assert_true(!in_array('homepage-design', $builder->pipeline()->stepIds(), true));
+    assert_true(class_exists(HomepageDesignStep::class), 'retired implementation remains available and tested');
     exec('rm -rf ' . escapeshellarg($tmp));
 });

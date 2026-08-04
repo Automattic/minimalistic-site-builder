@@ -1,0 +1,84 @@
+{
+    "snapshot_ref": "refs/snapshots/dp-slice2",
+    "snapshot_commit": "f83ff4dc58a735e666f22be8611a669bf1707473",
+    "snapshot_tree": "a5245785113b083549b78afe6238c2836d0b9b92",
+    "input": {
+        "meta": {
+            "prompt": "Build Northstar Studio"
+        },
+        "site_spec": {
+            "name": "Northstar Studio",
+            "language": "English",
+            "pages": [
+                {
+                    "slug": "home",
+                    "title": "Home",
+                    "purpose": "Welcome"
+                },
+                {
+                    "slug": "about",
+                    "title": "About",
+                    "purpose": "Explain studio"
+                },
+                {
+                    "slug": "contact",
+                    "title": "Contact",
+                    "purpose": "Give contact details"
+                }
+            ]
+        },
+        "design_direction": {
+            "description": "Crisp editorial system"
+        },
+        "site_css": "/* EXACT-SITE-CSS-5F7D */\n:root{--ink:#18222d}.shared-shell{max-width:72rem}\n",
+        "preview_html": "<!doctype html><html><head><style>.ignored{color:red}</style></head><body><header>EXACT-FOLD-HEADER-9C2A</header><main><section id=\"hero\"><h1>EXACT-FOLD-HERO-6D1F</h1></section></main></body></html>",
+        "responses": {
+            "design/home-body.html": "<main><section id=\"story\"><h2>GOLD-HOME</h2></section></main><footer><p>EXACT-HOME-FOOTER-7A4C</p></footer>",
+            "design/about.html": "<main id=\"about\"><h1>GOLD-ABOUT</h1></main>",
+            "design/contact.html": "<main id=\"contact\"><h1>GOLD-CONTACT</h1></main>"
+        }
+    },
+    "page_mode": {
+        "request_count": 3,
+        "complete_batch_calls": 1,
+        "complete_json_batch_calls": 0,
+        "calls": [
+            {
+                "prompt_sha256": "5fc1e9e051d26f36245c7cbc913627c8c40aedf7f037a874c08e8b97c772b0c6",
+                "prefix_sha256": [
+                    "dc58c399d735c8f0679896b786bd5952ba926d1b0e52a92585c30d5cb43a8a56",
+                    "907f74a91765ac9a98844d3096d4ba8be0e6207bf886181e7e32e71e79dfa727"
+                ],
+                "model": null,
+                "temperature": null
+            },
+            {
+                "prompt_sha256": "d381d463d90280f0345085c6d5b11173d26d98de0791e02c058fbb25fc74550f",
+                "prefix_sha256": [
+                    "dc58c399d735c8f0679896b786bd5952ba926d1b0e52a92585c30d5cb43a8a56",
+                    "907f74a91765ac9a98844d3096d4ba8be0e6207bf886181e7e32e71e79dfa727"
+                ],
+                "model": null,
+                "temperature": null
+            },
+            {
+                "prompt_sha256": "4daed34d6b51530b1adb02356c0c744260728596a33b9f29c07967bfd0bfe537",
+                "prefix_sha256": [
+                    "dc58c399d735c8f0679896b786bd5952ba926d1b0e52a92585c30d5cb43a8a56",
+                    "907f74a91765ac9a98844d3096d4ba8be0e6207bf886181e7e32e71e79dfa727"
+                ],
+                "model": null,
+                "temperature": null
+            }
+        ],
+        "design_manifest": {
+            "design/about.html": "<main id=\"about\"><h1>GOLD-ABOUT</h1></main>",
+            "design/contact.html": "<main id=\"contact\"><h1>GOLD-CONTACT</h1></main>",
+            "design/home-body.html": "<main><section id=\"story\"><h2>GOLD-HOME</h2></section></main><footer><p>EXACT-HOME-FOOTER-7A4C</p></footer>",
+            "design/page-artifact-map.json": "{\n    \"home\": \"home\",\n    \"about\": \"about\",\n    \"contact\": \"contact\"\n}\n",
+            "design/preview.html": "<!doctype html><html><head><style>.ignored{color:red}</style></head><body><header>EXACT-FOLD-HEADER-9C2A</header><main><section id=\"hero\"><h1>EXACT-FOLD-HERO-6D1F</h1></section></main></body></html>",
+            "design/site.css": "/* EXACT-SITE-CSS-5F7D */\n:root{--ink:#18222d}.shared-shell{max-width:72rem}\n"
+        },
+        "warnings_exists": false
+    }
+}

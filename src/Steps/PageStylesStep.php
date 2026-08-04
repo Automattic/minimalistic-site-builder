@@ -57,6 +57,8 @@ final class PageStylesStep implements Step
 {
     use LlmOptions;
 
+    private const PAGE_ARTIFACT_MAP = 'design/page-artifact-map.json';
+
     /**
      * The documented utility-class vocabulary, each with its implementation
      * contract (injected into prompts/page-styles.md for the classes a build
@@ -167,6 +169,7 @@ CSS;
             'theme/templates/*',
         ];
         if ($this->htmlFirst) {
+            $reads[] = self::PAGE_ARTIFACT_MAP;
             $reads[] = 'design/*';
             $reads[] = 'plugin/pages/*';
         }
@@ -343,23 +346,98 @@ CSS;
             throw new \RuntimeException('page-styles: pages.json has no delivered pages');
         }
 
+        $artifactMap = self::pageArtifactMap($project, $pages);
+
         $sources = [];
         foreach ($pages as $page) {
             if (!is_array($page) || trim((string) ($page['slug'] ?? '')) === '') {
                 throw new \RuntimeException('page-styles: pages.json contains a page without a slug');
             }
             $slug = (string) $page['slug'];
-            if ($project->exists("design/{$slug}.failed")) {
+            $artifactSlug = $artifactMap[$slug];
+            if ($project->exists("design/{$artifactSlug}.failed")) {
                 continue;
             }
-            $source = !empty($page['front'])
-                ? 'design/home.html'
-                : "design/{$slug}.html";
+            $source = "design/{$artifactSlug}.html";
             $sources[$source] = true;
         }
         $sources = array_keys($sources);
         sort($sources, SORT_STRING);
         return $sources;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $pages
+     * @return array<string,string> semantic page slug => physical design basename
+     */
+    private static function pageArtifactMap(Project $project, array $pages): array
+    {
+        try {
+            $map = $project->readJson(self::PAGE_ARTIFACT_MAP);
+        } catch (\RuntimeException $error) {
+            throw new \RuntimeException(
+                'page-styles: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                    . ': ' . $error->getMessage(),
+                previous: $error,
+            );
+        }
+
+        foreach ($map as $semanticSlug => $artifactSlug) {
+            $semanticKey = is_string($semanticSlug) || is_int($semanticSlug)
+                ? (string) $semanticSlug
+                : '';
+            if (
+                $semanticKey === ''
+                || !is_string($artifactSlug)
+                || preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/D', $artifactSlug) !== 1
+            ) {
+                throw new \RuntimeException(
+                    'page-styles: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ': expected direct semantic-slug to physical-basename string map',
+                );
+            }
+        }
+
+        $resolved = [];
+        $claimed = [];
+        foreach ($pages as $page) {
+            $semanticSlug = (string) ($page['slug'] ?? '');
+            if (!array_key_exists($semanticSlug, $map)) {
+                throw new \RuntimeException(
+                    'page-styles: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": missing semantic slug '{$semanticSlug}'",
+                );
+            }
+            $artifactSlug = $map[$semanticSlug];
+            if (!is_string($artifactSlug)) {
+                throw new \RuntimeException(
+                    'page-styles: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": non-string physical basename for '{$semanticSlug}'",
+                );
+            }
+            if (!empty($page['front']) && $artifactSlug !== 'home') {
+                throw new \RuntimeException(
+                    'page-styles: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": front page '{$semanticSlug}' must map to 'home'",
+                );
+            }
+            if (empty($page['front']) && in_array($artifactSlug, ['home', 'preview', 'home-body'], true)) {
+                throw new \RuntimeException(
+                    'page-styles: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": inner page '{$semanticSlug}' maps to reserved basename '{$artifactSlug}'",
+                );
+            }
+            if (isset($claimed[$artifactSlug])) {
+                throw new \RuntimeException(
+                    'page-styles: corrupt required artifact ' . self::PAGE_ARTIFACT_MAP
+                        . ": physical basename '{$artifactSlug}' is shared by '{$claimed[$artifactSlug]}'"
+                        . " and '{$semanticSlug}'",
+                );
+            }
+            $claimed[$artifactSlug] = $semanticSlug;
+            $resolved[$semanticSlug] = $artifactSlug;
+        }
+        return $resolved;
     }
 
     /** Final theme and content-plugin markup in deterministic path order. */

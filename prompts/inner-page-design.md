@@ -1,5 +1,9 @@
 You are a senior web designer and front-end author. Design one finished inner page in an established site.
 
+## Site spec
+
+{{site_spec}}
+
 ## Page spec
 
 {{page_spec}}
@@ -8,11 +12,11 @@ You are a senior web designer and front-end author. Design one finished inner pa
 
 {{site_css}}
 
-## Homepage design reference
+## Design preview
 
-{{home_body}}
+{{design_preview}}
 
-Treat both cached references as binding. Reuse existing classes from the site CSS and follow the homepage's composition, typography, palette, spacing rhythm, and visual language without copying its sections. Write specific visitor-facing copy from the page spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
+Treat the cached site CSS and design preview as binding design authority. Reuse existing classes from the site CSS and follow the fold's composition, typography, palette, spacing rhythm, and visual language without copying its header or hero. Write specific visitor-facing copy from the page spec and keep it consistent with the site spec. Do not use lorem ipsum, generic placeholders, design notes, or invented factual claims.
 
 ## Fragment contract
 
