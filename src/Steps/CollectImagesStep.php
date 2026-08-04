@@ -8,6 +8,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (deterministic): collect the AI image placeholders the sections step
@@ -60,6 +61,7 @@ final class CollectImagesStep implements Step
             writes: [
                 'images.json',
                 'theme/parts/*',
+                'warnings.json',
             ],
             concurrent: false,
         );
@@ -69,6 +71,7 @@ final class CollectImagesStep implements Step
     {
         /** @var array<string,array<string,mixed>> $byFilename keyed by filename, deduped */
         $byFilename = [];
+        $warnings = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
@@ -77,10 +80,30 @@ final class CollectImagesStep implements Step
                 $project->writeText('theme/' . $rel, $parsed['content']);
             }
             foreach ($parsed['images'] as $img) {
+                $cappedForFooter = false;
+                $authoredRatio = $img['aspectRatio'] ?? null;
+                if ($rel === 'parts/footer.html'
+                    && is_string($authoredRatio)
+                    && self::isPortraitAspectRatio($authoredRatio)
+                ) {
+                    $img['aspectRatio'] = 'square';
+                    $cappedForFooter = true;
+                    $warnings[] = "file='theme/parts/footer.html'; block='AI_IMAGE placeholder'; asset="
+                        . Warnings::value($img['src'] ?? $img['filename'] ?? 'unknown') . '; authored aspect-ratio='
+                        . Warnings::value($authoredRatio) . '; delivered aspect-ratio="square"; '
+                        . 'disposition=portrait-oriented footer image capped after placeholder recovery '
+                        . 'so it cannot stretch the footer band';
+                }
+
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
                     // Same asset referenced from another file — just record the source.
                     $byFilename[$filename]['sources'][] = $rel;
+                    if ($cappedForFooter) {
+                        // A shared asset must use the footer-safe shape even if
+                        // an earlier non-footer source introduced it first.
+                        $byFilename[$filename]['aspectRatio'] = 'square';
+                    }
                     continue;
                 }
                 $img['sources'] = [$rel];
@@ -90,6 +113,7 @@ final class CollectImagesStep implements Step
         }
 
         $project->writeJson('images.json', array_values($byFilename));
+        $project->addWarnings($this->id(), $warnings);
     }
 
     /** Theme-relative paths of every markup file that may hold image placeholders. */
@@ -363,5 +387,14 @@ final class CollectImagesStep implements Step
         }
 
         return 'landscape';
+    }
+
+    /** Whether Gemini's delivered shape for this authored ratio is portrait. */
+    private static function isPortraitAspectRatio(string $ratio): bool
+    {
+        if (preg_match('/^(\d+):(\d+)$/', GeminiImage::aspectRatio($ratio), $parts) !== 1) {
+            return false;
+        }
+        return (int) $parts[1] < (int) $parts[2];
     }
 }

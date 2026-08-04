@@ -89,6 +89,42 @@ test('collect-images recovers an AI_IMAGE spec left in a cover url', function ()
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images caps recovered footer source ratios after semantic decoding', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/footer.html',
+        '<img src="AI_IMAGE:A potter|ratio:card-portrait|role:footer" alt=""/>'
+        . '<!-- wp:cover {"url":"AI_IMAGE:A loom\u007cratio:9:16\u007crole:footer"} -->'
+        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+        . '<img src="AI_IMAGE:A wheel|ratio:16:9|role:footer" alt=""/>'
+    );
+    $project->writeText('theme/parts/hero.html',
+        '<img src="AI_IMAGE:A statue|ratio:card-portrait|role:hero" alt=""/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(4, count($images));
+    $ratios = array_column($images, 'aspectRatio', 'subject');
+    assert_eq('square', $ratios['A potter']);
+    assert_eq('square', $ratios['A loom']);
+    assert_eq('16:9', $ratios['A wheel'], 'wide footer image remains authored');
+    assert_eq('card-portrait', $ratios['A statue'], 'non-footer portrait remains authored');
+    $markup = $project->readText('theme/parts/footer.html');
+    assert_true(!str_contains($markup, 'AI_IMAGE:'), 'recovered source prompts are replaced');
+
+    $warnings = $project->readJson('warnings.json')['collect-images'] ?? [];
+    assert_eq(2, count($warnings));
+    $joined = implode("\n", $warnings);
+    assert_contains("file='theme/parts/footer.html'", $joined);
+    assert_contains('authored aspect-ratio="card-portrait"', $joined);
+    assert_contains('authored aspect-ratio="9:16"', $joined);
+    assert_contains('delivered aspect-ratio="square"', $joined);
+    assert_contains('disposition=', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images gives a recovered structured trailing ratio precedence over prose keywords', function () {
     [$project, $tmp] = collect_fixture();
     $project->writeText('theme/parts/hero.html',
