@@ -422,11 +422,14 @@ final class ScaffoldPluginStep implements Step
                 return null;
             }
 
-            // Elements that load or run code.
+            // Elements that load or run code, plus <style>: a stylesheet in
+            // content can restyle the trusted header shell (position:fixed
+            // chrome the build's ownership contract forbids), so its body is
+            // emptied like the intake sanitizer strips it.
             $inert = array(
                 'SCRIPT' => true, 'IFRAME' => true, 'OBJECT' => true,
                 'APPLET' => true, 'EMBED' => true, 'NOEMBED' => true,
-                'NOFRAMES' => true, 'NOSCRIPT' => true,
+                'NOFRAMES' => true, 'NOSCRIPT' => true, 'STYLE' => true,
             );
             $loaders = array(
                 'src', 'data', 'srcdoc', 'code', 'codebase', 'archive',
@@ -481,8 +484,9 @@ final class ScaffoldPluginStep implements Step
                         if ($tag === 'SCRIPT') {
                             $processor->set_attribute('type', 'text/plain');
                         }
-                        // Raw-text bodies (script, iframe, noembed, noframes)
-                        // are this tag's own modifiable text and go with it.
+                        // Raw-text bodies (script, style, iframe, noembed,
+                        // noframes) are this tag's own modifiable text and go
+                        // with it.
                         $processor->set_modifiable_text('');
                     }
                     if ($tag === 'BASE') {

@@ -29,6 +29,11 @@ function assert_inert(string $html, string $context): void
             assert_eq('text/plain', $processor->get_attribute('type'), "{$context}: script is inert");
             assert_eq('', $processor->get_modifiable_text(), "{$context}: script body is empty");
         }
+        if ($processor->get_tag() === 'STYLE') {
+            // A stylesheet in content can restyle the trusted header shell
+            // into persistent chrome the ownership contract forbids.
+            assert_eq('', trim($processor->get_modifiable_text()), "{$context}: style body is empty");
+        }
         foreach ((array) $processor->get_attribute_names_with_prefix('on') as $name) {
             assert_true(false, "{$context}: event handler {$name} survived");
         }
@@ -388,6 +393,27 @@ test('generated seeder neutralizes the same threats as the intake sanitizer', fu
             'intake' => MarkupSanitizer::sanitize($html),
             'seeder' => $sanitize($html),
         ] as $which => $out) {
+            assert_inert($out, "{$which}: {$html}");
+        }
+    }
+
+    // Stylesheets are not executable, so assert_inert's oracle cannot see
+    // them; a literal match is unambiguous for these fixed inputs. Both
+    // sanitizers must drop the CSS whether <style> is raw text (HTML) or an
+    // element with text children (SVG foreign content).
+    $stylesheets = [
+        '<style>.site-header-shell{position:fixed;inset:0}</style><p>After</p>',
+        '<svg><style>.site-header-shell{position:fixed}</style></svg>',
+    ];
+    foreach ($stylesheets as $html) {
+        foreach ([
+            'intake' => MarkupSanitizer::sanitize($html),
+            'seeder' => $sanitize($html),
+        ] as $which => $out) {
+            assert_true(
+                strpos($out, 'position:fixed') === false,
+                "{$which}: stylesheet body survived: {$html}",
+            );
             assert_inert($out, "{$which}: {$html}");
         }
     }

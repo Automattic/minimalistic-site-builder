@@ -21,10 +21,10 @@ namespace Automattic\SiteBuild;
  * instruction: it is appended to every prompt so independently generated images
  * read as one photographic series — EXCEPT for transparent assets: the grade
  * describes lighting and backdrop treatment ("candlelit low-key", "deep shadow
- * falloff"), which Imagen paints in as a background scene, so it is omitted
+ * falloff"), which the image model paints in as a background scene, so it is omitted
  * for them.
  *
- * TRANSPARENCY is also render instruction, but Imagen cannot output an alpha
+ * TRANSPARENCY is also render instruction, but the image model cannot output an alpha
  * channel and ignores prompt-level "transparent background" requests. So a
  * `.png` placeholder's prompt asks for the one isolation the model DOES honor —
  * the subject alone on a flat solid white background — and ImageTransparency
@@ -38,7 +38,7 @@ namespace Automattic\SiteBuild;
  * sheddable context first and keeps the subject and grade intact.
  *
  * The aspect ratio is intentionally absent from this text — it is sent to the
- * endpoint as a structured parameter (Imagen::aspectRatio / buildBody).
+ * endpoint as a structured parameter (GeminiImage::aspectRatio / buildBody).
  */
 final class ImagePromptComposer
 {
@@ -53,7 +53,7 @@ final class ImagePromptComposer
      *        from the design direction, applied to every image
      * @param bool               $transparent whether the asset needs a transparent
      *        background (a `.png` placeholder — decorative flourishes, ornaments,
-     *        logo marks). Imagen cannot render real transparency, so the prompt
+     *        logo marks). the image model cannot render real transparency, so the prompt
      *        asks for a flat solid white background instead, which
      *        ImageTransparency keys out after generation; the photographic
      *        grade is omitted so no lighting/backdrop gets painted behind the
@@ -84,14 +84,14 @@ final class ImagePromptComposer
         // The shared grade is a render instruction for every image on the site;
         // it precedes the guidance so end-trimming sheds the guidance first.
         // Transparent assets skip it: the grade describes lighting and backdrop
-        // treatment, which Imagen would paint in as a background scene behind
+        // treatment, which the image model would paint in as a background scene behind
         // the subject — exactly what the white-background keying must avoid.
         $gradeClause = ($imageGrade !== '' && !$transparent)
             ? 'Art direction for all site imagery: ' . rtrim($imageGrade, '.') . '.'
             : '';
 
         // Like the grade, this is a render instruction: it sits before the
-        // guidance so end-trimming under token pressure never sheds it. Imagen
+        // guidance so end-trimming under token pressure never sheds it. The model
         // cannot render real alpha, so ask for the isolation it does honor — a
         // flat solid white backdrop — which is keyed out after generation.
         $transparencyClause = $transparent
@@ -130,6 +130,6 @@ final class ImagePromptComposer
         // normalise the surrounding whitespace, then cap to the model's hard input
         // limit (sheds trailing context first — see class doc).
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
-        return Imagen::fitToTokens($prompt, Imagen::MAX_PROMPT_TOKENS);
+        return GeminiImage::fitToTokens($prompt, GeminiImage::MAX_PROMPT_TOKENS);
     }
 }

@@ -11,6 +11,10 @@ use Automattic\SiteBuild\ImageClient;
  */
 final class FakeImageClient implements ImageClient
 {
+    private const JPEG_FIXTURE = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==';
+
+    private const PNG_FIXTURE = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
     /** @var array<int,array{prompt:string,opts:array<mixed>}> */
     public array $calls = [];
 
@@ -24,6 +28,9 @@ final class FakeImageClient implements ImageClient
 
     /** Prompt substrings that should fail generation (for partial-failure tests). */
     public array $failPromptSubstrings = [];
+
+    /** Prompt substring => exact bytes, for mixed-delivery boundary tests. */
+    public array $bytesByPromptSubstring = [];
 
     /** Prompt substrings the fake safety filter rejects (`filtered` failures). */
     public array $filterPromptSubstrings = [];
@@ -39,7 +46,7 @@ final class FakeImageClient implements ImageClient
         if ($this->fail) {
             throw new \RuntimeException('fake image failure');
         }
-        return $this->bytes;
+        return $this->bytesForMime((string) ($opts['mime'] ?? 'image/jpeg'));
     }
 
     /** Test hook: runs after each onResult delivery, to observe mid-batch state. */
@@ -63,7 +70,13 @@ final class FakeImageClient implements ImageClient
             } elseif ($this->matches($prompt, $this->filterPromptSubstrings)) {
                 $results[$i] = ['ok' => false, 'error' => 'Image safety filter rejected the prompt: fake rai', 'filtered' => true];
             } else {
-                $results[$i] = ['ok' => true, 'bytes' => $this->bytes];
+                $results[$i] = [
+                    'ok' => true,
+                    'bytes' => $this->bytesForPrompt(
+                        $prompt,
+                        (string) ($spec['mime'] ?? 'image/jpeg'),
+                    ),
+                ];
             }
             if ($onResult !== null) {
                 $onResult($i, $results[$i]);
@@ -86,5 +99,30 @@ final class FakeImageClient implements ImageClient
             }
         }
         return false;
+    }
+
+    /**
+     * The legacy readable sentinels become real image fixtures so tests cross
+     * the same byte-validation boundary as production. Any other value remains
+     * verbatim, allowing individual tests to inject malformed or mismatched
+     * payloads deliberately.
+     */
+    private function bytesForMime(string $mime): string
+    {
+        if (!in_array($this->bytes, ['FAKEJPEGBYTES', 'JPEGDATA', 'PNGDATA'], true)) {
+            return $this->bytes;
+        }
+        $fixture = $mime === 'image/png' ? self::PNG_FIXTURE : self::JPEG_FIXTURE;
+        return (string) base64_decode($fixture, true);
+    }
+
+    private function bytesForPrompt(string $prompt, string $mime): string
+    {
+        foreach ($this->bytesByPromptSubstring as $needle => $bytes) {
+            if (str_contains($prompt, (string) $needle)) {
+                return (string) $bytes;
+            }
+        }
+        return $this->bytesForMime($mime);
     }
 }

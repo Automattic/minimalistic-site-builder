@@ -3,9 +3,12 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (deterministic): compose the site's pages from the (already fixed)
@@ -13,7 +16,8 @@ use Automattic\SiteBuild\StepDeclaration;
  * the markup that lands in the content plugin is the final, re-serialized
  * form.
  *
- * Input:  pages.json (the plan) + theme/parts/{header,footer,page-*}.html +
+ * Input:  pages.json (the plan) + headerBehavior.json (the resolved header
+ *         treatment) + theme/parts/{header,footer,page-*}.html +
  *         theme/theme.json.
  * Output:
  *   - plugin/pages/<slug>.html — each page's section markup inlined in plan
@@ -51,6 +55,7 @@ final class AssemblePagesStep implements Step
             label: $this->label(),
             reads: [
                 'pages.json',
+                'headerBehavior.json',
                 'images.json',
                 'theme/parts/header.html',
                 'theme/parts/footer.html',
@@ -61,6 +66,7 @@ final class AssemblePagesStep implements Step
                 'plugin/pages/*',
                 'plugin/pages.json',
                 'plugin/images.json',
+                'theme/parts/header.html',
                 'theme/templates/page.html',
                 'theme/templates/index.html',
                 'theme/theme.json',
@@ -79,6 +85,7 @@ final class AssemblePagesStep implements Step
         }
 
         $warnings = [];
+        $headerBehavior = $this->readHeaderBehavior($project, $warnings);
 
         // The templates reference the chrome parts; a missing one renders as
         // an empty template-part in WordPress — degraded but usable, so warn
@@ -148,8 +155,8 @@ final class AssemblePagesStep implements Step
         $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
         $project->writeJson('plugin/images.json', ['images' => self::contentImages($contents, $specs)]);
 
-        $project->writeText('theme/templates/page.html', self::pageTemplate());
-        $project->writeText('theme/templates/index.html', self::index());
+        $project->writeText('theme/templates/page.html', self::pageTemplate($headerBehavior));
+        $project->writeText('theme/templates/index.html', self::index($headerBehavior));
         $this->registerTemplateParts($project);
 
         // The inlined markup is the single copy now — drop the transient parts.
@@ -214,27 +221,219 @@ final class AssemblePagesStep implements Step
      * The universal page template: chrome around bare post content. Every
      * seeded page — the front page included — renders through this. Pure.
      */
-    public static function pageTemplate(): string
+    public static function pageTemplate(string $headerBehavior = 'static'): string
     {
-        return self::part('header', 'header') . "\n"
+        return self::part('header', 'header', self::pageHeaderClassName($headerBehavior)) . "\n"
             . '<!-- wp:post-content /-->' . "\n"
             . self::part('footer', 'footer') . "\n";
     }
 
     /** The blog fallback template: header, post content, footer. Pure. */
-    public static function index(): string
+    public static function index(string $headerBehavior = 'static'): string
     {
-        return self::part('header', 'header') . "\n"
+        return self::part('header', 'header', self::indexHeaderClassName($headerBehavior)) . "\n"
             . '<!-- wp:group {"tagName":"main","layout":{"type":"constrained"}} -->' . "\n"
             . '<main class="wp-block-group"><!-- wp:post-content {"layout":{"type":"constrained"}} /--></main>' . "\n"
             . '<!-- /wp:group -->' . "\n"
             . self::part('footer', 'footer') . "\n";
     }
 
-    /** One template-part reference. */
-    private static function part(string $slug, string $tagName): string
+    /**
+     * Classes on the header template-part in generated page templates. Static
+     * preserves the pre-behavior markup exactly; non-static treatments put
+     * positioning on the outer template-part wrapper rather than constraining
+     * it to the height of the generated inner header group. Pure — testable.
+     */
+    public static function pageHeaderClassName(string $headerBehavior): ?string
     {
-        return '<!-- wp:template-part {"slug":"' . $slug . '","tagName":"' . $tagName . '"} /-->';
+        return match ($headerBehavior) {
+            'sticky-soft' => 'site-header-shell site-header-shell--sticky-soft',
+            'overlay-to-solid' => 'site-header-shell site-header-shell--overlay-to-solid',
+            default => null,
+        };
+    }
+
+    /**
+     * Classes on the blog fallback's header reference. An overlay has no
+     * reviewed image-led opening on index.html, so it deterministically uses
+     * the opaque sticky treatment from the first frame. Pure — testable.
+     */
+    public static function indexHeaderClassName(string $headerBehavior): ?string
+    {
+        return match ($headerBehavior) {
+            'sticky-soft' => 'site-header-shell site-header-shell--sticky-soft',
+            'overlay-to-solid' => 'site-header-shell site-header-shell--sticky-soft site-header-shell--force-solid',
+            default => null,
+        };
+    }
+
+    /** One template-part reference. */
+    private static function part(string $slug, string $tagName, ?string $className = null): string
+    {
+        $attributes = ['slug' => $slug, 'tagName' => $tagName];
+        if ($className !== null) {
+            $attributes['className'] = $className;
+        }
+        return '<!-- wp:template-part '
+            . json_encode($attributes, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            . ' /-->';
+    }
+
+    /**
+     * Read the deterministic header-behavior artifact without allowing an
+     * imperfect generated choice to abort assembly. File I/O errors remain
+     * fatal, but a missing, malformed, or unsupported authored value degrades
+     * to the unchanged static template and leaves an actionable warning.
+     *
+     * @param list<string> $warnings
+     */
+    private function readHeaderBehavior(Project $project, array &$warnings): string
+    {
+        if (!$project->exists('headerBehavior.json')) {
+            $warnings[] = "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored=<missing>; "
+                . "delivered='static'; disposition=missing generated header behavior, degraded to a static header";
+            return $this->degradeToStatic($project, $warnings);
+        }
+
+        $raw = $project->readText('headerBehavior.json');
+        try {
+            $artifact = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $error) {
+            $warnings[] = "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored=<invalid JSON: "
+                . $error->getMessage() . ">; delivered='static'; "
+                . 'disposition=malformed generated header behavior, degraded to a static header';
+            return $this->degradeToStatic($project, $warnings);
+        }
+
+        try {
+            if (!is_array($artifact)) {
+                throw new \InvalidArgumentException('header behavior artifact must be a JSON object');
+            }
+            $artifact = HeaderBehavior::validateArtifact($artifact);
+            return $artifact['behavior'];
+        } catch (\InvalidArgumentException $error) {
+            $warnings[] = "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored="
+                . Warnings::value($artifact)
+                . "; delivered='static'; disposition=invalid generated header behavior ("
+                . $error->getMessage() . '), degraded to a static header';
+            return $this->degradeToStatic($project, $warnings);
+        }
+    }
+
+    /**
+     * The static-degrade path may run AFTER HeaderHeroStep already rewrote the
+     * header part for the overlay contract (transparent root + light
+     * foreground). Delivering that markup without the adaptive shell ships an
+     * invisible header — light text, no background, in normal flow — so the
+     * part is rewritten onto a solid readable surface and the rewrite is
+     * recorded next to the degradation warning.
+     *
+     * @param list<string> $warnings
+     */
+    private function degradeToStatic(Project $project, array &$warnings): string
+    {
+        if (!$project->exists('theme/parts/header.html')) {
+            return 'static';
+        }
+        try {
+            $palette = $project->exists('theme/theme.json')
+                ? ContrastFixStep::paletteMap($project->readJson('theme/theme.json'))
+                : [];
+        } catch (\RuntimeException) {
+            // A corrupt theme.json must not abort the fail-open rewrite; the
+            // solidifier falls back to its safe default pair.
+            $palette = [];
+        }
+        $result = self::solidifyOverlayPreparedHeader($project->readText('theme/parts/header.html'), $palette);
+        if ($result === null) {
+            return 'static';
+        }
+        $project->writeText('theme/parts/header.html', $result['markup']);
+        $warnings[] = "file='theme/parts/header.html'; block='overlay top state'; authored=transparent start"
+            . ($result['previousForeground'] !== '' ? " with '{$result['previousForeground']}' foreground" : '')
+            . "; delivered=opaque '{$result['topSurface']}' surface with '{$result['foreground']}' foreground; "
+            . 'disposition=overlay-prepared header rewritten to a readable solid surface because the behavior '
+            . 'artifact degraded to static';
+        return 'static';
+    }
+
+    /**
+     * Rewrite an overlay-prepared header part (the `header-start-transparent`
+     * signature HeaderHeroStep writes) onto an opaque, contrast-safe palette
+     * pair. Runs after fix-blocks, so the comment attrs AND the saved-HTML
+     * classes are both rewritten here — no later re-serialization will sync
+     * them. Returns null when the markup is not overlay-prepared.
+     * Pure — unit-testable.
+     *
+     * @param array<string,string> $palette slug => hex
+     * @return array{markup:string,topSurface:string,foreground:string,previousForeground:string}|null
+     */
+    public static function solidifyOverlayPreparedHeader(string $markup, array $palette): ?array
+    {
+        $doc = BlockMarkup::parse($markup);
+        $top = $doc->topLevel();
+        if ($top === null) {
+            return null;
+        }
+        $attrs = $doc->attrs($top) ?? [];
+        $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (!in_array('header-start-transparent', $tokens, true)
+            && !preg_match('/\bheader-start-transparent\b/', $doc->ownHtml($top))) {
+            return null;
+        }
+
+        // The same deterministic resolver HeaderHeroStep uses picks the
+        // contrast-safe opaque pair; an empty/unknown palette falls back to
+        // the closed base/contrast defaults instead of failing the build.
+        $solid = HeaderBehavior::resolve([], HeaderBehavior::MODE_STACKED, $palette);
+        $surface = $solid['topSurface'];
+        $foreground = $solid['foreground'];
+        $previousForeground = trim((string) ($attrs['textColor'] ?? ''));
+
+        $isOwned = static fn (string $token): bool => $token === 'header-transition-instant'
+            || (bool) preg_match('/^header-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+$/', $token);
+        $kept = array_values(array_filter($tokens, static fn (string $token): bool => !$isOwned($token)));
+        if ($kept === []) {
+            unset($attrs['className']);
+        } else {
+            $attrs['className'] = implode(' ', $kept);
+        }
+        $attrs['backgroundColor'] = $surface;
+        $attrs['textColor'] = $foreground;
+        $doc->setAttrs($top, $attrs);
+
+        if (preg_match_all(
+            '/\bheader-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+\b|\bheader-transition-instant\b/',
+            $doc->ownHtml($top),
+            $matches,
+        )) {
+            foreach (array_values(array_unique($matches[0])) as $token) {
+                $doc->removeClassTokenInOwnHtml($top, $token);
+            }
+        }
+        // Remove then re-add the color tokens so the result is deterministic
+        // regardless of which of them the overlay markup already carried.
+        $colorTokens = array_values(array_unique(array_filter([
+            $previousForeground !== '' ? "has-{$previousForeground}-color" : null,
+            "has-{$foreground}-color",
+            'has-text-color',
+            "has-{$surface}-background-color",
+            'has-background',
+        ])));
+        foreach ($colorTokens as $token) {
+            $doc->removeClassTokenInOwnHtml($top, $token);
+        }
+        $installed = "has-{$foreground}-color has-text-color has-{$surface}-background-color has-background ";
+        foreach (['class="', "class='"] as $prefix) {
+            $doc->replaceInOwnHtml($top, $prefix, $prefix . $installed);
+        }
+
+        return [
+            'markup' => $doc->render(),
+            'topSurface' => $surface,
+            'foreground' => $foreground,
+            'previousForeground' => $previousForeground,
+        ];
     }
 
     /**
