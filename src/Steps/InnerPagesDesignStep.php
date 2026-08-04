@@ -728,8 +728,11 @@ final class InnerPagesDesignStep implements Step
             $probeWarnings,
         );
         $sanitized = trim($sanitized);
-        return $sanitized === $candidate
-            && $isValid(self::balanceFragment($sanitized));
+        // Closure is decided on RAW validity, never on the balanced form:
+        // balancing an unclosed fragment would auto-close it and mask a real
+        // max_tokens truncation, dropping the authored tail. Post-return
+        // balancing still salvages a completed-but-malformed repair.
+        return $sanitized === $candidate && $isValid($sanitized);
     }
 
     /**
@@ -845,6 +848,38 @@ final class InnerPagesDesignStep implements Step
         return rtrim($content, "\r\n") . "\n\n";
     }
 
+    /**
+     * True when a raw-text element (style/script/textarea/title) encloses a
+     * `<` in its body — the only case the DOM round-trip corrupts by deleting
+     * end-tag-like sequences. Plain CSS/JS without `<` round-trips losslessly.
+     */
+    private static function rawTextContentHasMarkup(string $fragment): bool
+    {
+        foreach (['style', 'script', 'textarea', 'title'] as $tag) {
+            $offset = 0;
+            while (($open = stripos($fragment, '<' . $tag, $offset)) !== false) {
+                $after = $fragment[$open + strlen($tag) + 1] ?? '';
+                if ($after !== '' && ctype_alpha($after)) {
+                    $offset = $open + 1; // e.g. <scripting> is not <script>
+                    continue;
+                }
+                $gt = strpos($fragment, '>', $open);
+                if ($gt === false) {
+                    return true; // unterminated raw-text opener; stay safe
+                }
+                $close = stripos($fragment, '</' . $tag, $gt + 1);
+                $body = $close === false
+                    ? substr($fragment, $gt + 1)
+                    : substr($fragment, $gt + 1, $close - $gt - 1);
+                if (strpos($body, '<') !== false) {
+                    return true;
+                }
+                $offset = $close === false ? strlen($fragment) : $close + 1;
+            }
+        }
+        return false;
+    }
+
     public static function balanceFragment(string $fragment): string
     {
         if (
@@ -853,6 +888,13 @@ final class InnerPagesDesignStep implements Step
             || self::isValidFragment($fragment)
             || self::isValidHomeBodyFragment($fragment)
         ) {
+            return $fragment;
+        }
+
+        // libxml silently eats `</tag>`-like sequences inside raw-text element
+        // bodies (style/script/textarea/title). Round-tripping such a fragment
+        // would drop authored CSS/JS; leave it for the existing repair path.
+        if (self::rawTextContentHasMarkup($fragment)) {
             return $fragment;
         }
 

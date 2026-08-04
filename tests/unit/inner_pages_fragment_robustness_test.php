@@ -108,30 +108,49 @@ test('balanceFragment preserves invalid UTF-8 bytes without DOM transcoding', fu
     );
 });
 
-test('inner-pages-design balances truncated semantic repair before requesting continuation', function () {
+test('balanceFragment refuses to round-trip raw-text bodies that contain markup', function () {
+    // libxml deletes `</tag>`-like sequences inside style/script bodies. Such a
+    // fragment must fall through unchanged (to the LLM repair path) rather than
+    // be silently corrupted into a structurally-valid-but-lossy fragment.
+    $svg = '<style data-page-css>.h{background:url("data:image/svg+xml;utf8,'
+        . '<svg viewBox=\'0 0 9 9\'><circle r=\'5\'/></svg>")}</style><main><section>X';
+    assert_eq($svg, InnerPagesDesignStep::balanceFragment($svg));
+
+    $content = '<style data-page-css>.x::before{content:"</main>";}</style><main><div>Y';
+    assert_eq($content, InnerPagesDesignStep::balanceFragment($content));
+
+    // Plain CSS without markup still salvages (the common, safe case).
+    $plain = '<style data-page-css>.card{color:red}</style><main><div>Z';
+    assert_eq(
+        '<style data-page-css>.card{color:red}</style><main><div>Z</div></main>',
+        InnerPagesDesignStep::balanceFragment($plain),
+    );
+});
+
+test('inner-pages-design continues a truncated repair instead of masking it by balancing', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'Welcome'),
-        inner_page('repair', 'Repair', 'Balance semantic repair'),
+        inner_page('repair', 'Repair', 'Recover truncated tail'),
     ]);
     $llm->queueText(inner_pages_home_body());
     $llm->queueText('<section>Initial response has no main</section>');
+    // Cleanly truncated (unclosed <main>, max_tokens): balancing must NOT be
+    // used to declare it closed, or the authored tail is dropped.
     $llm->queueText(
-        '<main><article><p>REPAIR-BALANCED</p></main>',
+        '<main><section id="a">A</section><section id="b">B',
         'max_tokens',
     );
-    $llm->queueText('CONTINUATION-QUEUE-SENTINEL', 'stop');
+    $llm->queueText('</section></main>', 'stop');
+    $llm->queueText('CONTINUATION-QUEUE-SENTINEL');
 
     inner_pages_run($project, $llm);
 
-    assert_eq(1, $llm->completeCalls, 'balanced repair must not request a continuation');
+    assert_eq(2, $llm->completeCalls, 'truncated repair must fetch its continuation');
     assert_eq(
-        '<main><article><p>REPAIR-BALANCED</p></article></main>',
+        '<main><section id="a">A</section><section id="b">B</section></main>',
         $project->readText('design/repair.html'),
     );
     assert_true(!$project->exists('design/repair.failed'));
-    $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
-    assert_contains('context page repair semantic repair', $warnings);
-    assert_contains('disposition deterministically repaired', $warnings);
     assert_eq('CONTINUATION-QUEUE-SENTINEL', $llm->complete('sentinel probe'));
     inner_pages_cleanup($tmp);
 });
