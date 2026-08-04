@@ -451,6 +451,28 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('spacing warnings report residual global Group vertical padding actionably', function () {
+    [$project, $tmp] = validator_project();
+    $theme = ThemeJsonStep::normalizeSpacingSettings(['version' => 3]);
+    $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
+        'top' => 'var:preset|spacing|xl',
+        'bottom' => 'var:preset|spacing|xl',
+        'left' => 'var:preset|spacing|md',
+    ];
+    $project->writeJson('theme/theme.json', $theme);
+
+    $joined = implode("\n", ThemeValidator::spacingWarnings($project));
+    assert_contains("file='theme/theme.json'", $joined);
+    assert_contains("block='styles.blocks.core/group.spacing.padding'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=unchanged', $joined);
+    assert_contains('disposition=remove global top/bottom Group padding', $joined);
+
+    $project->writeJson('theme/theme.json', ThemeJsonStep::normalizeGroupBlockPadding($theme));
+    assert_eq([], ThemeValidator::spacingWarnings($project), 'normalized theme passes');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('spacing warnings accept a coverless image section the build pass degraded', function () {
     [$project, $tmp] = validator_project();
     $project->writeJson(

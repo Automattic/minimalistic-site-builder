@@ -34,7 +34,16 @@ function sections_fixture(): array
     $tmp = sys_get_temp_dir() . '/builder_sec_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'name' => 'Base', 'color' => '#ffffff'],
+            ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#111111'],
+            ['slug' => 'primary', 'name' => 'Primary', 'color' => '#274c77'],
+            ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#e5e7eb'],
+            ['slug' => 'accent', 'name' => 'Accent', 'color' => '#9a3412'],
+        ]]],
+    ]);
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
             ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base about split below.'],
@@ -484,6 +493,13 @@ test('header archetype pool follows the header mode', function () {
         [sections_page('menu', [['slug' => 'menu-hero', 'role' => 'hero', 'type' => 'menu', 'background' => 'base']])],
     );
     assert_true(in_array('split-nav', SectionsStep::headerArchetypePool($twoPages), true));
+
+    // The same multi-page shape resolves sticky-soft, so tall/multi-row
+    // compositions cannot be randomly assigned as persistent chrome.
+    $stickyPool = SectionsStep::headerArchetypePool($twoPages);
+    foreach (['centered-masthead', 'oversized-wordmark', 'double-decker'] as $tall) {
+        assert_true(!in_array($tall, $stickyPool, true), "sticky pool excludes {$tall}");
+    }
 });
 
 test('header assignment offers two distinct stacked archetypes from the pool', function () {
@@ -500,16 +516,17 @@ test('header assignment offers two distinct stacked archetypes from the pool', f
     }
 });
 
-test('header assignment mandates minimal-overlay with its class hook in overlay mode', function () {
+test('header assignment mandates minimal-overlay without the legacy inner positioning hook', function () {
     putenv(SectionsStep::ARCHETYPE_ENV);
     $pages = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
     $assignment = SectionsStep::headerAssignment($pages);
     assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $assignment);
-    assert_contains('"className":"header-overlay"', $assignment);
+    assert_contains('trusted outer shell', $assignment);
+    assert_contains('do not add positioning or the legacy header-overlay', $assignment);
 });
 
 test('header contract text matches the mode and reaches only hero-role sections', function () {
-    assert_contains('floats TRANSPARENTLY', SectionsStep::headerContract(SectionsStep::MODE_OVERLAY));
+    assert_contains('floats TRANSLUCENTLY', SectionsStep::headerContract(SectionsStep::MODE_OVERLAY));
     assert_contains('reach the very top edge', SectionsStep::headerContract(SectionsStep::MODE_OVERLAY));
     assert_contains('OPAQUE site header', SectionsStep::headerContract(SectionsStep::MODE_STACKED));
     assert_contains('"minHeight":80', SectionsStep::headerContract(SectionsStep::MODE_STACKED));
@@ -520,11 +537,57 @@ test('header contract text matches the mode and reaches only hero-role sections'
     $hero = sections_request_text($reqs['page-home--hero']);
     $about = sections_request_text($reqs['page-home--about']);
     assert_contains('HEADER CONTRACT (this is a page-opening section)', $hero, 'the page-opening section gets the contract');
-    assert_contains('floats TRANSPARENTLY', $hero, 'the contract carries the computed mode');
+    assert_contains('floats TRANSLUCENTLY', $hero, 'the contract carries the computed mode');
     assert_true(
         !str_contains($about, 'HEADER CONTRACT (this is a page-opening section)'),
         'non-opening sections share no viewport with the header'
     );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('an overlay-planned site whose palette fails the scrim check is briefed as stacked', function () {
+    putenv(SectionsStep::ARCHETYPE_ENV); // a forced archetype would bypass the resolver preview
+    [$project, $tmp] = sections_fixture(); // front hero is image-led → the PLAN alone says overlay
+    // Every palette role is a mid grey: no foreground reads against the
+    // trusted scrim's worst case, so the resolved MODE diverges from the
+    // structural mode — resolve() falls back through the stacked path.
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'name' => 'Base', 'color' => '#8A8A8A'],
+            ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#7A7A7A'],
+            ['slug' => 'primary', 'name' => 'Primary', 'color' => '#6E6E6E'],
+            ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#9A9A9A'],
+            ['slug' => 'accent', 'name' => 'Accent', 'color' => '#808080'],
+        ]]],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    // Sanity: the plan-only decision would still brief overlay — reverting the
+    // palette-aware preview to headerMode() must fail this test.
+    assert_eq(
+        SectionsStep::MODE_OVERLAY,
+        SectionsStep::headerMode($project->readJson('pages.json')['pages']),
+        'structurally this site qualifies for overlay'
+    );
+
+    // Both sides of the seam are briefed with the stacked-MODE contract. Only
+    // the mode is asserted here: the exact fallback behavior value is the
+    // resolver's own business.
+    $header = $reqs['header']['prompt'];
+    assert_contains('STACKS as an opaque bar', $header);
+    assert_true(
+        !str_contains($header, 'ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**'),
+        'the unreadable overlay must not be assigned'
+    );
+    assert_true(
+        !str_contains($header, 'DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid'),
+        'the behavior contract must not promise the overlay shell'
+    );
+    $hero = sections_request_text($reqs['page-home--hero']);
+    assert_contains('OPAQUE site header', $hero, 'the hero composes for stacked chrome');
+    assert_true(!str_contains($hero, 'floats TRANSLUCENTLY'), 'no overlay contract reaches the hero');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -538,6 +601,19 @@ test('HEADER_ARCHETYPE env forces the header archetype in the header prompt', fu
     } finally {
         putenv(SectionsStep::ARCHETYPE_ENV);
         exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('an unsafe forced overlay is briefed as the deterministic stacked fallback', function () {
+    putenv(SectionsStep::ARCHETYPE_ENV . '=minimal-overlay');
+    try {
+        $pages = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
+        $assignment = SectionsStep::headerAssignment($pages, '', SectionsStep::MODE_STACKED);
+        assert_contains('**standard-row**', $assignment);
+        assert_contains('minimal-overlay could not preserve', $assignment);
+        assert_contains('stacked chrome', $assignment);
+    } finally {
+        putenv(SectionsStep::ARCHETYPE_ENV);
     }
 });
 
@@ -563,6 +639,8 @@ test('the header prompt carries an archetype assignment and the full catalog', f
     assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $reqs['header']['prompt']);
     assert_contains('branded-lockup', $reqs['header']['prompt']); // new catalog entries render
     assert_contains('wp:site-logo', $reqs['header']['prompt']);
+    assert_contains('DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid', $reqs['header']['prompt']);
+    assert_contains('NEVER add `style.position`', $reqs['header']['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
