@@ -2014,7 +2014,7 @@ final class GeneratedMarkup
      */
     public static function closeTruncatedDelimiterComment(string $text, array &$notes = []): string
     {
-        return (string) preg_replace_callback(
+        $text = (string) preg_replace_callback(
             '/(?<head><!--\s+wp:[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?\s+)'
             . '(?<attrs>\{(?:(?!-->)[^{}>])*)>(?=\s*<)/',
             static function (array $m) use (&$notes): string {
@@ -2024,6 +2024,19 @@ final class GeneratedMarkup
                 $notes[] = 'closed a `>`-truncated delimiter comment in '
                     . substr(trim($m['head']), 0, 40) . '…';
                 return $m['head'] . $m['attrs'] . '} -->';
+            },
+            $text
+        );
+
+        // The attrs-less spelling of the same slip: `<!-- wp:paragraph>` or
+        // `<!-- /wp:paragraph>` dropped the ` -->` terminator entirely, so
+        // the "comment" swallows content up to the next real `-->`.
+        return (string) preg_replace_callback(
+            '/<!--\s+(?<closer>\/)?wp:(?<name>[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)>(?=\s*<)/',
+            static function (array $m) use (&$notes): string {
+                $notes[] = 'closed a `>`-truncated delimiter comment in <!-- '
+                    . $m['closer'] . 'wp:' . $m['name'] . '…';
+                return '<!-- ' . $m['closer'] . 'wp:' . $m['name'] . ' -->';
             },
             $text
         );

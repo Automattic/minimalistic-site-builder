@@ -746,3 +746,23 @@ test('a surplus closing brace inside a delimiter attrs run is removed', function
     assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedDelimiterAttrs($out, $again));
     assert_eq([], $again);
 });
+
+test('an attrs-less delimiter that dropped its terminator is closed', function () {
+    // Regression: pulso12 lost its ticketing section to `<!-- wp:paragraph>`
+    // — the ` -->` terminator dropped entirely on an attrs-less delimiter.
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph> <!-- /wp:paragraph -->' . "\n"
+        . '<!-- wp:paragraph --><p>790 SEK</p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($doc, $notes);
+    assert_contains('<!-- wp:paragraph --> <!-- /wp:paragraph -->', $out);
+    assert_contains('790 SEK', $out);
+    assert_eq(1, count($notes));
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // Idempotent; a legit closer never matches.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($out, $again));
+    assert_eq([], $again);
+});
