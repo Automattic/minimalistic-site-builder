@@ -154,15 +154,17 @@ test('log writes a file to the configured directory and is reversible', function
         $dir = "{$tmp}/llms";
         LlmLogger::setDir($dir);
 
-        $request = ['model' => 'claude-haiku-4-5', 'messages' => [['role' => 'user', 'content' => 'hi']]];
-        $written = LlmLogger::log('theme-json', $request, ['text' => 'OK', 'input' => 1, 'output' => 2], 0.5);
+        try {
+            $request = ['model' => 'claude-haiku-4-5', 'messages' => [['role' => 'user', 'content' => 'hi']]];
+            $written = LlmLogger::log('theme-json', $request, ['text' => 'OK', 'input' => 1, 'output' => 2], 0.5);
 
-        $path = "{$dir}/01-theme-json.log";
-        assert_eq($path, $written, 'log returns the evidence path for failure diagnostics');
-        assert_true(file_exists($path), 'first log file is prefixed 01-');
-        assert_contains('Step / label : theme-json', (string) file_get_contents($path));
-
-        LlmLogger::setDir(null); // restore default for other tests
+            $path = "{$dir}/01-theme-json.log";
+            assert_eq($path, $written, 'log returns the evidence path for failure diagnostics');
+            assert_true(file_exists($path), 'first log file is prefixed 01-');
+            assert_contains('Step / label : theme-json', (string) file_get_contents($path));
+        } finally {
+            LlmLogger::setDir(null); // restore default for other tests
+        }
     });
 });
 
@@ -171,21 +173,23 @@ test('log prefixes files with the call order, restarting per run', function () {
         $dir = "{$tmp}/ordered";
         LlmLogger::setDir($dir);
 
-        $resp = ['text' => 'x', 'input' => 0, 'output' => 0];
-        LlmLogger::log('site-spec', ['model' => 'm'], $resp, 0.0);
-        LlmLogger::log('theme-json', ['model' => 'm'], $resp, 0.0);
-        LlmLogger::log('section-hero', ['model' => 'm'], $resp, 0.0);
+        try {
+            $resp = ['text' => 'x', 'input' => 0, 'output' => 0];
+            LlmLogger::log('site-spec', ['model' => 'm'], $resp, 0.0);
+            LlmLogger::log('theme-json', ['model' => 'm'], $resp, 0.0);
+            LlmLogger::log('section-hero', ['model' => 'm'], $resp, 0.0);
 
-        assert_true(file_exists("{$dir}/01-site-spec.log"), 'first call is 01-');
-        assert_true(file_exists("{$dir}/02-theme-json.log"), 'second call is 02-');
-        assert_true(file_exists("{$dir}/03-section-hero.log"), 'third call is 03-');
+            assert_true(file_exists("{$dir}/01-site-spec.log"), 'first call is 01-');
+            assert_true(file_exists("{$dir}/02-theme-json.log"), 'second call is 02-');
+            assert_true(file_exists("{$dir}/03-section-hero.log"), 'third call is 03-');
 
-        // setDir starts a fresh run, so numbering restarts at 01.
-        LlmLogger::setDir($dir);
-        LlmLogger::log('site-spec', ['model' => 'm'], $resp, 0.0);
-        assert_true(file_exists("{$dir}/01-site-spec-02.log"), 'new run restarts at 01 (collision-suffixed)');
-
-        LlmLogger::setDir(null);
+            // setDir starts a fresh run, so numbering restarts at 01.
+            LlmLogger::setDir($dir);
+            LlmLogger::log('site-spec', ['model' => 'm'], $resp, 0.0);
+            assert_true(file_exists("{$dir}/01-site-spec-02.log"), 'new run restarts at 01 (collision-suffixed)');
+        } finally {
+            LlmLogger::setDir(null);
+        }
     });
 });
 
@@ -209,13 +213,15 @@ test('log writes a -failed file for a failed call', function () {
         $dir = "{$tmp}/failed";
         LlmLogger::setDir($dir);
 
-        LlmLogger::log('section-hero', ['model' => 'm'], ['text' => '', 'input' => 0, 'output' => 0], 19.0, 'HTTP 400: invalid_request');
+        try {
+            LlmLogger::log('section-hero', ['model' => 'm'], ['text' => '', 'input' => 0, 'output' => 0], 19.0, 'HTTP 400: invalid_request');
 
-        $path = "{$dir}/01-section-hero-failed.log";
-        assert_true(file_exists($path), 'a failed call is logged as <label>-failed.log');
-        assert_contains('Status       : FAILED', (string) file_get_contents($path));
-
-        LlmLogger::setDir(null);
+            $path = "{$dir}/01-section-hero-failed.log";
+            assert_true(file_exists($path), 'a failed call is logged as <label>-failed.log');
+            assert_contains('Status       : FAILED', (string) file_get_contents($path));
+        } finally {
+            LlmLogger::setDir(null);
+        }
     });
 });
 
@@ -232,12 +238,14 @@ test('log is a no-op when disabled', function () {
         LlmLogger::setDir($dir);
         LlmLogger::setEnabled(false);
 
-        $written = LlmLogger::log('nope', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
+        try {
+            $written = LlmLogger::log('nope', ['model' => 'm'], ['text' => 't', 'input' => 0, 'output' => 0], 0.0);
 
-        assert_true(!file_exists("{$dir}/nope.log"), 'nothing written while disabled');
-        assert_eq(null, $written, 'disabled logging has no evidence path');
-
-        LlmLogger::setEnabled(true);
-        LlmLogger::setDir(null);
+            assert_true(!file_exists("{$dir}/nope.log"), 'nothing written while disabled');
+            assert_eq(null, $written, 'disabled logging has no evidence path');
+        } finally {
+            LlmLogger::setEnabled(true);
+            LlmLogger::setDir(null);
+        }
     });
 });
