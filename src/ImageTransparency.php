@@ -6,12 +6,11 @@ namespace Automattic\SiteBuild;
 /**
  * Turns a generated image's solid background into real PNG alpha.
  *
- * Imagen cannot produce an alpha channel: `outputOptions.mimeType: image/png`
- * only changes the encoding, and prompt-level "transparent background" requests
- * are ignored (the model always paints a full-bleed picture). So transparency
- * for `.png` assets is manufactured after generation: the prompt asks for the
- * subject isolated on a flat solid white background — the one isolation Imagen
- * DOES honor reliably (see ImagePromptComposer) — and this class keys that
+ * The image model cannot produce a reliable alpha channel: prompt-level
+ * "transparent background" requests are ignored (the model always paints a
+ * full-bleed picture). So transparency for `.png` assets is manufactured after
+ * generation: the prompt asks for the subject isolated on a flat solid white
+ * background — the one isolation the model DOES honor reliably (see ImagePromptComposer) — and this class keys that
  * background out.
  *
  * The keying is two passes. First, a flood fill of transparency inward from
@@ -40,7 +39,7 @@ namespace Automattic\SiteBuild;
  * improve how the asset sits on any other background.
  *
  * After keying, the transparent margins are trimmed to the ink's bounding box
- * (plus a small pad): Imagen centers a small ornament on a full-size canvas,
+ * (plus a small pad): the model centers a small ornament on a full-size canvas,
  * and shipping all that empty margin makes the page reserve a huge blank band
  * for a tiny motif.
  */
@@ -218,7 +217,7 @@ final class ImageTransparency
 
     /**
      * Crop the now-transparent margins down to the ink's bounding box plus a
-     * small transparent pad. Imagen centers a small ornament on a full-size
+     * small transparent pad. The model centers a small ornament on a full-size
      * canvas, so after keying, most of the asset is empty margin — which the
      * page then reserves layout space for (a hairline rule shipped as a
      * 1408x768 image renders as a huge blank band with a line in the middle).
