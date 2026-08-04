@@ -16,6 +16,14 @@ function assemble_fixture(): array
     $tmp = sys_get_temp_dir() . '/builder_asm_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('headerBehavior.json', [
+        'behavior' => 'static',
+        'mode' => 'stacked',
+        'transition' => 'instant',
+        'topSurface' => 'base',
+        'scrolledSurface' => 'base',
+        'foreground' => 'contrast',
+    ]);
     $project->writeJson('pages.json', ['pages' => [
         [
             'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
@@ -112,6 +120,127 @@ test('assemble-pages writes the page and index templates and registers the chrom
         ['name' => 'header', 'title' => 'Header', 'area' => 'header'],
         ['name' => 'footer', 'title' => 'Footer', 'area' => 'footer'],
     ], $theme['templateParts']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages wires sticky-soft behavior onto the page and index header wrappers', function () {
+    [$project, $tmp] = assemble_fixture();
+    $behavior = $project->readJson('headerBehavior.json');
+    $behavior['behavior'] = 'sticky-soft';
+    $project->writeJson('headerBehavior.json', $behavior);
+
+    (new AssemblePagesStep())->run($project);
+
+    $className = 'site-header-shell site-header-shell--sticky-soft';
+    assert_contains(
+        'wp:template-part {"slug":"header","tagName":"header","className":"' . $className . '"}',
+        $project->readText('theme/templates/page.html')
+    );
+    assert_contains(
+        'wp:template-part {"slug":"header","tagName":"header","className":"' . $className . '"}',
+        $project->readText('theme/templates/index.html')
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages keeps overlay on pages but forces the blog index to an opaque sticky header', function () {
+    [$project, $tmp] = assemble_fixture();
+    $behavior = $project->readJson('headerBehavior.json');
+    $behavior['behavior'] = 'overlay-to-solid';
+    $behavior['mode'] = 'overlay';
+    $behavior['topSurface'] = 'transparent';
+    $project->writeJson('headerBehavior.json', $behavior);
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_contains(
+        '"className":"site-header-shell site-header-shell--overlay-to-solid"',
+        $project->readText('theme/templates/page.html')
+    );
+    $index = $project->readText('theme/templates/index.html');
+    assert_contains(
+        '"className":"site-header-shell site-header-shell--sticky-soft site-header-shell--force-solid"',
+        $index
+    );
+    assert_true(!str_contains($index, 'site-header-shell--overlay-to-solid'), 'index never starts transparent');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages preserves the original template-part markup for a static header', function () {
+    assert_eq(
+        '<!-- wp:template-part {"slug":"header","tagName":"header"} /-->' . "\n"
+            . '<!-- wp:post-content /-->' . "\n"
+            . '<!-- wp:template-part {"slug":"footer","tagName":"footer"} /-->' . "\n",
+        AssemblePagesStep::pageTemplate('static'),
+        'static page template remains byte-for-byte unchanged'
+    );
+    assert_true(
+        !str_contains(AssemblePagesStep::pageTemplate('static'), 'site-header-shell'),
+        'static page template has no behavior classes'
+    );
+    assert_true(
+        !str_contains(AssemblePagesStep::index('static'), 'site-header-shell'),
+        'static index template has no behavior classes'
+    );
+});
+
+test('assemble-pages degrades a missing header behavior to static and records actionable context', function () {
+    [$project, $tmp] = assemble_fixture();
+    unlink($project->path('headerBehavior.json'));
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_true(
+        !str_contains($project->readText('theme/templates/page.html'), 'site-header-shell'),
+        'missing behavior delivered as static'
+    );
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains('file=headerBehavior.json', $joined);
+    assert_contains('authored=<missing>', $joined);
+    assert_contains('delivered=static', $joined);
+    assert_contains('disposition=', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages degrades malformed header behavior JSON to static and warns instead of aborting', function () {
+    [$project, $tmp] = assemble_fixture();
+    $project->writeText('headerBehavior.json', '{"behavior":');
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_true(
+        !str_contains($project->readText('theme/templates/page.html'), 'site-header-shell'),
+        'malformed behavior delivered as static'
+    );
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains('file=headerBehavior.json', $joined);
+    assert_contains('authored=<invalid JSON:', $joined);
+    assert_contains('delivered=static', $joined);
+    assert_contains('disposition=malformed generated header behavior', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('assemble-pages validates the complete behavior tuple before adding adaptive wrapper classes', function () {
+    [$project, $tmp] = assemble_fixture();
+    $project->writeJson('headerBehavior.json', ['behavior' => 'overlay-to-solid']);
+
+    (new AssemblePagesStep())->run($project);
+
+    assert_true(
+        !str_contains($project->readText('theme/templates/page.html'), 'site-header-shell'),
+        'an incomplete overlay artifact degrades to the original static wrapper',
+    );
+    assert_true(!str_contains($project->readText('theme/templates/index.html'), 'site-header-shell'));
+    $joined = implode(' ', $project->readJson('warnings.json')['assemble-pages'] ?? []);
+    assert_contains('file=headerBehavior.json', $joined);
+    assert_contains('authored={"behavior":"overlay-to-solid"}', $joined);
+    assert_contains('delivered=static', $joined);
+    assert_contains('must contain exactly', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

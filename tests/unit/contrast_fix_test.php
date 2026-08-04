@@ -385,7 +385,7 @@ function overlay_lint_project(bool $overlay): array
             ['slug' => 'primary', 'color' => '#1D4ED8', 'name' => 'Primary'],
         ]]],
     ]);
-    $className = $overlay ? 'header-overlay' : 'site-header';
+    $className = $overlay ? 'header-behavior-overlay-to-solid' : 'site-header';
     $project->writeText(
         'theme/parts/header.html',
         '<!-- wp:group {"className":"' . $className . '","textColor":"base","layout":{"type":"constrained"}} -->'
