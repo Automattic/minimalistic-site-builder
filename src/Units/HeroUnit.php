@@ -95,6 +95,10 @@ final class HeroUnit extends AbstractPageSectionUnit
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
         $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
+        $markup = GeneratedMarkup::stripEyebrowChipChrome($markup, $key, $repairs);
+        if ((string) HeroComposition::metadata($context['recipe'])['layout_archetype'] === 'full-bleed-cover') {
+            $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
+        }
         $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
         $before = $markup;
         $markup = GeneratedMarkup::constrainedPart($markup);

@@ -5,7 +5,7 @@ use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\HeroComposition;
 
 test('hero catalog entries own complete metadata, defaults, prompts, and unique hooks', function () {
-    assert_eq(8, count(HeroComposition::RECIPES));
+    assert_eq(6, count(HeroComposition::RECIPES));
     $hooks = [];
     foreach (HeroComposition::RECIPES as $recipe) {
         $meta = HeroComposition::metadata($recipe);
@@ -33,18 +33,13 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
 });
 
 test('hero compatibility filters objective caller constraints before selection', function () {
-    assert_eq(
-        ['typographic-poster'],
-        HeroComposition::compatible([
-            'allowed_hero_media_modes' => ['none'],
-            'max_hero_images' => 0,
-            'hero_copy_capacity' => 'expanded',
-        ]),
-    );
+    // The image-free constraint values were retired with typographic-poster:
+    // every cataloged hero bears an image, so they fail loud at validation.
+    assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => ['none']]));
+    assert_throws(fn () => HeroComposition::validateConstraints(['max_hero_images' => 0]));
     $oneImage = HeroComposition::compatible(['max_hero_images' => 1]);
-    assert_true(!in_array('diptych-editorial', $oneImage, true));
     assert_true(in_array('editorial-split', $oneImage, true));
-    assert_true(in_array('typographic-poster', $oneImage, true));
+    assert_true(in_array('cinematic-safe-zone', $oneImage, true));
 
     $foreground = HeroComposition::compatible(['allowed_hero_media_modes' => ['foreground-image']]);
     foreach ($foreground as $recipe) {
@@ -66,19 +61,19 @@ test('invalid hero constraints and empty compatible pools fail preflight', funct
     assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => []]));
     assert_throws(fn () => HeroComposition::validateConstraints(['typo' => 'framed']));
 
-    $impossible = [
-        'allowed_hero_media_modes' => ['none'],
-        'hero_copy_capacity' => 'standard',
-    ];
+    // 'expanded' capacity stays a valid enum value with no cataloged recipe
+    // left, so it exercises the loud empty-pool path.
+    $impossible = ['hero_copy_capacity' => 'expanded'];
     assert_eq([], HeroComposition::compatible($impossible));
     assert_throws(fn () => HeroComposition::select('site', 'seed', $impossible));
 });
 
 test('hero catalog exposes image gating and deterministic page-plan projection', function () {
     assert_true(HeroComposition::usesGeneratedImages('editorial-split'));
-    assert_true(!HeroComposition::usesGeneratedImages('typographic-poster'));
+    // A blueprint whose media degraded to 'none' disarms image generation
+    // even though the recipe itself is image-bearing.
     assert_true(!HeroComposition::usesGeneratedImages([
-        'recipe' => 'typographic-poster',
+        'recipe' => 'editorial-split',
         'media_mode' => 'none',
     ]));
 
@@ -121,34 +116,15 @@ test('structured selector fixture corpus exercises eligibility and media distrib
         }
     }
     assert_true(count($selected) >= 6, 'objective fixture set exercises broad catalog selection');
-    foreach (['none', 'cover-image', 'foreground-image', 'diptych'] as $mode) {
+    foreach (['cover-image', 'foreground-image'] as $mode) {
         assert_true(isset($mediaModes[$mode]), "fixture selections cover {$mode}");
     }
 });
 
-test('hero recipe inspection warns on duplicate diptych assets without rewriting safe markup', function () {
-    $image = '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/repeated.jpg" '
-        . 'alt="AI_IMAGE: Repeated subject | diptych frame | photorealistic | portrait" /></figure><!-- /wp:image -->';
-    $markup = '<!-- wp:group --><div class="wp-block-group">'
-        . '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">Copy</div><!-- /wp:group -->'
-        . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">' . $image . '</div><!-- /wp:group -->'
-        . '<!-- wp:group {"className":"hero-composition__media hero-composition__media-secondary"} --><div class="wp-block-group hero-composition__media hero-composition__media-secondary">' . $image . '</div><!-- /wp:group -->'
-        . '</div><!-- /wp:group -->';
-
-    $warnings = HeroComposition::markupWarnings($markup, 'diptych-editorial', 'page-home--hero');
-
-    assert_eq(1, count($warnings));
-    foreach ([
-        "file='theme/parts/page-home--hero.html'",
-        'diptych asset identity',
-        'repeated.jpg',
-        'authored=',
-        'delivered=',
-        'disposition=',
-    ] as $context) {
-        assert_contains($context, $warnings[0]);
-    }
-    assert_contains('Repeated subject', $markup, 'inspection is advisory and preserves safe siblings byte-for-byte');
+test('the retired diptych-editorial recipe is unknown to the catalog', function () {
+    assert_true(!in_array('diptych-editorial', HeroComposition::RECIPES, true));
+    assert_throws(fn () => HeroComposition::metadata('diptych-editorial'));
+    assert_throws(fn () => HeroComposition::validateConstraints(['allowed_hero_media_modes' => ['diptych']]));
 });
 
 test('hero recipe inspection keeps cover and aspect drift actionable at their exact boundary', function () {

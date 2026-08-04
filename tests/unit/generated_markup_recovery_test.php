@@ -615,6 +615,91 @@ test('dedupeHeadlineEcho never matches short repeated labels or parts without an
     assert_eq([], $r);
 });
 
+test('stripEyebrowChipChrome unboxes a filled/bordered eyebrow but not the copy container', function () {
+    // Regression: pulso22 executed a "translucent veil" signature device as
+    // two nested filled+bordered groups boxing the eyebrow line above the H1
+    // — a caption chip that reads as UI, not typography.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","backgroundColor":"contrast","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group has-contrast-background-color has-background" id="hero">'
+        . '<!-- wp:group {"style":{"color":{"background":"#8ff3d626"},"border":{"radius":"2px","width":"1px","color":"#8ff3d63d"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color has-background" style="border-color:#8ff3d63d;border-width:1px;background-color:#8ff3d626">'
+        . '<!-- wp:group {"backgroundColor":"secondary","style":{"border":{"width":"1px","color":"#c9a7ff33"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color has-secondary-background-color has-background" style="border-color:#c9a7ff33;border-width:1px">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Two nights · Stockholm Art District</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:group -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Neon Pulse Festival</h1><!-- /wp:heading -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($doc, 'p', $repairs);
+    assert_true(!str_contains($out, '"border"'), 'chip borders stripped from attrs');
+    assert_true(!str_contains($out, '"background":"#8ff3d626"'), 'chip custom background stripped from attrs');
+    assert_true(!str_contains($out, '"backgroundColor":"secondary"'), 'chip preset background stripped');
+    // The stale inline style survives until fix-blocks re-serializes (shared
+    // convention), but the class hooks that keep the chrome visible are gone.
+    assert_true(!str_contains($out, 'has-border-color'), 'border class hooks removed');
+    assert_true(!str_contains($out, 'has-secondary-background-color'), 'preset background class hook removed');
+    assert_contains('Two nights · Stockholm Art District', $out, 'eyebrow text untouched');
+    assert_contains('"backgroundColor":"contrast"', $out, 'root surface (wraps the H1) untouched');
+    assert_contains('has-contrast-background-color', $out, 'root surface classes untouched');
+    assert_true(in_array('eyebrow-chip-chrome-stripped', array_column($repairs, 'code'), true));
+
+    // Idempotent once unboxed.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($out, 'p', $again));
+    assert_eq([], $again);
+});
+
+test('stripEyebrowChipChrome ignores media/action wrappers, long text, and heroes without an H1', function () {
+    // A pre-H1 group holding a button is an action cluster, not an eyebrow
+    // chip; a bordered block after the H1 is composition, not an eyebrow.
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:group {"backgroundColor":"accent","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-accent-background-color has-background">'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/tickets/">Get Tickets</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons --></div><!-- /wp:group -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Neon Pulse Festival</h1><!-- /wp:heading -->'
+        . '<!-- wp:group {"style":{"border":{"width":"1px","color":"#ffffff"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color" style="border-width:1px;border-color:#ffffff">'
+        . '<!-- wp:paragraph --><p>Warehouse sets after dark.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = [];
+    assert_eq($doc, Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($doc, 'p', $r));
+    assert_eq([], $r);
+
+    $noH1 = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:paragraph {"backgroundColor":"accent"} --><p class="has-accent-background-color has-background">Label</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq($noH1, Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($noH1, 'p', $r));
+    assert_eq([], $r);
+});
+
+test('fullBleedCoverAlignment upgrades a wide-capped cover-band hero to align:full', function () {
+    // Regression: portfolio26's framed canvas capped the layered-poster cover
+    // at alignwide, insetting the hero band from both viewport edges. The
+    // page-opening hero is exempt from the framed mat.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--layered-poster","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group hero-composition--layered-poster" id="hero">'
+        . '<!-- wp:cover {"url":"x.jpg","dimRatio":40,"minHeight":80,"minHeightUnit":"vh","align":"wide","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-cover alignwide hero-composition__media" style="min-height:80vh">'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Twenty Years of Witness</h1><!-- /wp:heading -->'
+        . '</div></div><!-- /wp:cover -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::fullBleedCoverAlignment($doc, 'p', $repairs);
+    assert_eq(2, substr_count($out, '"align":"full"'), 'root group and cover both upgraded');
+    assert_true(!str_contains($out, '"align":"wide"'), 'wide cap removed from attrs');
+    assert_true(!str_contains($out, 'alignwide'), 'stale alignwide class token removed');
+    assert_true(in_array('hero-full-bleed-alignment', array_column($repairs, 'code'), true));
+
+    // Idempotent: an already-full hero is untouched byte-for-byte.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::fullBleedCoverAlignment($out, 'p', $again));
+    assert_eq([], $again);
+});
+
 test('wrapper repair synthesizes closers for container frames crossed at a closer', function () {
     // Regression: pulso4 lost its whole 24KB schedule section because a
     // day-grid's wp:columns/wp:column never closed and the root closer

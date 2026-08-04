@@ -223,19 +223,6 @@ final class ScaffoldThemeStep implements Step
         .hero-composition--panorama-rail .wp-block-column.hero-composition__media img {
             aspect-ratio: auto;
         }
-        /* Cap diptych plates to the first viewport so an over-tall portrait
-           frame cannot push the copy anchor below the fold, and keep the
-           secondary frame a clearly subordinate counterpoint. */
-        .hero-composition--diptych-editorial .hero-composition__media img {
-            width: 100%;
-            height: 100%;
-            max-height: min(72vh, 44rem);
-            object-fit: cover;
-        }
-        .hero-composition--diptych-editorial .hero-composition__media-secondary img {
-            max-height: min(30vh, 18rem);
-        }
-        .hero-composition--typographic-poster,
         .hero-composition--layered-poster {
             overflow: hidden;
         }
@@ -243,7 +230,6 @@ final class ScaffoldThemeStep implements Step
            language break as a last resort, never snap mid-word; the prompts
            size headline presets so this rule stays dormant. */
         .hero-composition__copy .wp-block-heading,
-        .hero-composition--typographic-poster .wp-block-heading,
         .hero-composition--layered-poster .wp-block-heading {
             overflow-wrap: break-word;
             hyphens: auto;
@@ -255,8 +241,7 @@ final class ScaffoldThemeStep implements Step
         @media (max-width: 781.98px) {
             .hero-mobile--stack-copy-first .wp-block-columns,
             .hero-mobile--stack-media-first .wp-block-columns,
-            .hero-mobile--rail-below .wp-block-columns,
-            .hero-mobile--collapse-to-single-focus .wp-block-columns {
+            .hero-mobile--rail-below .wp-block-columns {
                 flex-direction: column;
             }
             .hero-mobile--stack-copy-first .wp-block-media-text,
@@ -315,9 +300,6 @@ final class ScaffoldThemeStep implements Step
                 padding: var(--wp--preset--spacing--lg) var(--wp--preset--spacing--md);
                 background: var(--wp--preset--color--contrast);
                 color: var(--wp--preset--color--base);
-            }
-            .hero-mobile--collapse-to-single-focus .hero-composition__media-secondary {
-                display: none;
             }
             .hero-mobile--flatten-layers .hero-composition__layers,
             .hero-mobile--flatten-layers .hero-composition__copy,

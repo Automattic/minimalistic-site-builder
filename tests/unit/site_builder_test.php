@@ -255,7 +255,7 @@ test('SiteBuilder validates and seeds caller-owned hero constraints and writing 
         'structured-inputs',
         designConstraints: [
             'hero_canvas' => 'FRAMED',
-            'allowed_hero_media_modes' => ['none', 'foreground-image', 'none'],
+            'allowed_hero_media_modes' => ['cover-image', 'foreground-image', 'cover-image'],
             'max_hero_images' => 1,
             'hero_copy_capacity' => 'standard',
         ],
@@ -264,7 +264,7 @@ test('SiteBuilder validates and seeds caller-owned hero constraints and writing 
     $meta = $project->readJson('meta.json');
     assert_eq([
         'hero_canvas' => 'framed',
-        'allowed_hero_media_modes' => ['none', 'foreground-image'],
+        'allowed_hero_media_modes' => ['cover-image', 'foreground-image'],
         'max_hero_images' => 1,
         'hero_copy_capacity' => 'standard',
     ], $meta['design_constraints']);

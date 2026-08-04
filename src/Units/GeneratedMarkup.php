@@ -1636,6 +1636,180 @@ final class GeneratedMarkup
     }
 
     /**
+     * Strip chip/badge chrome from eyebrow-position copy.
+     *
+     * Models render direction devices ("translucent veils", "layered panels")
+     * as filled/bordered groups wrapped around the eyebrow line above the H1 —
+     * a boxed caption chip that reads as UI, not typography (audited:
+     * pulso22's double-bordered eyebrow). The eyebrow is plain tracked text by
+     * contract, so any background, gradient, or border on a short text-only
+     * block that starts and ends before the H1 is removed. Copy containers
+     * holding the headline, media, or actions are never candidates, and the
+     * text itself is untouched — this is a repair, not a warning.
+     *
+     * Attribute-only edit, per the shared convention: stale inline
+     * border/background styles survive in the saved HTML until fix-blocks
+     * re-serializes it from these attributes; the class hooks that make the
+     * chrome visible are removed here.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function stripEyebrowChipChrome(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $h1Offset = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1Offset = $document->openingOffset($index);
+                break;
+            }
+        }
+        if ($h1Offset === null) {
+            return $markup;
+        }
+
+        $stripped = 0;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['group', 'paragraph'], true)) {
+                continue;
+            }
+            // endOffset is exclusive: a chip closing exactly where the H1
+            // opens has end == h1Offset and still sits entirely before it.
+            $end = $document->endOffset($index);
+            if ($end === null || $end > $h1Offset) {
+                continue;
+            }
+            if ($name === 'group' && !self::wrapsOnlyText($document, $index)) {
+                continue;
+            }
+            $text = self::readingText($document->innerHtml($index));
+            if ($text === '' || mb_strlen($text, 'UTF-8') > 80) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            $hadChrome = false;
+            $background = trim((string) ($attrs['backgroundColor'] ?? ''));
+            if ($background !== '') {
+                unset($attrs['backgroundColor']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$background}-background-color");
+                $hadChrome = true;
+            }
+            $gradient = trim((string) ($attrs['gradient'] ?? ''));
+            if ($gradient !== '') {
+                unset($attrs['gradient']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$gradient}-gradient-background");
+                $document->removeClassTokenInOwnHtml($index, 'has-background-gradient');
+                $hadChrome = true;
+            }
+            $borderColor = trim((string) ($attrs['borderColor'] ?? ''));
+            if ($borderColor !== '') {
+                unset($attrs['borderColor']);
+                $document->removeClassTokenInOwnHtml($index, "has-{$borderColor}-border-color");
+                $hadChrome = true;
+            }
+            if (isset($attrs['style']['color']['background'])) {
+                unset($attrs['style']['color']['background']);
+                if (($attrs['style']['color'] ?? []) === []) {
+                    unset($attrs['style']['color']);
+                }
+                $hadChrome = true;
+            }
+            if (isset($attrs['style']['border'])) {
+                unset($attrs['style']['border']);
+                $hadChrome = true;
+            }
+            if (!$hadChrome) {
+                continue;
+            }
+            if (($attrs['style'] ?? []) === []) {
+                unset($attrs['style']);
+            }
+            $document->removeClassTokenInOwnHtml($index, 'has-background');
+            $document->removeClassTokenInOwnHtml($index, 'has-border-color');
+            $document->setAttrs($index, $attrs);
+            $stripped++;
+        }
+        if ($stripped === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'eyebrow-chip-chrome-stripped',
+            'part' => $part,
+            'authored' => "{$stripped} filled/bordered block(s) boxing the eyebrow-position text",
+            'delivered' => 'the same text as plain typography',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
+     * Force a cover-band hero to span the full viewport width.
+     *
+     * The page-opening hero is exempt from the framed canvas: the mat begins
+     * with the second section. Models following the framed direction cap the
+     * hero's root/cover at `"align":"wide"` anyway (audited: portfolio26's
+     * layered-poster rendered with a page-background gutter on both sides),
+     * so for recipes whose projection is a full-bleed cover band the root
+     * group and every cover are upgraded to `"align":"full"`. Attribute-only
+     * edit per the shared convention (fix-blocks re-serializes the saved
+     * HTML's alignfull class from the attrs); the stale alignwide class token
+     * is removed here so re-serialization cannot resurrect it.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function fullBleedCoverAlignment(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $markup;
+        }
+        $upgraded = 0;
+        foreach ($document->indices() as $index) {
+            $isTarget = $index === $root || $document->name($index) === 'cover';
+            if (!$isTarget) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if ((string) ($attrs['align'] ?? '') === 'full') {
+                continue;
+            }
+            $attrs['align'] = 'full';
+            $document->setAttrs($index, $attrs);
+            $document->removeClassTokenInOwnHtml($index, 'alignwide');
+            $upgraded++;
+        }
+        if ($upgraded === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-full-bleed-alignment',
+            'part' => $part,
+            'authored' => "{$upgraded} cover-band block(s) capped below full width",
+            'delivered' => 'align:full edge-to-edge (the framed mat never applies to the page-opening hero)',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /** Whether a group's descendants are text wrappers only (groups/paragraphs). */
+    private static function wrapsOnlyText(BlockMarkup $document, int $group): bool
+    {
+        $pending = $document->children($group);
+        while ($pending !== []) {
+            $child = array_pop($pending);
+            if (!in_array($document->name($child), ['group', 'paragraph'], true)) {
+                return false;
+            }
+            array_push($pending, ...$document->children($child));
+        }
+        return true;
+    }
+
+    /**
      * Synthesize wrapper closers a container's closing segment left out.
      *
      * Long responses sometimes drop a `</div>` right before a container's

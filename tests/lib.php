@@ -81,7 +81,7 @@ function quietly(callable $fn): mixed
 
 /** Complete delivery-phase fixture for portable header/hero unit contracts. */
 function test_above_fold_contract(
-    string $recipe = 'typographic-poster',
+    string $recipe = 'focal-subject-stage',
     string $headerArchetype = 'standard-row',
     ?array $action = null,
 ): array {

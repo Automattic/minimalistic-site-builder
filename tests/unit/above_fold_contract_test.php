@@ -193,6 +193,50 @@ test('above-fold assignment is stable and honors one exact compatible forced arc
     assert_throws(fn () => above_fold_resolve($pages, forced: 'invented-header'));
 });
 
+test('catalog header_archetype_excludes removes the pairing from the pool and binds overrides', function () {
+    $pages = above_fold_pages(null, 'base', 'base');
+    $resolve = static fn (string $stableId, ?string $forced = null): array => AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('focal-subject-stage'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => $stableId, 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        $forced,
+    );
+
+    // The recipe opens with its own eyebrow strip; double-decker's caption
+    // topbar must never stack a second one above it, for any stable id.
+    foreach (range(1, 40) as $seed) {
+        assert_true(
+            $resolve("exclusion-seed-{$seed}")['header']['archetype'] !== 'double-decker',
+            'focal-subject-stage never pairs with double-decker',
+        );
+    }
+
+    $forced = $resolve('exclusion-forced', 'double-decker');
+    assert_eq('standard-row', $forced['header']['archetype']);
+    assert_eq('forced-header-degraded', $forced['degradations'][0]['code']);
+
+    // A recipe without exclusions keeps double-decker reachable in the pool.
+    $reachable = false;
+    foreach (range(1, 40) as $seed) {
+        $contract = AboveFoldContract::resolve(
+            $pages,
+            HeroBlueprint::defaultFor('editorial-split'),
+            'full-bleed',
+            ['base' => '#FFFFFF', 'contrast' => '#111111'],
+            ['stable_id' => "reachable-seed-{$seed}", 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+            ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        );
+        if ($contract['header']['archetype'] === 'double-decker') {
+            $reachable = true;
+            break;
+        }
+    }
+    assert_true($reachable, 'double-decker stays in the pool for recipes without the exclusion');
+});
+
 test('overlay requires an image-led recipe, every protected opening, an unframed canvas, and contrast', function () {
     $pages = above_fold_pages();
     $overlay = above_fold_resolve($pages);
@@ -209,9 +253,9 @@ test('overlay requires an image-led recipe, every protected opening, an unframed
         theme: ['base' => '#777777', 'contrast' => '#888888'],
     )['header']['mode']);
 
-    $typographic = above_fold_pages(null, 'contrast', 'contrast');
-    $typographic[0]['sections'][0]['layout_archetype'] = 'mixed-width-editorial';
-    assert_eq('stacked', above_fold_resolve($typographic, recipe: 'typographic-poster')['header']['mode']);
+    $solidStacked = above_fold_pages(null, 'contrast', 'contrast');
+    $solidStacked[0]['sections'][0]['layout_archetype'] = 'mixed-width-editorial';
+    assert_eq('stacked', above_fold_resolve($solidStacked, recipe: 'focal-subject-stage')['header']['mode']);
 });
 
 test('logical hero regions resolve to physical RTL sides once', function () {
@@ -240,7 +284,7 @@ test('front serialization is canonical while the interior opening subset is reci
 
 test('delivery and markup phases reject misuse and reach a fixed point without reselection', function () {
     $pages = [above_fold_pages(null, 'contrast', 'contrast')[0]];
-    $contract = above_fold_resolve($pages, recipe: 'typographic-poster', forced: 'standard-row');
+    $contract = above_fold_resolve($pages, recipe: 'focal-subject-stage', forced: 'standard-row');
     $parts = ['page-home--hero' => above_fold_solid_part('hero', 'contrast')];
     $facts = AboveFoldPartFacts::inspect($pages, $parts, $contract);
 
@@ -365,7 +409,7 @@ test('lost overlay support degrades to one reviewed stacked relation with an act
 test('split navigation and removed neighbors degrade only enumerated delivery facts', function () {
     $pages = above_fold_pages(null, 'contrast', 'contrast');
     $pages[0]['sections'][0]['layout_archetype'] = 'mixed-width-editorial';
-    $contract = above_fold_resolve($pages, recipe: 'typographic-poster', forced: 'split-nav');
+    $contract = above_fold_resolve($pages, recipe: 'focal-subject-stage', forced: 'split-nav');
     assert_eq('split-nav', $contract['header']['archetype']);
 
     $deliveredPages = [$pages[0]];
@@ -485,7 +529,7 @@ test('downstream consumers reject corrupt header relations and unverified token 
 
     $stacked = above_fold_resolve(
         above_fold_pages(null, 'contrast', 'contrast'),
-        recipe: 'typographic-poster',
+        recipe: 'focal-subject-stage',
         forced: 'standard-row',
     );
     $stacked['header']['archetype'] = 'minimal-overlay';

@@ -18,13 +18,14 @@ final class HeroComposition
         'editorial-split',
         'framed-portrait',
         'panorama-rail',
-        'diptych-editorial',
-        'typographic-poster',
         'focal-subject-stage',
         'layered-poster',
     ];
 
-    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image', 'diptych'];
+    // Caller-constraint enum. Every cataloged recipe now carries an image;
+    // 'none' remains a valid HeroBlueprint media_mode only as the delivered
+    // value of a media-loss degradation, never as a requestable constraint.
+    public const MEDIA_MODES = ['cover-image', 'foreground-image'];
     public const COPY_CAPACITIES = ['compact', 'standard', 'expanded'];
     public const CANVASES = ['full-bleed', 'framed'];
 
@@ -145,58 +146,6 @@ final class HeroComposition
                 'mobile_transformation' => 'rail-below',
             ],
         ],
-        'diptych-editorial' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['diptych'],
-            'min_images' => 2,
-            'max_images' => 2,
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'base',
-            'fallback_background' => 'base',
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'compact',
-            'mobile_transformations' => ['stack-media-first', 'collapse-to-single-focus'],
-            'layout_archetype' => 'mixed-width-editorial',
-            'fallback_family' => 'foreground-split',
-            'root_hook' => '.hero-composition--diptych-editorial',
-            'prompt' => 'hero-compositions/diptych-editorial.md',
-            'headline_registers' => ['restrained', 'display'],
-            'height_profiles' => ['standard', 'immersive'],
-            'defaults' => [
-                'media_mode' => 'diptych', 'headline_register' => 'restrained',
-                'text_anchor' => 'center-start',
-                'headline_line_target' => ['desktop' => [1, 3], 'mobile' => [2, 4]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'standard', 'cta_treatment' => 'quiet',
-                'mobile_transformation' => 'stack-media-first',
-            ],
-        ],
-        'typographic-poster' => [
-            'canvases' => ['full-bleed', 'framed'],
-            'media_modes' => ['none'],
-            'min_images' => 0,
-            'max_images' => 0,
-            'backgrounds' => ['base', 'tinted', 'contrast'],
-            'default_background' => 'contrast',
-            'fallback_background' => 'contrast',
-            'header_modes' => ['stacked'],
-            'copy_capacity' => 'expanded',
-            'mobile_transformations' => ['flatten-layers'],
-            'layout_archetype' => 'mixed-width-editorial',
-            'fallback_family' => 'typographic',
-            'root_hook' => '.hero-composition--typographic-poster',
-            'prompt' => 'hero-compositions/typographic-poster.md',
-            'headline_registers' => ['display', 'poster'],
-            'height_profiles' => ['compact', 'standard', 'immersive'],
-            'defaults' => [
-                'media_mode' => 'none', 'headline_register' => 'poster',
-                'text_anchor' => 'center-start',
-                'headline_line_target' => ['desktop' => [1, 4], 'mobile' => [2, 6]],
-                'focal_region' => 'none', 'text_safe_region' => 'full',
-                'height_profile' => 'standard', 'cta_treatment' => 'prominent',
-                'mobile_transformation' => 'flatten-layers',
-            ],
-        ],
         'focal-subject-stage' => [
             'canvases' => ['full-bleed', 'framed'],
             'media_modes' => ['foreground-image'],
@@ -206,6 +155,10 @@ final class HeroComposition
             'default_background' => 'base',
             'fallback_background' => 'base',
             'header_modes' => ['stacked'],
+            // The recipe opens with its own uppercase eyebrow directly under
+            // the header; double-decker's caption topbar stacks a second
+            // caption strip right above it (audited: naturaleza22/23).
+            'header_archetype_excludes' => ['double-decker'],
             'copy_capacity' => 'compact',
             'mobile_transformations' => ['stack-media-first', 'stack-copy-first'],
             'layout_archetype' => 'asymmetric-split',
@@ -296,7 +249,7 @@ final class HeroComposition
             $recipe = trim((string) ($recipeOrBlueprint['recipe'] ?? ''));
             self::assertKnown($recipe);
             $mode = strtolower(trim((string) ($recipeOrBlueprint['media_mode'] ?? '')));
-            return in_array($mode, ['cover-image', 'foreground-image', 'diptych'], true);
+            return in_array($mode, ['cover-image', 'foreground-image'], true);
         }
         return (int) self::metadata($recipeOrBlueprint)['min_images'] > 0;
     }
@@ -367,9 +320,9 @@ final class HeroComposition
         }
         if (array_key_exists('max_hero_images', $constraints)) {
             $max = $constraints['max_hero_images'];
-            if (!is_int($max) || $max < 0 || $max > 2) {
+            if (!is_int($max) || $max < 1 || $max > 2) {
                 throw new \InvalidArgumentException(
-                    'design_constraints.max_hero_images must be an integer from 0 through 2'
+                    'design_constraints.max_hero_images must be an integer from 1 through 2'
                 );
             }
             $out['max_hero_images'] = $max;
@@ -460,20 +413,12 @@ final class HeroComposition
         $imageCount = is_int($imageCount) ? $imageCount : 0;
         $copyRegions = 0;
         $mediaRegions = 0;
-        $headings = 0;
         $directCovers = 0;
         $covers = 0;
-        $mediaTextBlocks = 0;
         foreach ($document->indices() as $index) {
             $name = $document->name($index);
-            if ($name === 'heading') {
-                $headings++;
-            }
             if ($name === 'cover') {
                 $covers++;
-            }
-            if ($name === 'media-text') {
-                $mediaTextBlocks++;
             }
             $classes = preg_split(
                 '/\s+/',
@@ -523,7 +468,7 @@ final class HeroComposition
                 ['direct_wp_cover_count' => $directCovers],
                 'safe parseable hero was retained; overlay finalization may degrade to stacked until the assigned cover is restored',
             );
-        } elseif ((in_array('foreground-image', $mediaModes, true) || in_array('diptych', $mediaModes, true))
+        } elseif (in_array('foreground-image', $mediaModes, true)
             && $mediaRegions < $minImages
         ) {
             $warnings[] = self::markupWarning(
@@ -534,7 +479,7 @@ final class HeroComposition
                 'safe parseable hero was retained; restore only the missing assigned foreground-media region hooks',
             );
         }
-        if ((in_array('foreground-image', $mediaModes, true) || in_array('diptych', $mediaModes, true))
+        if (in_array('foreground-image', $mediaModes, true)
             && $covers > 0
         ) {
             $warnings[] = self::markupWarning(
@@ -545,32 +490,7 @@ final class HeroComposition
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
         }
-        if ($recipe === 'typographic-poster' && ($covers > 0 || $mediaTextBlocks > 0)) {
-            $warnings[] = self::markupWarning(
-                $part,
-                'typographic poster media block usage',
-                ['wp_cover_count' => 0, 'wp_media_text_count' => 0],
-                ['wp_cover_count' => $covers, 'wp_media_text_count' => $mediaTextBlocks],
-                'safe parseable poster was retained; remove only the media topology and keep its real block typography',
-            );
-        }
-
         $images = self::imageFacts($markup);
-        if ($recipe === 'diptych-editorial' && count($images) >= 2) {
-            $sources = array_values(array_filter(array_column($images, 'src'), static fn (string $v): bool => $v !== ''));
-            $specs = array_values(array_filter(array_column($images, 'alt'), static fn (string $v): bool => $v !== ''));
-            if (count($sources) !== count(array_unique($sources))
-                || count($specs) !== count(array_unique($specs))
-            ) {
-                $warnings[] = self::markupWarning(
-                    $part,
-                    'diptych asset identity',
-                    ['distinct_sources' => 2, 'distinct_ai_image_specs' => 2],
-                    ['sources' => $sources, 'ai_image_specs' => $specs],
-                    'safe parseable diptych was retained; regenerate only the duplicated frame with a distinct filename and subject',
-                );
-            }
-        }
         $expectedAspect = match ($recipe) {
             'framed-portrait' => 'portrait',
             'panorama-rail', 'cinematic-safe-zone', 'layered-poster' => 'landscape',
@@ -590,15 +510,6 @@ final class HeroComposition
                     'safe parseable hero was retained; regenerate or recrop only the mismatched assigned image slot',
                 );
             }
-        }
-        if ($recipe === 'typographic-poster' && $headings < 1) {
-            $warnings[] = self::markupWarning(
-                $part,
-                'recipe display heading',
-                ['wp_heading_minimum' => 1],
-                ['wp_heading_count' => $headings],
-                'safe parseable poster was retained; restore its real-text heading without inventing raster lettering',
-            );
         }
         return $warnings;
     }

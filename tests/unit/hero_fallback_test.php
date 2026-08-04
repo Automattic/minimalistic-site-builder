@@ -96,16 +96,11 @@ test('reviewed hero fallback families have distinct code-owned topology', functi
         $input,
         test_above_fold_contract('editorial-split', 'standard-row'),
     )->markup;
-    $poster = HeroFallback::render(
-        $input,
-        test_above_fold_contract('typographic-poster', 'standard-row'),
-    )->markup;
 
     assert_contains('hero-fallback__cover-stage', $cover);
     assert_contains('hero-fallback__split', $split);
     assert_contains('wp:columns', $split);
-    assert_contains('hero-fallback__poster', $poster);
-    assert_true($cover !== $split && $split !== $poster && $cover !== $poster);
+    assert_true($cover !== $split);
 });
 
 test('hero fallback uses the dynamic real site title instead of inventing generic copy', function () {
@@ -116,7 +111,7 @@ test('hero fallback uses the dynamic real site title instead of inventing generi
     ];
     $markup = HeroFallback::render(
         $input,
-        test_above_fold_contract('typographic-poster', 'standard-row'),
+        test_above_fold_contract('focal-subject-stage', 'standard-row'),
     )->markup;
 
     assert_contains('wp:site-title', $markup);

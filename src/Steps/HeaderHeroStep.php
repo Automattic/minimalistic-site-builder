@@ -239,6 +239,19 @@ final class HeaderHeroStep implements Step
                     : (string) json_encode($repair, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
             }
             array_push($warnings, ...$actionResult['warnings']);
+
+            // With the hero's delivered copy and action known, drop the
+            // header's duplicates of them (echoed caption lines, same-label
+            // CTA) — the ownership split gives both to the hero.
+            $dedupe = self::dedupeAgainstHero(
+                $writes[$headerRel],
+                $writes[$heroRel],
+                is_array($delivery['primary_action'] ?? null) ? $delivery['primary_action'] : null,
+            );
+            $writes[$headerRel] = $dedupe['markup'];
+            foreach ($dedupe['notes'] as $note) {
+                $report[] = "[{$headerRel}] {$note}";
+            }
         }
 
         $partBytes = self::partBytes($project, $writes);
@@ -597,6 +610,138 @@ final class HeaderHeroStep implements Step
         $doc->removeClassTokenInOwnHtml($top, self::OVERLAY_CLASS);
         $notes[] = "removed the '" . self::OVERLAY_CLASS . "' class "
             . '(stacked mode: the hero composed for an opaque bar above it, not a floating header)';
+    }
+
+    /**
+     * Remove authored header lines that duplicate the hero's copy inside the
+     * same first viewport. Two audited defect classes:
+     *  1. Echo — an authored header caption line repeating a short hero
+     *     eyebrow/location/heading line (prompts/header.md's NO ECHO rule,
+     *     violated twice in audited builds: the pair renders ~150px apart and
+     *     reads as a rendering bug).
+     *  2. Duplicate CTA — a header button whose label repeats the contract's
+     *     primary action; the ownership split gives the primary action to the
+     *     hero, so the header copy is the redundant one.
+     * Pure — unit-testable.
+     *
+     * @param array{label:string,intent:string,destination:string}|null $primaryAction
+     * @return array{markup:string, notes:string[]}
+     */
+    public static function dedupeAgainstHero(
+        string $headerMarkup,
+        string $heroMarkup,
+        ?array $primaryAction,
+    ): array {
+        $heroLines = [];
+        $hero = BlockMarkup::parse($heroMarkup);
+        foreach ($hero->indices() as $i) {
+            $name = $hero->name($i);
+            if ($name !== 'paragraph' && $name !== 'heading') {
+                continue;
+            }
+            $tokens = self::textTokens($hero->innerHtml($i));
+            // Only short lines are echo candidates: eyebrows, location lines,
+            // headlines. Standfirst-length paragraphs never legitimately
+            // reappear in a header, and matching them would risk stripping
+            // unrelated chrome text on incidental word overlap.
+            if (count($tokens) >= 2 && count($tokens) <= 12) {
+                $heroLines[] = $tokens;
+            }
+        }
+        $actionLabel = $primaryAction === null
+            ? []
+            : self::textTokens((string) ($primaryAction['label'] ?? ''));
+
+        $doc = BlockMarkup::parse($headerMarkup);
+        $notes = [];
+        $removals = [];
+        foreach ($doc->indices() as $i) {
+            $name = $doc->name($i);
+            $end = $doc->endOffset($i);
+            if ($end === null) {
+                continue;
+            }
+            if ($name === 'paragraph') {
+                $tokens = self::textTokens($doc->innerHtml($i));
+                foreach ($heroLines as $line) {
+                    if (!self::linesEcho($tokens, $line)) {
+                        continue;
+                    }
+                    $removals[$doc->openingOffset($i)] = $end - $doc->openingOffset($i);
+                    $notes[] = 'authored header line "' . implode(' ', $tokens) . '" removed: it echoes a '
+                        . 'hero eyebrow/headline line rendered directly beneath the header '
+                        . '(the hero owns that copy; the same words twice within one viewport read as a mistake)';
+                    break;
+                }
+                continue;
+            }
+            if ($name === 'button' && $actionLabel !== []
+                && self::textTokens($doc->innerHtml($i)) === $actionLabel
+            ) {
+                // Remove the enclosing wp:buttons wrapper when this is its
+                // only button, so no empty container survives.
+                $target = $i;
+                $parent = $doc->parent($i);
+                if ($parent !== null && $doc->name($parent) === 'buttons' && $doc->endOffset($parent) !== null) {
+                    $siblings = array_filter(
+                        $doc->children($parent),
+                        fn (int $child): bool => $doc->name($child) === 'button',
+                    );
+                    if (count($siblings) === 1) {
+                        $target = $parent;
+                    }
+                }
+                $targetEnd = (int) $doc->endOffset($target);
+                $removals[$doc->openingOffset($target)] = $targetEnd - $doc->openingOffset($target);
+                $notes[] = 'header button "' . implode(' ', $actionLabel) . '" removed: its label duplicates '
+                    . "the contract's primary action, which the hero delivers ~200px below "
+                    . '(two identical calls to action within one viewport compete instead of converting)';
+            }
+        }
+        if ($removals === []) {
+            return ['markup' => $headerMarkup, 'notes' => []];
+        }
+        krsort($removals);
+        foreach ($removals as $offset => $length) {
+            $headerMarkup = substr_replace($headerMarkup, '', $offset, $length);
+        }
+        return ['markup' => $headerMarkup, 'notes' => $notes];
+    }
+
+    /**
+     * Normalized comparison tokens for one rendered text line: tags stripped,
+     * entities decoded, lowercased, split on every non-alphanumeric run — so
+     * "San Telmo, Buenos Aires" and "SAN TELMO · BUENOS AIRES" compare equal.
+     *
+     * @return list<string>
+     */
+    private static function textTokens(string $html): array
+    {
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = mb_strtolower($text, 'UTF-8');
+        return array_values(array_filter(
+            preg_split('/[^\p{L}\p{N}]+/u', $text) ?: [],
+            static fn (string $token): bool => $token !== '',
+        ));
+    }
+
+    /**
+     * Whether two short lines say the same thing: at least two shared distinct
+     * tokens covering 80%+ of the shorter line. Reordering and punctuation
+     * differences match; lines merely sharing a place name do not.
+     *
+     * @param list<string> $a
+     * @param list<string> $b
+     */
+    private static function linesEcho(array $a, array $b): bool
+    {
+        $a = array_unique($a);
+        $b = array_unique($b);
+        if ($a === [] || $b === []) {
+            return false;
+        }
+        $shared = count(array_intersect($a, $b));
+        return $shared >= 2 && $shared / min(count($a), count($b)) >= 0.8;
     }
 
     /**

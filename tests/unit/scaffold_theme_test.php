@@ -46,8 +46,6 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         'editorial-split',
         'framed-portrait',
         'panorama-rail',
-        'diptych-editorial',
-        'typographic-poster',
         'focal-subject-stage',
         'layered-poster',
     ] as $recipe) {
@@ -58,14 +56,14 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         'stack-copy-first',
         'stack-media-first',
         'rail-below',
-        'collapse-to-single-focus',
         'flatten-layers',
         'retain-media-overlay',
     ] as $transformation) {
         assert_contains('.hero-mobile--' . $transformation, $css);
     }
-    assert_contains('.hero-composition__media-secondary', $css);
-    assert_contains('display: none;', $css);
+    // Retired with diptych-editorial: no dead recipe or transformation hooks.
+    assert_true(!str_contains($css, 'diptych'), 'retired recipe CSS is gone');
+    assert_true(!str_contains($css, 'collapse-to-single-focus'), 'retired transformation CSS is gone');
     assert_contains('.hero-mobile--stack-copy-first .wp-block-media-text__content', $css);
     assert_contains('.hero-mobile--stack-copy-first .wp-block-media-text__media', $css);
     assert_contains('.hero-mobile--stack-media-first .wp-block-media-text__media', $css);

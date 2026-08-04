@@ -13,7 +13,8 @@ complete, explicitly selected variant whose safe region remains authored.
 - Identity: the one root group carries exactly `.hero-composition--cinematic-safe-zone`.
 - Media: exactly one wide/landscape cover image; never add a second image or a
   portrait crop. Use only group, cover, heading, paragraph, and optional button.
-- Surface/width: use the planned `image` surface and full-width behavior allowed
-  by the canvas; `contrast` is the reviewed no-image fallback surface.
+- Surface/width: use the planned `image` surface with the root and cover at
+  `"align":"full"` edge-to-edge on every canvas (framed included); `contrast`
+  is the reviewed no-image fallback surface.
 - Objective failure: no direct cover, more than one image, missing copy region,
   or copy placed in the blueprint's focal region violates this recipe.

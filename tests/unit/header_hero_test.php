@@ -142,6 +142,65 @@ test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone'
     assert_eq($px, HeaderHeroStep::capCovers($px)['markup']);
 });
 
+test('dedupeAgainstHero strips echoed caption lines and the duplicate-label CTA', function () {
+    $hero = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p>SAN TELMO · BUENOS AIRES</p><!-- /wp:paragraph -->'
+        . '<!-- wp:heading {"level":1} --><h1>Vegetarian Argentine Cuisine</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>A long standfirst that runs well past twelve words so it can never'
+        . ' participate in echo matching against header chrome at all.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Reserve a Table</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->';
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:paragraph {"fontSize":"caption"} --><p>San Telmo, Buenos Aires</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p>Open Tuesday to Sunday</p><!-- /wp:paragraph -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Reserve a Table</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->'
+    );
+    $action = ['label' => 'Reserve a Table', 'intent' => 'Invite a booking', 'destination' => '/visit/'];
+    $result = HeaderHeroStep::dedupeAgainstHero($header, $hero, $action);
+
+    assert_true(!str_contains($result['markup'], 'San Telmo'), 'echoed location line removed');
+    assert_contains('Open Tuesday to Sunday', $result['markup'], 'non-echoed chrome line survives');
+    assert_true(!str_contains($result['markup'], 'Reserve a Table'), 'duplicate CTA removed');
+    assert_true(!str_contains($result['markup'], 'wp:buttons'), 'empty buttons wrapper removed with its only button');
+    assert_contains('wp:site-title', $result['markup'], 'identity chrome untouched');
+    assert_eq(2, count($result['notes']));
+
+    // Idempotent, and a header with nothing duplicated is untouched.
+    $again = HeaderHeroStep::dedupeAgainstHero($result['markup'], $hero, $action);
+    assert_eq($result['markup'], $again['markup']);
+    assert_eq([], $again['notes']);
+});
+
+test('dedupeAgainstHero leaves distinct chrome, partial overlap, and other-label buttons alone', function () {
+    $hero = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>Bienvenidos — San Telmo, Buenos Aires</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    // Shares only the place name with the hero eyebrow — different information.
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:paragraph {"fontSize":"caption"} --><p>Vegetarian kitchen · Calle Defensa, San Telmo</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/menu/">See the Menu</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->'
+    );
+    $action = ['label' => 'Reserve a Table', 'intent' => 'Invite a booking', 'destination' => '/visit/'];
+    $result = HeaderHeroStep::dedupeAgainstHero($header, $hero, $action);
+    assert_eq($header, $result['markup']);
+    assert_eq([], $result['notes']);
+
+    // No contract action: buttons are never candidates.
+    $none = HeaderHeroStep::dedupeAgainstHero($header, $hero, null);
+    assert_eq($header, $none['markup']);
+});
+
 test('the step repairs header and hero parts without promoting successful repairs to warnings', function () {
     $tmp = sys_get_temp_dir() . '/builder_hh_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
@@ -153,7 +212,7 @@ test('the step repairs header and hero parts without promoting successful repair
     $project->writeJson('pages.json', ['pages' => $pages]);
     $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
         pages: $pages,
-        blueprint: HeroBlueprint::defaultFor('typographic-poster'),
+        blueprint: HeroBlueprint::defaultFor('focal-subject-stage'),
         canvas: 'full-bleed',
         themeContext: ['version' => 3],
         siteContext: ['stable_id' => 'demo', 'writing_direction' => 'ltr', 'page_count' => 1],
@@ -190,7 +249,7 @@ test('the step removes an exact hero action when its delivered target is dead', 
     ]];
     $delivery = AboveFoldContract::resolve(
         $pages,
-        HeroBlueprint::defaultFor('typographic-poster'),
+        HeroBlueprint::defaultFor('focal-subject-stage'),
         'full-bleed',
         ['base' => '#FFFFFF', 'contrast' => '#111111'],
         ['stable_id' => 'dead-action', 'writing_direction' => 'ltr', 'page_count' => 1],
@@ -202,8 +261,8 @@ test('the step removes an exact hero action when its delivered target is dead', 
     $project->writeText('theme/parts/header.html', hh_header('{"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}}'));
     $sibling = '<!-- wp:paragraph --><p>Sibling proposition remains.</p><!-- /wp:paragraph -->';
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/missing/">Missing work</a></div><!-- /wp:button -->';
-    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--typographic-poster hero-mobile--flatten-layers","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--typographic-poster hero-mobile--flatten-layers">'
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
         . $sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->'
         . '</div><!-- /wp:group -->';
     $project->writeText('theme/parts/page-home--hero.html', $hero);

@@ -38,7 +38,7 @@ test('HeaderUnit generates a constrained header from self-contained input', func
     $result = $unit->generate(array_merge(template_part_unit_input(), [
         'hero_brief' => 'PART-HERO-SENTINEL',
         'nav_rule'   => '- PART-NAV-SENTINEL',
-        'above_fold_contract' => test_above_fold_contract('typographic-poster', 'branded-lockup'),
+        'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'branded-lockup'),
     ]));
     $markup = $result->markup;
 
@@ -129,7 +129,7 @@ test('HeaderUnit normalizes exactly one assigned root archetype marker idempoten
     $input = array_merge(template_part_unit_input(), [
         'hero_brief' => 'PART-HERO-SENTINEL',
         'nav_rule' => '- PART-NAV-SENTINEL',
-        'above_fold_contract' => test_above_fold_contract('typographic-poster', 'branded-lockup'),
+        'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'branded-lockup'),
     ]);
     $raw = '<!-- wp:group {"className":"keep header-archetype--old header-archetype--stale","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group keep header-archetype--old header-archetype--old">Header</div>'

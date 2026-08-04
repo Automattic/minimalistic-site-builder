@@ -12,7 +12,7 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * One-shot: build a site from a prompt, report tokens + wall time, then boot it
  * in WordPress Playground and print the URL.
  *
- *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=none,foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images]
+ *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images]
  *
  * --no-serve builds and reports metrics without launching Playground.
  * --multi-page lets the site plan inner pages beyond the homepage (off by
@@ -38,7 +38,7 @@ $heroCanvas = null;
 $heroMediaModesArg = null;
 $maxHeroImagesArg = null;
 $heroCopyCapacity = null;
-$usage = "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=none,cover-image,foreground-image,diptych] [--max-hero-images=0..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images]\n";
+$usage = "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images]\n";
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
@@ -98,7 +98,7 @@ if ($heroMediaModesArg !== null) {
 }
 if ($maxHeroImagesArg !== null) {
     if (preg_match('/^\d+$/', $maxHeroImagesArg) !== 1) {
-        fwrite(STDERR, "--max-hero-images must be an integer from 0 through 2.\n");
+        fwrite(STDERR, "--max-hero-images must be an integer from 1 through 2.\n");
         exit(1);
     }
     $designConstraints['max_hero_images'] = (int) $maxHeroImagesArg;

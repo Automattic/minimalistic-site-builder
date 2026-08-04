@@ -145,7 +145,6 @@ final class DesignDirectionStep implements Step
             (string) ($specData['slug'] ?? $project->slug()),
             $seed,
             $warnings,
-            $specData,
         );
         $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
         $heroComposition = $this->renderer->render('hero-composition.md', [
@@ -368,26 +367,21 @@ final class DesignDirectionStep implements Step
      * Resolve one authoritative recipe from caller controls and the pure
      * compatibility-filtered selector. HERO_RECIPE is exact/fatal; the batch
      * assignment in meta.json is fallible and remaps with a durable warning.
-     * The site spec's subject_is_visual_work fact narrows the automatic pool
-     * to image-bearing recipes; it never overrides caller-owned constraints
-     * or the exact operator recipe.
      *
      * @param array<mixed> $meta
      * @param list<string> $warnings
-     * @param array<mixed> $spec
      */
     public static function selectHeroRecipe(
         array $meta,
         string $stableIdentifier,
         string $conceptSeed,
         array &$warnings = [],
-        array $spec = [],
     ): string {
         $callerConstraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
         if (HeroComposition::compatible($callerConstraints) === []) {
             throw new \InvalidArgumentException('design_constraints leave no compatible hero recipe');
         }
-        $constraints = self::specGatedConstraints($callerConstraints, $spec, $warnings);
+        $constraints = $callerConstraints;
         $pool = HeroComposition::compatible($constraints);
 
         $forced = trim((string) (Env::get(self::HERO_RECIPE_ENV) ?? ''));
@@ -426,8 +420,7 @@ final class DesignDirectionStep implements Step
                 ? 'batch assignment had no usable requested_recipe'
                 : (!in_array($requested, HeroComposition::RECIPES, true)
                     ? 'batch requested an unknown recipe'
-                    : 'batch request was outside the effective pool (caller design_constraints '
-                        . "plus the site spec's subject_is_visual_work gate)"));
+                    : 'batch request was outside the caller design_constraints pool'));
             $warnings[] = "file='meta.json'; path=\"hero_assignment.requested_recipe\"; authored="
                 . self::describe($assignment['requested_recipe'] ?? null)
                 . '; delivered=' . self::describe($delivered)
@@ -441,38 +434,6 @@ final class DesignDirectionStep implements Step
             . '; delivered=' . self::describe($delivered)
             . '; disposition=malformed fallible batch assignment was remapped by the stable compatible-pool selector';
         return $delivered;
-    }
-
-    /**
-     * Narrow the automatic selection pool to image-bearing recipes when the
-     * site spec states the subject IS visual work (photography, art, food,
-     * architecture portfolios): an image-free hero misrepresents such a site.
-     * Caller-owned allowed_hero_media_modes always wins untouched, and the
-     * gate backs off with a durable warning rather than emptying the pool.
-     *
-     * @param array<mixed> $constraints validated caller constraints
-     * @param array<mixed> $spec
-     * @param list<string> $warnings
-     * @return array<mixed>
-     */
-    private static function specGatedConstraints(array $constraints, array $spec, array &$warnings): array
-    {
-        if (($spec['subject_is_visual_work'] ?? null) !== true) {
-            return $constraints;
-        }
-        if (array_key_exists('allowed_hero_media_modes', $constraints)) {
-            return $constraints;
-        }
-        $gated = $constraints;
-        $gated['allowed_hero_media_modes'] = array_values(array_diff(HeroComposition::MEDIA_MODES, ['none']));
-        $gated = HeroComposition::validateConstraints($gated);
-        if (HeroComposition::compatible($gated) === []) {
-            $warnings[] = "file='siteSpec.json'; path=\"subject_is_visual_work\"; authored=true; "
-                . 'delivered=ignored; disposition=image-bearing gate would leave no compatible hero recipe '
-                . 'under caller-owned design_constraints, so the ungated pool was kept';
-            return $constraints;
-        }
-        return $gated;
     }
 
     /** Validate the exact operator override before the seed LLM call. */
@@ -860,7 +821,7 @@ final class DesignDirectionStep implements Step
         // keyword. Directions persisted before the field existed carry none.
         $canvas = trim((string) ($direction['canvas'] ?? ''));
         if ($canvas === 'framed') {
-            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band; cap bands at `"align":"wide"`, never `"align":"full"`.';
+            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
         } elseif ($canvas !== '') {
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }

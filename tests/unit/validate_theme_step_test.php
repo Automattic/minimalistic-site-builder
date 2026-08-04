@@ -50,8 +50,8 @@ function final_validation_project(): array
             'primary_action' => null,
         ]],
     ]];
-    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--typographic-poster","layout":{"type":"constrained"}} -->'
-        . '<div id="hero" class="wp-block-group hero-composition--typographic-poster"></div><!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage"></div><!-- /wp:group -->';
     $hero = SectionRhythm::rewrite([[
         'slug' => 'hero',
         'markup' => $hero,
@@ -60,7 +60,7 @@ function final_validation_project(): array
     ]])['markups'][0];
     $delivery = AboveFoldContract::resolve(
         $pages,
-        HeroBlueprint::defaultFor('typographic-poster'),
+        HeroBlueprint::defaultFor('focal-subject-stage'),
         'full-bleed',
         ['base' => '#FFFFFF', 'contrast' => '#111111'],
         ['stable_id' => 'validate-step', 'writing_direction' => 'ltr', 'page_count' => 1],

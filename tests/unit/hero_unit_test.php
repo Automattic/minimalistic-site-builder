@@ -115,8 +115,6 @@ test('HeroUnit exposes one isolated assigned recipe and no section cache prefixe
         'editorial-split' => 'deliberately unequal copy and foreground-media regions',
         'framed-portrait' => 'contained vertical foreground image',
         'panorama-rail' => 'wide foreground visual field',
-        'diptych-editorial' => 'two related but distinct foreground images',
-        'typographic-poster' => 'real horizontal typography',
         'focal-subject-stage' => 'singular subject as an opaque foreground content image',
         'layered-poster' => 'cover image beneath controlled block-built type',
     ];
@@ -303,17 +301,20 @@ test('HeroUnit normalizes recipe and mobile root markers while preserving unrela
 
 test('HeroUnit wraps complete roots without changing their bytes and reaches a fixed point', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    $input = hero_unit_contract_input('typographic-poster', null);
+    $input = hero_unit_contract_input('focal-subject-stage', null);
     $raw = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
         . '<!-- wp:heading --><h1>Hero survives.</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
+        . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
+        . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/subject.jpg" alt="AI_IMAGE: One exhibit subject | hero media column | photorealistic | landscape" /></figure><!-- /wp:image -->'
         . '</div><!-- /wp:group -->'
         . '<!-- wp:paragraph --><p>Support survives.</p><!-- /wp:paragraph -->';
 
     $first = $unit->finish($raw, $input);
 
     assert_contains($raw, $first->markup, 'the complete generated roots survive byte-for-byte inside the envelope');
-    assert_hero_unit_root_marker($first->markup, 'hero-composition--typographic-poster');
-    assert_hero_unit_root_marker($first->markup, 'hero-mobile--flatten-layers');
+    assert_hero_unit_root_marker($first->markup, 'hero-composition--focal-subject-stage');
+    assert_hero_unit_root_marker($first->markup, 'hero-mobile--stack-media-first');
     assert_contains('"layout":{"type":"constrained"}', $first->markup);
     assert_eq(['root-group-wrapped', 'root-marker-normalized', 'root-marker-normalized', 'root-layout-constrained'], array_column($first->repairs, 'code'));
     assert_eq([], $first->warnings);

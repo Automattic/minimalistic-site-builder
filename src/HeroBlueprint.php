@@ -14,7 +14,7 @@ namespace Automattic\SiteBuild;
 final class HeroBlueprint
 {
     public const VERSION = 1;
-    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image', 'diptych'];
+    public const MEDIA_MODES = ['none', 'cover-image', 'foreground-image'];
     public const HEADLINE_REGISTERS = ['restrained', 'display', 'poster'];
     public const TEXT_ANCHORS = [
         'top-start', 'center-start', 'bottom-start', 'center',
@@ -26,7 +26,7 @@ final class HeroBlueprint
     public const CTA_TREATMENTS = ['quiet', 'prominent'];
     public const MOBILE_TRANSFORMATIONS = [
         'retain-media-overlay', 'stack-copy-first', 'stack-media-first',
-        'rail-below', 'flatten-layers', 'collapse-to-single-focus',
+        'rail-below', 'flatten-layers',
     ];
 
     /**

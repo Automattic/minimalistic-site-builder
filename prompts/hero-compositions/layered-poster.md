@@ -25,6 +25,7 @@ content off screen.
   spacer or separator when structurally needed, and optional planned button;
   every decorative layer remains a token-built core block.
 - Surface/width: use the planned image surface/full-bleed-cover projection,
-  with contrast as the reviewed no-image fallback; honor the canvas width.
+  with contrast as the reviewed no-image fallback; the root and cover run
+  `"align":"full"` edge-to-edge on every canvas, framed included.
 - Objective failure: extra images, rasterized lettering, missing safe copy zone,
   essential absolute-positioned content, or uncontrolled overlap fails.

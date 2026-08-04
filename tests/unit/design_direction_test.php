@@ -711,7 +711,7 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => designdir_direction()]);
 
-    putenv('HERO_RECIPE=typographic-poster');
+    putenv('HERO_RECIPE=panorama-rail');
     try {
         (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
     } finally {
@@ -719,11 +719,11 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     }
 
     $direction = $project->readJson('designDirection.json');
-    assert_eq('typographic-poster', $direction['hero_blueprint']['recipe']);
-    assert_eq('none', $direction['hero_blueprint']['media_mode']);
-    assert_contains('typographic-poster', $llm->calls[1]['prompt']);
+    assert_eq('panorama-rail', $direction['hero_blueprint']['recipe']);
+    assert_eq('foreground-image', $direction['hero_blueprint']['media_mode']);
+    assert_contains('panorama-rail', $llm->calls[1]['prompt']);
     foreach (HeroComposition::RECIPES as $recipe) {
-        if ($recipe !== 'typographic-poster') {
+        if ($recipe !== 'panorama-rail') {
             assert_true(!str_contains($llm->calls[1]['prompt'], $recipe), "{$recipe} is not exposed");
         }
     }
@@ -817,18 +817,22 @@ test('fallible batch hero assignment remaps incompatibility and warns with reque
     [$project, $llm, $tmp] = make_designdir_fixture();
     $project->writeJson('meta.json', [
         'prompt' => 'A cozy neighborhood bakery',
-        'design_constraints' => ['allowed_hero_media_modes' => ['none']],
-        'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'diptych-editorial'],
+        'design_constraints' => ['allowed_hero_media_modes' => ['cover-image']],
+        'hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'editorial-split'],
     ]);
     $llm->queueJson(['seeds' => designdir_seeds()]);
     $llm->queueJson(['direction' => designdir_direction()]);
     (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $direction = $project->readJson('designDirection.json');
-    assert_eq('typographic-poster', $direction['hero_blueprint']['recipe']);
+    $delivered = $direction['hero_blueprint']['recipe'];
+    assert_true(
+        in_array($delivered, ['cinematic-safe-zone', 'layered-poster'], true),
+        'foreground request remapped inside the cover-image pool',
+    );
     $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
-    assert_contains('diptych-editorial', $joined);
-    assert_contains('typographic-poster', $joined);
+    assert_contains('editorial-split', $joined);
+    assert_contains($delivered, $joined);
     assert_contains('remapped', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -899,85 +903,18 @@ test('invalid signature-device slots degrade to empty and clear hero placement w
     assert_contains('signature_device_slots', implode(' ', $warnings));
 });
 
-test('subject_is_visual_work gates the image-free recipe out of automatic selection', function () {
-    $ids = array_map(fn (int $i) => "gate-site-{$i}", range(1, 64));
-
-    // Ungated, the sweep must reach the image-free recipe at least once —
-    // otherwise the gated assertion below would be vacuous.
-    $ungated = [];
-    foreach ($ids as $id) {
-        $w = [];
-        $ungated[] = DesignDirectionStep::selectHeroRecipe([], $id, 'Committed seed', $w);
+test('every cataloged hero recipe bears an image (the image-free poster is retired)', function () {
+    foreach (Automattic\SiteBuild\HeroComposition::RECIPES as $recipe) {
+        $meta = Automattic\SiteBuild\HeroComposition::metadata($recipe);
+        assert_true((int) $meta['min_images'] >= 1, "{$recipe} carries at least one image");
     }
-    assert_true(in_array('typographic-poster', $ungated, true));
-
-    foreach ($ids as $id) {
+    // Automatic selection therefore always lands on an image-bearing recipe.
+    foreach (range(1, 16) as $i) {
         $w = [];
-        $recipe = DesignDirectionStep::selectHeroRecipe(
-            [],
-            $id,
-            'Committed seed',
-            $w,
-            ['subject_is_visual_work' => true],
-        );
-        assert_true($recipe !== 'typographic-poster', "gated selection for {$id} must bear an image");
+        $recipe = DesignDirectionStep::selectHeroRecipe([], "gate-site-{$i}", 'Committed seed', $w);
+        assert_true((int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['min_images'] >= 1);
         assert_eq([], $w);
     }
-});
-
-test('subject_is_visual_work gate only fires on boolean true', function () {
-    // Find an identifier that reaches the image-free recipe ungated, then
-    // confirm non-boolean truthy spec values leave that selection unchanged.
-    $chosen = null;
-    foreach (range(1, 64) as $i) {
-        $w = [];
-        if (DesignDirectionStep::selectHeroRecipe([], "gate-site-{$i}", 'Committed seed', $w) === 'typographic-poster') {
-            $chosen = "gate-site-{$i}";
-            break;
-        }
-    }
-    assert_true($chosen !== null);
-    foreach (['true', 1, ['yes'], null] as $value) {
-        $w = [];
-        $recipe = DesignDirectionStep::selectHeroRecipe(
-            [],
-            $chosen,
-            'Committed seed',
-            $w,
-            ['subject_is_visual_work' => $value],
-        );
-        assert_eq('typographic-poster', $recipe);
-        assert_eq([], $w);
-    }
-});
-
-test('caller-owned media modes beat the subject_is_visual_work gate without warnings', function () {
-    $w = [];
-    $recipe = DesignDirectionStep::selectHeroRecipe(
-        ['design_constraints' => ['allowed_hero_media_modes' => ['none']]],
-        'gate-caller-wins',
-        'Committed seed',
-        $w,
-        ['subject_is_visual_work' => true],
-    );
-    assert_eq('typographic-poster', $recipe);
-    assert_eq([], $w);
-});
-
-test('batch request outside the visual-work gate remaps with provenance', function () {
-    $w = [];
-    $recipe = DesignDirectionStep::selectHeroRecipe(
-        ['hero_assignment' => ['source' => 'batch', 'requested_recipe' => 'typographic-poster']],
-        'gate-batch-remap',
-        'Committed seed',
-        $w,
-        ['subject_is_visual_work' => true],
-    );
-    assert_true($recipe !== 'typographic-poster');
-    assert_true(in_array($recipe, HeroComposition::RECIPES, true));
-    assert_eq(1, count($w));
-    assert_contains('subject_is_visual_work', $w[0]);
-    assert_contains('typographic-poster', $w[0]);
 });
 
 test('directionFor returns nothing when no direction was committed', function () {

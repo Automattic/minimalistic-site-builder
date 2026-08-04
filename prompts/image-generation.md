@@ -20,7 +20,7 @@ AI_IMAGE: subject | page-context | style | aspect-ratio
 - `AI_IMAGE:` — Required prefix marker (exactly as written)
 - `|` — Pipe character used as the separator between values
 - `subject` — What the image shows and from what point of view (see subject guidelines below). This is the actual thing to render.
-- `page-context` — Where and how the image is used on the page. This is NOT part of what gets drawn; it only helps the generator pick a fitting subject, mood and composition. Examples: `wide feature with text overlaid on top`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`, `team member headshot in a row of bios`, `background of a call-to-action band`.
+- `page-context` — Where and how the image is used on the page. This is NOT part of what gets drawn; it only helps the generator pick a fitting subject, mood and composition. Examples: `wide feature band with a quiet low-detail area kept clear on top`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`, `team member headshot in a row of bios`, `background of a call-to-action band`.
 - `style` — One of the style options below
 - `aspect-ratio` — One of: `square`, `landscape`, `ultrawide`, `portrait`, `card-landscape`, `card-portrait`
 
@@ -62,10 +62,11 @@ Decoration, when a section needs any at all, comes from theme primitives — the
 - NEVER ask the image to render text. No words, names, letters, numerals, wordmarks, monograms, mottos, signage copy, labels, or "calligraphy/hand-lettering of <words>" — in any language or script. Image models garble glyphs and invent fake scripts, and raster text can't be read by assistive tech, translated, or restyled. Everything meant to be read is real HTML typography styled by the theme. If a plan or design note asks for lettered imagery (a hand-lettered name, a calligraphic line), express it as styled heading/paragraph text instead and keep imagery purely pictorial. Incidental illegible text inside a photographic scene (a distant storefront, a menu blur) is fine — text as the subject is not.
 - Describe content and composition, NOT photographic grade or style treatment. A single site-wide grade (color vs black-and-white, film grain, light quality, color grading) is applied to every image automatically at generation time — do not restate or contradict it in the subject (no "black and white", "golden hour color", "muted grey tones", "35mm grain" and the like). Per-image grading would make adjacent images clash.
 - Make sibling images in the same section describe their distinct subject so they don't read alike.
-- For cover backgrounds with overlaid copy, keep the focal subject off-center with calm, low-detail areas so the text (described in `page-context`) stays legible.
+- For cover backgrounds with overlaid copy, keep the focal subject off-center with calm, low-detail areas so the overlaid HTML text stays legible.
 
 **Page-context guidelines:**
-- A short phrase naming where and how the image is used (e.g. `wide feature with the headline overlaid on top`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`). The generator uses this to fit the image to its slot — it is not drawn into the image.
+- A short phrase naming where and how the image is used (e.g. `wide feature band in a portfolio grid`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`). The generator uses this to fit the image to its slot — it is not drawn into the image.
+- Describe copy-overlay placement as reserved empty space, never as text: write `full-bleed hero cover with the left third kept as a calm low-detail area` — NOT `hero with the headline and subtitle overlaid on the left`. Naming a headline, subtitle, caption or menu in the page-context is the audited trigger for the model painting ghost text and fake UI into that exact region of the image.
 
 **Cover backgrounds:**
 For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOTH the block's `url` attribute and the inner `<img class="wp-block-cover__image-background">` src, and put the `AI_IMAGE` spec in that img's alt. The `url` and `src` are asset PATHS only — never write the `AI_IMAGE:` spec into a `url` or `src`; it belongs solely in the `alt`. A cover whose `url` is an `AI_IMAGE:` string ships the raw prompt text as the image and renders no picture.
