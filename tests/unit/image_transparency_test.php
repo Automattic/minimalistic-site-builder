@@ -4,7 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\ImageTransparency;
 
 /**
- * ImageTransparency keys the flat solid background Imagen was prompted to
+ * ImageTransparency keys the flat solid background the image model was prompted to
  * render (it cannot produce real alpha) out to PNG transparency: a flood fill
  * inward from the image border, then an unconditional global key pass so
  * background-colored pockets enclosed by the subject go too, then a trim of
@@ -61,7 +61,7 @@ test('keyOutBackground makes the white background transparent, keeps the subject
 });
 
 test('keyOutBackground keys an off-white background via the fuzz', function () {
-    // Imagen renders "pure white" with slight warmth/noise; the fuzz must
+    // The model renders "pure white" with slight warmth/noise; the fuzz must
     // absorb that.
     $out = ImageTransparency::keyOutBackground(transparency_fixture('rgb(250,247,242)', 'rgb(120,40,20)'));
 
@@ -162,7 +162,7 @@ test('keyOutBackground unmattes anti-aliased edge pixels instead of keeping them
         skip_test('edge unmatting needs ImageMagick 7');
     }
     // A pixel that blends ink 50/50 with the white background — the
-    // anti-aliased edge Imagen renders. The binary key passes leave it fully
+    // anti-aliased edge the model renders. The binary key passes leave it fully
     // opaque with the white baked in (a white fringe on dark pages); the
     // unmatting pass must turn the white share into translucency and divide
     // the contamination out of the color. Solid ink must stay untouched.

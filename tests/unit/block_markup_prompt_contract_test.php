@@ -37,6 +37,7 @@ test('markup generation units share one output-only contract', function () {
             'hero_brief' => 'A text-led hero.',
             'nav_rule' => '- Use wp:page-list.',
             'archetype_assignment' => 'ASSIGNED HEADER ARCHETYPE: standard-row',
+            'header_behavior' => 'DETERMINISTIC HEADER BEHAVIOR: static.',
         ]),
         'footer' => (new FooterUnit($llm, $renderer))->request($input + [
             'final_section_brief' => 'A quiet closing section.',

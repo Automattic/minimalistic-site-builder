@@ -15,9 +15,10 @@ use Automattic\SiteBuild\StepDeclaration;
  * Output: theme/style.css and theme/readme.txt with {{placeholders}} that the
  *         ApplyIdentityStep fills once the site name/slug are known, plus the
  *         static motion kit copied verbatim into theme/assets/motion/ (all
- *         four profiles — the design direction hasn't been chosen yet; the
- *         finalize-theme step later prunes to the committed profile and
- *         enqueues the kit).
+ *         four profiles — the design direction hasn't been chosen yet), and
+ *         the trusted adaptive-header kit in theme/assets/header/. The
+ *         finalize-theme step later prunes assets the committed design does
+ *         not use and enqueues the rest.
  */
 final class ScaffoldThemeStep implements Step
 {
@@ -41,6 +42,7 @@ final class ScaffoldThemeStep implements Step
                 'theme/style.css',
                 'theme/readme.txt',
                 'theme/assets/motion/*',
+                'theme/assets/header/*',
             ],
             concurrent: false,
         );
@@ -51,6 +53,7 @@ final class ScaffoldThemeStep implements Step
         $project->writeText('theme/style.css', self::STYLE_CSS);
         $project->writeText('theme/readme.txt', self::README);
         self::copyMotionKit($project);
+        self::copyHeaderKit($project);
     }
 
     /** Copy the hand-written motion kit into the theme, byte-for-byte. */
@@ -65,6 +68,20 @@ final class ScaffoldThemeStep implements Step
                 'theme/assets/motion/profiles/' . basename($profile),
                 (string) file_get_contents($profile)
             );
+        }
+    }
+
+    /** Copy the hand-written adaptive-header kit into the theme byte-for-byte. */
+    private static function copyHeaderKit(Project $project): void
+    {
+        $kit = Package::headerDir();
+        foreach (['header.css', 'header.js'] as $file) {
+            $source = "{$kit}/{$file}";
+            $contents = @file_get_contents($source);
+            if ($contents === false) {
+                throw new \RuntimeException("Missing or unreadable trusted header asset: {$source}");
+            }
+            $project->writeText('theme/assets/header/' . $file, $contents);
         }
     }
 
@@ -122,27 +139,6 @@ final class ScaffoldThemeStep implements Step
         .wp-site-blocks .wp-block-pullquote {
             margin-block: 0;
             padding-block: var(--wp--preset--spacing--lg);
-        }
-
-        /* Chrome-less overlay header (the header part opts in via className="header-overlay"):
-           floats transparently over the full-bleed hero instead of stacking above it. The
-           absolute positioning resolves against the viewport, not the padded body, so the
-           horizontal padding mirrors the theme's root padding (--wp--style--root--padding-*,
-           emitted when useRootPaddingAwareAlignments is on) — the title/nav then share the
-           same gutter as the constrained content below. The top offset clears the WP admin
-           bar when logged in (core defines the var only while the bar renders); logged-out
-           visitors get the 0px fallback. */
-        .wp-site-blocks .header-overlay {
-            position: absolute;
-            top: var(--wp-admin--admin-bar--height, 0px);
-            left: 0;
-            right: 0;
-            z-index: 10;
-            background: transparent;
-            padding-top: var(--wp--preset--spacing--sm);
-            padding-bottom: var(--wp--preset--spacing--sm);
-            padding-left: var(--wp--style--root--padding-left, var(--wp--preset--spacing--md));
-            padding-right: var(--wp--style--root--padding-right, var(--wp--preset--spacing--md));
         }
 
         /* Raise the navigation's hamburger breakpoint from core's 600px to 720px
