@@ -79,6 +79,18 @@ final class GeneratedMarkup
                 'disposition' => 'repaired',
             ];
         }
+        $wrapperRepairs = [];
+        $text = self::closeUnbalancedWrapperClosers($text, $wrapperRepairs);
+        foreach ($wrapperRepairs as $note) {
+            Narrator::write("    (part '{$key}': {$note})\n");
+            $repairs[] = [
+                'code' => 'wrapper-closers-synthesized',
+                'part' => $key,
+                'authored' => $note,
+                'delivered' => 'balanced container shell',
+                'disposition' => 'repaired',
+            ];
+        }
 
         $recoveryNotes = [];
         try {
@@ -1604,6 +1616,318 @@ final class GeneratedMarkup
             'disposition' => 'repaired',
         ];
         return $markup;
+    }
+
+    /**
+     * Synthesize wrapper closers a container's closing segment left out.
+     *
+     * Long responses sometimes drop a `</div>` right before a container's
+     * closing comment while the comment tree itself stays balanced — and one
+     * missing wrapper tag makes recovery discard the whole part. This pass
+     * rebuilds the comment tree with a simple stack, then advances the strict
+     * wrapper stack through each static container's own shell segments
+     * (prefix, inter-child gaps, closing suffix). When the prefix and every
+     * gap advance cleanly but the suffix leaves wrapper tags open, the
+     * missing close tags are inserted immediately before the closer comment.
+     * Anything ambiguous — a broken gap, a non-strict shell, an imbalanced
+     * comment tree — is left untouched for recovery to isolate. Idempotent:
+     * a repaired suffix advances to an empty stack. At most four insertions
+     * per document.
+     *
+     * @param list<string> $notes
+     */
+    public static function closeUnbalancedWrapperClosers(string $text, array &$notes = []): string
+    {
+        preg_match_all(
+            '/<!--\s+(?<closer>\/)?wp:(?<name>[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)\s+'
+            . '(?:(?<attrs>\{(?:(?!-->).)*?\})\s+)?(?<void>\/)?-->/s',
+            $text,
+            $matches,
+            PREG_OFFSET_CAPTURE | PREG_SET_ORDER
+        );
+        if ($matches === []) {
+            return $text;
+        }
+
+        /** @var list<array{name:string,openEnd:int,children:list<array{start:int,end:int}>,start:int}> $stack */
+        $stack = [];
+        /** @var list<array{name:string,openEnd:int,children:list<array{start:int,end:int}>,closerStart:int}> $containers */
+        $containers = [];
+        /** @var list<array{at:int,html:string,name:string}> $insertions */
+        $insertions = [];
+        /** @var list<string> $crossedInsertions */
+        $crossedInsertions = [];
+        foreach ($matches as $m) {
+            $offset = $m[0][1];
+            $length = strlen($m[0][0]);
+            $isCloser = ($m['closer'][0] ?? '') === '/';
+            $isVoid = ($m['void'][0] ?? '') === '/';
+            if ($isCloser && $isVoid) {
+                return $text;
+            }
+            if ($isVoid) {
+                if ($stack !== []) {
+                    $stack[count($stack) - 1]['children'][] = ['start' => $offset, 'end' => $offset + $length];
+                    $stack[count($stack) - 1]['firstEventStart'] ??= $offset;
+                }
+                continue;
+            }
+            if (!$isCloser) {
+                if ($stack !== []) {
+                    $stack[count($stack) - 1]['firstEventStart'] ??= $offset;
+                }
+                $stack[] = [
+                    'name' => $m['name'][0],
+                    'start' => $offset,
+                    'openEnd' => $offset + $length,
+                    'children' => [],
+                    'firstEventStart' => null,
+                ];
+                continue;
+            }
+            if ($stack === []) {
+                return $text; // stray closer — not this pass's defect
+            }
+            if ($stack[count($stack) - 1]['name'] !== $m['name'][0]) {
+                // A closer crossing still-open frames: the model forgot the
+                // inner containers' closers entirely (observed: a day-grid's
+                // wp:columns/wp:column never closed, so the root's closer
+                // crossed both). When every crossed frame is a static
+                // container, synthesize its wrapper close tags and closer
+                // comment just before the wrapper-close run that precedes
+                // this closer, innermost-first. Anything else stays broken
+                // for recovery to isolate.
+                $matchDepth = null;
+                for ($i = count($stack) - 1; $i >= 0; $i--) {
+                    if ($stack[$i]['name'] === $m['name'][0]) {
+                        $matchDepth = $i;
+                        break;
+                    }
+                }
+                if ($matchDepth === null) {
+                    return $text;
+                }
+                $insertAt = self::wrapperCloseRunStart($text, $offset);
+                $synth = '';
+                for ($i = count($stack) - 1; $i > $matchDepth; $i--) {
+                    $frame = $stack[$i];
+                    if (!in_array($frame['name'], ['group', 'columns', 'column', 'buttons'], true)) {
+                        return $text;
+                    }
+                    $prefixEnd = $frame['firstEventStart'] ?? min($insertAt, $offset);
+                    $shell = MarkupSalvage::advanceStrictWrapperStack(
+                        substr($text, $frame['openEnd'], max(0, $prefixEnd - $frame['openEnd'])),
+                        [],
+                        false
+                    );
+                    if ($shell === null || $shell === []) {
+                        return $text;
+                    }
+                    $synth .= implode('', array_map(
+                        static fn (string $tag): string => "</{$tag}>",
+                        array_reverse($shell)
+                    )) . "<!-- /wp:{$frame['name']} -->";
+                    $crossedInsertions[] = $frame['name'];
+                    array_pop($stack);
+                }
+                if (count($crossedInsertions ?? []) > 4) {
+                    return $text;
+                }
+                $insertions[] = ['at' => $insertAt, 'html' => $synth, 'name' => $m['name'][0], 'crossed' => true];
+            }
+            $node = array_pop($stack);
+            $node['closerStart'] = $offset;
+            if ($stack !== []) {
+                $stack[count($stack) - 1]['children'][] = [
+                    'start' => $node['start'],
+                    'end' => $offset + $length,
+                ];
+            }
+            if (in_array($node['name'], ['group', 'columns', 'column', 'buttons'], true)) {
+                $containers[] = $node;
+            }
+        }
+        if ($stack !== []) {
+            return $text;
+        }
+
+        // Crossed-frame synthesis changed which bytes belong to which frame,
+        // so the container-suffix scan below would compute against stale
+        // offsets; apply only the crossed repairs this pass.
+        if ($crossedInsertions !== []) {
+            usort($insertions, static fn (array $a, array $b): int => $b['at'] <=> $a['at']);
+            foreach ($insertions as $insertion) {
+                $text = substr_replace($text, $insertion['html'], $insertion['at'], 0);
+                $notes[] = 'synthesized missing container closer(s) '
+                    . preg_replace('/\s+/', ' ', $insertion['html'])
+                    . " for frame(s) crossed by a wp:{$insertion['name']} closer";
+            }
+            return $text;
+        }
+
+        foreach ($containers as $node) {
+            $childStart = $node['children'] === [] ? $node['closerStart'] : $node['children'][0]['start'];
+            $wrapper = MarkupSalvage::advanceStrictWrapperStack(
+                substr($text, $node['openEnd'], $childStart - $node['openEnd']),
+                [],
+                false
+            );
+            if ($wrapper === null || $wrapper === []) {
+                continue; // dynamic or non-strict shell — leave to recovery
+            }
+            $cursor = $childStart;
+            foreach ($node['children'] as $child) {
+                $gap = substr($text, $cursor, $child['start'] - $cursor);
+                if ($gap !== '') {
+                    $wrapper = MarkupSalvage::advanceStrictWrapperStack($gap, $wrapper, false);
+                    if ($wrapper === null || $wrapper === []) {
+                        continue 2;
+                    }
+                }
+                $cursor = $child['end'];
+            }
+            $suffix = substr($text, $cursor, $node['closerStart'] - $cursor);
+            $after = MarkupSalvage::advanceStrictWrapperStack($suffix, $wrapper, true);
+            if ($after === null || $after === []) {
+                continue;
+            }
+            $insertions[] = [
+                'at' => $node['closerStart'],
+                'html' => implode('', array_map(
+                    static fn (string $tag): string => "</{$tag}>",
+                    array_reverse($after)
+                )),
+                'name' => $node['name'],
+            ];
+        }
+        if ($insertions === [] || count($insertions) > 4) {
+            return $text;
+        }
+
+        usort($insertions, static fn (array $a, array $b): int => $b['at'] <=> $a['at']);
+        foreach ($insertions as $insertion) {
+            $text = substr_replace($text, $insertion['html'], $insertion['at'], 0);
+            $notes[] = "closed wrapper tag(s) {$insertion['html']} missing before a wp:{$insertion['name']} closer";
+        }
+        return $text;
+    }
+
+    /**
+     * Start of the run of whitespace and HTML close tags directly preceding
+     * an offset. Crossed-frame closers are synthesized before this run so
+     * they land inside the still-open frames, ahead of the wrapper closes
+     * that belong to the outer frames.
+     */
+    private static function wrapperCloseRunStart(string $text, int $offset): int
+    {
+        $start = $offset;
+        while ($start > 0) {
+            $before = rtrim(substr($text, 0, $start));
+            if (!str_ends_with($before, '>')) {
+                break;
+            }
+            $open = strrpos($before, '<');
+            if ($open === false || preg_match('/^<\/[a-z][a-z0-9-]*\s*>$/i', substr($before, $open)) !== 1) {
+                break;
+            }
+            $start = $open;
+        }
+        return $start;
+    }
+
+    /**
+     * Clamp a media-led hero root's top padding to the `sm` preset.
+     *
+     * hero.md requires it ("when the recipe leads with media... the root
+     * group's top padding is at most the `sm` spacing preset") but models
+     * keep authoring `xl`, opening a dead band between the header and the
+     * media that pushes the copy — sometimes the whole rail — below the
+     * fold. Fires only when the root's first child is the recipe's media
+     * (wp:image/wp:cover marked hero-composition__media) and the authored
+     * top padding is a larger spacing preset. Preset swap only; explicit
+     * pixel values and smaller presets pass through untouched.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function clampMediaLedTopPadding(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $markup;
+        }
+        $children = $document->children($root);
+        if ($children === []) {
+            return $markup;
+        }
+        $first = $children[0];
+        if (!in_array($document->name($first), ['image', 'cover'], true)
+            || !str_contains(
+                (string) (($document->attrs($first) ?? [])['className'] ?? ''),
+                'hero-composition__media'
+            )
+        ) {
+            return $markup;
+        }
+
+        $attrs = $document->attrs($root) ?? [];
+        $top = $attrs['style']['spacing']['padding']['top'] ?? null;
+        if (!is_string($top) || preg_match('/^var:preset\|spacing\|(md|lg|xl)$/', $top, $m) !== 1) {
+            return $markup;
+        }
+
+        // Patch both mirrors inside the root's own byte spans: the attribute
+        // JSON inside the opening comment, and the inline style in the
+        // wrapper tag (replaceInOwnHtml only edits class attributes). The
+        // JSON needle carries the "top" key so a matching sibling value
+        // (e.g. bottom padding) is never touched.
+        $commentEnd = $document->openingOffset($root) + $document->openingLength($root);
+        $children = $document->children($root);
+        $htmlEnd = $children === []
+            ? $document->innerEndOffset($root)
+            : $document->openingOffset($children[0]);
+        $patched = self::replaceFirstInSpan(
+            $markup,
+            $document->openingOffset($root),
+            $commentEnd,
+            "\"top\":\"var:preset|spacing|{$m[1]}\"",
+            '"top":"var:preset|spacing|sm"',
+        );
+        $patched = self::replaceFirstInSpan(
+            $patched,
+            $commentEnd,
+            $htmlEnd,
+            "padding-top:var(--wp--preset--spacing--{$m[1]})",
+            'padding-top:var(--wp--preset--spacing--sm)',
+        );
+        if ($patched === $markup) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'media-led-top-padding-clamped',
+            'part' => $part,
+            'authored' => $top,
+            'delivered' => 'var:preset|spacing|sm',
+            'disposition' => 'repaired',
+        ];
+        return $patched;
+    }
+
+    /** Replace the first occurrence of a needle inside [start, end) only. */
+    private static function replaceFirstInSpan(
+        string $text,
+        int $start,
+        int $end,
+        string $needle,
+        string $replace,
+    ): string {
+        $span = substr($text, $start, $end - $start);
+        $at = strpos($span, $needle);
+        if ($at === false) {
+            return $text;
+        }
+        $span = substr_replace($span, $replace, $at, strlen($needle));
+        return substr_replace($text, $span, $start, $end - $start);
     }
 
     /** Visible reading text of a block's inner HTML, normalized for equality. */

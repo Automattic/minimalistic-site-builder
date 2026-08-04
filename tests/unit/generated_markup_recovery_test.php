@@ -616,3 +616,78 @@ test('dedupeHeadlineEcho never matches short repeated labels or parts without an
     assert_eq($noH1, Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($noH1, 'p', $r));
     assert_eq([], $r);
 });
+
+test('wrapper repair synthesizes closers for container frames crossed at a closer', function () {
+    // Regression: pulso4 lost its whole 24KB schedule section because a
+    // day-grid's wp:columns/wp:column never closed and the root closer
+    // crossed both frames (leaving the saved HTML two </div>s short).
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"schedule","layout":{"type":"constrained"}} -->' . "\n"
+        . '<section class="wp-block-group" id="schedule">' . "\n"
+        . '<!-- wp:columns -->' . "\n"
+        . '<div class="wp-block-columns"><!-- wp:column -->' . "\n"
+        . '<div class="wp-block-column"><!-- wp:paragraph --><p>Friday sets.</p><!-- /wp:paragraph -->' . "\n"
+        . '</section>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($doc, $notes);
+    assert_true($out !== $doc, 'crossed frames were repaired');
+    assert_contains('<!-- /wp:column -->', $out);
+    assert_contains('<!-- /wp:columns -->', $out);
+    assert_eq(1, count($notes));
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // Idempotent: the repaired document passes through untouched.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($out, $again));
+    assert_eq([], $again);
+});
+
+test('wrapper repair closes a container suffix missing its wrapper tag', function () {
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>Copy.</p><!-- /wp:paragraph -->' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($doc, $notes);
+    assert_contains('</div><!-- /wp:group -->', $out);
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+    assert_eq(1, count($notes));
+});
+
+test('wrapper repair leaves stray closers and content-bearing shells alone', function () {
+    $stray = '<!-- wp:paragraph --><p>Text.</p><!-- /wp:paragraph --><!-- /wp:group -->';
+    $n = [];
+    assert_eq($stray, Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($stray, $n));
+    assert_eq([], $n);
+});
+
+test('clampMediaLedTopPadding lowers xl to sm only on media-led hero roots', function () {
+    // Regression: lumen4's panorama-rail root carried padding-top:xl, opening
+    // a dead band under the header that pushed the whole rail below the fold.
+    $mediaLed = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--panorama-rail","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
+        . '<section id="hero" class="wp-block-group hero-composition--panorama-rail" style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)">'
+        . '<!-- wp:image {"className":"hero-composition__media"} --><figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt="AI_IMAGE: a | b | c | landscape"/></figure><!-- /wp:image -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::clampMediaLedTopPadding($mediaLed, 'p', $repairs);
+    assert_contains('"top":"var:preset|spacing|sm"', $out);
+    assert_contains('padding-top:var(--wp--preset--spacing--sm)', $out);
+    assert_contains('padding-bottom:var(--wp--preset--spacing--xl)', $out, 'bottom padding untouched');
+    assert_true(in_array('media-led-top-padding-clamped', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::clampMediaLedTopPadding($out, 'p', $again));
+    assert_eq([], $again);
+
+    // Copy-led root keeps its padding.
+    $copyLed = str_replace(
+        ['<!-- wp:image {"className":"hero-composition__media"} --><figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt="AI_IMAGE: a | b | c | landscape"/></figure><!-- /wp:image -->'
+            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'],
+        ['<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'],
+        $mediaLed
+    );
+    $r2 = [];
+    assert_eq($copyLed, Automattic\SiteBuild\Units\GeneratedMarkup::clampMediaLedTopPadding($copyLed, 'p', $r2));
+    assert_eq([], $r2);
+});
