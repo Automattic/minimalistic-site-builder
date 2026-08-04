@@ -39,10 +39,11 @@ test('HeaderUnit generates a constrained header from self-contained input', func
         'hero_brief' => 'PART-HERO-SENTINEL',
         'nav_rule'   => '- PART-NAV-SENTINEL',
         'archetype_assignment' => 'PART-ARCHETYPE-SENTINEL',
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
     ]));
 
     $prompt = $llm->calls[0]['prompt'];
-    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL', 'PART-ARCHETYPE-SENTINEL'] as $sentinel) {
+    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL', 'PART-ARCHETYPE-SENTINEL', 'PART-BEHAVIOR-SENTINEL'] as $sentinel) {
         assert_contains($sentinel, $prompt);
     }
     assert_eq('header', $llm->calls[0]['opts']['log_label'] ?? null);
