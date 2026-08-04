@@ -522,6 +522,113 @@ test('normalizeRootPadding zeroes vertical root padding — sections own the rhy
     assert_true(!isset($theme['styles']['spacing']['padding']), 'no padding invented');
 });
 
+test('normalizeGroupBlockPadding removes recursive vertical defaults and preserves siblings', function () {
+    $theme = ['styles' => ['blocks' => [
+        'core/group' => [
+            'spacing' => [
+                'padding' => [
+                    'top' => 'var:preset|spacing|xl',
+                    'right' => 'var:preset|spacing|md',
+                    'bottom' => 'var:preset|spacing|lg',
+                    'left' => '2rem',
+                ],
+                'blockGap' => 'var:preset|spacing|sm',
+            ],
+            'border' => ['radius' => '4px'],
+        ],
+        'core/image' => ['border' => ['radius' => '2px']],
+    ]]];
+
+    [$normalized, $rows] = ThemeJsonStep::repairGroupBlockPadding($theme);
+    $group = $normalized['styles']['blocks']['core/group'];
+    assert_true(!isset($group['spacing']['padding']['top']));
+    assert_true(!isset($group['spacing']['padding']['bottom']));
+    assert_eq('var:preset|spacing|md', $group['spacing']['padding']['right']);
+    assert_eq('2rem', $group['spacing']['padding']['left']);
+    assert_eq('var:preset|spacing|sm', $group['spacing']['blockGap']);
+    assert_eq(['radius' => '4px'], $group['border']);
+    assert_eq(['radius' => '2px'], $normalized['styles']['blocks']['core/image']['border']);
+    assert_eq($normalized, ThemeJsonStep::normalizeGroupBlockPadding($normalized), 'fixed point');
+
+    // The deletion of authored padding is recorded durably, per removed side,
+    // in the same grammar as every sibling repair.
+    $joined = implode(' ', $rows);
+    assert_eq(2, count($rows), 'one row per removed vertical side');
+    assert_contains(
+        'theme/theme.json styles.blocks.core/group.spacing.padding.top: authored "var:preset|spacing|xl"; delivered removed',
+        $joined,
+    );
+    assert_contains(
+        'theme/theme.json styles.blocks.core/group.spacing.padding.bottom: authored "var:preset|spacing|lg"; delivered removed',
+        $joined,
+    );
+    assert_contains('disposition removed recursive vertical Group padding', $joined);
+    assert_eq([], ThemeJsonStep::repairGroupBlockPadding($normalized)[1], 'a fixed point records no rows');
+
+    $onlyVertical = ThemeJsonStep::normalizeGroupBlockPadding(['styles' => ['blocks' => [
+        'core/group' => ['spacing' => ['padding' => [
+            'top' => 'var:preset|spacing|xl',
+            'bottom' => 'var:preset|spacing|xl',
+        ]]],
+    ]]]);
+    assert_true(!isset($onlyVertical['styles']['blocks']['core/group']), 'empty block style pruned');
+
+    [$scalar, $scalarRows] = ThemeJsonStep::repairGroupBlockPadding(['styles' => ['blocks' => [
+        'core/group' => ['spacing' => ['padding' => 'var:preset|spacing|md']],
+    ]]]);
+    assert_eq(
+        ['left' => 'var:preset|spacing|md', 'right' => 'var:preset|spacing|md'],
+        $scalar['styles']['blocks']['core/group']['spacing']['padding'],
+        'four-side shorthand keeps only its horizontal intent',
+    );
+    assert_eq(1, count($scalarRows), 'the scalar rewrite is recorded once');
+    assert_contains(
+        'theme/theme.json styles.blocks.core/group.spacing.padding: authored "var:preset|spacing|md"; '
+            . 'delivered {"left":"var:preset|spacing|md","right":"var:preset|spacing|md"}',
+        $scalarRows[0],
+    );
+    assert_contains('disposition rewrote the four-side shorthand to horizontal longhands', $scalarRows[0]);
+
+    $missing = ['styles' => ['spacing' => ['blockGap' => '1rem']]];
+    assert_eq([$missing, []], ThemeJsonStep::repairGroupBlockPadding($missing), 'missing path untouched, no rows');
+});
+
+test('theme-json write removes Atlas-style global Group vertical padding', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_group_padding_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A field operations landing page']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+
+    $payload = valid_theme_payload();
+    $payload['styles']['blocks']['core/group'] = [
+        'spacing' => [
+            'padding' => [
+                'top' => 'var:preset|spacing|xl',
+                'bottom' => 'var:preset|spacing|xl',
+            ],
+            'blockGap' => 'var:preset|spacing|md',
+        ],
+        'border' => ['radius' => '2px'],
+    ];
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $group = $project->readJson('theme/theme.json')['styles']['blocks']['core/group'];
+    assert_true(!isset($group['spacing']['padding']), 'recursive vertical padding removed');
+    assert_eq('var:preset|spacing|md', $group['spacing']['blockGap']);
+    assert_eq(['radius' => '2px'], $group['border']);
+
+    // The silent-deletion regression: the removal must leave a durable row,
+    // like every sibling repair in the write path.
+    $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_contains('styles.blocks.core/group.spacing.padding.top: authored "var:preset|spacing|xl"', $joined);
+    assert_contains('styles.blocks.core/group.spacing.padding.bottom: authored "var:preset|spacing|xl"', $joined);
+    assert_contains('delivered removed', $joined);
+    assert_contains('disposition removed recursive vertical Group padding', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json fills a missing required font slug with the system stack', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

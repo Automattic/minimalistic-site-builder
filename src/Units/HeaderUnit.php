@@ -20,7 +20,8 @@ final class HeaderUnit extends AbstractMarkupUnit
      * @param array{
      *   site_spec:string|array<mixed>,language:string,theme_json:string|array<mixed>,
      *   design_direction:string,outline:string,hero_brief:string,
-     *   site_pages:string,nav_rule:string,archetype_assignment:string
+     *   site_pages:string,nav_rule:string,archetype_assignment:string,
+     *   header_behavior:string
      * } $input
      */
     public function request(array $input): array
@@ -30,6 +31,7 @@ final class HeaderUnit extends AbstractMarkupUnit
             'site_pages' => $this->inputString($input, 'site_pages'),
             'nav_rule'   => $this->inputString($input, 'nav_rule'),
             'archetype_assignment' => $this->inputString($input, 'archetype_assignment'),
+            'header_behavior' => $this->inputString($input, 'header_behavior'),
         ]);
     }
 
