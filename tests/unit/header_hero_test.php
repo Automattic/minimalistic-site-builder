@@ -81,6 +81,106 @@ test('overlay-to-solid removes legacy inner positioning and wires closed state c
     assert_eq([], $again['notes']);
 });
 
+test('nested header Groups neutralize Atlas-style global vertical padding', function () {
+    $theme = ['styles' => ['blocks' => ['core/group' => ['spacing' => ['padding' => [
+        'top' => 'var:preset|spacing|xl',
+        'bottom' => 'var:preset|spacing|xl',
+    ]]]]]];
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"var:preset|spacing|md"}},"layout":{"type":"flex"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"var:preset|spacing|sm"}},"layout":{"type":"flex"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+        . '<!-- wp:navigation /--></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader(
+        $markup,
+        SectionsStep::MODE_STACKED,
+        'Atlas Field',
+        [],
+        false,
+        null,
+        $theme,
+    );
+    $doc = BlockMarkup::parse($result['markup']);
+    $groups = array_values(array_filter($doc->indices(), static fn (int $i): bool => $doc->name($i) === 'group'));
+    assert_eq(3, count($groups));
+    $rootPadding = ($doc->attrs($groups[0]) ?? [])['style']['spacing']['padding'];
+    assert_eq('var:preset|spacing|sm', $rootPadding['top'], 'root breathing room survives');
+    assert_eq('var:preset|spacing|sm', $rootPadding['bottom']);
+    foreach (array_slice($groups, 1) as $group) {
+        $attrs = $doc->attrs($group) ?? [];
+        assert_eq('0', $attrs['style']['spacing']['padding']['top']);
+        assert_eq('0', $attrs['style']['spacing']['padding']['bottom']);
+        assert_true(isset($attrs['style']['spacing']['blockGap']), 'existing descendant gap survives');
+    }
+    assert_contains('2 descendant header groups', implode(' ', $result['notes']));
+
+    $again = HeaderHeroStep::fixHeader(
+        $result['markup'],
+        SectionsStep::MODE_STACKED,
+        'Atlas Field',
+        [],
+        false,
+        null,
+        $theme,
+    );
+    assert_eq($result['markup'], $again['markup'], 'repair reaches a fixed point');
+    assert_eq([], $again['notes']);
+});
+
+test('nested Group repair preserves explicit double-decker and partial-side padding', function () {
+    $theme = ['styles' => ['blocks' => ['core/group' => ['spacing' => ['padding' => [
+        'top' => 'var:preset|spacing|xl',
+        'bottom' => 'var:preset|spacing|xl',
+    ]]]]]];
+    $markup = '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}},"border":{"bottom":{"width":"1px"}}}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-tagline /--></div><!-- /wp:group -->'
+        . '<!-- wp:group {"style":{"spacing":{"padding":{"bottom":"var:preset|spacing|sm"}}},"layout":{"type":"flex"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--><!-- wp:navigation /--></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', [], false, null, $theme);
+    $doc = BlockMarkup::parse($result['markup']);
+    $groups = array_values(array_filter($doc->indices(), static fn (int $i): bool => $doc->name($i) === 'group'));
+    $strip = $doc->attrs($groups[1]) ?? [];
+    assert_eq('var:preset|spacing|sm', $strip['style']['spacing']['padding']['top']);
+    assert_eq('var:preset|spacing|sm', $strip['style']['spacing']['padding']['bottom']);
+    assert_eq('1px', $strip['style']['border']['bottom']['width'], 'strip decoration survives');
+    $row = $doc->attrs($groups[2]) ?? [];
+    assert_eq('0', $row['style']['spacing']['padding']['top'], 'missing inherited side neutralized');
+    assert_eq('var:preset|spacing|sm', $row['style']['spacing']['padding']['bottom'], 'explicit side survives');
+});
+
+test('nested Group repair skips malformed containers and continues with healthy siblings', function () {
+    $theme = ['styles' => ['blocks' => ['core/group' => ['spacing' => ['padding' => [
+        'top' => 'var:preset|spacing|xl',
+        'bottom' => 'var:preset|spacing|xl',
+    ]]]]]];
+    $markup = '<!-- wp:group {} --><div class="wp-block-group">'
+        . '<!-- wp:group {"style":"bad"} --><div class="wp-block-group"></div><!-- /wp:group -->'
+        . '<!-- wp:group {"style":{"spacing":"bad"}} --><div class="wp-block-group"></div><!-- /wp:group -->'
+        . '<!-- wp:group {"style":{"spacing":{"padding":["bad"]}}} --><div class="wp-block-group"></div><!-- /wp:group -->'
+        . '<!-- wp:group {"layout":{"type":"flex"}} --><div class="wp-block-group">'
+        . '<!-- wp:site-title /--></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', [], false, null, $theme);
+    $doc = BlockMarkup::parse($result['markup']);
+    $groups = array_values(array_filter($doc->indices(), static fn (int $i): bool => $doc->name($i) === 'group'));
+    assert_eq('bad', ($doc->attrs($groups[1]) ?? [])['style']);
+    assert_eq('bad', ($doc->attrs($groups[2]) ?? [])['style']['spacing']);
+    assert_eq(['bad'], ($doc->attrs($groups[3]) ?? [])['style']['spacing']['padding']);
+    $healthyPadding = ($doc->attrs($groups[4]) ?? [])['style']['spacing']['padding'];
+    assert_eq('0', $healthyPadding['top']);
+    assert_eq('0', $healthyPadding['bottom']);
+    assert_contains('1 descendant header group', implode(' ', $result['notes']));
+});
+
 test('stacked mode removes a stray header-overlay class from attrs and saved HTML', function () {
     $markup = '<!-- wp:group {"className":"header-overlay","layout":{"type":"constrained"}} -->' . "\n"
         . '<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>' . "\n"
@@ -366,6 +466,48 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
     assert_eq(HeaderBehavior::STATIC, $project->readJson(HeaderBehavior::FILE)['behavior']);
     assert_true(!$project->exists('warnings.json'), 'complete deterministic repair is not queued for AI repair');
     assert_true($project->exists('logs/header-hero.txt'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the step protects a resumed legacy theme with global Group padding', function () {
+    $tmp = sys_get_temp_dir() . '/builder_hh_group_padding_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Atlas Field']);
+    $theme = hh_theme_json();
+    $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
+        'top' => 'var:preset|spacing|xl',
+        'bottom' => 'var:preset|spacing|xl',
+    ];
+    $project->writeJson('theme/theme.json', $theme);
+    $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home', 'title' => 'Home', 'front' => true,
+        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+    ]]]);
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group"><!-- wp:group {"layout":{"type":"flex"}} -->'
+            . '<div class="wp-block-group"><!-- wp:group {"layout":{"type":"flex"}} -->'
+            . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+            . '<!-- wp:navigation /--></div><!-- /wp:group --></div><!-- /wp:group -->',
+    );
+
+    putenv(SectionsStep::ARCHETYPE_ENV);
+    (new HeaderHeroStep())->run($project);
+
+    $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
+    $groups = array_values(array_filter(
+        $header->indices(),
+        static fn (int $i): bool => $header->name($i) === 'group',
+    ));
+    foreach (array_slice($groups, 1) as $group) {
+        $padding = ($header->attrs($group) ?? [])['style']['spacing']['padding'];
+        assert_eq('0', $padding['top']);
+        assert_eq('0', $padding['bottom']);
+    }
+    assert_contains('neutralized inherited core/group', $project->readText('logs/header-hero.txt'));
+    assert_true(!$project->exists('warnings.json'), 'lossless legacy repair is not queued');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

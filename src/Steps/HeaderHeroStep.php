@@ -24,7 +24,7 @@ use Automattic\SiteBuild\Warnings;
  * Output: the same parts with contract violations repaired,
  *         headerBehavior.json, and logs/header-hero.txt listing every repair.
  *
- * Six repairs/contracts:
+ * Seven repairs/contracts:
  *  1. Header behavior — resolve static/sticky-soft/overlay-to-solid from the
  *     whole site plan, actual palette and forced archetype, then persist the
  *     closed six-field headerBehavior.json artifact.
@@ -34,20 +34,25 @@ use Automattic\SiteBuild\Warnings;
  *  3. State colors — canonicalize the root visual-state classes and enforce
  *     one palette-token foreground that remains readable on both opaque
  *     states. Overlay starts transparent and stacked modes start opaque.
- *  4. Fold budget — in stacked mode an opaque header consumes ~100px of the
+ *  4. Nested Group padding — a legacy/generated theme may put vertical
+ *     padding on the global core/group style, which matches every structural
+ *     Group nested inside the header and compounds into a giant bar. Missing
+ *     descendant top/bottom values are set to zero while explicit padding
+ *     (including a double-decker strip) and the root's compact padding survive.
+ *  5. Fold budget — in stacked mode an opaque header consumes ~100px of the
  *     first viewport, so a page-opening cover taller than 84vh is lowered to
  *     80vh (header + cover must fit ~100vh; audited covers ran 86-92vh and
  *     pushed the hero H1 and CTA below the fold). Only the cover half is
  *     enforced here: the header's own height is asked for in prompts/header.md
- *     and never measured, so the cap assumes a compliant header. A header that
- *     busts its budget still pushes content below the fold, and this step will
- *     not say so — estimating header height the way estimatedRowWidth()
- *     estimates width would be the way to close that.
- *  5. Nav collapse — WordPress's hamburger only engages below 600px, while
+ *     and not fully measured, so the cap assumes all remaining authored
+ *     header geometry is compliant. A header that busts its budget through an
+ *     explicit value can still push content below the fold; estimating total
+ *     height the way estimatedRowWidth() estimates width would close that.
+ *  6. Nav collapse — WordPress's hamburger only engages below 600px, while
  *     an over-wide title/nav row wraps into a 2-3 row header across the
  *     whole tablet range. When the estimated single-row width exceeds the
  *     budget, the navigation gets `"overlayMenu":"always"`.
- *  6. Title scale — a site title at `section-title`/`display` competes with
+ *  7. Title scale — a site title at `section-title`/`display` competes with
  *     the hero's display H1 (audited ratios collapsed to 1.33x); it is
  *     rewritten to `heading` unless the build forced the oversized-wordmark
  *     archetype, whose whole point is a display-scale wordmark.
@@ -150,7 +155,8 @@ final class HeaderHeroStep implements Step
         $header = $project->readText('theme/' . $headerRel);
         $authoredPositions = self::removedAuthoredPositions($header);
         [$authoredTop, $authoredForeground] = self::authoredRootColors($header);
-        $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
+        $theme = $project->readJson('theme/theme.json');
+        $palette = ContrastFixStep::paletteMap($theme);
         $behavior = HeaderBehavior::resolve(
             $pages,
             $resolvedMode,
@@ -189,6 +195,7 @@ final class HeaderHeroStep implements Step
             $pageTitles,
             $forcedArchetype === 'oversized-wordmark',
             $behavior,
+            $theme,
         );
         if ($result['markup'] !== $header) {
             $project->writeText('theme/' . $headerRel, $result['markup']);
@@ -227,7 +234,7 @@ final class HeaderHeroStep implements Step
         if ($report === []) {
             $report[] = "Header behavior '{$behavior['behavior']}' in mode '{$behavior['mode']}': header and "
                 . 'page-opening sections already satisfy the '
-                . 'repairs this step makes. Header height is prompt-enforced only and was not measured.';
+                . 'repairs this step makes. Remaining explicitly authored header height is prompt-enforced.';
         }
         $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
         Narrator::write(sprintf(
@@ -447,6 +454,9 @@ final class HeaderHeroStep implements Step
      * @param array<mixed>|null $behavior resolved HeaderBehavior artifact;
      *                                    null keeps this helper useful for
      *                                    isolated legacy composition tests
+     * @param array<mixed> $theme generated theme.json; used only to neutralize
+     *                            recursive core/group padding on structural
+     *                            header descendants
      * @return array{markup:string, notes:string[]}
      */
     public static function fixHeader(
@@ -456,6 +466,7 @@ final class HeaderHeroStep implements Step
         array $pageTitles = [],
         bool $oversizedForced = false,
         ?array $behavior = null,
+        array $theme = [],
     ): array {
         $doc = BlockMarkup::parse($markup);
         $notes = [];
@@ -471,6 +482,14 @@ final class HeaderHeroStep implements Step
             $behavior = HeaderBehavior::validateArtifact($behavior);
             self::applyBehaviorClasses($doc, $top, $behavior, $notes);
             self::applyRootSurfaces($doc, $top, $behavior, $notes);
+        }
+        if ($top !== null) {
+            self::neutralizeInheritedGroupPadding(
+                $doc,
+                $top,
+                self::inheritedCoreGroupPaddingSides($theme),
+                $notes,
+            );
         }
 
         foreach ($doc->indices() as $i) {
@@ -513,6 +532,117 @@ final class HeaderHeroStep implements Step
                 . '(the assembled outer shell exclusively owns header positioning)';
         }
         return ['markup' => $rendered, 'notes' => $notes];
+    }
+
+    /**
+     * Return the non-zero vertical sides a global core/group style applies to
+     * every Group block. Scalar padding is a four-side shorthand, so it
+     * activates both vertical sides. Malformed containers are left for the
+     * theme normalizer/validator instead of guessed at here.
+     *
+     * @param array<mixed> $theme
+     * @return list<string>
+     */
+    private static function inheritedCoreGroupPaddingSides(array $theme): array
+    {
+        $padding = $theme['styles']['blocks']['core/group']['spacing']['padding'] ?? null;
+        if (is_string($padding) || is_int($padding) || is_float($padding)) {
+            return self::isZeroCssLength($padding) ? [] : ['top', 'bottom'];
+        }
+        if (!is_array($padding) || ($padding !== [] && array_is_list($padding))) {
+            return [];
+        }
+
+        $sides = [];
+        foreach (['top', 'bottom'] as $side) {
+            if (self::hasAuthoredValue($padding[$side] ?? null)
+                && !self::isZeroCssLength($padding[$side])) {
+                $sides[] = $side;
+            }
+        }
+        return $sides;
+    }
+
+    /**
+     * Structural Groups beneath the header root must not inherit section-scale
+     * vertical padding. Add a zero only when a side has no authored value;
+     * explicit component padding survives unchanged. The root is excluded so
+     * its prompt-owned sm/md breathing room remains authoritative.
+     *
+     * @param list<string> $sides
+     * @param list<string> $notes
+     */
+    private static function neutralizeInheritedGroupPadding(
+        BlockMarkup $doc,
+        int $top,
+        array $sides,
+        array &$notes,
+    ): void {
+        if ($sides === []) {
+            return;
+        }
+
+        $changed = 0;
+        foreach ($doc->indices() as $i) {
+            if ($i === $top || $doc->name($i) !== 'group' || !self::isDescendantOf($doc, $i, $top)) {
+                continue;
+            }
+            $attrs = $doc->attrs($i) ?? [];
+            $style = $attrs['style'] ?? null;
+            if ($style !== null
+                && (!is_array($style) || ($style !== [] && array_is_list($style)))) {
+                continue;
+            }
+            $style = is_array($style) ? $style : [];
+            $spacing = $style['spacing'] ?? null;
+            if ($spacing !== null
+                && (!is_array($spacing) || ($spacing !== [] && array_is_list($spacing)))) {
+                continue;
+            }
+            $spacing = is_array($spacing) ? $spacing : [];
+            $padding = $spacing['padding'] ?? null;
+            // A scalar is an explicit four-side value. Preserve it rather than
+            // replacing authored component spacing under the guise of repair.
+            if ($padding !== null && !is_array($padding)) {
+                continue;
+            }
+            if (is_array($padding) && $padding !== [] && array_is_list($padding)) {
+                continue;
+            }
+
+            $nodeChanged = false;
+            foreach ($sides as $side) {
+                if (self::hasAuthoredValue($padding[$side] ?? null)) {
+                    continue;
+                }
+                $padding[$side] = '0';
+                $nodeChanged = true;
+            }
+            if ($nodeChanged) {
+                $spacing['padding'] = $padding;
+                $style['spacing'] = $spacing;
+                $attrs['style'] = $style;
+                $doc->setAttrs($i, $attrs);
+                $changed++;
+            }
+        }
+
+        if ($changed > 0) {
+            $notes[] = 'neutralized inherited core/group ' . implode('/', $sides)
+                . " padding on {$changed} descendant header group"
+                . ($changed === 1 ? '' : 's')
+                . ' (explicit component and root padding preserved)';
+        }
+    }
+
+    private static function isDescendantOf(BlockMarkup $doc, int $i, int $ancestor): bool
+    {
+        for ($parent = $doc->parent($i); $parent !== null; $parent = $doc->parent($parent)) {
+            if ($parent === $ancestor) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
