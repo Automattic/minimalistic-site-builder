@@ -10,8 +10,8 @@ namespace Automattic\SiteBuild;
  * unrelated items behind a batch-wide barrier. Pure orchestration ($start
  * begins one transfer; $await blocks until at least one in-flight transfer
  * completes and returns those results keyed by item id), so it is
- * unit-testable with fakes; the curl_multi glue lives in each client
- * (AnthropicClient::streamMulti, WpcomImageClient::multiRequest).
+ * unit-testable with fakes; the shared curl_multi glue lives in
+ * {@see CurlMultiPool}.
  */
 final class RollingPool
 {

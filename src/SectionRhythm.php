@@ -223,43 +223,18 @@ final class SectionRhythm
             ]
             : null;
         $spacingBackground = $degradation === null ? $background : 'base';
-        $before = self::encodeAttrs($attrs);
-        $markup = self::stripOwnedWrapperClasses(
+        $rewritten = self::rewriteWrapperBlock(
+            $markup,
             $attrs,
-            $markup,
-            $openingOffset + $openingLength,
+            $openingOffset,
+            $openingLength,
+            'wp:group',
+            $spacingBackground === 'image' ? '0' : self::presetRef($preset),
+            $spacingBackground === 'image' || $sharedSeam ? '0' : self::presetRef($preset),
             $label,
-        );
-
-        $style = self::objectProperty($attrs, 'style', $label, 'style');
-        $spacing = self::objectProperty($style, 'spacing', $label, 'style.spacing');
-        $padding = self::boxProperty($spacing, 'padding', $label, 'style.spacing.padding');
-        $margin = self::boxProperty($spacing, 'margin', $label, 'style.spacing.margin');
-        $shorthandProperties = self::preserveWrapperHorizontalSpacing(
-            $markup,
-            $openingOffset + $openingLength,
-            $padding,
-            $margin,
             $label,
+            'style',
         );
-        $padding->top = $spacingBackground === 'image' ? '0' : self::presetRef($preset);
-        $padding->bottom = $spacingBackground === 'image' || $sharedSeam ? '0' : self::presetRef($preset);
-
-        $margin->top = '0';
-        $margin->bottom = '0';
-
-        // Patch the wrapper HTML first: it sits after the opener, so the
-        // opener's offsets stay valid for the substr_replace below.
-        $rewritten = self::patchWrapperStyle($markup, $openingOffset + $openingLength, [
-            'margin-top'     => '0',
-            'margin-bottom'  => '0',
-            'padding-top'    => self::cssSpacingValue($padding->top),
-            'padding-bottom' => self::cssSpacingValue($padding->bottom),
-        ], $shorthandProperties);
-        if (self::encodeAttrs($attrs) !== $before) {
-            $opening = '<!-- wp:group ' . self::encodeAttrs($attrs) . ' -->';
-            $rewritten = substr_replace($rewritten, $opening, $openingOffset, $openingLength);
-        }
 
         if ($background === 'image' && $degradation === null) {
             $coverResult = self::rewriteImageCover($rewritten, $preset, $label);
@@ -410,39 +385,18 @@ final class SectionRhythm
         }
 
         try {
-            $before = self::encodeAttrs($attrs);
-            $markup = self::stripOwnedWrapperClasses(
+            $patched = self::rewriteWrapperBlock(
+                $markup,
                 $attrs,
-                $markup,
-                $offset + $length,
+                $offset,
+                $length,
+                'wp:cover',
+                self::presetRef($preset),
+                self::presetRef($preset),
+                $label,
                 $label . ' direct cover',
+                'cover style',
             );
-            $style = self::objectProperty($attrs, 'style', $label, 'cover style');
-            $spacing = self::objectProperty($style, 'spacing', $label, 'cover style.spacing');
-            $padding = self::boxProperty($spacing, 'padding', $label, 'cover style.spacing.padding');
-            $margin = self::boxProperty($spacing, 'margin', $label, 'cover style.spacing.margin');
-            $shorthandProperties = self::preserveWrapperHorizontalSpacing(
-                $markup,
-                $offset + $length,
-                $padding,
-                $margin,
-                $label . ' direct cover',
-            );
-            $padding->top = self::presetRef($preset);
-            $padding->bottom = self::presetRef($preset);
-            $margin->top = '0';
-            $margin->bottom = '0';
-
-            $patched = self::patchWrapperStyle($markup, $offset + $length, [
-                'margin-top'     => '0',
-                'margin-bottom'  => '0',
-                'padding-top'    => self::cssSpacingValue($padding->top),
-                'padding-bottom' => self::cssSpacingValue($padding->bottom),
-            ], $shorthandProperties);
-            if (self::encodeAttrs($attrs) !== $before) {
-                $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
-                $patched = substr_replace($patched, $newOpening, $offset, $length);
-            }
         } catch (\RuntimeException $error) {
             return self::imageCoverFailure(
                 $originalMarkup,
@@ -451,6 +405,65 @@ final class SectionRhythm
             );
         }
         return ['markup' => $patched, 'degradation' => null];
+    }
+
+    /**
+     * Take ownership of one wrapper's vertical rhythm: strip owned classes,
+     * mirror horizontal shorthands into the attrs, pin the vertical
+     * padding/margin, and splice the updated opener back into the markup.
+     *
+     * @param string $wrapperLabel label for saved-HTML edits (strip/preserve)
+     * @param string $stylePath attribute path prefix used in error messages
+     */
+    private static function rewriteWrapperBlock(
+        string $markup,
+        \stdClass $attrs,
+        int $offset,
+        int $length,
+        string $blockName,
+        string $paddingTop,
+        string $paddingBottom,
+        string $label,
+        string $wrapperLabel,
+        string $stylePath,
+    ): string {
+        $before = self::encodeAttrs($attrs);
+        $markup = self::stripOwnedWrapperClasses(
+            $attrs,
+            $markup,
+            $offset + $length,
+            $wrapperLabel,
+        );
+
+        $style = self::objectProperty($attrs, 'style', $label, $stylePath);
+        $spacing = self::objectProperty($style, 'spacing', $label, "{$stylePath}.spacing");
+        $padding = self::boxProperty($spacing, 'padding', $label, "{$stylePath}.spacing.padding");
+        $margin = self::boxProperty($spacing, 'margin', $label, "{$stylePath}.spacing.margin");
+        $shorthandProperties = self::preserveWrapperHorizontalSpacing(
+            $markup,
+            $offset + $length,
+            $padding,
+            $margin,
+            $wrapperLabel,
+        );
+        $padding->top = $paddingTop;
+        $padding->bottom = $paddingBottom;
+        $margin->top = '0';
+        $margin->bottom = '0';
+
+        // Patch the wrapper HTML first: it sits after the opener, so the
+        // opener's offsets stay valid for the substr_replace below.
+        $patched = self::patchWrapperStyle($markup, $offset + $length, [
+            'margin-top'     => '0',
+            'margin-bottom'  => '0',
+            'padding-top'    => self::cssSpacingValue($paddingTop),
+            'padding-bottom' => self::cssSpacingValue($paddingBottom),
+        ], $shorthandProperties);
+        if (self::encodeAttrs($attrs) !== $before) {
+            $opening = "<!-- {$blockName} " . self::encodeAttrs($attrs) . ' -->';
+            $patched = substr_replace($patched, $opening, $offset, $length);
+        }
+        return $patched;
     }
 
     /**

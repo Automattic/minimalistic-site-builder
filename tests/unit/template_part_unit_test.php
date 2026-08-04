@@ -6,6 +6,7 @@ use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Tests\FakeLlm;
+use Automattic\SiteBuild\Units\FooterMarkup;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Units\HeaderUnit;
@@ -168,7 +169,7 @@ test('portrait cap covers card-portrait and tall numeric ratios, leaves wide one
         . '<img src="theme:./assets/d.jpg" alt="AI_IMAGE: A wheel | footer | photorealistic | card-landscape"/>';
 
     $notes = [];
-    $out = GeneratedMarkup::withoutPortraitImagePlaceholders($markup, $notes);
+    $out = FooterMarkup::withoutPortraitImagePlaceholders($markup, $notes);
 
     assert_eq(2, substr_count($out, '| square"'), 'card-portrait and 9:16 are both capped');
     assert_contains('| 16:9', $out);
@@ -177,7 +178,7 @@ test('portrait cap covers card-portrait and tall numeric ratios, leaves wide one
     assert_contains('authored aspect-ratio=card-portrait', $joined);
     assert_contains('authored aspect-ratio=9:16', $joined);
     assert_eq(2, count($notes), 'wide ratios record no rewrite');
-    assert_eq($out, GeneratedMarkup::withoutPortraitImagePlaceholders($out), 'capping reaches a fixed point');
+    assert_eq($out, FooterMarkup::withoutPortraitImagePlaceholders($out), 'capping reaches a fixed point');
 });
 
 test('portrait cap covers recovered AI_IMAGE source forms before collection', function () {
