@@ -12,6 +12,13 @@ test('fill substitutes plain placeholders', function () {
     assert_eq('Hello Ada', PromptRenderer::fill('Hello {{name}}', ['name' => 'Ada']));
 });
 
+test('fill tolerates whitespace and substitutes multiple placeholders', function () {
+    assert_eq(
+        'Hello Ada, slug=ada',
+        PromptRenderer::fill('Hello {{ name }}, slug={{slug}}', ['name' => 'Ada', 'slug' => 'ada'])
+    );
+});
+
 test('fill substitutes a placeholder with an empty value', function () {
     assert_eq('A', PromptRenderer::fill('A{{suffix}}', ['suffix' => '']));
 });
