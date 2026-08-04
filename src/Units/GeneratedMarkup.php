@@ -5,9 +5,11 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Warnings;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
@@ -49,7 +51,7 @@ final class GeneratedMarkup
         // block-looking comments inside a script body are not payload.
         $sanitizerNotes = [];
         $trimmed = trim($text);
-        $unfenced = self::stripFences($trimmed);
+        $unfenced = CodeFences::strip($trimmed);
         if ($unfenced !== $trimmed) {
             $repairs[] = [
                 'code' => 'response-fence-removed',
@@ -837,29 +839,46 @@ final class GeneratedMarkup
     /**
      * Cap footer AI_IMAGE placeholders to non-portrait aspect ratios.
      *
-     * A `portrait` placeholder generates a 9:16 asset; rendered in a footer
-     * column it grows nearly twice as tall as wide, stretches the whole band,
-     * and strands blank space beside the short utility rows. The documented
-     * `<img alt>` form and any mirrored block-JSON "alt" value are rewritten
-     * together so block re-serialization cannot restore the portrait spec.
-     * Idempotent: a capped placeholder no longer matches either pattern.
+     * A portrait-oriented placeholder — the `portrait` (9:16) or
+     * `card-portrait` (3:4) keyword, or any numeric ratio taller than wide —
+     * generates an asset that, rendered in a footer column, stretches the
+     * whole band and strands blank space beside the short utility rows. The
+     * documented `<img alt>` form and any mirrored block-JSON "alt" value are
+     * rewritten together so block re-serialization cannot restore the
+     * portrait spec. Recovered source-form placeholders are capped here too,
+     * before CollectImagesStep turns their raw `AI_IMAGE:...|ratio:...` URL or
+     * src into a canonical asset path. Idempotent: a capped placeholder no
+     * longer matches any pattern.
      *
      * @param list<string> $notes appended to once per rewritten placeholder
      */
     public static function withoutPortraitImagePlaceholders(string $markup, array &$notes = []): string
     {
         $patterns = [
-            '/(?<prefix>alt\s*=\s*(?<quote>["\'])AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)portrait(?<suffix>\s*\k{quote})/is',
-            '/(?<prefix>"alt"\s*:\s*"AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)portrait(?<suffix>\s*")/is',
+            '/(?<prefix>alt\s*=\s*(?<quote>["\'])AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*\k{quote})/is',
+            '/(?<prefix>"alt"\s*:\s*"AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*")/is',
+            '/(?<prefix>\bsrc\s*=\s*(?<quote>["\'])\s*AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*ratio\s*:\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\s*(?:\||\k{quote})))/is',
+            '/(?<prefix>\bsrc\s*=\s*(?<quote>["\'])\s*AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*\k{quote})/is',
+            '/(?<prefix>\bsrc\s*=\s*AI_IMAGE:[^\s>"\'`=]*?\|ratio:)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\||\s|\/?>))/i',
+            '/(?<prefix>\bsrc\s*=\s*AI_IMAGE:[^\s>"\'`=]*\|)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\s|\/?>))/i',
+            '/(?<prefix>"(?:url|src)"\s*:\s*"\s*AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*ratio\s*:\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\s*(?:\||")))/is',
+            '/(?<prefix>"(?:url|src)"\s*:\s*"\s*AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*")/is',
         ];
         foreach ($patterns as $pattern) {
             $markup = (string) preg_replace_callback(
                 $pattern,
                 static function (array $m) use (&$notes): string {
+                    $ratio = strtolower($m['ratio']);
+                    if (preg_match('/^(\d+):(\d+)$/', $ratio, $wh) === 1
+                        && (int) $wh[1] >= (int) $wh[2]
+                    ) {
+                        return $m[0]; // numeric square/landscape — already footer-safe
+                    }
                     $notes[] = "file='parts/footer.html'; block='AI_IMAGE placeholder'; "
-                        . 'authored aspect-ratio=portrait; delivered=square; '
-                        . 'disposition=a 9:16 footer image stretches the band and strands blank '
-                        . 'space beside the utility rows, so the placeholder was capped to square';
+                        . "authored aspect-ratio={$ratio}; delivered=square; "
+                        . 'disposition=a portrait-oriented footer image stretches the band and '
+                        . 'strands blank space beside the utility rows, so the placeholder was '
+                        . 'capped to square';
                     return $m['prefix'] . 'square' . $m['suffix'];
                 },
                 $markup
@@ -1410,10 +1429,7 @@ final class GeneratedMarkup
         mixed $authored,
         string $color
     ): void {
-        $encoded = json_encode($authored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($encoded)) {
-            $encoded = get_debug_type($authored);
-        }
+        $encoded = Warnings::value($authored);
         $notes[] = "file='parts/{$part}.html'; block='root wp:group'; authored {$path}={$encoded}; "
             . "delivered=removed; disposition=opaque or malformed root styling removed so the assigned "
             . "'{$color}' {$part} surface cannot be overridden";
@@ -1935,16 +1951,6 @@ final class GeneratedMarkup
         $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $text = (string) preg_replace('/\s+/u', ' ', $text);
         return mb_strtolower(trim($text), 'UTF-8');
-    }
-
-    private static function stripFences(string $text): string
-    {
-        $text = (string) preg_replace('/^\xEF\xBB\xBF/', '', $text);
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\r?\n/', '', $text);
-            $text = preg_replace('/\r?\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
     }
 
     /**

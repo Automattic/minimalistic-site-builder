@@ -89,8 +89,12 @@ foreach ($args as $a) {
         $withImages = true;
     } elseif ($a === '--multi-page') {
         $multiPage = true;
-    } elseif ($prompt === null) {
+    } elseif ($prompt === null && !str_starts_with($a, '--')) {
         $prompt = $a;
+    } else {
+        fwrite(STDERR, "Unknown argument: {$a}\n");
+        fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
+        exit(1);
     }
 }
 

@@ -26,15 +26,4 @@ final class FreeformNode implements DocumentNode
     {
         return $this->content;
     }
-
-    public function innerHTML(): string
-    {
-        return $this->content;
-    }
-
-    /** @return list<string> */
-    public function innerContent(): array
-    {
-        return [$this->content];
-    }
 }

@@ -36,12 +36,6 @@ final class JsJsonEncoder
         );
     }
 
-    /** Explicit alias used by the block-comment serializer. */
-    public static function encodeCommentAttributes(JsonObject $attributes): string
-    {
-        return self::serializeAttributes($attributes);
-    }
-
     /** JavaScript Number.toString spelling used outside JSON comments too. */
     public static function stringifyNumber(int|float $value): string
     {

@@ -4,18 +4,6 @@ declare(strict_types=1);
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\JsonBatchRecovery;
 
-/** Run a callback and return the RuntimeException it is expected to throw. */
-function jbr_exception(callable $callback): RuntimeException
-{
-    try {
-        $callback();
-    } catch (RuntimeException $e) {
-        return $e;
-    }
-
-    throw new RuntimeException('Expected JsonBatchRecovery to throw');
-}
-
 test('JsonBatchRecovery returns an all-valid batch without a retry', function () {
     $requests = [
         'theme' => ['prompt' => 'Generate the theme'],
@@ -149,7 +137,7 @@ test('JsonBatchRecovery reports a concise diagnostic when the retry is still mal
         ]];
     };
 
-    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send));
+    $error = assert_throws(fn () => JsonBatchRecovery::run($requests, $send));
     $message = $error->getMessage();
     $lower = strtolower($message);
 
@@ -181,7 +169,7 @@ test('JsonBatchRecovery exposes valid siblings on a terminal generated JSON fail
         return $out;
     };
 
-    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send));
+    $error = assert_throws(fn () => JsonBatchRecovery::run($requests, $send));
 
     assert_true($error instanceof GeneratedJsonException);
     assert_eq(['page'], array_keys($error->failures));
@@ -201,7 +189,7 @@ test('JsonBatchRecovery fails loud when a sender omits an expected key', functio
         return ['theme' => ['text' => '{"ok":true}']];
     };
 
-    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send));
+    $error = assert_throws(fn () => JsonBatchRecovery::run($requests, $send));
     $message = strtolower($error->getMessage());
 
     assert_true(!($error instanceof GeneratedJsonException), 'broken sender contracts are not content failures');
@@ -248,7 +236,7 @@ test('JsonBatchRecovery classifies max_tokens output as truncated JSON', functio
 
     // Zero retries isolates classification of the first response from the
     // separate policy of whether a caller wants to regenerate it.
-    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send, 0));
+    $error = assert_throws(fn () => JsonBatchRecovery::run($requests, $send, 0));
     $message = $error->getMessage();
     $lower = strtolower($message);
 
@@ -292,6 +280,21 @@ test('JsonBatchRecovery regenerates a truncated response with a doubled budget',
     );
 });
 
+test('JsonBatchRecovery doubles the calling client configurable default for a truncated repair', function () {
+    $requests = ['plan' => ['prompt' => 'Plan the site']];
+    $budgets = [];
+
+    $send = function (array $subset) use (&$budgets): array {
+        $budgets[] = $subset['plan']['max_tokens'] ?? null;
+        return count($budgets) === 1
+            ? ['plan' => ['text' => '{"sections":["cut-off-mid', 'stop_reason' => 'max_tokens']]
+            : ['plan' => ['text' => '{"ok":true}', 'stop_reason' => 'end_turn']];
+    };
+
+    JsonBatchRecovery::run($requests, $send, defaultMaxTokens: 4096);
+    assert_eq([null, 8192], $budgets);
+});
+
 test('JsonBatchRecovery regenerates a refusal without claiming invalid JSON', function () {
     $requests = ['page' => ['prompt' => 'Plan the page']];
     $repairs = [];
@@ -324,7 +327,7 @@ test('JsonBatchRecovery classifies model_context_window_exceeded as truncation',
         'stop_reason' => 'model_context_window_exceeded',
     ]];
 
-    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send, 0));
+    $error = assert_throws(fn () => JsonBatchRecovery::run($requests, $send, 0));
     assert_contains('truncat', strtolower($error->getMessage()));
 });
 
@@ -332,7 +335,7 @@ test('JsonBatchRecovery rejects a non-string non-array response cleanly', functi
     $requests = ['a' => ['prompt' => 'A']];
     $send = fn (array $subset): array => ['a' => null];
 
-    $error = jbr_exception(fn () => JsonBatchRecovery::run($requests, $send));
+    $error = assert_throws(fn () => JsonBatchRecovery::run($requests, $send));
     assert_contains('must be a string or a record', $error->getMessage());
     assert_contains('null', $error->getMessage());
 });

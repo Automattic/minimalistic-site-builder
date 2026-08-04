@@ -68,31 +68,6 @@ final class AttributeSourcer
     }
 
     /**
-     * Resolve one top-level attribute. Missing-without-default is represented
-     * as null for this convenience method; sourceAttributes() retains the
-     * important distinction by omitting that key.
-     *
-     * @param array<mixed> $schema
-     * @param array<string,mixed> $commentAttributes
-     */
-    public function sourceAttribute(
-        string $key,
-        array $schema,
-        array $commentAttributes,
-        HtmlFragment $fragment,
-        string $rawInnerHtml,
-    ): mixed {
-        $value = $this->resolveTopLevel(
-            $key,
-            $schema,
-            $commentAttributes,
-            $fragment->root(),
-            $rawInnerHtml,
-        );
-        return $value === $this->missing ? null : $value;
-    }
-
-    /**
      * @param array<mixed> $schema
      * @param array<string,mixed> $commentAttributes
      */

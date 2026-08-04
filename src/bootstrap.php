@@ -80,13 +80,13 @@ function make_llm(): Llm
         'xai', 'grok' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('XAI_API_KEY'),
             model:    default_llm_model(),
-            baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1') ?? 'https://api.x.ai/v1',
+            baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.x.ai/v1'),
             provider: 'xai',
         ),
         'openai', 'openai-compatible' => new OpenAiCompatibleClient(
             apiKey:   Env::getRequired('OPENAI_API_KEY'),
             model:    default_llm_model(),
-            baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1') ?? 'https://api.openai.com/v1',
+            baseUrl:  Env::get('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             provider: 'openai',
         ),
         'openrouter' => new OpenAiCompatibleClient(
@@ -110,12 +110,12 @@ function make_llm(): Llm
     };
 }
 
-/** Build the image-generation transport (WPCOM AI proxy → Google Vertex Imagen). */
+/** Build the image-generation transport (WPCOM AI proxy → Google Vertex Gemini). */
 function make_image_client(): ImageClient
 {
     return new WpcomImageClient(
         apiToken: Env::getRequired('GOOGLE_VERTEX_API_TOKEN'),
-        model:    Env::get('IMAGE_MODEL', 'imagen-4.0-generate-001'),
+        model:    Env::get('IMAGE_MODEL', 'gemini-3.1-flash-image'),
     );
 }
 

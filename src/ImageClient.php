@@ -15,8 +15,8 @@ interface ImageClient
      * default, PNG when `mime` asks for it).
      *
      * @param array{aspect_ratio?:string,sample_image_size?:?string,mime?:?string} $opts
-     *        aspect_ratio is one of the Imagen-supported ratios: "1:1", "16:9",
-     *        "9:16", "4:3", "3:4"; sample_image_size is "1K" (default) or "2K";
+     *        aspect_ratio is one of the supported ratios: "1:1", "16:9",
+     *        "21:9", "9:16", "4:3", "3:4"; sample_image_size is "1K" (default) or "2K";
      *        mime is "image/jpeg" (default) or "image/png" (for assets that
      *        need a transparent background — JPEG has no alpha channel).
      */
@@ -24,7 +24,7 @@ interface ImageClient
 
     /**
      * The model identifier this client generates with (e.g.
-     * "imagen-4.0-generate-001"). Used for request logging.
+     * "gemini-3.1-flash-image"). Used for request logging.
      */
     public function model(): string;
 

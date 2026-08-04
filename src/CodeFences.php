@@ -12,10 +12,10 @@ final class CodeFences
     /** Strip a leading/trailing markdown code fence if the model added one. */
     public static function strip(string $text): string
     {
-        $text = trim($text);
+        $text = trim((string) preg_replace('/^\xEF\xBB\xBF/', '', trim($text)));
         if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
+            $text = preg_replace('/^```[a-zA-Z]*\r?\n/', '', $text);
+            $text = preg_replace('/\r?\n```$/', '', (string) $text);
         }
         return trim((string) $text);
     }

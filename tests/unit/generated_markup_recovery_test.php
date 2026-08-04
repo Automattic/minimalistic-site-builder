@@ -519,9 +519,7 @@ test('recovery ignores a backticked opener quoted after the document', function 
 
 test('recovery reports a complete block it drops before the document', function () {
     $lead = '<!-- wp:paragraph --><p>SECTION A</p><!-- /wp:paragraph -->';
-    ob_start();
-    $out = GeneratedMarkup::normalize("Here: {$lead}\n" . GM_ROOT, 'p');
-    ob_end_clean();
+    $out = quietly(fn () => GeneratedMarkup::normalize("Here: {$lead}\n" . GM_ROOT, 'p'));
 
     assert_eq(GM_ROOT, $out, 'still recovers the line-standing document');
     // The drop is by design; going silent about it is what loses a section.

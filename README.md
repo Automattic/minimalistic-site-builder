@@ -5,7 +5,7 @@ theme (theme.json + templates + header/footer parts) plus a companion content
 plugin that seeds every generated page on activation and removes them on
 deactivation. The site spec carries a page tree (home, menu, about, …); every
 page gets its own planned and generated sections. Optionally turns the
-`AI_IMAGE` placeholders it emits into real assets via Google Imagen (through
+`AI_IMAGE` placeholders it emits into real assets via Google Gemini (through
 the WPCOM AI proxy).
 
 The split is deliberate: design lives in the theme, content lives in
@@ -238,7 +238,7 @@ Uploaded ZIPs are browsable online at
 A standalone page for iterating on `AI_IMAGE` prompts **without building a whole
 theme**. It drives the real `GenerateImagesStep` against a throwaway temp
 project, so what you see is exactly what the pipeline would produce: the same
-prompt composition, the same site-context grounding, the same Imagen call.
+prompt composition, the same site-context grounding, the same Gemini call.
 
 It comes pre-filled with a site context and 10 example prompts, each with an
 editable subject / page-context / style / aspect-ratio. Use **Generate** on a
