@@ -166,11 +166,11 @@ final class LayoutFixer
                 continue;
             }
             $tagStart = $node->start + $node->len;
-            $tagHtml = self::wrapperTag($markup, $tagStart);
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
             if ($tagHtml === null) {
                 continue;
             }
-            $style = self::tagAttribute($tagHtml, 'style');
+            $style = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($style === null || !str_contains($style[0], 'var(--wp--spacing--')) {
                 continue;
             }
@@ -433,15 +433,14 @@ final class LayoutFixer
                     || self::is($node, 'column') || self::is($node, 'cover'));
             if ($trustsHtml) {
                 $short = preg_replace('#^core/#', '', $node->name);
-                $tagHtml = self::wrapperTag($markup, $node->start + $node->len);
+                $tagHtml = MarkupScan::wrapperTag($markup, $node->start + $node->len);
                 if ($tagHtml !== null && self::hasClassToken($tagHtml, "wp-block-{$short}")) {
-                    $styleAttr = self::tagAttribute($tagHtml, 'style');
+                    $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
                     if ($styleAttr !== null) {
                         $declared = [];
-                        foreach (explode(';', $styleAttr[0]) as $segment) {
-                            $colon = strpos($segment, ':');
-                            if ($colon !== false) {
-                                $declared[strtolower(trim(substr($segment, 0, $colon)))] = trim(substr($segment, $colon + 1));
+                        foreach (MarkupScan::parseInlineStyle($styleAttr[0]) as $declaration) {
+                            if ($declaration['value'] !== null) {
+                                $declared[$declaration['property']] = trim($declaration['value']);
                             }
                         }
                     }
@@ -527,11 +526,11 @@ final class LayoutFixer
                 continue;
             }
             $tagStart = $node->start + $node->len;
-            $tagHtml = self::wrapperTag($markup, $tagStart);
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
             if ($tagHtml === null || !self::hasClassToken($tagHtml, "wp-block-{$short}")) {
                 continue;
             }
-            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($styleAttr === null) {
                 continue;
             }
@@ -547,22 +546,21 @@ final class LayoutFixer
             $kept = [];
             $declared = [];
             $unmirrorable = false;
-            foreach (explode(';', $styleAttr[0]) as $segment) {
-                if (trim($segment) === '') {
+            foreach (MarkupScan::parseInlineStyle($styleAttr[0]) as $declaration) {
+                if (trim($declaration['segment']) === '') {
                     continue;
                 }
-                $colon = strpos($segment, ':');
-                $prop = $colon === false ? '' : strtolower(trim(substr($segment, 0, $colon)));
-                if (preg_match('/\A(padding|margin)-(top|right|bottom|left)\z/', $prop, $m) !== 1) {
-                    $kept[] = trim($segment);
+                if ($declaration['value'] === null
+                    || preg_match('/\A(padding|margin)-(top|right|bottom|left)\z/', $declaration['property'], $m) !== 1) {
+                    $kept[] = trim($declaration['segment']);
                     continue;
                 }
-                $value = trim(substr($segment, $colon + 1));
+                $value = trim($declaration['value']);
                 if ($value === '' || self::referencesNonPresetVar($value)) {
                     $unmirrorable = true;
                     break;
                 }
-                $declared[$m[1]][$m[2]] = self::blockSpacingValue($value);
+                $declared[$m[1]][$m[2]] = MarkupScan::blockSpacingValue($value);
             }
             if ($unmirrorable || $declared === []) {
                 continue;
@@ -644,23 +642,22 @@ final class LayoutFixer
             if ($style !== null && !$style instanceof \stdClass) {
                 continue;
             }
-            $tagHtml = self::wrapperTag($markup, $node->start + $node->len);
+            $tagHtml = MarkupScan::wrapperTag($markup, $node->start + $node->len);
             if ($tagHtml === null
                 || !self::hasClassToken($tagHtml, 'wp-block-' . preg_replace('#^core/#', '', $node->name))) {
                 continue;
             }
-            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($styleAttr === null) {
                 continue;
             }
 
-            foreach (explode(';', $styleAttr[0]) as $segment) {
-                $colon = strpos($segment, ':');
-                if ($colon === false
-                    || preg_match('/\A(padding|margin)-(top|bottom)\z/', strtolower(trim(substr($segment, 0, $colon))), $m) !== 1) {
+            foreach (MarkupScan::parseInlineStyle($styleAttr[0]) as $declaration) {
+                if ($declaration['value'] === null
+                    || preg_match('/\A(padding|margin)-(top|bottom)\z/', $declaration['property'], $m) !== 1) {
                     continue;
                 }
-                $value = trim(substr($segment, $colon + 1));
+                $value = trim($declaration['value']);
                 if ($value === '' || self::referencesNonPresetVar($value)) {
                     continue;
                 }
@@ -676,7 +673,7 @@ final class LayoutFixer
                 if (!$box instanceof \stdClass || property_exists($box, $side)) {
                     continue;
                 }
-                $box->{$side} = self::blockSpacingValue($value);
+                $box->{$side} = MarkupScan::blockSpacingValue($value);
                 $node->dirty = true;
                 $notes[] = "wp:{$node->name} carried {$property}-{$side} only in its inline HTML — mirrored it into style.spacing.{$property}.{$side} so re-serialization keeps the declared rhythm";
             }
@@ -719,12 +716,12 @@ final class LayoutFixer
                 continue;
             }
             $tagStart = $node->start + $node->len;
-            $tagHtml = self::wrapperTag($markup, $tagStart);
+            $tagHtml = MarkupScan::wrapperTag($markup, $tagStart);
             if ($tagHtml === null
                 || !self::hasClassToken($tagHtml, 'wp-block-' . preg_replace('#^core/#', '', $node->name))) {
                 continue;
             }
-            $styleAttr = self::tagAttribute($tagHtml, 'style');
+            $styleAttr = MarkupScan::tagAttribute($tagHtml, 'style');
             if ($styleAttr === null) {
                 continue;
             }
@@ -797,26 +794,26 @@ final class LayoutFixer
     {
         $kept = [];
         $declared = [];
-        foreach (explode(';', $styleValue) as $segment) {
-            $colon = strpos($segment, ':');
-            $property = $colon === false ? '' : strtolower(trim(substr($segment, 0, $colon)));
-            if (!in_array($property, ['gap', 'row-gap', 'column-gap'], true)) {
-                if (trim($segment) !== '') {
-                    $kept[] = $segment;
+        foreach (MarkupScan::parseInlineStyle($styleValue) as $declaration) {
+            $property = $declaration['property'];
+            if ($declaration['value'] === null
+                || !in_array($property, ['gap', 'row-gap', 'column-gap'], true)) {
+                if (trim($declaration['segment']) !== '') {
+                    $kept[] = $declaration['segment'];
                 }
                 continue;
             }
-            $value = trim(substr($segment, $colon + 1));
+            $value = trim($declaration['value']);
             $parts = preg_split('/\s+/', $value) ?: [];
             if ($value === '' || str_contains($value, ',') || self::referencesNonPresetVar($value)
                 || count($parts) > 2 || ($property !== 'gap' && count($parts) !== 1)) {
                 return null;
             }
             if ($property !== 'column-gap') {
-                $declared['top'] = self::blockSpacingValue($property === 'gap' ? $parts[0] : $value);
+                $declared['top'] = MarkupScan::blockSpacingValue($property === 'gap' ? $parts[0] : $value);
             }
             if ($property !== 'row-gap') {
-                $declared['left'] = self::blockSpacingValue($property === 'gap' ? ($parts[1] ?? $parts[0]) : $value);
+                $declared['left'] = MarkupScan::blockSpacingValue($property === 'gap' ? ($parts[1] ?? $parts[0]) : $value);
             }
         }
         return $declared;
@@ -1539,62 +1536,10 @@ final class LayoutFixer
         return preg_match('/var\(\s*--(?!wp--preset--)/i', $value) === 1;
     }
 
-    /** Convert a rendered preset variable back to block-attribute syntax. */
-    private static function blockSpacingValue(string $value): string
-    {
-        return preg_match('/^var\(--wp--preset--spacing--([a-z0-9_-]+)\)$/', $value, $match) === 1
-            ? "var:preset|spacing|{$match[1]}"
-            : $value;
-    }
-
-    /**
-     * The first HTML element immediately following a block opener (mirrors
-     * SectionRhythm::wrapperTag — this class must stay usable on markup that
-     * pass rejects, so it keeps its own copy of the scanner).
-     */
-    private static function wrapperTag(string $markup, int $searchOffset): ?string
-    {
-        $rest = substr($markup, $searchOffset);
-        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?=[\x20\t\r\n\f\/>])/', $rest, $start) !== 1) {
-            return null;
-        }
-
-        $quote = null;
-        $length = strlen($rest);
-        for ($i = strlen($start[0]); $i < $length; $i++) {
-            $char = $rest[$i];
-            if ($quote !== null) {
-                if ($char === $quote) {
-                    $quote = null;
-                }
-                continue;
-            }
-            if ($char === '"' || $char === "'") {
-                $quote = $char;
-                continue;
-            }
-            if ($char === '>') {
-                return substr($rest, 0, $i + 1);
-            }
-        }
-        return null;
-    }
-
-    /** @return array{string,int}|null attribute value and its byte offset inside the tag */
-    private static function tagAttribute(string $tagHtml, string $name): ?array
-    {
-        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
-            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
-        if (preg_match($pattern, $tagHtml, $match, PREG_OFFSET_CAPTURE) !== 1) {
-            return null;
-        }
-        return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
-    }
-
     /** Whether the tag's class attribute contains $token as a whole word. */
     private static function hasClassToken(string $tagHtml, string $token): bool
     {
-        $class = self::tagAttribute($tagHtml, 'class');
+        $class = MarkupScan::tagAttribute($tagHtml, 'class');
         return $class !== null
             && in_array($token, preg_split('/\s+/', trim($class[0])) ?: [], true);
     }

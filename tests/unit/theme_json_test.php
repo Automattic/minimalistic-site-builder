@@ -12,26 +12,6 @@ use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
-function valid_theme_payload(): array
-{
-    return [
-        'version' => 2, // should be forced to 3
-        'settings' => [
-            'color' => ['palette' => [
-                ['slug' => 'base', 'color' => '#fff', 'name' => 'Base'],
-                ['slug' => 'contrast', 'color' => '#111', 'name' => 'Contrast'],
-                ['slug' => 'primary', 'color' => '#2f6b4f', 'name' => 'Primary'],
-                ['slug' => 'secondary', 'color' => '#a7c4a0', 'name' => 'Secondary'],
-                ['slug' => 'accent', 'color' => '#d98c3f', 'name' => 'Accent'],
-            ]],
-            'typography' => ['fontFamilies' => [
-                ['slug' => 'heading', 'fontFamily' => 'Fraunces, serif', 'name' => 'Heading'],
-                ['slug' => 'body', 'fontFamily' => 'Source Sans 3, sans-serif', 'name' => 'Body'],
-            ]],
-        ],
-    ];
-}
-
 test('theme-json writes valid theme.json and forces version 3', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

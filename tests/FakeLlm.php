@@ -25,10 +25,10 @@ final class FakeLlm implements Llm
     public array $batchNotes = [];
 
     /**
-     * Prompt substrings that fail permanently. complete() throws for a matching
-     * prompt; completeBatch() throws for the WHOLE batch when any request
-     * matches — mirroring the real clients, whose retryTextBatch aborts the
-     * batch on the first permanently-failed request.
+     * Prompt substrings that fail permanently. complete()/completeJson() throw
+     * for a matching prompt; completeBatch()/completeJsonBatch() throw for the
+     * WHOLE batch when any request matches — mirroring the real clients, whose
+     * batch retry aborts on the first permanently-failed request.
      *
      * @var string[]
      */
@@ -62,6 +62,9 @@ final class FakeLlm implements Llm
     {
         $this->completeJsonCalls++;
         $this->calls[] = ['prompt' => $prompt, 'opts' => $opts];
+        if ($this->shouldFail($prompt)) {
+            throw new \RuntimeException('FakeLlm: permanent failure');
+        }
         if ($this->jsonQueue === []) {
             throw new \RuntimeException('FakeLlm: no queued json response');
         }
@@ -79,6 +82,11 @@ final class FakeLlm implements Llm
     public function completeJsonBatch(array $requests): array
     {
         $this->completeJsonBatchCalls++;
+        foreach ($requests as $key => $req) {
+            if ($this->shouldFail((string) $req['prompt'])) {
+                throw new \RuntimeException("FakeLlm: batch request '{$key}' failed");
+            }
+        }
         $out = [];
         foreach ($requests as $key => $req) {
             $opts = $req;
@@ -122,6 +130,12 @@ final class FakeLlm implements Llm
         $notes = $this->batchNotes;
         $this->batchNotes = [];
         return new \Automattic\SiteBuild\TextBatchResult($out, $notes);
+    }
+
+    /** Unconsumed queued responses (text + json), so tests can assert a drained queue. */
+    public function remaining(): int
+    {
+        return count($this->textQueue) + count($this->jsonQueue);
     }
 
     private function shouldFail(string $prompt): bool

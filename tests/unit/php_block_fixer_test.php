@@ -90,26 +90,6 @@ final class PhpBlockFixerTestWriter implements StagedFileWriter
     }
 }
 
-/** @param array<string,string> $files relative theme path => bytes */
-function php_block_fixer_test_theme(array $files = []): string
-{
-    $root = sys_get_temp_dir() . '/php-block-fixer-' . bin2hex(random_bytes(8));
-    $theme = $root . '/theme';
-    if (!mkdir($theme, 0775, true) && !is_dir($theme)) {
-        throw new RuntimeException('Could not create PHP block fixer test theme');
-    }
-    foreach ($files as $relative => $content) {
-        $path = $theme . '/' . $relative;
-        if (!is_dir(dirname($path)) && !mkdir(dirname($path), 0775, true) && !is_dir(dirname($path))) {
-            throw new RuntimeException('Could not create PHP block fixer fixture directory');
-        }
-        if (file_put_contents($path, $content) !== strlen($content)) {
-            throw new RuntimeException('Could not write PHP block fixer fixture');
-        }
-    }
-    return $theme;
-}
-
 test('PhpBlockFixer reaches a fixed point, reports exact drops and repairs, and is a no-op on retry', function () {
     $original = '<!-- wp:paragraph --><p class="keep lost" style=\'padding-top:4rem;color:red\'>dirty'
         . '<span class=\'lost lost\' style="padding-top:4rem"></span></p><!-- /wp:paragraph -->';

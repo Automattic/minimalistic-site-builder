@@ -3,27 +3,10 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\JsonBatchRecovery;
 use Automattic\SiteBuild\Llm;
-use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
-
-/** @return array{0:Project,1:FakeLlm,2:string} */
-function make_sitespec_fixture(bool $multiPage = false, ?array $pages = null, ?array $siteSpec = null): array
-{
-    $tmp = sys_get_temp_dir() . '/builder_sitespec_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $meta = ['prompt' => 'A cozy neighborhood bakery', 'multi_page' => $multiPage];
-    if ($pages !== null) {
-        $meta['pages'] = $pages;
-    }
-    if ($siteSpec !== null) {
-        $meta['site_spec'] = $siteSpec;
-    }
-    $project->writeJson('meta.json', $meta);
-    return [$project, new FakeLlm(), $tmp];
-}
 
 test('site-spec normalizes a host-supplied spec without an LLM call', function () {
     [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: [
