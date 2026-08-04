@@ -31,6 +31,8 @@ function final_validation_project(): array
         'topSurface' => 'base',
         'scrolledSurface' => 'base',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
     $project->writeText('theme/functions.php', "<?php\n");
     $template = '<!-- wp:template-part {"slug":"header"} /-->'
@@ -186,6 +188,8 @@ test('validate-theme accepts a fully wired sticky header behavior contract', fun
         'topSurface' => 'base',
         'scrolledSurface' => 'base',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
     $project->writeText(
         'theme/parts/header.html',
@@ -235,6 +239,109 @@ test('validate-theme warns and continues when headerBehavior JSON is malformed',
     }
 });
 
+test('validate-theme warns and continues when headerBehavior JSON is a valid non-object scalar', function () {
+    [$project, $tmp] = final_validation_project();
+    $project->writeText('headerBehavior.json', '"static"');
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+        assert_contains('header behavior contract: file=headerBehavior.json', $joined);
+        assert_contains('authored="static"', $joined);
+        assert_contains('disposition=header behavior artifact must be a JSON object', $joined);
+        assert_contains('theme delivered anyway', $project->readText('logs/validate-theme.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('validate-theme completes and warns when theme/theme.json is absent', function () {
+    [$project, $tmp] = final_validation_project();
+    unlink($project->path('theme/theme.json'));
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+        assert_contains('missing theme/theme.json', $joined);
+        assert_contains('palette membership and contrast checks skipped', $joined);
+        assert_true(
+            !str_contains($joined, 'must name a theme/theme.json palette slug'),
+            'palette membership cannot be judged against an absent palette',
+        );
+        assert_contains('theme delivered anyway', $project->readText('logs/validate-theme.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('validate-theme matches inline position declarations without background-position false positives', function () {
+    [$project, $tmp] = final_validation_project();
+    $write = static function (string $style) use ($project): void {
+        $attr = $style === '' ? '' : ' style="' . $style . '"';
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}} -->'
+                . '<div class="wp-block-group has-contrast-color has-base-background-color has-text-color has-background"'
+                . $attr . '><!-- wp:site-title /--></div><!-- /wp:group -->',
+        );
+    };
+    $run = static function () use ($project): string {
+        $project->writeText('warnings.json', "{}\n");
+        (new ValidateThemeStep())->run($project);
+        return implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+    };
+
+    try {
+        $write('background-position: center top');
+        assert_true(
+            !str_contains($run(), 'saved wrapper contains inline position CSS'),
+            'background-position is not a position declaration',
+        );
+
+        $write("font-family: 'Foo'; position: absolute");
+        assert_contains(
+            'saved wrapper contains inline position CSS',
+            $run(),
+            'an apostrophe inside the quoted value must not hide the declaration',
+        );
+
+        $write('position: sticky');
+        assert_contains('saved wrapper contains inline position CSS', $run());
+
+        $write('color: red');
+        assert_true(
+            !str_contains($run(), 'saved wrapper contains inline position CSS'),
+            'no position declaration, no warning',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('validate-theme flags residual style elements in delivered theme markup', function () {
+    [$project, $tmp] = final_validation_project();
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group has-contrast-color has-base-background-color has-text-color has-background">'
+            . '<style>.site-header-shell{position:fixed}</style>'
+            . '<!-- wp:site-title /--></div><!-- /wp:group -->',
+    );
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
+        assert_contains('theme/parts/header.html: contains 1 <style> element(s)', $joined);
+        assert_contains('disposition: remove the <style> element(s)', $joined);
+        assert_contains('theme delivered anyway', $project->readText('logs/validate-theme.log'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('validate-theme reports residual header contrast, class, position, template, and asset defects', function () {
     [$project, $tmp] = final_validation_project();
     $project->writeJson('headerBehavior.json', [
@@ -244,6 +351,8 @@ test('validate-theme reports residual header contrast, class, position, template
         'topSurface' => 'primary',
         'scrolledSurface' => 'primary',
         'foreground' => 'primary',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
     $project->writeText(
         'theme/parts/header.html',
@@ -284,27 +393,136 @@ test('validate-theme reports residual header contrast, class, position, template
     }
 });
 
-test('validate-theme enforces the closed header artifact and behavior-mode palette consistency', function () {
+test('validate-theme mirrors consumer degradation for a rejected artifact without a wiring cascade', function () {
     [$project, $tmp] = final_validation_project();
+    // One extra key makes HeaderBehavior::validateArtifact throw — the exact
+    // gate AssemblePagesStep and FinalizeThemeStep run before they assemble
+    // static templates and prune the adaptive kit. final_validation_project()
+    // is that statically-assembled theme, so the validator must report the
+    // artifact defect once and not demand the sticky wiring the consumers
+    // removed on purpose.
     $project->writeJson('headerBehavior.json', [
         'behavior' => 'sticky-soft',
-        'mode' => 'overlay',
+        'mode' => 'stacked',
         'transition' => 'smooth',
-        'topSurface' => 'transparent',
-        'scrolledSurface' => 'unknown-surface',
+        'topSurface' => 'base',
+        'scrolledSurface' => 'contrast',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
         'modelNote' => 'invented extension',
     ]);
 
     try {
         (new ValidateThemeStep())->run($project);
 
+        $warnings = $project->readJson('warnings.json')['validate-theme'] ?? [];
+        $artifactProblems = array_values(array_filter(
+            $warnings,
+            static fn (string $w): bool => str_starts_with($w, 'header behavior contract:'),
+        ));
+        assert_eq(1, count($artifactProblems), implode("\n", $warnings));
+        assert_contains('closed header behavior contract is invalid', $artifactProblems[0]);
+        assert_contains('must contain exactly', $artifactProblems[0]);
+        assert_contains('delivered=static', $artifactProblems[0]);
+
+        $joined = implode("\n", $warnings);
+        assert_true(
+            !str_contains($joined, 'required outer header class'),
+            'no cascade against the intentionally static templates',
+        );
+        assert_true(
+            !str_contains($joined, 'requires this asset enqueue'),
+            'no cascade against the intentionally pruned kit',
+        );
+        assert_true(
+            !str_contains($joined, 'required inner header class'),
+            'no cascade against the static inner header',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('validate-theme reports a treatment relationship violation as one artifact problem', function () {
+    [$project, $tmp] = final_validation_project();
+    // A static behavior can never carry a non-solid treatment — the exact
+    // relationship rule HeaderBehavior::validateArtifact enforces. Like any
+    // other rejected artifact, the consumers degraded to static, so the
+    // validator must report the defect once and judge the theme against the
+    // static/pruned expectation without a wiring cascade.
+    $project->writeJson('headerBehavior.json', [
+        'behavior' => 'static',
+        'mode' => 'stacked',
+        'transition' => 'instant',
+        'topSurface' => 'base',
+        'scrolledSurface' => 'base',
+        'foreground' => 'contrast',
+        'topTreatment' => 'glass',
+        'scrolledTreatment' => 'solid',
+    ]);
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
+        $warnings = $project->readJson('warnings.json')['validate-theme'] ?? [];
+        $artifactProblems = array_values(array_filter(
+            $warnings,
+            static fn (string $w): bool => str_starts_with($w, 'header behavior contract:'),
+        ));
+        assert_eq(1, count($artifactProblems), implode("\n", $warnings));
+        assert_contains('closed header behavior contract is invalid', $artifactProblems[0]);
+        assert_contains('static behavior requires solid top and scrolled treatments', $artifactProblems[0]);
+        assert_contains('delivered=static', $artifactProblems[0]);
+
+        $joined = implode("\n", $warnings);
+        assert_true(
+            !str_contains($joined, 'required outer header class'),
+            'no cascade against the intentionally static templates',
+        );
+        assert_true(
+            !str_contains($joined, 'requires this asset enqueue'),
+            'no cascade against the intentionally pruned kit',
+        );
+        assert_true(
+            !str_contains($joined, 'required inner header class'),
+            'no cascade against the static inner header',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('validate-theme flags sticky residue the consumers would have pruned for a rejected artifact', function () {
+    [$project, $tmp] = final_validation_project();
+    $project->writeJson('headerBehavior.json', [
+        'behavior' => 'sticky-soft',
+        'mode' => 'stacked',
+        'transition' => 'smooth',
+        'topSurface' => 'base',
+        'scrolledSurface' => 'contrast',
+        'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
+        'modelNote' => 'invented extension',
+    ]);
+    // Leftover adaptive wiring that the consumers' static degrade should have
+    // removed is real residue against the pruned expectation.
+    $project->writeText('theme/assets/header/header.css', "/* stale */\n");
+    $project->writeText(
+        'theme/parts/header.html',
+        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast",'
+            . '"className":"header-behavior-sticky-soft","layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group has-contrast-color has-base-background-color has-text-color has-background '
+            . 'header-behavior-sticky-soft"><!-- wp:site-title /--></div><!-- /wp:group -->',
+    );
+
+    try {
+        (new ValidateThemeStep())->run($project);
+
         $joined = implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []);
-        assert_contains('artifact is not closed', $joined);
-        assert_contains('extra=["modelNote"]', $joined);
-        assert_contains('behavior/mode mismatch', $joined);
-        assert_contains("'sticky-soft' requires mode 'stacked'", $joined);
-        assert_contains('scrolledSurface must name a theme/theme.json palette slug', $joined);
+        assert_contains('static behavior must not retain header state classes', $joined);
+        assert_contains('static behavior must not ship unused header state assets', $joined);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
@@ -358,6 +576,8 @@ test('validate-theme rejects palette slugs that the trusted header CSS does not 
         'topSurface' => 'base',
         'scrolledSurface' => 'custom-panel',
         'foreground' => 'contrast',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
 
     try {
@@ -408,6 +628,8 @@ test('validate-theme checks overlay foreground against the trusted scrim worst c
         'topSurface' => 'transparent',
         'scrolledSurface' => 'contrast',
         'foreground' => 'primary',
+        'topTreatment' => 'transparent',
+        'scrolledTreatment' => 'solid',
     ]);
     $project->writeText(
         'theme/parts/header.html',
@@ -442,6 +664,8 @@ test('validate-theme rejects a smooth surface change with an unreadable midpoint
         'topSurface' => 'base',
         'scrolledSurface' => 'contrast',
         'foreground' => 'primary',
+        'topTreatment' => 'solid',
+        'scrolledTreatment' => 'solid',
     ]);
     $project->writeText(
         'theme/parts/header.html',
@@ -483,6 +707,8 @@ test('validate-theme rejects a smooth surface change with an unreadable midpoint
             'topSurface' => 'base',
             'scrolledSurface' => 'primary',
             'foreground' => 'contrast',
+            'topTreatment' => 'solid',
+            'scrolledTreatment' => 'solid',
         ]);
         $project->writeText(
             'theme/parts/header.html',

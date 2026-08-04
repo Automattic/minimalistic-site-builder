@@ -195,9 +195,17 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'topSurface',
         'scrolledSurface',
         'foreground',
+        'topTreatment',
+        'scrolledTreatment',
     ], array_keys($headerBehavior), 'header behavior artifact is closed');
     assert_eq('sticky-soft', $headerBehavior['behavior']);
     assert_eq('stacked', $headerBehavior['mode']);
+    // The image-led home opening rules out a verifiable transparent start, but
+    // the light base tint at GLASS_ALPHA stays readable under the dark
+    // foreground for any content, so the resolver grants a frosted top state;
+    // the scrolled tint cannot make the same guarantee and stays solid.
+    assert_eq('glass', $headerBehavior['topTreatment']);
+    assert_eq('solid', $headerBehavior['scrolledTreatment']);
     assert_true(in_array($headerBehavior['transition'], ['smooth', 'instant'], true));
     $headerPalette = array_column(
         $project->readJson('theme/theme.json')['settings']['color']['palette'],
@@ -224,9 +232,14 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'header-start-' . $headerBehavior['topSurface'],
         'header-scrolled-' . $headerBehavior['scrolledSurface'],
         'header-foreground-' . $headerBehavior['foreground'],
+        'header-top-' . $headerBehavior['topTreatment'],
     ] as $class) {
         assert_contains($class, $headerMarkup, "header carries canonical {$class} hook");
     }
+    assert_true(
+        !str_contains($headerMarkup, 'header-scrolled-glass'),
+        'a solid scrolled treatment ships no glass hook',
+    );
     if ($headerBehavior['transition'] === 'instant') {
         assert_contains('header-transition-instant', $headerMarkup);
     } else {

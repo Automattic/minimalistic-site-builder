@@ -9,6 +9,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Final step (deterministic): write theme/functions.php.
@@ -60,11 +61,14 @@ final class FinalizeThemeStep implements Step
             reads: [
                 'designDirection.json',
                 'headerBehavior.json',
+                'theme/theme.json',
+                'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
             ],
             writes: [
                 'theme/functions.php',
+                'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
                 'warnings.json',
@@ -80,6 +84,13 @@ final class FinalizeThemeStep implements Step
             ? $profile
             : null;
         [$headerBehavior, $headerWarnings] = self::headerBehaviorFor($project);
+        if ($headerWarnings !== []) {
+            // A degraded artifact may arrive AFTER HeaderHeroStep rewrote the
+            // header part for overlay (transparent root + light foreground).
+            // Pruning the kit while keeping that markup ships an invisible
+            // header, so the part is solidified and the rewrite recorded.
+            self::solidifyDegradedOverlayHeader($project, $headerWarnings);
+        }
         $header = $headerBehavior !== 'static';
         if ($header) {
             self::assertHeaderKit($project);
@@ -109,9 +120,9 @@ final class FinalizeThemeStep implements Step
     {
         if (!$project->exists('headerBehavior.json')) {
             return ['static', [
-                'headerBehavior.json $: authored value missing; delivered value {"behavior":"static"}; '
-                . 'disposition: missing generated behavior artifact was downgraded and the '
-                . 'adaptive-header kit was removed',
+                "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored=<missing>; "
+                . "delivered='static'; disposition=missing generated behavior artifact was downgraded "
+                . 'and the adaptive-header kit was removed',
             ]];
         }
 
@@ -120,9 +131,9 @@ final class FinalizeThemeStep implements Step
             $data = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
         } catch (\JsonException $error) {
             return ['static', [
-                'headerBehavior.json $.behavior: authored value invalid JSON; delivered value '
-                . '"static"; disposition: malformed generated behavior was downgraded and the '
-                . 'adaptive-header kit was removed',
+                "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored=<invalid JSON: "
+                . $error->getMessage() . ">; delivered='static'; disposition=malformed generated "
+                . 'behavior was downgraded and the adaptive-header kit was removed',
             ]];
         }
 
@@ -133,13 +144,49 @@ final class FinalizeThemeStep implements Step
             $data = HeaderBehavior::validateArtifact($data);
             return [$data['behavior'], []];
         } catch (\InvalidArgumentException $error) {
-            $encoded = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             return ['static', [
-                'headerBehavior.json $: authored value ' . ($encoded === false ? 'unrepresentable' : $encoded)
-                . '; delivered value {"behavior":"static"}; disposition: invalid closed artifact ('
+                "file='" . HeaderBehavior::FILE . "'; block='behavior'; authored=" . Warnings::value($data)
+                . "; delivered='static'; disposition=invalid closed artifact ("
                 . $error->getMessage() . ') was downgraded and the adaptive-header kit was removed',
             ]];
         }
+    }
+
+    /**
+     * Rewrite an overlay-prepared header part onto a solid readable surface
+     * when the behavior artifact degraded to static. Shares the deterministic
+     * rewrite with the assemble-pages degrade path so both consumers deliver
+     * the identical repaired part.
+     *
+     * @param list<string> $warnings appended to in place
+     */
+    private static function solidifyDegradedOverlayHeader(Project $project, array &$warnings): void
+    {
+        if (!$project->exists('theme/parts/header.html')) {
+            return;
+        }
+        try {
+            $palette = $project->exists('theme/theme.json')
+                ? ContrastFixStep::paletteMap($project->readJson('theme/theme.json'))
+                : [];
+        } catch (\RuntimeException) {
+            // A corrupt theme.json must not abort the fail-open rewrite; the
+            // solidifier falls back to its safe default pair.
+            $palette = [];
+        }
+        $result = AssemblePagesStep::solidifyOverlayPreparedHeader(
+            $project->readText('theme/parts/header.html'),
+            $palette,
+        );
+        if ($result === null) {
+            return;
+        }
+        $project->writeText('theme/parts/header.html', $result['markup']);
+        $warnings[] = "file='theme/parts/header.html'; block='overlay top state'; authored=transparent start"
+            . ($result['previousForeground'] !== '' ? " with '{$result['previousForeground']}' foreground" : '')
+            . "; delivered=opaque '{$result['topSurface']}' surface with '{$result['foreground']}' foreground; "
+            . 'disposition=overlay-prepared header rewritten to a readable solid surface because the behavior '
+            . 'artifact degraded to static';
     }
 
     /** A non-static resolved behavior contractually requires both trusted files. */

@@ -545,6 +545,52 @@ test('header contract text matches the mode and reaches only hero-role sections'
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('an overlay-planned site whose palette fails the scrim check is briefed as stacked', function () {
+    putenv(SectionsStep::ARCHETYPE_ENV); // a forced archetype would bypass the resolver preview
+    [$project, $tmp] = sections_fixture(); // front hero is image-led → the PLAN alone says overlay
+    // Every palette role is a mid grey: no foreground reads against the
+    // trusted scrim's worst case, so the resolved MODE diverges from the
+    // structural mode — resolve() falls back through the stacked path.
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'name' => 'Base', 'color' => '#8A8A8A'],
+            ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#7A7A7A'],
+            ['slug' => 'primary', 'name' => 'Primary', 'color' => '#6E6E6E'],
+            ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#9A9A9A'],
+            ['slug' => 'accent', 'name' => 'Accent', 'color' => '#808080'],
+        ]]],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    // Sanity: the plan-only decision would still brief overlay — reverting the
+    // palette-aware preview to headerMode() must fail this test.
+    assert_eq(
+        SectionsStep::MODE_OVERLAY,
+        SectionsStep::headerMode($project->readJson('pages.json')['pages']),
+        'structurally this site qualifies for overlay'
+    );
+
+    // Both sides of the seam are briefed with the stacked-MODE contract. Only
+    // the mode is asserted here: the exact fallback behavior value is the
+    // resolver's own business.
+    $header = $reqs['header']['prompt'];
+    assert_contains('STACKS as an opaque bar', $header);
+    assert_true(
+        !str_contains($header, 'ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**'),
+        'the unreadable overlay must not be assigned'
+    );
+    assert_true(
+        !str_contains($header, 'DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid'),
+        'the behavior contract must not promise the overlay shell'
+    );
+    $hero = sections_request_text($reqs['page-home--hero']);
+    assert_contains('OPAQUE site header', $hero, 'the hero composes for stacked chrome');
+    assert_true(!str_contains($hero, 'floats TRANSLUCENTLY'), 'no overlay contract reaches the hero');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('HEADER_ARCHETYPE env forces the header archetype in the header prompt', function () {
     [$project, $tmp] = sections_fixture();
     putenv(SectionsStep::ARCHETYPE_ENV . '=branded-lockup');

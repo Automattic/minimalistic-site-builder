@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -146,11 +147,15 @@ final class ContrastFixStep implements Step
      * nothing upstream guarantees the one text color the header committed to
      * reads against every page's opening background. This is the
      * deterministic backstop: the header's effective text color is checked
-     * against each page's first-section background. Warnings only — the right
-     * fix (recolor the header, darken the section, or drop the overlay) is a
-     * design decision this step must not make — and image-backed covers are
-     * skipped like everywhere else in phase one (their pixels are unknowable
-     * until images exist).
+     * against each page's first-section background AS THE TRUSTED KIT PAINTS
+     * IT — the overlay's top state always composites its verified black scrim
+     * (HeaderBehavior::OVERLAY_SCRIM_ALPHA) under the header text, bounding
+     * every pixel to the worst case the foreground was already selected
+     * against, so the lint judges the scrimmed background rather than the raw
+     * one. Warnings only — the right fix (recolor the header, darken the
+     * section, or drop the overlay) is a design decision this step must not
+     * make — and image-backed covers are skipped like everywhere else in
+     * phase one (their pixels are unknowable until images exist).
      *
      * @param list<string> $report
      */
@@ -227,16 +232,26 @@ final class ContrastFixStep implements Step
                 [$bg, $bgLabel] = $ownBg !== null ? [$ownBg['colors'], $ownBg['label']] : [[$base], 'base'];
             }
 
+            // The trusted kit's top state always paints its verified scrim
+            // between the raw background and the header text; lint what the
+            // viewer sees, not the unscrimmed surface beneath it.
             $min = PHP_FLOAT_MAX;
             foreach ($bg as $color) {
-                $min = min($min, ContrastMath::ratio($fg['rgb'], $color));
+                $scrimmed = ContrastMath::compositeOver(
+                    [0, 0, 0],
+                    HeaderBehavior::OVERLAY_SCRIM_ALPHA,
+                    $color,
+                );
+                $min = min($min, ContrastMath::ratio($fg['rgb'], $scrimmed));
             }
             if ($min >= ContrastMath::NORMAL_TEXT) {
                 continue;
             }
             $report[] = sprintf(
-                "[parts/header.html] overlay header text %s floats over page '%s' opening section '%s' on %s: %.2f < %.1f — the transparent header renders on EVERY page; keep opening backgrounds consistent with it or pick another archetype (warning)",
-                $fg['label'], $pageSlug, $sectionSlug, $bgLabel, $min, ContrastMath::NORMAL_TEXT
+                "[parts/header.html] overlay header text %s floats over page '%s' opening section '%s' on %s under the trusted %d%%-black scrim: %.2f < %.1f — the transparent header renders on EVERY page; keep opening backgrounds consistent with it or pick another archetype (warning)",
+                $fg['label'], $pageSlug, $sectionSlug, $bgLabel,
+                (int) round(HeaderBehavior::OVERLAY_SCRIM_ALPHA * 100),
+                $min, ContrastMath::NORMAL_TEXT
             );
             $warnings++;
         }

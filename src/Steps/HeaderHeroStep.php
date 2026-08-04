@@ -165,6 +165,7 @@ final class HeaderHeroStep implements Step
             HeaderBehavior::transitionFor(DesignDirectionStep::motionProfileFor($project)),
             $authoredTop,
             $authoredForeground,
+            self::pageBackgroundSlug($theme),
         );
         foreach ($openingProblems as $problem) {
             $warnings[] = "file='{$problem['file']}'; block='page-opening composition'; authored="
@@ -864,31 +865,70 @@ final class HeaderHeroStep implements Step
     }
 
     /**
+     * An HTML tag with its attributes; quoted values may contain `<`/`>`
+     * without ending the match. Both saved-HTML position passes below use it
+     * so only real tag attributes are ever inspected or rewritten.
+     */
+    private const HTML_TAG_PATTERN = '/<[a-z][a-z0-9-]*(?:[^<>"\']|"[^"]*"|\'[^\']*\')*>/i';
+
+    /**
      * Inline HTML can repeat a block comment's `style.position`. Remove any
      * root position, plus nested sticky/fixed declarations, while preserving
      * local descendant relative positioning and every neighboring property.
+     *
+     * Regions come from the block parser: each block contributes only the
+     * HTML it owns, and only tags inside that HTML are edited — visible text
+     * that merely mentions `style="position:fixed"` is never rewritten
+     * (BlockMarkup::replaceInOwnHtml documents the same contract), and a
+     * leading non-block comment cannot displace the true root region.
      *
      * @return array{0:string,1:bool}
      */
     private static function withoutInlinePosition(string $markup): array
     {
-        $openEnd = strpos($markup, '-->');
-        if ($openEnd === false) {
-            return [$markup, false];
-        }
-        $ownEndCandidates = [];
-        foreach (['<!-- wp:', '<!-- /wp:'] as $marker) {
-            $offset = strpos($markup, $marker, $openEnd + 3);
-            if ($offset !== false) {
-                $ownEndCandidates[] = $offset;
+        $doc = BlockMarkup::parse($markup);
+        $top = $doc->topLevel();
+        $edits = [];
+        foreach ($doc->indices() as $i) {
+            $own = $doc->ownHtml($i);
+            [$stripped, $nodeChanged] = self::stripInlinePositionFromTags($own, $i !== $top);
+            if ($nodeChanged) {
+                $edits[] = [
+                    'start' => $doc->openingOffset($i) + $doc->openingLength($i),
+                    'length' => strlen($own),
+                    'content' => $stripped,
+                ];
             }
         }
-        $ownEnd = $ownEndCandidates === [] ? strlen($markup) : min($ownEndCandidates);
-        $rootHtml = substr($markup, 0, $ownEnd);
-        $descendants = substr($markup, $ownEnd);
-        [$rootHtml, $rootChanged] = self::stripInlinePositionDeclarations($rootHtml, false);
-        [$descendants, $descendantChanged] = self::stripInlinePositionDeclarations($descendants, true);
-        return [$rootHtml . $descendants, $rootChanged || $descendantChanged];
+        if ($edits === []) {
+            return [$markup, false];
+        }
+        usort($edits, static fn (array $a, array $b): int => $b['start'] <=> $a['start']);
+        foreach ($edits as $edit) {
+            $markup = substr_replace($markup, $edit['content'], $edit['start'], $edit['length']);
+        }
+        return [$markup, true];
+    }
+
+    /**
+     * Apply the position strip only inside HTML tags, so text content in the
+     * same owned region survives verbatim.
+     *
+     * @return array{0:string,1:bool}
+     */
+    private static function stripInlinePositionFromTags(string $html, bool $persistentOnly): array
+    {
+        $changed = false;
+        $result = preg_replace_callback(
+            self::HTML_TAG_PATTERN,
+            static function (array $match) use (&$changed, $persistentOnly): string {
+                [$tag, $tagChanged] = self::stripInlinePositionDeclarations($match[0], $persistentOnly);
+                $changed = $changed || $tagChanged;
+                return $tag;
+            },
+            $html,
+        );
+        return [is_string($result) ? $result : $html, $changed];
     }
 
     /** @return array{0:string,1:bool} */
@@ -925,6 +965,24 @@ final class HeaderHeroStep implements Step
             $html,
         );
         return [is_string($result) ? $result : $html, $changed];
+    }
+
+    /**
+     * The palette slug theme.json paints behind the page body, in either of
+     * the preset spellings the pipeline emits. A transparent sticky start
+     * reveals exactly this color, so the resolver verifies against it; null
+     * (raw hex or absent) lets the resolver use its base-token convention.
+     *
+     * @param array<string,mixed> $theme
+     */
+    private static function pageBackgroundSlug(array $theme): ?string
+    {
+        $value = (string) ($theme['styles']['color']['background'] ?? '');
+        if (preg_match('/^var\(--wp--preset--color--([a-z0-9-]+)\)$/', trim($value), $match)
+            || preg_match('/^var:preset\|color\|([a-z0-9-]+)$/', trim($value), $match)) {
+            return $match[1];
+        }
+        return null;
     }
 
     /** @return array{0:?string,1:?string} */
@@ -965,49 +1023,57 @@ final class HeaderHeroStep implements Step
                 'root' => $i === $top,
             ];
         }
-        $openEnd = strpos($markup, '-->');
-        if ($openEnd !== false) {
-            $ownEndCandidates = [];
-            foreach (['<!-- wp:', '<!-- /wp:'] as $marker) {
-                $offset = strpos($markup, $marker, $openEnd + 3);
-                if ($offset !== false) {
-                    $ownEndCandidates[] = $offset;
-                }
-            }
-            $ownEnd = $ownEndCandidates === [] ? strlen($markup) : min($ownEndCandidates);
-            foreach (
-                [
-                    [substr($markup, 0, $ownEnd), true, false],
-                    [substr($markup, $ownEnd), false, true],
-                ] as [$html, $root, $persistentOnly]
-            ) {
-                if (!preg_match_all('/\bposition\s*:\s*([a-z-]+)\b/i', $html, $matches, PREG_SET_ORDER)) {
+        foreach ($doc->indices() as $i) {
+            $root = $i === $top;
+            foreach (self::inlineStylePositionTypes($doc->ownHtml($i)) as [$type, $evidence]) {
+                if (!$root && !in_array($type, ['sticky', 'fixed'], true)) {
                     continue;
                 }
-                foreach ($matches as $match) {
-                    $type = strtolower($match[1]);
-                    if ($persistentOnly && !in_array($type, ['sticky', 'fixed'], true)) {
-                        continue;
+                $duplicate = false;
+                foreach ($findings as $finding) {
+                    if ($finding['root'] === $root && $finding['type'] === $type) {
+                        $duplicate = true;
+                        break;
                     }
-                    $duplicate = false;
-                    foreach ($findings as $finding) {
-                        if ($finding['root'] === $root && $finding['type'] === $type) {
-                            $duplicate = true;
-                            break;
-                        }
-                    }
-                    if (!$duplicate) {
-                        $findings[] = [
-                            'block' => $root ? 'root saved HTML style attribute' : 'descendant saved HTML style attribute',
-                            'type' => $type,
-                            'value' => $match[0],
-                            'root' => $root,
-                        ];
-                    }
+                }
+                if (!$duplicate) {
+                    $findings[] = [
+                        'block' => $root ? 'root saved HTML style attribute' : 'descendant saved HTML style attribute',
+                        'type' => $type,
+                        'value' => $evidence,
+                        'root' => $root,
+                    ];
                 }
             }
         }
         return $findings;
+    }
+
+    /**
+     * Position declarations found in `style` attributes of real tags. Text
+     * content that mentions a declaration is not authored positioning.
+     *
+     * @return list<array{0:string,1:string}> [type, matched declaration]
+     */
+    private static function inlineStylePositionTypes(string $html): array
+    {
+        $found = [];
+        if (!preg_match_all(self::HTML_TAG_PATTERN, $html, $tags)) {
+            return $found;
+        }
+        foreach ($tags[0] as $tag) {
+            if (!preg_match_all('/\sstyle\s*=\s*(["\'])(.*?)\1/is', $tag, $styles, PREG_SET_ORDER)) {
+                continue;
+            }
+            foreach ($styles as $style) {
+                if (preg_match_all('/\bposition\s*:\s*([a-z-]+)\b/i', $style[2], $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $match) {
+                        $found[] = [strtolower($match[1]), $match[0]];
+                    }
+                }
+            }
+        }
+        return $found;
     }
 
     /** @param array{root:bool,type:string} $position @param array<mixed> $behavior */

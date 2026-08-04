@@ -27,22 +27,6 @@ final class ValidateThemeStep implements Step
 {
     private const LOG_FILE = 'validate-theme.log';
 
-    /** The header behavior artifact is deliberately closed: no model-owned extension bag. */
-    private const HEADER_FIELDS = [
-        'behavior',
-        'mode',
-        'transition',
-        'topSurface',
-        'scrolledSurface',
-        'foreground',
-    ];
-
-    private const HEADER_BEHAVIORS = ['static', 'sticky-soft', 'overlay-to-solid'];
-
-    private const HEADER_MODES = ['stacked', 'overlay'];
-
-    private const HEADER_TRANSITIONS = ['smooth', 'instant'];
-
     private const HEADER_ASSETS = [
         'theme/assets/header/header.css',
         'theme/assets/header/header.js',
@@ -94,6 +78,7 @@ final class ValidateThemeStep implements Step
             ThemeValidator::typographyWarnings($project),
             ThemeValidator::planWarnings($project),
             PresetReferences::problems($project),
+            self::styleElementProblems($project),
             self::headerBehaviorProblems($project),
         );
         $problems = array_values(array_unique($problems));
@@ -118,150 +103,73 @@ final class ValidateThemeStep implements Step
      * here mutates the already-usable theme: every residual is delivered and
      * recorded with enough file/value/disposition context for a repair pass.
      *
+     * The artifact gate is HeaderBehavior::validateArtifact — the exact call
+     * AssemblePagesStep and FinalizeThemeStep run — so this validator can
+     * never disagree with the consumers about which artifacts are acceptable.
+     * When the consumers degrade to a static header (missing, malformed, or
+     * rejected artifact), the theme is judged against that pruned static
+     * expectation rather than the artifact's claimed behavior; anything else
+     * would direct a repair pass to re-add wiring the consumers removed on
+     * purpose. Each artifact defect yields exactly one problem row.
+     *
      * @return list<string>
      */
     private static function headerBehaviorProblems(Project $project): array
     {
         $problems = [];
-        $artifact = self::readHeaderArtifact($project, $problems);
-        if ($artifact === null) {
+        $decoded = self::readHeaderArtifact($project, $problems);
+        if ($decoded === null) {
+            self::checkDegradedStaticResidue($project, $problems);
             return $problems;
         }
 
-        $keys = array_keys($artifact);
-        $missing = array_values(array_diff(self::HEADER_FIELDS, $keys));
-        $extra = array_values(array_diff($keys, self::HEADER_FIELDS));
-        if ($missing !== [] || $extra !== []) {
+        try {
+            $artifact = HeaderBehavior::validateArtifact($decoded);
+        } catch (\InvalidArgumentException $error) {
             $problems[] = self::headerProblem(
                 'headerBehavior.json',
-                'fields=' . self::value($keys),
-                'unchanged',
-                'artifact is not closed; missing=' . self::value($missing)
-                    . ', extra=' . self::value($extra)
-                    . ', expected exactly=' . self::value(self::HEADER_FIELDS),
+                self::value($decoded),
+                'static',
+                'closed header behavior contract is invalid: ' . $error->getMessage(),
             );
-            // Missing fields make every derived class/surface check
-            // speculative. Extra fields are independently actionable but do
-            // not prevent validating the complete known contract.
-            if ($missing !== []) {
-                return $problems;
-            }
-        }
-
-        $typesValid = true;
-        foreach (self::HEADER_FIELDS as $field) {
-            if (!is_string($artifact[$field])) {
-                $typesValid = false;
-                $problems[] = self::headerProblem(
-                    'headerBehavior.json',
-                    "{$field}=" . self::value($artifact[$field]),
-                    'unchanged',
-                    "field '{$field}' must be a string",
-                );
-            } elseif (trim($artifact[$field]) === '') {
-                $typesValid = false;
-                $problems[] = self::headerProblem(
-                    'headerBehavior.json',
-                    "{$field}=" . self::value($artifact[$field]),
-                    'unchanged',
-                    "field '{$field}' must be non-empty",
-                );
-            }
-        }
-        if (!$typesValid) {
-            return $problems;
-        }
-
-        /** @var array{behavior:string,mode:string,transition:string,topSurface:string,scrolledSurface:string,foreground:string} $artifact */
-        if ($missing === [] && $extra === []) {
-            try {
-                HeaderBehavior::validateArtifact($artifact);
-            } catch (\InvalidArgumentException $error) {
-                $problems[] = self::headerProblem(
-                    'headerBehavior.json',
-                    self::value($artifact),
-                    'unchanged',
-                    'closed header behavior contract is invalid: ' . $error->getMessage(),
-                );
-            }
-        }
-
-        $enumsValid = true;
-        foreach ([
-            'behavior' => self::HEADER_BEHAVIORS,
-            'mode' => self::HEADER_MODES,
-            'transition' => self::HEADER_TRANSITIONS,
-        ] as $field => $allowed) {
-            if (in_array($artifact[$field], $allowed, true)) {
-                continue;
-            }
-            $enumsValid = false;
-            $problems[] = self::headerProblem(
-                'headerBehavior.json',
-                "{$field}=" . self::value($artifact[$field]),
-                'unchanged',
-                "unsupported {$field}; expected one of " . self::value($allowed),
-            );
-        }
-        if (!$enumsValid) {
+            self::checkDegradedStaticResidue($project, $problems);
             return $problems;
         }
 
         $behavior = $artifact['behavior'];
-        $mode = $artifact['mode'];
-        $expectedMode = $behavior === 'overlay-to-solid' ? 'overlay' : 'stacked';
-        if ($mode !== $expectedMode) {
-            $problems[] = self::headerProblem(
-                'headerBehavior.json',
-                'behavior=' . self::value($behavior) . ', mode=' . self::value($mode),
-                'unchanged',
-                "behavior/mode mismatch; '{$behavior}' requires mode '{$expectedMode}'",
-            );
-        }
-        if ($behavior === 'static' && $artifact['scrolledSurface'] !== $artifact['topSurface']) {
-            $problems[] = self::headerProblem(
-                'headerBehavior.json',
-                'behavior="static", topSurface=' . self::value($artifact['topSurface'])
-                    . ', scrolledSurface=' . self::value($artifact['scrolledSurface']),
-                'unchanged',
-                'static behavior requires identical top and scrolled surfaces',
-            );
-        }
-        if ($mode === 'overlay' && $artifact['topSurface'] !== 'transparent') {
-            $problems[] = self::headerProblem(
-                'headerBehavior.json',
-                'mode="overlay", topSurface=' . self::value($artifact['topSurface']),
-                'unchanged',
-                'overlay mode requires topSurface="transparent"',
-            );
-        } elseif ($mode === 'stacked' && $artifact['topSurface'] === 'transparent') {
-            $problems[] = self::headerProblem(
-                'headerBehavior.json',
-                'mode="stacked", topSurface="transparent"',
-                'unchanged',
-                'stacked mode requires an opaque palette topSurface',
-            );
-        }
 
-        $theme = json_decode($project->readText('theme/theme.json'), true);
-        $palette = is_array($theme) ? ContrastFixStep::paletteMap($theme) : [];
-        foreach (['topSurface', 'scrolledSurface', 'foreground'] as $field) {
-            $slug = $artifact[$field];
-            if ($field === 'topSurface' && $slug === 'transparent') {
-                continue;
+        if (!$project->exists('theme/theme.json')) {
+            // ThemeValidator reports the structural absence itself; this row
+            // records that the palette-dependent header checks could not run.
+            // Project::readText throws on a missing file, and this advisory
+            // step must never abort over one.
+            $problems[] = self::headerProblem(
+                'theme/theme.json',
+                '<missing>',
+                '<missing>',
+                'palette membership and contrast checks skipped: theme/theme.json is absent',
+            );
+        } else {
+            $theme = json_decode($project->readText('theme/theme.json'), true);
+            $palette = is_array($theme) ? ContrastFixStep::paletteMap($theme) : [];
+            foreach (['topSurface', 'scrolledSurface', 'foreground'] as $field) {
+                $slug = $artifact[$field];
+                if ($field === 'topSurface' && $slug === HeaderBehavior::TRANSPARENT) {
+                    continue;
+                }
+                if (!array_key_exists($slug, $palette)) {
+                    $problems[] = self::headerProblem(
+                        'headerBehavior.json',
+                        "{$field}=" . self::value($slug),
+                        'unchanged',
+                        "{$field} must name a theme/theme.json palette slug",
+                    );
+                }
             }
-            if (!array_key_exists($slug, $palette)) {
-                $problems[] = self::headerProblem(
-                    'headerBehavior.json',
-                    "{$field}=" . self::value($slug),
-                    'unchanged',
-                    "{$field} must name a theme/theme.json palette slug",
-                );
-            }
+            self::checkHeaderContrast($artifact, $palette, 'topSurface', $problems);
+            self::checkHeaderContrast($artifact, $palette, 'scrolledSurface', $problems);
+            self::checkHeaderTransition($artifact, $palette, $problems);
         }
-        self::checkHeaderContrast($artifact, $palette, 'topSurface', $problems);
-        self::checkHeaderContrast($artifact, $palette, 'scrolledSurface', $problems);
-        self::checkHeaderTransition($artifact, $palette, $problems);
 
         self::checkInnerHeader($project, $artifact, $problems);
         self::checkOuterTemplate(
@@ -320,6 +228,77 @@ final class ValidateThemeStep implements Step
             return null;
         }
         return $decoded;
+    }
+
+    /**
+     * The delivered expectation once the consumers degrade: AssemblePagesStep
+     * and FinalizeThemeStep answer a missing, malformed, or rejected artifact
+     * by assembling the static templates and pruning the adaptive-header kit.
+     * Hold the theme to that same static expectation — no retained inner
+     * state classes, no outer shell classes, no state assets or enqueues.
+     *
+     * @param list<string> $problems
+     */
+    private static function checkDegradedStaticResidue(Project $project, array &$problems): void
+    {
+        $rel = 'theme/parts/header.html';
+        if ($project->exists($rel)) {
+            $doc = BlockMarkup::parse($project->readText($rel));
+            $top = $doc->topLevel();
+            if ($top !== null) {
+                $attrs = $doc->attrs($top) ?? [];
+                $attributeTokens = self::classTokens(
+                    is_string($attrs['className'] ?? null) ? $attrs['className'] : null,
+                );
+                $state = array_values(array_unique(array_merge(
+                    self::innerStateTokens($attributeTokens),
+                    self::innerStateTokens(self::htmlClassTokens($doc->ownHtml($top))),
+                )));
+                foreach ($state as $class) {
+                    $problems[] = self::headerProblem(
+                        $rel,
+                        "state class='{$class}'",
+                        'unchanged',
+                        'static behavior must not retain header state classes',
+                    );
+                }
+            }
+        }
+        self::checkOuterTemplate(
+            $project,
+            'theme/templates/page.html',
+            self::classTokens(AssemblePagesStep::pageHeaderClassName(HeaderBehavior::STATIC)),
+            $problems,
+        );
+        self::checkOuterTemplate(
+            $project,
+            'theme/templates/index.html',
+            self::classTokens(AssemblePagesStep::indexHeaderClassName(HeaderBehavior::STATIC)),
+            $problems,
+        );
+        self::checkHeaderAssets($project, HeaderBehavior::STATIC, $problems);
+    }
+
+    /**
+     * Model-authored <style> elements are stripped at markup intake
+     * (MarkupSanitizer); one surviving in a delivered template or part means
+     * the markup reached the theme without passing that choke point, and a
+     * single rule such as `.site-header-shell{position:fixed}` would override
+     * the trusted header shell's position ownership.
+     *
+     * @return list<string>
+     */
+    private static function styleElementProblems(Project $project): array
+    {
+        $problems = [];
+        foreach ($project->themeFiles() as $rel) {
+            $count = preg_match_all('/<style\b/i', $project->readText('theme/' . $rel));
+            if ($count > 0) {
+                $problems[] = "theme/{$rel}: contains {$count} <style> element(s) — delivered CSS belongs to "
+                    . 'the trusted theme assets, not generated markup; disposition: remove the <style> element(s)';
+            }
+        }
+        return $problems;
     }
 
     /**
@@ -468,7 +447,7 @@ final class ValidateThemeStep implements Step
             self::innerStateTokens($attributeTokens),
             self::innerStateTokens($htmlTokens),
         )));
-        $required = self::expectedInnerClasses($artifact);
+        $required = HeaderBehavior::rootClasses($artifact);
 
         foreach ($required as $class) {
             if (in_array($class, $attributeTokens, true) && in_array($class, $htmlTokens, true)) {
@@ -603,7 +582,7 @@ final class ValidateThemeStep implements Step
                 'positioning belongs to the outer template-part shell; inner header position must be absent',
             );
         }
-        if (preg_match('/\bstyle\s*=\s*(["\'])[^"\']*\bposition\s*:/i', $doc->ownHtml($top))) {
+        if (self::hasInlinePositionDeclaration($doc->ownHtml($top))) {
             $problems[] = self::headerProblem(
                 $rel,
                 'saved wrapper contains inline position CSS',
@@ -626,7 +605,7 @@ final class ValidateThemeStep implements Step
                     'descendant sticky/fixed positioning is unsupported inside the persistent header shell',
                 );
             }
-            if (preg_match('/\bposition\s*:\s*(?:sticky|fixed)\b/i', $doc->ownHtml($i), $match)) {
+            if (preg_match('/(?<![-\w])position\s*:\s*(?:sticky|fixed)\b/i', $doc->ownHtml($i), $match)) {
                 $problems[] = self::headerProblem(
                     $rel,
                     'wp:' . $doc->name($i) . "[{$i}] saved wrapper contains " . self::value($match[0]),
@@ -758,24 +737,25 @@ final class ValidateThemeStep implements Step
     }
 
     /**
-     * @param array{behavior:string,mode:string,transition:string,topSurface:string,scrolledSurface:string,foreground:string} $artifact
-     * @return list<string>
+     * Whether an inline style attribute in the given HTML carries a CSS
+     * `position` declaration. The attribute value is matched with its own
+     * closing quote, so an apostrophe inside a double-quoted value (a quoted
+     * font-family, say) cannot end the scan early; and the property boundary
+     * excludes hyphen-prefixed properties, so `background-position` is not a
+     * false positive while `position` first in the list, after `;`, or after
+     * whitespace still matches.
      */
-    private static function expectedInnerClasses(array $artifact): array
+    private static function hasInlinePositionDeclaration(string $html): bool
     {
-        if ($artifact['behavior'] === 'static') {
-            return [];
+        if (!preg_match_all('/\bstyle\s*=\s*(["\'])((?:(?!\1).)*)\1/is', $html, $matches)) {
+            return false;
         }
-        $classes = [
-            'header-behavior-' . $artifact['behavior'],
-            'header-start-' . $artifact['topSurface'],
-            'header-scrolled-' . $artifact['scrolledSurface'],
-            'header-foreground-' . $artifact['foreground'],
-        ];
-        if ($artifact['transition'] === 'instant') {
-            $classes[] = 'header-transition-instant';
+        foreach ($matches[2] as $css) {
+            if (preg_match('/(?<![-\w])position\s*:/i', $css)) {
+                return true;
+            }
         }
-        return $classes;
+        return false;
     }
 
     /** @param list<string> $tokens @return list<string> */

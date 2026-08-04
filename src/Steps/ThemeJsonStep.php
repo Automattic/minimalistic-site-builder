@@ -327,13 +327,14 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Last: the scaffold references the preset slugs repaired above, and
         // every well-shaped model-authored leaf wins over the wiring it fills in.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
-        $theme = self::normalizeGroupBlockPadding($theme);
+        [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
             $colorWarnings,
             $fontWarnings,
             $sizeWarnings,
             $scaffoldWarnings,
+            $groupPaddingWarnings,
         );
 
         if ($warnings !== []) {
@@ -482,25 +483,50 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      */
     public static function normalizeGroupBlockPadding(array $theme): array
     {
+        return self::repairGroupBlockPadding($theme)[0];
+    }
+
+    /**
+     * normalizeGroupBlockPadding() plus a durable warning row per removed or
+     * rewritten model-authored declaration, in the same grammar as every
+     * sibling repair in writeTheme(). Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairGroupBlockPadding(array $theme): array
+    {
+        $warnings = [];
         $padding = $theme['styles']['blocks']['core/group']['spacing']['padding'] ?? null;
         $pathExists = isset($theme['styles']['blocks']['core/group']['spacing'])
             && is_array($theme['styles']['blocks']['core/group']['spacing'])
             && array_key_exists('padding', $theme['styles']['blocks']['core/group']['spacing']);
         if (!$pathExists) {
-            return $theme;
+            return [$theme, $warnings];
         }
 
         if (is_string($padding) || is_int($padding) || is_float($padding)) {
-            $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
-                'left' => $padding,
-                'right' => $padding,
-            ];
-            return $theme;
+            $delivered = ['left' => $padding, 'right' => $padding];
+            $theme['styles']['blocks']['core/group']['spacing']['padding'] = $delivered;
+            $warnings[] = 'theme/theme.json styles.blocks.core/group.spacing.padding: authored '
+                . Warnings::value($padding) . '; delivered ' . Warnings::value($delivered)
+                . '; disposition rewrote the four-side shorthand to horizontal longhands because its vertical'
+                . ' default compounds inside every nested Group';
+            return [$theme, $warnings];
         }
         if (!is_array($padding) || ($padding !== [] && array_is_list($padding))) {
-            return $theme;
+            return [$theme, $warnings];
         }
 
+        foreach (['top', 'bottom'] as $side) {
+            if (!array_key_exists($side, $padding)) {
+                continue;
+            }
+            $warnings[] = "theme/theme.json styles.blocks.core/group.spacing.padding.{$side}: authored "
+                . Warnings::value($padding[$side])
+                . '; delivered removed'
+                . '; disposition removed recursive vertical Group padding that compounds inside every nested Group';
+        }
         unset(
             $theme['styles']['blocks']['core/group']['spacing']['padding']['top'],
             $theme['styles']['blocks']['core/group']['spacing']['padding']['bottom'],
@@ -518,7 +544,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             unset($theme['styles']['blocks']);
         }
 
-        return $theme;
+        return [$theme, $warnings];
     }
 
     /**
