@@ -13,9 +13,10 @@ namespace Automattic\SiteBuild;
  * Gemini image models (e.g. gemini-3.1-flash-image) speak `generateContent`:
  * the prompt travels as `contents` parts, generation knobs live under
  * `generationConfig.imageConfig`, and the image comes back base64-encoded in a
- * candidate's `inlineData` part. Unlike the retired Imagen `predict` protocol
- * there is no output-format knob — the model emits PNG — so the JPEG encoding
- * photographic assets ship with is produced client-side ({@see toJpeg}).
+ * candidate's `inlineData` part. Output format is requested through
+ * `imageConfig.imageOutputOptions`; the response's declared MIME and byte
+ * signature are checked before delivery, with client-side JPEG encoding kept
+ * only as a fallback for a proxy/model that ignores that option.
  *
  * WpcomImageClient (and any future transport) supplies the I/O; the logic here
  * is free of network and output side effects (the only exceptions are
@@ -167,9 +168,9 @@ final class GeminiImage
     /**
      * The generateContent request body for one prompt. TEXT rides along in the
      * response modalities because not every Gemini image model accepts an
-     * IMAGE-only response; interpret() scans past any text parts. The `mime`
-     * option has no wire representation here — the model emits PNG, and the
-     * transport re-encodes to JPEG ({@see toJpeg}) where the asset calls for it.
+     * IMAGE-only response; interpret() scans past any text parts. Ask Vertex
+     * for the asset's actual delivery format so the common path needs no local
+     * image extension. compressionQuality is a JPEG-only option.
      *
      * @internal Delegation seam for the transport; not part of the consumer API.
      *
@@ -178,6 +179,15 @@ final class GeminiImage
      */
     public static function buildBody(string $prompt, array $opts): array
     {
+        $mime = self::canonicalMime((string) ($opts['mime'] ?? '')) ?? 'image/jpeg';
+        if (!in_array($mime, ['image/jpeg', 'image/png'], true)) {
+            $mime = 'image/jpeg';
+        }
+        $outputOptions = ['mimeType' => $mime];
+        if ($mime === 'image/jpeg') {
+            $outputOptions['compressionQuality'] = self::JPEG_QUALITY;
+        }
+
         return [
             'contents' => [[
                 'role'  => 'user',
@@ -188,19 +198,223 @@ final class GeminiImage
                 'imageConfig' => [
                     'aspectRatio' => self::aspectRatio((string) ($opts['aspect_ratio'] ?? '16:9')),
                     'imageSize'   => $opts['sample_image_size'] ?? '1K',
+                    'imageOutputOptions' => $outputOptions,
                 ],
             ],
         ];
     }
 
     /**
-     * Re-encode image bytes as JPEG, flattened on white. The replacement for
-     * Imagen's server-side `outputOptions` knob: Gemini has no output-format
-     * parameter and emits PNG, which for the photographic assets (heroes,
-     * banners) is several times the bytes of a visually identical JPEG. Bytes
-     * that are already JPEG pass through untouched. Fails soft: without a
-     * usable imaging extension the original bytes come back — PNG bytes in a
-     * `.jpg` file still render everywhere, just heavier.
+     * MIME inferred from the encoded bytes. The response declaration and the
+     * target filename are not trusted: only a recognized signature may cross
+     * the delivery boundary.
+     */
+    public static function mimeFromBytes(string $bytes): ?string
+    {
+        $magic = null;
+        if (str_starts_with($bytes, "\xFF\xD8\xFF") && self::hasCompleteJpegContainer($bytes)) {
+            $magic = 'image/jpeg';
+        } elseif (
+            str_starts_with($bytes, "\x89PNG\r\n\x1A\n")
+            && self::hasCompletePngContainer($bytes)
+        ) {
+            $magic = 'image/png';
+        }
+        if ($magic === null) {
+            return null;
+        }
+
+        // A signature alone also prefixes truncated/crafted garbage. Confirm a
+        // complete, positive-dimension image header using PHP's dependency-free
+        // decoder before accepting the bytes for delivery.
+        $info = @getimagesizefromstring($bytes);
+        if (!is_array($info) || ($info[0] ?? 0) < 1 || ($info[1] ?? 0) < 1) {
+            return null;
+        }
+        $decoded = self::canonicalMime(is_string($info['mime'] ?? null) ? $info['mime'] : null);
+        return $decoded === $magic ? $magic : null;
+    }
+
+    /**
+     * Walk the JPEG marker stream through a real scan and its EOI marker.
+     * getimagesizefromstring() stops after the dimensions and accepts a file
+     * truncated before its pixel stream finishes, so header probing alone is
+     * not a delivery postcondition.
+     */
+    private static function hasCompleteJpegContainer(string $bytes): bool
+    {
+        $size = strlen($bytes);
+        if ($size < 4 || substr($bytes, 0, 2) !== "\xFF\xD8") {
+            return false;
+        }
+
+        $position = 2;
+        $sawScan = false;
+        while ($position < $size) {
+            if (ord($bytes[$position]) !== 0xFF) {
+                return false;
+            }
+            while ($position < $size && ord($bytes[$position]) === 0xFF) {
+                $position++;
+            }
+            if ($position >= $size) {
+                return false;
+            }
+
+            $marker = ord($bytes[$position]);
+            $position++;
+            if ($marker === 0xD9) { // EOI
+                return $sawScan && $position === $size;
+            }
+            if ($marker === 0x00 || $marker === 0xD8) {
+                return false;
+            }
+            if ($marker === 0x01 || ($marker >= 0xD0 && $marker <= 0xD7)) {
+                continue; // Standalone TEM / restart marker.
+            }
+            if ($position + 2 > $size) {
+                return false;
+            }
+            $segmentLength = unpack('nlength', substr($bytes, $position, 2))['length'];
+            if ($segmentLength < 2 || $segmentLength > $size - $position) {
+                return false;
+            }
+            $position += $segmentLength;
+            if ($marker !== 0xDA) { // SOS begins entropy-coded scan data.
+                continue;
+            }
+
+            $sawScan = true;
+            while ($position < $size) {
+                $nextMarker = strpos($bytes, "\xFF", $position);
+                if ($nextMarker === false) {
+                    return false;
+                }
+                $position = $nextMarker + 1;
+                while ($position < $size && ord($bytes[$position]) === 0xFF) {
+                    $position++;
+                }
+                if ($position >= $size) {
+                    return false;
+                }
+                $scanMarker = ord($bytes[$position]);
+                $position++;
+                if ($scanMarker === 0x00 || ($scanMarker >= 0xD0 && $scanMarker <= 0xD7)) {
+                    continue; // Byte-stuffed data / restart marker inside scan.
+                }
+                if ($scanMarker === 0xD9) {
+                    return $position === $size;
+                }
+                // Progressive JPEGs can carry another marker and scan. Rewind
+                // to its 0xFF so the outer segment walker validates it.
+                $position = $nextMarker;
+                break;
+            }
+        }
+        return false;
+    }
+
+    /** Require a complete, CRC-valid PNG chunk stream ending exactly at IEND. */
+    private static function hasCompletePngContainer(string $bytes): bool
+    {
+        $size = strlen($bytes);
+        $position = 8;
+        $sawHeader = false;
+        $sawData = false;
+
+        while ($position < $size) {
+            if ($size - $position < 12) {
+                return false;
+            }
+            $length = unpack('Nlength', substr($bytes, $position, 4))['length'];
+            if ($length > $size - $position - 12) {
+                return false;
+            }
+            $type = substr($bytes, $position + 4, 4);
+            $data = substr($bytes, $position + 8, $length);
+            $storedCrc = substr($bytes, $position + 8 + $length, 4);
+            if (!hash_equals(hash('crc32b', $type . $data, true), $storedCrc)) {
+                return false;
+            }
+            $position += 12 + $length;
+
+            if (!$sawHeader) {
+                if ($type !== 'IHDR' || $length !== 13) {
+                    return false;
+                }
+                $sawHeader = true;
+                continue;
+            }
+            if ($type === 'IHDR') {
+                return false;
+            }
+            if ($type === 'IDAT') {
+                $sawData = true;
+            }
+            if ($type === 'IEND') {
+                return $length === 0 && $sawData && $position === $size;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Enforce the requested delivery MIME using byte magic as the source of
+     * truth. A stale/missing inlineData MIME is harmless when the bytes already
+     * match. If a JPEG request comes back in another recognized image format,
+     * use the local encoder as a bounded fallback and verify its output too.
+     * Anything that still disagrees is rejected so PNG bytes can never be
+     * written under a .jpg filename.
+     *
+     * @param null|callable(string):string $jpegEncoder test seam; production
+     *        defaults to {@see toJpeg}
+     */
+    public static function ensureMime(
+        string $bytes,
+        ?string $declaredMime,
+        string $requestedMime,
+        ?callable $jpegEncoder = null,
+    ): string {
+        $requested = self::canonicalMime($requestedMime);
+        if (!in_array($requested, ['image/jpeg', 'image/png'], true)) {
+            throw new \InvalidArgumentException("Unsupported requested image MIME: {$requestedMime}");
+        }
+
+        $detected = self::mimeFromBytes($bytes);
+        if ($detected === $requested) {
+            return $bytes;
+        }
+
+        if ($requested === 'image/jpeg' && $detected !== null) {
+            $encoder = $jpegEncoder ?? [self::class, 'toJpeg'];
+            try {
+                $converted = $encoder($bytes);
+            } catch (\Throwable) {
+                $converted = '';
+            }
+            if (is_string($converted) && self::mimeFromBytes($converted) === 'image/jpeg') {
+                return $converted;
+            }
+        }
+
+        $declared = trim((string) $declaredMime);
+        $declared = $declared !== '' ? $declared : 'missing';
+        $actual = $detected ?? 'unrecognized';
+        $fallback = $requested === 'image/jpeg'
+            ? 'local JPEG conversion unavailable or failed'
+            : 'no safe local conversion available';
+        throw new \RuntimeException(
+            "Image proxy format mismatch: requested {$requested}; declared {$declared}; "
+            . "detected {$actual}; {$fallback}; delivered removed"
+        );
+    }
+
+    /**
+     * Re-encode image bytes as JPEG, flattened on white. This is only a fallback
+     * for a server/proxy that ignored imageOutputOptions. Bytes already carrying
+     * JPEG magic pass through untouched. Without a usable imaging extension the
+     * original bytes come back; {@see ensureMime} verifies the result and rejects
+     * it rather than allowing those bytes to be mislabeled.
      */
     public static function toJpeg(string $bytes): string
     {
@@ -349,19 +563,21 @@ final class GeminiImage
     /**
      * Interpret a completed transfer at the protocol level: HTTP-status
      * classification + generateContent body parsing. Returns decoded image
-     * bytes, or throws TransientApiException (429/5xx), ImageFilteredException
-     * (safety filter — retryable AND repairable), or RuntimeException
-     * (permanent). Pure — no I/O — so the single and batched paths share it.
+     * bytes and the response's declared MIME, or throws TransientApiException
+     * (429/5xx), ImageFilteredException (safety filter — retryable AND
+     * repairable), or RuntimeException (permanent). Pure — no I/O — so the
+     * single and batched paths share it.
      *
      * The transport classifies its own connection-level failures (e.g. cURL
      * errnos) BEFORE calling this, so nothing transport-specific lives here.
      *
      * @internal Delegation seam for the transport; not part of the consumer API.
      *
+     * @return array{bytes:string,mime:?string}
      * @throws TransientApiException on a retryable HTTP status (429/5xx)
      * @throws ImageFilteredException when the safety filter rejected the prompt
      */
-    public static function interpret(string $raw, int $status): string
+    public static function interpret(string $raw, int $status): array
     {
         if ($status === 429 || $status >= 500) {
             throw new TransientApiException("HTTP {$status}: " . substr($raw, 0, 300));
@@ -377,16 +593,47 @@ final class GeminiImage
             throw new ImageFilteredException('Image safety filter rejected the prompt: ' . $reason);
         }
 
-        $b64 = self::imageData($data);
-        if ($b64 === null) {
+        $part = self::imagePart($data);
+        if ($part === null) {
             throw new \RuntimeException('Image proxy response had no image data: ' . substr($raw, 0, 300));
         }
 
-        $bytes = base64_decode($b64, true);
+        $bytes = base64_decode($part['data'], true);
         if ($bytes === false || $bytes === '') {
             throw new \RuntimeException('Image proxy returned undecodable base64');
         }
-        return $bytes;
+        return ['bytes' => $bytes, 'mime' => $part['mime']];
+    }
+
+    /**
+     * The first final inline image payload. Gemini 3 may include internal
+     * `thought: true` image parts before the authored result; those are never a
+     * deliverable asset and must be skipped.
+     *
+     * @param ?array<mixed> $data decoded JSON response body
+     * @return ?array{data:string,mime:?string}
+     */
+    public static function imagePart(?array $data): ?array
+    {
+        foreach ((array) ($data['candidates'] ?? []) as $candidate) {
+            $parts = is_array($candidate) ? ($candidate['content']['parts'] ?? null) : null;
+            foreach ((array) $parts as $part) {
+                if (!is_array($part) || ($part['thought'] ?? false) === true) {
+                    continue;
+                }
+                $inline = $part['inlineData'] ?? $part['inline_data'] ?? null;
+                $b64 = is_array($inline) ? ($inline['data'] ?? null) : null;
+                if (!is_string($b64) || $b64 === '') {
+                    continue;
+                }
+                $mime = $inline['mimeType'] ?? $inline['mime_type'] ?? null;
+                return [
+                    'data' => $b64,
+                    'mime' => is_string($mime) && trim($mime) !== '' ? trim($mime) : null,
+                ];
+            }
+        }
+        return null;
     }
 
     /**
@@ -399,17 +646,19 @@ final class GeminiImage
      */
     public static function imageData(?array $data): ?string
     {
-        foreach ((array) ($data['candidates'] ?? []) as $candidate) {
-            $parts = is_array($candidate) ? ($candidate['content']['parts'] ?? null) : null;
-            foreach ((array) $parts as $part) {
-                $inline = is_array($part) ? ($part['inlineData'] ?? $part['inline_data'] ?? null) : null;
-                $b64 = is_array($inline) ? ($inline['data'] ?? null) : null;
-                if (is_string($b64) && $b64 !== '') {
-                    return $b64;
-                }
-            }
-        }
-        return null;
+        return self::imagePart($data)['data'] ?? null;
+    }
+
+    /** Normalize MIME aliases/parameters used by response metadata. */
+    private static function canonicalMime(?string $mime): ?string
+    {
+        $mime = strtolower(trim((string) $mime));
+        $mime = trim(explode(';', $mime, 2)[0]);
+        return match ($mime) {
+            'image/jpeg', 'image/jpg', 'image/pjpeg' => 'image/jpeg',
+            'image/png', 'image/x-png' => 'image/png',
+            default => null,
+        };
     }
 
     /**

@@ -5,6 +5,24 @@ use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImageFilteredException;
 use Automattic\SiteBuild\TransientApiException;
 
+/** A valid 1x1 PNG for byte-level delivery checks. */
+function gemini_image_fixture_png(): string
+{
+    return (string) base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        true,
+    );
+}
+
+/** A valid 1x1 JPEG for byte-level delivery checks. */
+function gemini_image_fixture_jpeg(): string
+{
+    return (string) base64_decode(
+        '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==',
+        true,
+    );
+}
+
 /**
  * Unit tests for the batch retry orchestration (GeminiImage::retryBatch).
  * The transport is faked so we exercise the transient-retry accounting without
@@ -160,16 +178,33 @@ test('imageData finds the inline image part and skips narration text', function 
         ['inline_data' => ['mime_type' => 'image/png', 'data' => 'QUJD']],
     ]]]]];
     assert_eq('QUJD', GeminiImage::imageData($snake));
+    assert_eq(
+        ['data' => 'QUJD', 'mime' => 'image/png'],
+        GeminiImage::imagePart($snake),
+        'the declared MIME survives extraction',
+    );
+
+    // Gemini 3 may expose intermediate thought images. Only the final authored
+    // image is a deliverable asset.
+    $thoughts = ['candidates' => [['content' => ['parts' => [
+        ['thought' => true, 'inlineData' => ['mimeType' => 'image/png', 'data' => 'VEhPVUdIVA==']],
+        ['inlineData' => ['mimeType' => 'image/jpeg', 'data' => 'RklOQUw=']],
+    ]]]]];
+    assert_eq(['data' => 'RklOQUw=', 'mime' => 'image/jpeg'], GeminiImage::imagePart($thoughts));
 
     assert_eq(null, GeminiImage::imageData(['candidates' => []]));
     assert_eq(null, GeminiImage::imageData(null));
 });
 
 test('interpret decodes a Gemini success and classifies the failure shapes', function () {
+    $png = gemini_image_fixture_png();
     $ok = json_encode(['candidates' => [['finishReason' => 'STOP', 'content' => ['parts' => [
-        ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode('PNGBYTES')]],
+        ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($png)]],
     ]]]]]);
-    assert_eq('PNGBYTES', GeminiImage::interpret((string) $ok, 200));
+    assert_eq(
+        ['bytes' => $png, 'mime' => 'image/png'],
+        GeminiImage::interpret((string) $ok, 200),
+    );
 
     try {
         GeminiImage::interpret((string) json_encode(['promptFeedback' => ['blockReason' => 'SAFETY']]), 200);
@@ -245,6 +280,120 @@ test('buildBody normalizes an invalid ratio at the transport boundary', function
     $body = GeminiImage::buildBody('A wide landscape', ['aspect_ratio' => '2:1']);
     assert_eq('16:9', $body['generationConfig']['imageConfig']['aspectRatio']);
     assert_eq('A wide landscape', $body['contents'][0]['parts'][0]['text']);
+    assert_eq([
+        'mimeType' => 'image/jpeg',
+        'compressionQuality' => 85,
+    ], $body['generationConfig']['imageConfig']['imageOutputOptions']);
+});
+
+test('buildBody requests PNG without the JPEG-only compression option', function () {
+    $body = GeminiImage::buildBody('A line ornament', [
+        'aspect_ratio' => 'landscape',
+        'mime' => 'image/png',
+    ]);
+    assert_eq(
+        ['mimeType' => 'image/png'],
+        $body['generationConfig']['imageConfig']['imageOutputOptions'],
+    );
+});
+
+test('ensureMime trusts byte magic and keeps server-honored output byte-identical', function () {
+    $jpeg = gemini_image_fixture_jpeg();
+    $png = gemini_image_fixture_png();
+
+    assert_eq('image/jpeg', GeminiImage::mimeFromBytes($jpeg));
+    assert_eq('image/png', GeminiImage::mimeFromBytes($png));
+    assert_eq($jpeg, GeminiImage::ensureMime($jpeg, 'image/jpeg', 'image/jpeg'));
+    assert_eq($png, GeminiImage::ensureMime($png, null, 'image/png'));
+    assert_eq(
+        $jpeg,
+        GeminiImage::ensureMime($jpeg, 'image/png', 'image/jpeg'),
+        'actual magic wins over stale response metadata',
+    );
+});
+
+test('ensureMime converts a server PNG only as a verified JPEG fallback', function () {
+    $png = gemini_image_fixture_png();
+    $jpeg = gemini_image_fixture_jpeg();
+    $seen = null;
+
+    $out = GeminiImage::ensureMime(
+        $png,
+        'image/png',
+        'image/jpeg',
+        function (string $bytes) use (&$seen, $jpeg): string {
+            $seen = $bytes;
+            return $jpeg;
+        },
+    );
+
+    assert_eq($png, $seen, 'fallback receives the server bytes');
+    assert_eq($jpeg, $out);
+    assert_eq('image/jpeg', GeminiImage::mimeFromBytes($out));
+});
+
+test('ensureMime refuses an unconverted PNG instead of labeling it JPEG', function () {
+    $png = gemini_image_fixture_png();
+    $error = assert_throws(fn () => GeminiImage::ensureMime(
+        $png,
+        'image/jpeg', // even a lying declaration cannot override byte magic
+        'image/jpeg',
+        fn (string $bytes): string => $bytes,
+    ));
+
+    assert_contains('requested image/jpeg', $error->getMessage());
+    assert_contains('declared image/jpeg', $error->getMessage());
+    assert_contains('detected image/png', $error->getMessage());
+    assert_contains('delivered removed', $error->getMessage());
+});
+
+test('ensureMime refuses unknown bytes and a JPEG response requested as PNG', function () {
+    $unknown = assert_throws(fn () => GeminiImage::ensureMime(
+        'not an image',
+        'image/jpeg',
+        'image/jpeg',
+    ));
+    assert_contains('detected unrecognized', $unknown->getMessage());
+
+    $jpegAsPng = assert_throws(fn () => GeminiImage::ensureMime(
+        gemini_image_fixture_jpeg(),
+        'image/jpeg',
+        'image/png',
+    ));
+    assert_contains('requested image/png', $jpegAsPng->getMessage());
+    assert_contains('detected image/jpeg', $jpegAsPng->getMessage());
+});
+
+test('mimeFromBytes rejects truncated signature-only payloads', function () {
+    $truncatedJpeg = "\xFF\xD8\xFFtruncated";
+    $truncatedPng = "\x89PNG\r\n\x1A\ntruncated";
+
+    assert_eq(null, GeminiImage::mimeFromBytes($truncatedJpeg));
+    assert_eq(null, GeminiImage::mimeFromBytes($truncatedPng));
+
+    $error = assert_throws(fn () => GeminiImage::ensureMime(
+        $truncatedJpeg,
+        'image/jpeg',
+        'image/jpeg',
+    ));
+    assert_contains('detected unrecognized', $error->getMessage());
+    assert_contains('delivered removed', $error->getMessage());
+});
+
+test('mimeFromBytes rejects real images truncated after their dimension headers', function () {
+    $png = gemini_image_fixture_png();
+    $jpeg = gemini_image_fixture_jpeg();
+
+    assert_true(
+        is_array(getimagesizefromstring(substr($png, 0, 32))),
+        'the PHP header probe accepts this truncated PNG regression input',
+    );
+    assert_true(
+        is_array(getimagesizefromstring(substr($jpeg, 0, 100))),
+        'the PHP header probe accepts this truncated JPEG regression input',
+    );
+    assert_eq(null, GeminiImage::mimeFromBytes(substr($png, 0, 32)));
+    assert_eq(null, GeminiImage::mimeFromBytes(substr($jpeg, 0, 100)));
 });
 
 test('sampleImageSize keeps transparent decoratives at 1K even when wide', function () {

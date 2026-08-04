@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixer;
+use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\StepGraph;
@@ -35,6 +36,7 @@ test('generate-images declaration marks its batched work as concurrent', functio
 
     assert_eq(true, $declaration->concurrent);
     assert_true(in_array(GenerateImagesStep::COMPLETION_ARTIFACT, $declaration->writes, true));
+    assert_true(in_array('warnings.json', $declaration->writes, true));
 });
 
 test('cover-contrast graph requires generate-images even when scaffold assets exist', function () {
@@ -77,7 +79,7 @@ test('generate-images writes assets, rewrites src/url, and marks completed', fun
 
     // Asset written from the returned bytes.
     assert_true($project->exists('theme/assets/hero.jpg'), 'asset written');
-    assert_eq('JPEGDATA', $project->readText('theme/assets/hero.jpg'));
+    assert_eq('image/jpeg', GeminiImage::mimeFromBytes($project->readText('theme/assets/hero.jpg')));
 
     // Aspect ratio mapped landscape -> 16:9 for the proxy.
     assert_eq('16:9', $images->calls[0]['opts']['aspect_ratio']);
@@ -346,7 +348,7 @@ test('generate-images requests PNG and a transparent background for .png assets'
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('generate-images marks failed and leaves the placeholder on error', function () {
+test('generate-images marks failed and removes only its media block on error', function () {
     [$project, $tmp] = generate_fixture();
     $images = new FakeImageClient('', true); // throws
 
@@ -354,10 +356,208 @@ test('generate-images marks failed and leaves the placeholder on error', functio
 
     assert_true(!$project->exists('theme/assets/hero.jpg'), 'no asset on failure');
     $markup = $project->readText('theme/templates/page.html');
-    assert_contains('theme:./assets/hero.jpg', $markup); // placeholder untouched
+    assert_true(!str_contains($markup, 'theme:./assets/hero.jpg'), 'dead asset reference removed');
 
     $specs = $project->readJson('images.json');
     assert_eq('failed', $specs[0]['status']);
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_eq(1, count($warnings));
+    assert_contains('images.json[0] / theme/assets/hero.jpg', $warnings[0]);
+    assert_contains('authored MIME image/jpeg', $warnings[0]);
+    assert_contains('delivered removed', $warnings[0]);
+    assert_contains('container media', $warnings[0]);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images removal keeps failed-image siblings byte-for-byte intact', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $before = '<!-- wp:paragraph --><p>Before theme:./assets/failed.jpg as text.</p><!-- /wp:paragraph -->';
+    $image = '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/failed.jpg" '
+        . 'alt="AI_IMAGE: A failed scene | content image | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image -->';
+    $after = '<!-- wp:paragraph --><p>After.</p><!-- /wp:paragraph -->';
+    $project->writeText('theme/parts/content.html', $before . $image . $after);
+    (new CollectImagesStep())->run($project);
+
+    (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
+
+    assert_eq(
+        $before . $after,
+        $project->readText('theme/parts/content.html'),
+        'only the failed media block is cut; sibling bytes and plain text survive',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images removes a bare failed img without deleting its group', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $opening = '<!-- wp:group --><div class="wp-block-group">';
+    $image = '<img src="theme:./assets/failed-logo.jpg" '
+        . 'alt="AI_IMAGE: A failed logo | header | photorealistic | landscape"/>';
+    $copy = '<!-- wp:paragraph --><p>Keep group copy.</p><!-- /wp:paragraph -->';
+    $closing = '</div><!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $opening . $image . $copy . $closing);
+    (new CollectImagesStep())->run($project);
+
+    (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
+
+    assert_eq(
+        $opening . $copy . $closing,
+        $project->readText('theme/parts/header.html'),
+        'a non-media container and its child blocks survive bare-img removal',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images strips failed cover media while retaining headline and CTA bytes', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $heading = '<!-- wp:heading --><h2 class="wp-block-heading">Keep this headline</h2><!-- /wp:heading -->';
+    $buttons = '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link">Keep CTA</a></div><!-- /wp:button -->'
+        . '</div><!-- /wp:buttons -->';
+    $cover = '<!-- wp:cover {"url":"theme:./assets/failed-cover.jpg","dimRatio":40} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" '
+        . 'src="theme:./assets/failed-cover.jpg" '
+        . 'alt="AI_IMAGE: A failed cover | hero | photorealistic | landscape"/>'
+        . '<div class="wp-block-cover__inner-container">' . $heading . $buttons . '</div></div>'
+        . '<!-- /wp:cover -->';
+    $project->writeText('theme/parts/hero.html', $cover);
+    (new CollectImagesStep())->run($project);
+
+    (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
+
+    $expected = '<!-- wp:cover {"dimRatio":40} -->'
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . $heading . $buttons . '</div></div><!-- /wp:cover -->';
+    assert_eq($expected, $project->readText('theme/parts/hero.html'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images cleans each shared failed-source block at its own boundary', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $heading = '<!-- wp:heading --><h2>Cover copy survives.</h2><!-- /wp:heading -->';
+    $cover = '<!-- wp:cover {"url":"theme:./assets/shared-failure.jpg"} -->'
+        . '<div class="wp-block-cover"><img src="theme:./assets/shared-failure.jpg" '
+        . 'alt="AI_IMAGE: Shared failure | cover | photorealistic | landscape"/>'
+        . $heading . '</div><!-- /wp:cover -->';
+    $image = '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/shared-failure.jpg" '
+        . 'alt="AI_IMAGE: Shared failure | content | photorealistic | landscape"/>'
+        . '</figure><!-- /wp:image -->';
+    $project->writeText('theme/parts/content.html', $cover . $image);
+    (new CollectImagesStep())->run($project);
+
+    (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
+
+    $delivered = $project->readText('theme/parts/content.html');
+    assert_contains($heading, $delivered);
+    assert_true(!str_contains($delivered, 'theme:./assets/shared-failure.jpg'));
+    assert_true(!str_contains($delivered, '<!-- wp:image -->'), 'standalone image block removed whole');
+    assert_true(!str_contains($delivered, '<figure class="wp-block-image"></figure>'), 'no empty media UI');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps an unsafe failed cover unchanged and reports the residual', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $unclosed = '<!-- wp:cover {"url":"theme:./assets/unsafe-cover.jpg"} -->'
+        . '<div class="wp-block-cover"><img src="theme:./assets/unsafe-cover.jpg" '
+        . 'alt="AI_IMAGE: An unsafe cover | hero | photorealistic | landscape"/>'
+        . '<!-- wp:heading --><h2>Retain me</h2><!-- /wp:heading -->';
+    $project->writeText('theme/parts/hero.html', $unclosed);
+    (new CollectImagesStep())->run($project);
+
+    (new GenerateImagesStep(new FakeImageClient('', true)))->run($project);
+
+    assert_eq($unclosed, $project->readText('theme/parts/hero.html'));
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_contains('theme/parts/hero.html: authored media source theme:./assets/unsafe-cover.jpg', implode("\n", $warnings));
+    assert_contains('pre-cleanup bytes kept', implode("\n", $warnings));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images never persists PNG bytes under a JPEG filename', function () {
+    [$project, $tmp] = generate_fixture();
+    $png = (string) base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        true,
+    );
+    // A deliberately non-WPCOM client ignores the requested JPEG MIME.
+    $images = new FakeImageClient($png);
+
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_true(!$project->exists('theme/assets/hero.jpg'), 'PNG was not written as .jpg');
+    $specs = $project->readJson('images.json');
+    assert_eq('failed', $specs[0]['status'], 'the mismatch is isolated to this image');
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_contains('requested image/jpeg', implode("\n", $warnings));
+    assert_contains('detected image/png', implode("\n", $warnings));
+    assert_true(
+        !str_contains($project->readText('theme/templates/page.html'), 'theme:./assets/hero.jpg'),
+        'failed media block removed instead of shipping dead UI',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images isolates a MIME mismatch and preserves its valid sibling', function () {
+    [$project, $tmp] = batch_fixture(2);
+    $png = (string) base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        true,
+    );
+    $images = new FakeImageClient('JPEGDATA');
+    $images->bytesByPromptSubstring = ['image 0.' => $png];
+
+    (new GenerateImagesStep($images))->run($project);
+
+    $specs = $project->readJson('images.json');
+    assert_eq('failed', $specs[0]['status']);
+    assert_eq('completed', $specs[1]['status']);
+    assert_true(!$project->exists('theme/assets/img-0.jpg'));
+    assert_eq(
+        'image/jpeg',
+        GeminiImage::mimeFromBytes($project->readText('theme/assets/img-1.jpg')),
+        'the valid sibling reaches disk in its requested format',
+    );
+    assert_eq(
+        ['status' => 'completed'],
+        $project->readJson(GenerateImagesStep::COMPLETION_ARTIFACT),
+        'one bad generated image does not abort the build',
+    );
+    $warnings = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_contains('images.json[0] / theme/assets/img-0.jpg', implode("\n", $warnings));
+    assert_contains('detected image/png', implode("\n", $warnings));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images keeps asset persistence failures fatal', function () {
+    [$project, $tmp] = generate_fixture();
+    $blockingPath = $project->path('theme/assets/hero.jpg');
+    mkdir($blockingPath, 0775, true);
+
+    set_error_handler(static fn (): bool => true);
+    try {
+        $error = assert_throws(fn () => (new GenerateImagesStep(new FakeImageClient('JPEGDATA')))->run($project));
+    } finally {
+        restore_error_handler();
+    }
+
+    assert_contains('Could not write file', $error->getMessage());
+    assert_true(!$project->exists('warnings.json'), 'asset I/O is not mislabeled as generated content');
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -667,7 +867,7 @@ test('generate-images ships manifest-listed content images with the plugin', fun
 
     // Content image: generated into the theme AND copied into the plugin.
     assert_true($project->exists('plugin/images/hero.jpg'), 'content image shipped with the plugin');
-    assert_eq('JPEGDATA', $project->readText('plugin/images/hero.jpg'));
+    assert_eq('image/jpeg', GeminiImage::mimeFromBytes($project->readText('plugin/images/hero.jpg')));
     // Chrome-only image stays theme-only.
     assert_true(!$project->exists('plugin/images/wordmark.png'), 'chrome image not shipped with the plugin');
     assert_true($project->exists('theme/assets/wordmark.png'), 'chrome image in the theme');

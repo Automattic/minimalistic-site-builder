@@ -58,9 +58,10 @@ final class WpcomImageClient implements ImageClient
 
     public function generate(string $prompt, array $opts = []): string
     {
-        $bytes = $this->requestWithRetry(GeminiImage::buildBody($prompt, $opts));
+        $image = $this->requestWithRetry(GeminiImage::buildBody($prompt, $opts));
+        $bytes = $this->encodeForMime($image, ($opts['mime'] ?? null) ?: 'image/jpeg');
         $this->requests++;
-        return $this->encodeForMime($bytes, ($opts['mime'] ?? null) ?: 'image/jpeg');
+        return $bytes;
     }
 
     /**
@@ -80,18 +81,10 @@ final class WpcomImageClient implements ImageClient
             return [];
         }
 
-        // Bodies keyed by the caller's index. The requested mime stays local:
-        // Gemini has no output-format knob, so JPEG assets are re-encoded
-        // client-side as each success is delivered.
-        $bodies = [];
-        $mimes = [];
-        foreach ($specs as $i => $spec) {
-            $mimes[$i] = ($spec['mime'] ?? null) ?: 'image/jpeg';
-            $bodies[$i] = GeminiImage::buildBody((string) $spec['prompt'], [
-                'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
-                'sample_image_size' => $spec['sample_image_size'] ?? null,
-            ]);
-        }
+        // Bodies and requested MIME keyed by the caller's index. Ask Vertex for
+        // the final format; the MIME map remains available to verify every
+        // response and drive the local fallback if the proxy ignores it.
+        [$bodies, $mimes] = $this->batchRequests($specs);
 
         // With a caller callback, success bytes leave the pipeline the moment
         // a transfer is classified (success is always final): the transport
@@ -100,12 +93,12 @@ final class WpcomImageClient implements ImageClient
         // once (52 images ≈ 150MB — over PHP's default limit). retryBatch
         // then reports only the FAILURES, whose finality it alone knows.
         $onBytes = $onResult === null ? null
-            : function (int $i, string $bytes) use ($onResult, $mimes): void {
-                $onResult($i, ['ok' => true, 'bytes' => $this->encodeForMime($bytes, $mimes[$i])]);
+            : function (int $i, string $bytes) use ($onResult): void {
+                $onResult($i, ['ok' => true, 'bytes' => $bytes]);
             };
         $out = GeminiImage::retryBatch(
             $bodies,
-            fn (array $subset): array => $this->multiRequest($subset, $onBytes),
+            fn (array $subset): array => $this->multiRequest($subset, $mimes, $onBytes),
             $this->retryDelays,
             static function (int $count, int $attempt, int $wait): void {
                 Narrator::write("    (retryable image API failure on {$count} image(s); retry {$attempt} in {$wait}s)\n");
@@ -118,27 +111,41 @@ final class WpcomImageClient implements ImageClient
                 },
         );
         $this->requests += $out['succeeded'];
-        $results = $out['results'];
-        if ($onResult === null) {
-            // No callback delivery: the returned records still carry bytes,
-            // which must honor the requested mime just like the callback path.
-            foreach ($results as $i => $result) {
-                if (($result['ok'] ?? false) && isset($result['bytes'])) {
-                    $results[$i]['bytes'] = $this->encodeForMime($result['bytes'], $mimes[$i]);
-                }
-            }
-        }
-        return $results;
+        return $out['results'];
     }
 
     /**
-     * Honor the asset's requested output format: Gemini emits PNG, so JPEG
-     * assets are re-encoded here at the delivery boundary. PNG assets pass
-     * through untouched (their transparency keying happens downstream).
+     * Build protocol bodies without losing the per-asset delivery MIME.
+     * Extracted as a pure seam so mixed JPEG/PNG batches have direct coverage.
+     *
+     * @param array<int,array{prompt:string,aspect_ratio?:string,sample_image_size?:?string,mime?:?string}> $specs
+     * @return array{0:array<int,array<string,mixed>>,1:array<int,string>}
      */
-    private function encodeForMime(string $bytes, string $mime): string
+    private function batchRequests(array $specs): array
     {
-        return $mime === 'image/jpeg' ? GeminiImage::toJpeg($bytes) : $bytes;
+        $bodies = [];
+        $mimes = [];
+        foreach ($specs as $i => $spec) {
+            $mimes[$i] = ($spec['mime'] ?? null) ?: 'image/jpeg';
+            $bodies[$i] = GeminiImage::buildBody((string) $spec['prompt'], [
+                'aspect_ratio'      => $spec['aspect_ratio'] ?? '16:9',
+                'sample_image_size' => $spec['sample_image_size'] ?? null,
+                'mime'              => $mimes[$i],
+            ]);
+        }
+        return [$bodies, $mimes];
+    }
+
+    /**
+     * Honor the asset's requested output format. The server request should
+     * already have produced it; ensureMime validates response metadata against
+     * byte magic and locally re-encodes only when necessary.
+     *
+     * @param array{bytes:string,mime:?string} $image
+     */
+    private function encodeForMime(array $image, string $mime): string
+    {
+        return GeminiImage::ensureMime($image['bytes'], $image['mime'], $mime);
     }
 
     /**
@@ -151,16 +158,17 @@ final class WpcomImageClient implements ImageClient
      * without charging its budget, and the pool doesn't fire the whole batch
      * into a rate-limit event as fast as the 429s bounce back.
      *
-     * With $onBytes, a successful transfer's decoded bytes are handed to the
-     * callback immediately and the returned outcome is `['ok' => true]` with
-     * no payload — the pool's result set stays light no matter how many
-     * images the batch carries.
+     * With $onBytes, a successful transfer's decoded, MIME-verified bytes are
+     * handed to the callback immediately and the returned outcome is
+     * `['ok' => true]` with no payload — the pool's result set stays light no
+     * matter how many images the batch carries.
      *
      * @param array<int,array<string,mixed>> $bodies request body keyed by index
+     * @param array<int,string> $requestedMimes requested delivery MIME keyed by index
      * @param callable(int,string):void|null $onBytes immediate delivery for each success
      * @return array<int,array{ok:bool,bytes?:string,error?:string,transient?:bool,held?:bool,filtered?:bool}>
      */
-    private function multiRequest(array $bodies, ?callable $onBytes = null): array
+    private function multiRequest(array $bodies, array $requestedMimes, ?callable $onBytes = null): array
     {
         $multi = curl_multi_init();
         /** @var array<int,\CurlHandle> $handles */
@@ -196,7 +204,14 @@ final class WpcomImageClient implements ImageClient
         };
 
         // Classify one finished transfer and release its handle (and slot).
-        $finish = function (string|int $i, \CurlHandle $ch) use ($multi, &$handles, &$keysById, &$holding, $onBytes): array {
+        $finish = function (string|int $i, \CurlHandle $ch) use (
+            $multi,
+            &$handles,
+            &$keysById,
+            &$holding,
+            $requestedMimes,
+            $onBytes,
+        ): array {
             $raw    = (string) curl_multi_getcontent($ch);
             $errno  = curl_errno($ch);
             $error  = curl_error($ch);
@@ -215,7 +230,8 @@ final class WpcomImageClient implements ImageClient
                     // operational, not the prompt's fault — retry it.
                     throw new TransientApiException('no response received before the transfer stopped');
                 }
-                $bytes = GeminiImage::interpret($raw, $httpStatus);
+                $image = GeminiImage::interpret($raw, $httpStatus);
+                $bytes = $this->encodeForMime($image, $requestedMimes[$i] ?? 'image/jpeg');
             } catch (ImageFilteredException $e) {
                 // The safety filter is non-deterministic: retry like a
                 // transient failure, but keep the filtered flag so the caller
@@ -289,8 +305,9 @@ final class WpcomImageClient implements ImageClient
      * so the caller can repair the prompt.
      *
      * @param array<string,mixed> $body
+     * @return array{bytes:string,mime:?string}
      */
-    private function requestWithRetry(array $body): string
+    private function requestWithRetry(array $body): array
     {
         $delays = $this->retryDelays; // seconds before retries
         $attempt = 0;
@@ -313,12 +330,14 @@ final class WpcomImageClient implements ImageClient
     }
 
     /**
-     * One generateContent call. Returns decoded image bytes.
+     * One generateContent call. Returns decoded image bytes plus the response's
+     * declared MIME so the delivery boundary can compare it with byte magic.
      *
      * @param array<string,mixed> $body
+     * @return array{bytes:string,mime:?string}
      * @throws TransientApiException on a retryable failure (429, 5xx, stall)
      */
-    private function request(array $body): string
+    private function request(array $body): array
     {
         $ch = $this->buildHandle($body);
         $raw    = curl_exec($ch);
