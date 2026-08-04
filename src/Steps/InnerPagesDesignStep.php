@@ -786,6 +786,11 @@ final class InnerPagesDesignStep implements Step
         return rtrim($content, "\r\n") . "\n\n";
     }
 
+    public static function balanceFragment(string $fragment): string
+    {
+        return $fragment;
+    }
+
     private static function isValidFragment(string $html): bool
     {
         if ($html === '') {
