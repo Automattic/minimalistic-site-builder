@@ -18,7 +18,11 @@ decorative thumbnails.
   `hero-composition__media-secondary`. Compose the secondary frame as a
   deliberate counterpoint — clearly smaller and offset beside the copy or
   against an edge of the primary — never as a leftover strip stacked full-width
-  directly beneath the primary frame.
+  directly beneath the primary frame. The primary frame is a FRAME, not a
+  band: never open the section with it spanning the full wide measure ahead
+  of the copy (that is panorama-rail's topology, and it drags the headline to
+  the fold line); keep the primary inside a column or offset grid so copy and
+  media share the first viewport side by side.
 - Identity: the one root group carries exactly `.hero-composition--diptych-editorial`.
 - Media: exactly two foreground `wp:image` blocks with distinct AI_IMAGE
   filenames, subjects, and intentional aspect roles. Use group, columns/column,
