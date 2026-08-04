@@ -503,6 +503,7 @@ final class GeminiImage
      * @param array<int,int> $delays backoff seconds before each retry (length = max retries)
      * @param callable(int,int,int):void|null $onRetry called before each backoff with (pending count, attempt #, wait seconds)
      * @param callable(int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}):void|null $onResult called once per index with its final result
+     * @param null|callable(int):void $sleeper Test seam for the backoff waits; defaults to sleep().
      * @return array{results:array<int,array{ok:bool,bytes?:string,error?:string,filtered?:bool}>,succeeded:int}
      */
     public static function retryBatch(
@@ -511,8 +512,12 @@ final class GeminiImage
         array $delays,
         ?callable $onRetry = null,
         ?callable $onResult = null,
+        ?callable $sleeper = null,
     ): array
     {
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
         $results = [];
         $succeeded = 0;
         $pending = array_keys($bodies);
@@ -564,14 +569,14 @@ final class GeminiImage
             $pending = $retry;
             if ($pending !== []) {
                 // Wait long enough for every really-attempted transient in
-                // this wave. A held-only wave waits zero: no request consumed
-                // a retry or owns a backoff slot.
-                $wait = $retryWaits === [] ? 0 : max($retryWaits);
+                // this wave; held-only waves charge the first backoff (see
+                // CurlMultiPool::heldWaveWait).
+                $wait = CurlMultiPool::heldWaveWait($retryWaits, $delays);
                 $retryWave++;
                 if ($onRetry !== null) {
                     $onRetry(count($pending), $retryWave, $wait);
                 }
-                sleep($wait);
+                $sleeper($wait);
             }
         }
 
