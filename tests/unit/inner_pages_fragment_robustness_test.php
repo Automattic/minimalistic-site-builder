@@ -9,8 +9,8 @@ test('inner-pages-design balances primary inner-page and home-body fragments wit
         inner_page('about', 'About', 'Explain the studio'),
     ]);
     $llm->queueText(
-        '<main><section id="story"><h2>HOME-BALANCED</h2></main>'
-        . '<footer><p>HOME-FOOTER</p></footer>',
+        '<main><section id="story"><h2>HOME-BALANCED</h2></section></main>'
+        . '<footer><div>HOME-FOOTER</footer>',
     );
     $llm->queueText(
         '<main id="about-main"><div class="card"><p>INNER-BALANCED</p></main>',
@@ -22,7 +22,7 @@ test('inner-pages-design balances primary inner-page and home-body fragments wit
     assert_eq(0, $llm->completeCalls, 'balancing must not consume serial repair completion');
     assert_eq(
         '<main><section id="story"><h2>HOME-BALANCED</h2></section></main>'
-            . '<footer><p>HOME-FOOTER</p></footer>',
+            . '<footer><div>HOME-FOOTER</div></footer>',
         $project->readText('design/home-body.html'),
     );
     assert_eq(
@@ -93,6 +93,21 @@ test('balanceFragment keeps valid page CSS and main bytes exact and idempotent',
     inner_pages_cleanup($tmp);
 });
 
+test('balanceFragment refuses sentinel escape that would drop authored sibling content', function () {
+    $escaped = '<main><p>A</p></main></site-build-fragment-root><p>B</p>';
+
+    assert_eq($escaped, InnerPagesDesignStep::balanceFragment($escaped));
+});
+
+test('balanceFragment preserves invalid UTF-8 bytes without DOM transcoding', function () {
+    $invalidUtf8 = "<main><div>A\xFFB</main>";
+
+    assert_eq(
+        bin2hex($invalidUtf8),
+        bin2hex(InnerPagesDesignStep::balanceFragment($invalidUtf8)),
+    );
+});
+
 test('inner-pages-design balances truncated semantic repair before requesting continuation', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'Welcome'),
@@ -119,4 +134,61 @@ test('inner-pages-design balances truncated semantic repair before requesting co
     assert_contains('disposition deterministically repaired', $warnings);
     assert_eq('CONTINUATION-QUEUE-SENTINEL', $llm->complete('sentinel probe'));
     inner_pages_cleanup($tmp);
+});
+
+test('inner-pages-design sanitizes truncated repair before accepting balanced closure', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('repair', 'Repair', 'Retain safe continuation'),
+    ]);
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText('<section>Initial response has no main</section>');
+    $llm->queueText('<main><script>ONLY-UNSAFE</script>', 'max_tokens');
+    $llm->queueText('<p>SAFE-CONTINUATION</p></main>', 'stop');
+    $llm->queueText('INNER-REPAIR-QUEUE-SENTINEL');
+
+    inner_pages_run($project, $llm);
+
+    assert_eq(2, $llm->completeCalls, 'sanitized partial must request its safe continuation');
+    assert_eq(
+        '<main><p>SAFE-CONTINUATION</p></main>',
+        $project->readText('design/repair.html'),
+    );
+    $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+    assert_eq(1, substr_count($warnings, 'ONLY-UNSAFE'), 'probe warnings must stay throwaway');
+    assert_eq('INNER-REPAIR-QUEUE-SENTINEL', $llm->complete('sentinel probe'));
+    inner_pages_cleanup($tmp);
+});
+
+test('section-mode home sanitizes truncated repair before accepting balanced closure', function () {
+    $previousMode = getenv('SITE_BUILD_GEN_UNIT');
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+    ]);
+    putenv('SITE_BUILD_GEN_UNIT=section');
+    try {
+        $llm->queueText('<section>Initial response has no home roots</section>');
+        $llm->queueText(
+            '<main><script>HOME-ONLY-UNSAFE</script></main><footer><div>FOOTER',
+            'max_tokens',
+        );
+        $llm->queueText('<p>HOME-SAFE-CONTINUATION</p></div></footer>', 'stop');
+        $llm->queueText('HOME-REPAIR-QUEUE-SENTINEL');
+
+        inner_pages_run($project, $llm);
+
+        assert_eq(2, $llm->completeCalls, 'sanitized home partial must request safe continuation');
+        assert_eq(
+            '<main></main><footer><div>FOOTER<p>HOME-SAFE-CONTINUATION</p></div></footer>',
+            $project->readText('design/home-body.html'),
+        );
+        $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+        assert_eq(1, substr_count($warnings, 'HOME-ONLY-UNSAFE'), 'probe warnings must stay throwaway');
+        assert_eq('HOME-REPAIR-QUEUE-SENTINEL', $llm->complete('sentinel probe'));
+    } finally {
+        $previousMode === false
+            ? putenv('SITE_BUILD_GEN_UNIT')
+            : putenv('SITE_BUILD_GEN_UNIT=' . $previousMode);
+        inner_pages_cleanup($tmp);
+    }
 });
