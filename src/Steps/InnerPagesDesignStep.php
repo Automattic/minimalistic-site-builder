@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\ContinuationRecovery;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Html;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -246,6 +247,14 @@ final class InnerPagesDesignStep implements Step
                 self::writeSuccessfulDesign($project, $path, $failedPath, $sanitized);
                 continue;
             }
+            $balanced = self::balanceFragment($sanitized);
+            if ($isValid($balanced)) {
+                self::writeSuccessfulDesign($project, $path, $failedPath, $balanced);
+                $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
+                    . self::warningValue($sanitized)
+                    . "; delivered {$path} balanced fragment; disposition deterministically repaired";
+                continue;
+            }
 
             $repairContract = $isHome
                 ? 'one closed bare <main> with no attributes for below-fold content, followed by one closed '
@@ -259,7 +268,9 @@ final class InnerPagesDesignStep implements Step
                     $this->llm,
                     $repairPrompt,
                     $this->withOptions(['cached_prefixes' => $cachedPrefixes]),
-                    $isValid,
+                    static fn (string $fragment): bool => $isValid(
+                        self::balanceFragment(trim($fragment)),
+                    ),
                 );
             } catch (TruncatedGenerationException $error) {
                 $repair = $error->getPartialText();
@@ -286,8 +297,15 @@ final class InnerPagesDesignStep implements Step
                 $warnings,
             );
             $repair = trim($repair);
+            $unbalancedRepair = $repair;
+            $repair = self::balanceFragment($repair);
             if ($isValid($repair)) {
                 self::writeSuccessfulDesign($project, $path, $failedPath, $repair);
+                if (!$isValid($unbalancedRepair)) {
+                    $warnings[] = "malformed_design: {$path} context page {$slug} semantic repair; authored "
+                        . self::warningValue($unbalancedRepair)
+                        . "; delivered {$path} balanced fragment; disposition deterministically repaired";
+                }
                 $warnings[] = "malformed_design: {$path} context page {$slug}; authored "
                     . self::warningValue($authored)
                     . "; delivered {$path} repaired fragment; disposition replaced";
@@ -607,6 +625,14 @@ final class InnerPagesDesignStep implements Step
             self::writeSuccessfulDesign($project, $path, $failedPath, $candidate);
             return;
         }
+        $balanced = self::balanceFragment($candidate);
+        if ($isValid($balanced)) {
+            self::writeSuccessfulDesign($project, $path, $failedPath, $balanced);
+            $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
+                . self::warningValue($candidate)
+                . "; delivered {$path} balanced fragment; disposition deterministically repaired";
+            return;
+        }
 
         $repairPrompt = (string) $unit['prompt']
             . "\n\nThe previous response was empty or malformed. Repair it once. Return one closed bare <main> "
@@ -617,7 +643,9 @@ final class InnerPagesDesignStep implements Step
                 $this->llm,
                 $repairPrompt,
                 $this->withOptions(['cached_prefixes' => $cachedPrefixes]),
-                $isValid,
+                static fn (string $fragment): bool => $isValid(
+                    self::balanceFragment(trim($fragment)),
+                ),
             );
         } catch (TruncatedGenerationException $error) {
             $repair = $error->getPartialText();
@@ -642,8 +670,15 @@ final class InnerPagesDesignStep implements Step
             $warnings,
         );
         $repair = trim($repair);
+        $unbalancedRepair = $repair;
+        $repair = self::balanceFragment($repair);
         if ($isValid($repair)) {
             self::writeSuccessfulDesign($project, $path, $failedPath, $repair);
+            if (!$isValid($unbalancedRepair)) {
+                $warnings[] = "malformed_design: {$path} context page {$slug} semantic repair; authored "
+                    . self::warningValue($unbalancedRepair)
+                    . "; delivered {$path} balanced fragment; disposition deterministically repaired";
+            }
             $warnings[] = "malformed_design: {$path} context page {$slug}; authored "
                 . self::warningValue($authored)
                 . "; delivered {$path} repaired fragment; disposition replaced";
@@ -788,7 +823,42 @@ final class InnerPagesDesignStep implements Step
 
     public static function balanceFragment(string $fragment): string
     {
-        return $fragment;
+        if (
+            $fragment === ''
+            || self::isValidFragment($fragment)
+            || self::isValidHomeBodyFragment($fragment)
+        ) {
+            return $fragment;
+        }
+
+        $rootName = 'site-build-fragment-root';
+        try {
+            $dom = Html::loadUtf8Html(
+                '<!doctype html><html><body><' . $rootName . '>'
+                    . $fragment
+                    . '</' . $rootName . '></body></html>',
+                LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING,
+            );
+            if ($dom === null) {
+                return $fragment;
+            }
+            $root = $dom->getElementsByTagName($rootName)->item(0);
+            if (!$root instanceof \DOMElement) {
+                return $fragment;
+            }
+
+            $balanced = '';
+            foreach (iterator_to_array($root->childNodes) as $node) {
+                $html = $dom->saveHTML($node);
+                if ($html === false) {
+                    return $fragment;
+                }
+                $balanced .= $html;
+            }
+            return $balanced;
+        } catch (\Throwable) {
+            return $fragment;
+        }
     }
 
     private static function isValidFragment(string $html): bool
