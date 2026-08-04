@@ -84,7 +84,7 @@ final class ImageLogger
         }
         $headerLines = array_merge($headerLines, [
             'Status       : ' . ($error !== null ? 'FAILED' : 'OK'),
-            'Logged at    : ' . date('Y-m-d H:i:s'),
+            'Logged at    : ' . gmdate('Y-m-d H:i:s'),
         ]);
         if ($error === null) {
             $path = (string) ($result['path'] ?? '');

@@ -82,7 +82,7 @@ final class ConcurrentGroup implements Step
     /** Keep numeric-string paths as strings while de-duplicating the union. */
     private static function pathSetKey(string $path): string
     {
-        return "\0path:" . $path;
+        return StepGraph::PATH_SET_PREFIX . $path;
     }
 
     /**
