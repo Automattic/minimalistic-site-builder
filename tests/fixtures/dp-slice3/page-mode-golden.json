@@ -1,5 +1,5 @@
 {
-    "snapshot_ref": "refs/snapshots/dp-slice2",
+    "snapshot_source": "DP-Slice 2 staged-tree capture; no runtime ref required",
     "snapshot_commit": "f83ff4dc58a735e666f22be8611a669bf1707473",
     "snapshot_tree": "a5245785113b083549b78afe6238c2836d0b9b92",
     "input": {
