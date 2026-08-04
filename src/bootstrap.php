@@ -110,12 +110,12 @@ function make_llm(): Llm
     };
 }
 
-/** Build the image-generation transport (WPCOM AI proxy → Google Vertex Imagen). */
+/** Build the image-generation transport (WPCOM AI proxy → Google Vertex Gemini). */
 function make_image_client(): ImageClient
 {
     return new WpcomImageClient(
         apiToken: Env::getRequired('GOOGLE_VERTEX_API_TOKEN'),
-        model:    Env::get('IMAGE_MODEL', 'imagen-4.0-generate-001'),
+        model:    Env::get('IMAGE_MODEL', 'gemini-3.1-flash-image'),
     );
 }
 

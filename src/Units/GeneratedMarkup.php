@@ -244,29 +244,46 @@ final class GeneratedMarkup
     /**
      * Cap footer AI_IMAGE placeholders to non-portrait aspect ratios.
      *
-     * A `portrait` placeholder generates a 9:16 asset; rendered in a footer
-     * column it grows nearly twice as tall as wide, stretches the whole band,
-     * and strands blank space beside the short utility rows. The documented
-     * `<img alt>` form and any mirrored block-JSON "alt" value are rewritten
-     * together so block re-serialization cannot restore the portrait spec.
-     * Idempotent: a capped placeholder no longer matches either pattern.
+     * A portrait-oriented placeholder — the `portrait` (9:16) or
+     * `card-portrait` (3:4) keyword, or any numeric ratio taller than wide —
+     * generates an asset that, rendered in a footer column, stretches the
+     * whole band and strands blank space beside the short utility rows. The
+     * documented `<img alt>` form and any mirrored block-JSON "alt" value are
+     * rewritten together so block re-serialization cannot restore the
+     * portrait spec. Recovered source-form placeholders are capped here too,
+     * before CollectImagesStep turns their raw `AI_IMAGE:...|ratio:...` URL or
+     * src into a canonical asset path. Idempotent: a capped placeholder no
+     * longer matches any pattern.
      *
      * @param list<string> $notes appended to once per rewritten placeholder
      */
     public static function withoutPortraitImagePlaceholders(string $markup, array &$notes = []): string
     {
         $patterns = [
-            '/(?<prefix>alt\s*=\s*(?<quote>["\'])AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)portrait(?<suffix>\s*\k{quote})/is',
-            '/(?<prefix>"alt"\s*:\s*"AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)portrait(?<suffix>\s*")/is',
+            '/(?<prefix>alt\s*=\s*(?<quote>["\'])AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*\k{quote})/is',
+            '/(?<prefix>"alt"\s*:\s*"AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*")/is',
+            '/(?<prefix>\bsrc\s*=\s*(?<quote>["\'])\s*AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*ratio\s*:\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\s*(?:\||\k{quote})))/is',
+            '/(?<prefix>\bsrc\s*=\s*(?<quote>["\'])\s*AI_IMAGE:(?:(?!\k{quote}).)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*\k{quote})/is',
+            '/(?<prefix>\bsrc\s*=\s*AI_IMAGE:[^\s>"\'`=]*?\|ratio:)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\||\s|\/?>))/i',
+            '/(?<prefix>\bsrc\s*=\s*AI_IMAGE:[^\s>"\'`=]*\|)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\s|\/?>))/i',
+            '/(?<prefix>"(?:url|src)"\s*:\s*"\s*AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*ratio\s*:\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>(?=\s*(?:\||")))/is',
+            '/(?<prefix>"(?:url|src)"\s*:\s*"\s*AI_IMAGE:(?:[^"\\\\]|\\\\.)*?\|\s*)(?<ratio>card-portrait|portrait|\d+:\d+)(?<suffix>\s*")/is',
         ];
         foreach ($patterns as $pattern) {
             $markup = (string) preg_replace_callback(
                 $pattern,
                 static function (array $m) use (&$notes): string {
+                    $ratio = strtolower($m['ratio']);
+                    if (preg_match('/^(\d+):(\d+)$/', $ratio, $wh) === 1
+                        && (int) $wh[1] >= (int) $wh[2]
+                    ) {
+                        return $m[0]; // numeric square/landscape — already footer-safe
+                    }
                     $notes[] = "file='parts/footer.html'; block='AI_IMAGE placeholder'; "
-                        . 'authored aspect-ratio=portrait; delivered=square; '
-                        . 'disposition=a 9:16 footer image stretches the band and strands blank '
-                        . 'space beside the utility rows, so the placeholder was capped to square';
+                        . "authored aspect-ratio={$ratio}; delivered=square; "
+                        . 'disposition=a portrait-oriented footer image stretches the band and '
+                        . 'strands blank space beside the utility rows, so the placeholder was '
+                        . 'capped to square';
                     return $m['prefix'] . 'square' . $m['suffix'];
                 },
                 $markup

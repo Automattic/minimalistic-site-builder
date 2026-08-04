@@ -3,9 +3,10 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageLogger;
-use Automattic\SiteBuild\Imagen;
+use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
@@ -31,7 +32,7 @@ use Automattic\SiteBuild\ThemeValidator;
  * This is gated behind `--with-images` (or bin/images.php) because it is slow
  * (~30-60s/image) and hits the network — unlike the rest of the deterministic
  * build. A single image failing never aborts the build: it is marked "failed"
- * and its placeholder is left untouched.
+ * and only media blocks/references to that undeliverable asset are removed.
  *
  * A prompt the endpoint's safety filter rejects (the client retries those like
  * transient failures first — 3 more attempts by default) gets one repair pass
@@ -95,6 +96,7 @@ final class GenerateImagesStep implements Step
                 'theme/templates/*',
                 'plugin/images/*',
                 'plugin/pages/*',
+                'warnings.json',
             ],
             concurrent: true,
         );
@@ -194,6 +196,11 @@ final class GenerateImagesStep implements Step
                 $this->repairFiltered($project, $specs, $repairs, $siteContext, $imageGrade, $resolved);
             }
         }
+
+        // A failed asset reference is dead UI. Remove only the safe media block
+        // that contains each failed source (or a bare matching img tag), leaving
+        // every sibling byte-for-byte intact.
+        $this->removeFailedImageReferences($project, $specs);
 
         $project->writeJsonAtomic('images.json', $specs);
 
@@ -309,11 +316,11 @@ final class GenerateImagesStep implements Step
      */
     private static function generationSpec(array $spec, string $siteContext, string $imageGrade, ?string $subject = null): array
     {
-        $ratio = Imagen::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
+        $ratio = GeminiImage::aspectRatio((string) ($spec['aspectRatio'] ?? 'landscape'));
         // A .png placeholder is a transparent-background asset: request PNG
-        // bytes, prompt for a flat white background (Imagen cannot render
+        // bytes, prompt for a flat white background (the image model cannot render
         // alpha), and key that background out after generation.
-        $mime = Imagen::mimeForFilename((string) ($spec['filename'] ?? ''));
+        $mime = GeminiImage::mimeForFilename((string) ($spec['filename'] ?? ''));
         return [
             'prompt'            => ImagePromptComposer::compose(
                 $subject ?? (string) ($spec['subject'] ?? ''),
@@ -328,7 +335,7 @@ final class GenerateImagesStep implements Step
             // those at 2K so they stay sharp past ~1366px. Transparent
             // decoratives render small on the page and stay at 1K whatever
             // their ratio.
-            'sample_image_size' => Imagen::sampleImageSize($ratio, $mime === 'image/png'),
+            'sample_image_size' => GeminiImage::sampleImageSize($ratio, $mime === 'image/png'),
             'mime'              => $mime,
         ];
     }
@@ -359,11 +366,10 @@ final class GenerateImagesStep implements Step
     }
 
     /**
-     * Record one generation result: write the asset (keying out the white
-     * background for .png) and mark the spec completed, or mark it failed —
-     * and log the request either way. A single image must never abort the
-     * build, so both a generation failure and a write failure (disk full, bad
-     * path) are contained here.
+     * Record one generation result: validate the delivery bytes, key out the
+     * white background for .png, write the asset, and mark the spec completed;
+     * or isolate a generated-content failure to this image and warn. Asset I/O
+     * remains fatal because a failed write is operational, not bad model output.
      *
      * @param array<int,array<string,mixed>> $specs images.json rows, mutated in place
      * @param array{prompt:string,aspect_ratio:string,sample_image_size:string,mime:string} $genSpec
@@ -386,29 +392,41 @@ final class GenerateImagesStep implements Step
             if (!($result['ok'] ?? false) || !isset($result['bytes'])) {
                 throw new \RuntimeException((string) ($result['error'] ?? 'unknown error'));
             }
+            // Defense in depth: ImageClient implementations are replaceable.
+            // WpcomImageClient already requested and, only if needed, locally
+            // converted JPEG. This final boundary asserts its contract rather
+            // than introducing a second conversion path.
             $bytes = (string) $result['bytes'];
+            $this->assertDeliveryMime($bytes, $genSpec['mime']);
             if ($genSpec['mime'] === 'image/png') {
-                // Imagen cannot render real alpha: the prompt asked for a flat
+                // The image model cannot render real alpha: the prompt asked for a flat
                 // solid white background instead, keyed out here so the asset
                 // gets the transparency its .png promises.
                 $bytes = ImageTransparency::keyOutBackground($bytes);
             }
-            $project->writeText('theme/assets/' . $filename, $bytes);
-            $specs[$i]['status'] = 'completed';
-            $specs[$i]['url']    = $this->servedUrl($project, $filename);
-            unset($specs[$i]['error']);
-            $resolved[$specs[$i]['src']] = $specs[$i]['url'];
-            Narrator::write("    generated {$filename}\n");
-            ImageLogger::log($filename, $logRequest, [
-                'path'  => 'theme/assets/' . $filename,
-                'bytes' => strlen((string) $result['bytes']),
-            ]);
+            // ImageTransparency fails soft by returning its input. Verify the
+            // post-processed bytes as well before choosing the file extension.
+            $this->assertDeliveryMime($bytes, $genSpec['mime']);
         } catch (\Throwable $e) {
             $specs[$i]['status'] = 'failed';
             $specs[$i]['error']  = $e->getMessage();
             Narrator::write("    FAILED {$filename}: {$e->getMessage()}\n");
             ImageLogger::log($filename, $logRequest, [], $e->getMessage());
+            $this->warnFailure($project, $specs[$i], $i, $genSpec['mime'], $e->getMessage());
+            return;
         }
+
+        // Do not classify persistence failures as generated-content defects.
+        $project->writeText('theme/assets/' . $filename, $bytes);
+        $specs[$i]['status'] = 'completed';
+        $specs[$i]['url']    = $this->servedUrl($project, $filename);
+        unset($specs[$i]['error']);
+        $resolved[$specs[$i]['src']] = $specs[$i]['url'];
+        Narrator::write("    generated {$filename}\n");
+        ImageLogger::log($filename, $logRequest, [
+            'path'  => 'theme/assets/' . $filename,
+            'bytes' => strlen($bytes),
+        ]);
     }
 
     /**
@@ -483,6 +501,13 @@ final class GenerateImagesStep implements Step
                 $specs[$i]['status'] = 'failed';
                 $specs[$i]['error']  = $error;
                 Narrator::write("    FAILED {$filename}: no usable prompt rewrite\n");
+                $this->warnFailure(
+                    $project,
+                    $specs[$i],
+                    $i,
+                    GeminiImage::mimeForFilename($filename),
+                    $error . '; no usable prompt rewrite',
+                );
                 continue;
             }
             $subjects[$i] = $subject;
@@ -542,6 +567,240 @@ final class GenerateImagesStep implements Step
                 $once($pos, $results[$pos] ?? ['ok' => false, 'error' => 'no result returned']);
             }
         }
+    }
+
+    /** Reject unrecognized or mislabeled bytes at the final write boundary. */
+    private function assertDeliveryMime(string $bytes, string $requestedMime): void
+    {
+        $detected = GeminiImage::mimeFromBytes($bytes);
+        if ($detected === $requestedMime) {
+            return;
+        }
+        throw new \RuntimeException(
+            "Image client delivery failed MIME postcondition: requested {$requestedMime}; detected "
+            . ($detected ?? 'unrecognized')
+            . '; delivered removed'
+        );
+    }
+
+    /** @param array<string,mixed> $spec */
+    private function warnFailure(
+        Project $project,
+        array $spec,
+        int $i,
+        string $mime,
+        string $error,
+    ): void {
+        $filename = (string) ($spec['filename'] ?? 'unknown');
+        $source = (string) ($spec['src'] ?? 'unknown source');
+        $locations = array_values(array_filter(
+            array_map('strval', (array) ($spec['sources'] ?? [])),
+            static fn (string $value): bool => $value !== '',
+        ));
+        $where = $locations === [] ? '' : ' at ' . implode(', ', $locations);
+        $project->addWarnings($this->id(), [
+            "images.json[{$i}] / theme/assets/{$filename}: authored MIME {$mime} "
+            . "for {$source}{$where}; delivered removed; disposition: failed generated asset omitted; "
+            . "container media or media-only wrapper/reference removed where structurally safe; "
+            . "error: {$error}",
+        ]);
+    }
+
+    /**
+     * Remove references to failed generated assets transactionally per markup
+     * file. A structurally safe innermost block is the preferred isolation
+     * unit; recovered bare img placeholders fall back to removing that tag.
+     *
+     * @param array<int,array<string,mixed>> $specs
+     */
+    private function removeFailedImageReferences(Project $project, array $specs): void
+    {
+        $sources = [];
+        foreach ($specs as $spec) {
+            if (($spec['status'] ?? '') !== 'failed') {
+                continue;
+            }
+            $source = (string) ($spec['src'] ?? '');
+            if ($source !== '') {
+                $sources[$source] = true;
+            }
+        }
+        if ($sources === []) {
+            return;
+        }
+
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        foreach ($project->markupFiles() as $absolute) {
+            $relative = str_starts_with($absolute, $root)
+                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+                : $absolute;
+            $content = $project->readText($relative);
+            $updated = $content;
+            foreach (array_keys($sources) as $source) {
+                $candidate = self::removeSourceFromMarkup($updated, $source);
+                if (self::firstMediaSourcePosition($candidate, $source) !== null) {
+                    // The source sits in malformed/unclosed markup without a
+                    // safe block span. Keep this source's pre-cleanup bytes and
+                    // report the residual instead of half-mutating the file.
+                    $project->addWarnings($this->id(), [
+                        "{$relative}: authored media source {$source}; delivered retained in unsafe markup; "
+                        . 'disposition: pre-cleanup bytes kept because no safe media isolation was available',
+                    ]);
+                    continue;
+                }
+                $updated = $candidate;
+            }
+            if ($updated !== $content) {
+                $project->writeText($relative, $updated);
+            }
+        }
+    }
+
+    /** Remove every safely isolated occurrence of one failed asset source. */
+    private static function removeSourceFromMarkup(string $markup, string $source): string
+    {
+        while (($position = self::firstMediaSourcePosition($markup, $source)) !== null) {
+            $document = BlockMarkup::parse($markup);
+            $best = null;
+            foreach ($document->indices() as $index) {
+                if (!in_array($document->name($index), ['image', 'cover', 'media-text'], true)) {
+                    continue;
+                }
+                $start = $document->openingOffset($index);
+                $end = $document->endOffset($index);
+                if ($end === null || $position < $start || $position >= $end) {
+                    continue;
+                }
+                $length = $end - $start;
+                if ($best === null || $length < $best['length']) {
+                    $best = ['index' => $index, 'start' => $start, 'length' => $length];
+                }
+            }
+            if ($best !== null) {
+                $name = $document->name($best['index']);
+                if ($name === 'cover') {
+                    // A cover's image is only one visual layer. Strip that
+                    // layer while retaining the cover wrapper and every byte
+                    // of its headline, copy, buttons, and freeform content.
+                    $coverMarkup = substr($markup, $best['start'], $best['length']);
+                    $beforeCoverCleanup = $coverMarkup;
+                    $coverDocument = BlockMarkup::parse($coverMarkup);
+                    $coverIndex = $coverDocument->topLevel();
+                    if ($coverIndex === null || $coverDocument->name($coverIndex) !== 'cover') {
+                        break;
+                    }
+                    $attrs = $coverDocument->attrs($coverIndex);
+                    if (is_array($attrs)) {
+                        $changedAttrs = false;
+                        foreach (['url', 'src'] as $key) {
+                            if (($attrs[$key] ?? null) === $source) {
+                                unset($attrs[$key]);
+                                $changedAttrs = true;
+                            }
+                        }
+                        if ($changedAttrs) {
+                            unset($attrs['id'], $attrs['focalPoint']);
+                            $coverDocument->setAttrs($coverIndex, $attrs);
+                            $coverMarkup = $coverDocument->render();
+                        }
+                    }
+                    $coverMarkup = self::removeMatchingImageTags($coverMarkup, $source);
+                    $quotedSource = preg_quote($source, '~');
+                    $coverMarkup = (string) preg_replace(
+                        '~background-image\s*:\s*url\(\s*(["\']?)' . $quotedSource . '\1\s*\)\s*;?~i',
+                        '',
+                        $coverMarkup,
+                    );
+                    if ($coverMarkup === $beforeCoverCleanup) {
+                        break;
+                    }
+                    $markup = substr_replace(
+                        $markup,
+                        $coverMarkup,
+                        $best['start'],
+                        $best['length'],
+                    );
+                    continue;
+                }
+
+                $replacement = '';
+                if ($name === 'media-text') {
+                    // Unwrap media-text and retain every authored inner block
+                    // byte-for-byte; keeping its grid with no media would leave
+                    // a large empty column beside the surviving copy.
+                    foreach ($document->children($best['index']) as $child) {
+                        $childStart = $document->openingOffset($child);
+                        $childEnd = $document->endOffset($child);
+                        if ($childEnd === null) {
+                            $replacement = null;
+                            break;
+                        }
+                        $replacement .= substr($markup, $childStart, $childEnd - $childStart);
+                    }
+                }
+                if ($replacement === null) {
+                    break;
+                }
+                $markup = substr_replace(
+                    $markup,
+                    $replacement,
+                    $best['start'],
+                    $best['length'],
+                );
+                continue;
+            }
+
+            // Recovered placeholders can be bare HTML with no Gutenberg block.
+            // Remove only an img whose src attribute is this exact source.
+            $withoutImage = self::removeMatchingImageTags($markup, $source);
+            if ($withoutImage === $markup) {
+                break; // unsafe/unrecognized context: preserve the file bytes
+            }
+            $markup = $withoutImage;
+        }
+        return $markup;
+    }
+
+    /** Remove bare/rendered img tags whose src is this exact failed source. */
+    private static function removeMatchingImageTags(string $markup, string $source): string
+    {
+        return (string) preg_replace_callback(
+            '/<img\b[^>]*>/is',
+            static function (array $match) use ($source): string {
+                if (!preg_match(
+                    '/\bsrc\s*=\s*(?:(["\'])' . preg_quote($source, '/') . '\1|'
+                    . preg_quote($source, '/') . '(?=\s|\/?>))/i',
+                    $match[0],
+                )) {
+                    return $match[0];
+                }
+                return '';
+            },
+            $markup,
+        );
+    }
+
+    /** Byte position of an exact block-JSON url/src or HTML src value. */
+    private static function firstMediaSourcePosition(string $markup, string $source): ?int
+    {
+        $quoted = preg_quote($source, '/');
+        $patterns = [
+            '/"(?:url|src)"\s*:\s*"' . $quoted . '"/i',
+            '/\bsrc\s*=\s*(?:(["\'])' . $quoted . '\1|' . $quoted . '(?=\s|\/?>))/i',
+        ];
+        $positions = [];
+        foreach ($patterns as $pattern) {
+            if (!preg_match_all($pattern, $markup, $matches, PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+            foreach ($matches[0] as [$match, $offset]) {
+                $within = strpos($match, $source);
+                if ($within !== false) {
+                    $positions[] = $offset + $within;
+                }
+            }
+        }
+        return $positions === [] ? null : min($positions);
     }
 
     /** Root-relative URL the theme's assets are served at in Playground. */

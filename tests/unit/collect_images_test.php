@@ -80,11 +80,79 @@ test('collect-images recovers an AI_IMAGE spec left in a cover url', function ()
     // Recovery immediately installs a serializer-stable canonical path.
     assert_eq('theme:./assets/' . $images[0]['filename'], $images[0]['src']);
     assert_contains('dense fog over the dunes', $images[0]['subject']);
-    assert_eq('16:9', $images[0]['aspectRatio']);
+    assert_eq('21:9', $images[0]['aspectRatio']);
     assert_eq('.jpg', substr($images[0]['filename'], -4));
     $markup = $project->readText('theme/parts/hero.html');
     assert_contains($images[0]['src'], $markup);
     assert_true(!str_contains($markup, '"url":"AI_IMAGE:'), 'raw prompt removed from cover url');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images caps recovered footer source ratios after semantic decoding', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/footer.html',
+        '<img src="AI_IMAGE:A potter|ratio:card-portrait|role:footer" alt=""/>'
+        . '<!-- wp:cover {"url":"AI_IMAGE:A loom\u007cratio:9:16\u007crole:footer"} -->'
+        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+        . '<img src="AI_IMAGE:A wheel|ratio:16:9|role:footer" alt=""/>'
+    );
+    $project->writeText('theme/parts/hero.html',
+        '<img src="AI_IMAGE:A statue|ratio:card-portrait|role:hero" alt=""/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(4, count($images));
+    $ratios = array_column($images, 'aspectRatio', 'subject');
+    assert_eq('square', $ratios['A potter']);
+    assert_eq('square', $ratios['A loom']);
+    assert_eq('16:9', $ratios['A wheel'], 'wide footer image remains authored');
+    assert_eq('card-portrait', $ratios['A statue'], 'non-footer portrait remains authored');
+    $markup = $project->readText('theme/parts/footer.html');
+    assert_true(!str_contains($markup, 'AI_IMAGE:'), 'recovered source prompts are replaced');
+
+    $warnings = $project->readJson('warnings.json')['collect-images'] ?? [];
+    assert_eq(2, count($warnings));
+    $joined = implode("\n", $warnings);
+    assert_contains("file='theme/parts/footer.html'", $joined);
+    assert_contains('authored aspect-ratio="card-portrait"', $joined);
+    assert_contains('authored aspect-ratio="9:16"', $joined);
+    assert_contains('delivered aspect-ratio="square"', $joined);
+    assert_contains('disposition=', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images gives a recovered structured trailing ratio precedence over prose keywords', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/hero.html',
+        '<!-- wp:cover {"url":"AI_IMAGE:an ultrawide landscape at dawn|portrait feature context|photorealistic|square"} -->'
+        . '<div class="wp-block-cover"></div><!-- /wp:cover -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('square', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images normalizes a recovered numeric trailing ratio before heuristic terms', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/feature.html',
+        '<img src="AI_IMAGE:a square ceramic tile|landscape feature context|photorealistic|2:1"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    // 2:1 is not a direct Gemini shape; it maps to the nearest supported ratio.
+    assert_eq('16:9', $images[0]['aspectRatio']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -103,7 +171,7 @@ test('collect-images decodes serializer-equivalent cover values into one canonic
     $images = $project->readJson('images.json');
     // JSON \u0026 and HTML &amp; represent the same prompt — one image/path.
     assert_eq(1, count($images));
-    assert_eq('16:9', $images[0]['aspectRatio']);
+    assert_eq('21:9', $images[0]['aspectRatio']);
     $markup = $project->readText('theme/parts/hero.html');
     assert_eq(2, substr_count($markup, $images[0]['src']));
     assert_true(!str_contains($markup, 'AI_IMAGE:'), 'both malformed source contexts normalized');

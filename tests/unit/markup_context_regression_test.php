@@ -134,12 +134,24 @@ test('an unterminated CDATA in foreign content does not skip to EOF', function (
 });
 
 test('a comment in a raw-text body does not stop tag removal', function () {
+    // `<title>` is raw text the sanitizer keeps; a comment opener inside its
+    // body must not blind the scanner to the closer or the following base.
     $out = MarkupSanitizer::sanitize(
-        '<!-- wp:html --><div><style>a{c:"<!--"}</style>'
+        '<!-- wp:html --><div><title>a "<!--" t</title>'
         . '<base href="https://evil.example/"></div><!-- /wp:html -->'
     );
-    assert_true(!str_contains($out, '<base'), 'base removed despite the comment in the style body');
-    assert_contains('a{c:"<!--"}', $out);
+    assert_true(!str_contains($out, '<base'), 'base removed despite the comment in the title body');
+    assert_contains('a "<!--" t', $out);
+
+    // A stripped raw-text container has to find its real closer the same way,
+    // or removal would overrun past the comment-shaped body.
+    $out = MarkupSanitizer::sanitize(
+        '<!-- wp:html --><div><style>a{c:"<!--"}</style>'
+        . '<p>After.</p></div><!-- /wp:html -->'
+    );
+    assert_true(!str_contains($out, '<style'), 'style removed with its comment-shaped body');
+    assert_true(!str_contains($out, 'a{c:'), 'style body removed');
+    assert_contains('<p>After.</p>', $out);
 });
 
 test('nested unclosed opaque elements scan in linear time', function () {
