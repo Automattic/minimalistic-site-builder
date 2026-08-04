@@ -13,7 +13,7 @@ test('image-logger slug keeps dots and dashes, lowercases the rest', function ()
 /** A successful request renders prompt, model, aspect ratio, spec and output. */
 test('image-logger format renders the full prompt, model and params on success', function () {
     $out = ImageLogger::format('hero.jpg', [
-        'model'             => 'imagen-4.0-generate-001',
+        'model'             => 'gemini-3.1-flash-image',
         'prompt'            => 'A bakery at dawn. Style: photorealistic',
         'aspect_ratio'      => '16:9',
         'sample_image_size' => '2K',
@@ -25,7 +25,7 @@ test('image-logger format renders the full prompt, model and params on success',
 
     assert_contains('IMAGE REQUEST LOG', $out);
     assert_contains('File         : hero.jpg', $out);
-    assert_contains('Model        : imagen-4.0-generate-001', $out);
+    assert_contains('Model        : gemini-3.1-flash-image', $out);
     assert_contains('Aspect ratio : 16:9', $out);
     assert_contains('Sample size  : 2K', $out);
     assert_contains('Status       : OK', $out);
@@ -40,7 +40,7 @@ test('image-logger format renders the full prompt, model and params on success',
 /** A failed request is tagged FAILED and still logs the full prompt, then the error. */
 test('image-logger format shows the prompt and the error on failure', function () {
     $out = ImageLogger::format('hero.jpg', [
-        'model'  => 'imagen-4.0-generate-001',
+        'model'  => 'gemini-3.1-flash-image',
         'prompt' => 'A bakery at dawn',
     ], [], 'Image proxy HTTP 500: boom');
 
@@ -66,11 +66,11 @@ test('image-logger writes a numbered transcript file into the dir', function () 
     ImageLogger::setDir($dir);
 
     ImageLogger::log('hero.jpg', [
-        'model'  => 'imagen-4.0-generate-001',
+        'model'  => 'gemini-3.1-flash-image',
         'prompt' => 'A bakery at dawn',
     ], ['path' => 'theme/assets/hero.jpg', 'bytes' => 42]);
     ImageLogger::log('about.jpg', [
-        'model'  => 'imagen-4.0-generate-001',
+        'model'  => 'gemini-3.1-flash-image',
         'prompt' => 'A quiet studio',
     ], [], 'boom');
 
