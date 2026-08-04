@@ -521,6 +521,33 @@ test('retryBatch survives a held launch with an empty delay schedule', function 
     assert_eq('IMG', $out['results'][0]['bytes'], 'a held image retries even with no transient rounds configured');
 });
 
+test('retryBatch charges the first backoff for a held-only retry wave', function () {
+    // Same rule as retryTextBatch: when the rate-limited sibling itself
+    // resolves (e.g. by exhausting its budget), the retry wave contains ONLY
+    // held keys and re-sending with zero wait would fire straight into the
+    // still-active rate limit. The wave must wait the first backoff delay,
+    // slept through the injected sleeper.
+    $round = 0;
+    $slept = [];
+    $out = GeminiImage::retryBatch(
+        [0 => ['p' => 'h']],
+        function (array $subset) use (&$round): array {
+            $round++;
+            return [0 => $round === 1
+                ? ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)']
+                : ['ok' => true, 'bytes' => 'IMG']];
+        },
+        [3, 9],
+        null,
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+    );
+    assert_eq('IMG', $out['results'][0]['bytes']);
+    assert_eq([3], $slept, 'a held-only wave waits the first backoff delay instead of zero');
+});
+
 test('retryBatch reports each result once, at its final state, via onResult', function () {
     // Incremental persistence hook: fires when a result is FINAL (success or
     // out-of-retries failure), never for a transient outcome that will retry.
