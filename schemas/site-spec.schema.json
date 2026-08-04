@@ -14,13 +14,13 @@
         "area",
         "audience",
         "language",
+        "writing_direction",
         "persona_name",
         "email_domain",
         "invented",
         "visual_vibe",
-        "animation_request",
         "subject_is_visual_work",
-        "writing_direction",
+        "animation_request",
         "sections",
         "pages"
     ],
@@ -70,6 +70,14 @@
                 "es-AR"
             ]
         },
+        "writing_direction": {
+            "type": "string",
+            "enum": [
+                "ltr",
+                "rtl"
+            ],
+            "description": "Normalized logical writing direction derived from a caller override or the site language."
+        },
         "persona_name": {
             "type": "string",
             "description": "Full name for the person represented by a personal site; empty for non-personal sites."
@@ -96,21 +104,13 @@
             "type": "string",
             "description": "Brief overall mood phrase, without concrete colors, fonts, spacing, or layout choices."
         },
+        "subject_is_visual_work": {
+            "type": "boolean",
+            "description": "Whether the site's core offering is itself visual imagery, used to require an image-bearing hero composition."
+        },
         "animation_request": {
             "type": "string",
             "description": "Verbatim specific motion behavior requested by the user; empty when none was requested."
-        },
-        "subject_is_visual_work": {
-            "type": "boolean",
-            "description": "True only when the site's core offering IS visual imagery (photography, art, food, or architecture portfolios). Narrows automatic hero selection to image-bearing recipes; anything but explicit true normalizes to false."
-        },
-        "writing_direction": {
-            "type": "string",
-            "enum": [
-                "ltr",
-                "rtl"
-            ],
-            "description": "Logical writing direction for all generated markup and styles. Normalization derives it from language unless the caller supplied an explicit override."
         },
         "sections": {
             "type": "array",

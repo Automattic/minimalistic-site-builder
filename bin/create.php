@@ -38,6 +38,7 @@ $heroCanvas = null;
 $heroMediaModesArg = null;
 $maxHeroImagesArg = null;
 $heroCopyCapacity = null;
+$usage = "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=none,cover-image,foreground-image,diptych] [--max-hero-images=0..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images]\n";
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
@@ -65,13 +66,13 @@ foreach (array_slice($argv, 1) as $a) {
         $prompt = $a;
     } else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images]\n");
+        fwrite(STDERR, $usage);
         exit(1);
     }
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=none,cover-image,foreground-image,diptych] [--max-hero-images=0..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images]\n");
+    fwrite(STDERR, $usage);
     exit(1);
 }
 

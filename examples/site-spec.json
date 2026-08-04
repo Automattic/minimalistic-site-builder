@@ -8,6 +8,7 @@
     "area": "bakery",
     "audience": "neighborhood residents and visitors",
     "language": "en",
+    "writing_direction": "ltr",
     "persona_name": "",
     "email_domain": "hearthandcrumb.com",
     "invented": [
@@ -15,6 +16,7 @@
         "email_domain"
     ],
     "visual_vibe": "warm and rustic",
+    "subject_is_visual_work": false,
     "animation_request": "",
     "subject_is_visual_work": false,
     "writing_direction": "ltr",

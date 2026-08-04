@@ -93,7 +93,7 @@ final class SiteBuilder
      *
      * @param array<int,string|array<string,mixed>> $pages
      * @param array<string,mixed>|null              $siteSpec
-     * @param array<string,mixed>                    $designConstraints
+     * @param array<string,mixed>                   $designConstraints
      */
     public function createProject(
         string $prompt,

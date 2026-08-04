@@ -556,7 +556,7 @@ final class DesignDirectionStep implements Step
      */
     public static function normalize(
         mixed $raw,
-        string $assignedRecipe,
+        string $assignedRecipe = 'cinematic-safe-zone',
         string $conceptSeed = '',
         array &$repairs = [],
         array &$warnings = [],
