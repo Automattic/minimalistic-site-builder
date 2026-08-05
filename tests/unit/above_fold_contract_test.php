@@ -64,6 +64,7 @@ function above_fold_resolve(
     string $direction = 'ltr',
     ?string $forced = null,
     array $theme = ['base' => '#FFFFFF', 'contrast' => '#111111'],
+    string $tagline = '',
 ): array {
     return AboveFoldContract::resolve(
         $pages,
@@ -74,6 +75,7 @@ function above_fold_resolve(
             'stable_id' => 'above-fold-fixture',
             'writing_direction' => $direction,
             'page_count' => count($pages),
+            'tagline' => $tagline,
         ],
         ['archetype' => 'minimal-columns', 'surface' => 'base'],
         $forced,
@@ -521,4 +523,60 @@ test('downstream consumers reject corrupt header relations and unverified token 
     );
     $stacked['header']['archetype'] = 'minimal-overlay';
     assert_throws(fn () => AboveFoldContract::assertPhase($stacked, AboveFoldContract::PHASE_DELIVERY));
+});
+
+test('header text-shape facts follow the archetype and the stated tagline (BIGR-773)', function () {
+    $pages = above_fold_pages(null, 'base', 'base');
+
+    // branded-lockup + a stated tagline: the lockup renders it, two text rows.
+    $lockup = above_fold_resolve(
+        $pages,
+        recipe: 'editorial-split',
+        forced: 'branded-lockup',
+        tagline: 'Handmade ceramic lamps from Copenhagen',
+    );
+    assert_eq('branded-lockup', $lockup['header']['archetype']);
+    assert_eq(true, $lockup['header']['displays_tagline']);
+    assert_eq('Handmade ceramic lamps from Copenhagen', $lockup['header']['tagline_text']);
+    assert_eq(2, $lockup['header']['text_rows']);
+
+    // branded-lockup with no stated tagline: nothing to render — one text row.
+    $bare = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'branded-lockup');
+    assert_eq(false, $bare['header']['displays_tagline']);
+    assert_eq(null, $bare['header']['tagline_text']);
+    assert_eq(1, $bare['header']['text_rows']);
+
+    // centered-masthead never renders a tagline but always stacks two rows
+    // (wordmark row + nav row), so the hero eyebrow gate still engages.
+    $masthead = above_fold_resolve(
+        $pages,
+        recipe: 'editorial-split',
+        forced: 'centered-masthead',
+        tagline: 'Handmade ceramic lamps from Copenhagen',
+    );
+    assert_eq('centered-masthead', $masthead['header']['archetype']);
+    assert_eq(false, $masthead['header']['displays_tagline']);
+    assert_eq(null, $masthead['header']['tagline_text']);
+    assert_eq(2, $masthead['header']['text_rows']);
+
+    // A single-row bar keeps the eyebrow available.
+    $row = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'standard-row');
+    assert_eq(1, $row['header']['text_rows']);
+
+    // Header degradation resets the text-shape facts with the archetype.
+    $split = above_fold_resolve(
+        above_fold_pages(null, 'contrast', 'contrast'),
+        recipe: 'focal-subject-stage',
+        forced: 'split-nav',
+        tagline: 'Handmade ceramic lamps from Copenhagen',
+    );
+    $deliveredPages = [above_fold_pages(null, 'contrast', 'contrast')[0]];
+    $deliveredPages[0]['sections'] = [$deliveredPages[0]['sections'][0]];
+    $parts = ['page-home--hero' => above_fold_solid_part('hero', 'contrast')];
+    $facts = AboveFoldPartFacts::inspect($deliveredPages, $parts, $split);
+    $degraded = AboveFoldContract::finalizeDelivery($split, $deliveredPages, $facts);
+    assert_eq('standard-row', $degraded['header']['archetype']);
+    assert_eq(false, $degraded['header']['displays_tagline']);
+    assert_eq(null, $degraded['header']['tagline_text']);
+    assert_eq(1, $degraded['header']['text_rows']);
 });
