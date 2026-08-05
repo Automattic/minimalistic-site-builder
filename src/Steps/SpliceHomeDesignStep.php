@@ -284,15 +284,29 @@ final class SpliceHomeDesignStep implements Step
 
         $mains = self::matching($elements, 'main');
         $footers = self::matching($elements, 'footer');
+        $topLevelFooters = array_values(array_filter(
+            $footers,
+            static fn (array $element): bool => $element['parent'] === null,
+        ));
         if (
             count($mains) !== 1
-            || count($footers) !== 1
+            || count($topLevelFooters) !== 1
             || self::matching($elements, 'header') !== []
         ) {
             return null;
         }
+        foreach ($footers as $candidate) {
+            $ancestorIndex = $candidate['parent'];
+            while ($ancestorIndex !== null) {
+                $ancestor = $elements[$ancestorIndex];
+                if (in_array($ancestor['name'], ['footer', 'address'], true)) {
+                    return null;
+                }
+                $ancestorIndex = $ancestor['parent'];
+            }
+        }
         $main = $mains[0];
-        $footer = $footers[0];
+        $footer = $topLevelFooters[0];
         $mainAttributes = self::attributes($html, $main);
         $roots = array_values(array_filter(
             $elements,
