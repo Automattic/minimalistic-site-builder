@@ -583,6 +583,103 @@ CSS;
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path matches tag and class selectors only against delivered section roots', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_root_elements_');
+    $siteCss = <<<'CSS'
+section {
+    padding: 2rem 3rem 4rem;
+}
+.foundation-section {
+    padding-left: 5rem;
+    padding-right: 6rem;
+    padding-top: 7rem;
+}
+.column-plate {
+    padding: 8rem 9rem;
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section class="source-only"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story" class="foundation-section">'
+            . '<div class="column-plate">Inner content</div></section>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    ps_assert_no_root_inline_padding($style, 'section');
+    ps_assert_no_root_inline_padding($style, '.foundation-section');
+    assert_contains(
+        'padding-top: 2rem',
+        implode("\n", ps_css_bodies_for_selector($style, 'section')),
+        'tag-targeted root keeps vertical shorthand start',
+    );
+    assert_contains(
+        'padding-bottom: 4rem',
+        implode("\n", ps_css_bodies_for_selector($style, 'section')),
+        'tag-targeted root keeps vertical shorthand end',
+    );
+    assert_contains(
+        'padding-top: 7rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '.foundation-section')),
+        'class-targeted root keeps vertical padding',
+    );
+    assert_contains(
+        'padding: 8rem 9rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '.column-plate')),
+        'inner class padding stays byte-for-byte authored',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path strips unsupported trailing pseudos before matching delivered section roots', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_trailing_pseudo_');
+    $siteCss = <<<'CSS'
+.foundation-section:nth-of-type(1) {
+    padding-left: 3rem;
+    padding-top: 4rem;
+}
+.column-plate {
+    padding: 5rem 6rem;
+}
+#story:before {
+    padding-left: 7rem;
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section class="source-only"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="story" class="foundation-section">'
+            . '<div class="column-plate">Inner content</div></section>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    ps_assert_no_root_inline_padding($style, '.foundation-section:nth-of-type(1)');
+    assert_contains(
+        'padding-top: 4rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '.foundation-section:nth-of-type(1)')),
+        'unsupported trailing pseudo keeps vertical padding on delivered root',
+    );
+    assert_contains(
+        'padding: 5rem 6rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '.column-plate')),
+        'inner class rule remains byte-for-byte authored',
+    );
+    assert_contains(
+        'padding-left: 7rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '#story:before')),
+        'legacy pseudo-element rule does not target the section-root box',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path recognizes functional attribute and escaped final-subject section selectors', function () {
     [$project, $tmp] = ps_project('builder_ps_foundation_selector_forms_');
     $siteCss = <<<'CSS'
@@ -976,7 +1073,10 @@ CSS;
         'nested child stays once under the original parent list and media query',
     );
     assert_true(
-        !str_contains($compact, '.shared{@media(min-width:1px){&.child{'),
+        preg_match(
+            '/(?:^|})\.shared\{@media\(min-width:1px\)\{&\.child\{/',
+            $compact,
+        ) !== 1,
         'nested child is not moved under a class-only parent',
     );
     assert_true(

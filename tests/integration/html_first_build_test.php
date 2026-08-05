@@ -5,7 +5,11 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\SiteBuilder;
+use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\StepComposition;
+use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\ThemeValidator;
 
@@ -148,6 +152,48 @@ function html_first_foundation_preview_document(): string
         . '<main><section id="hero"><h1 class="has-display-font-size">FOUNDATION-HERO</h1>'
         . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
         . '</section></main></body></html>';
+}
+
+function html_first_foundation_cover_fixture_step(): Step
+{
+    return new class implements Step {
+        public function id(): string
+        {
+            return 'foundation-cover-fixture';
+        }
+
+        public function label(): string
+        {
+            return 'Install full-pipeline cover fixture';
+        }
+
+        public function declaration(): StepDeclaration
+        {
+            return new StepDeclaration(
+                id: $this->id(),
+                label: $this->label(),
+                reads: ['theme/parts/*'],
+                writes: ['theme/parts/*'],
+                concurrent: false,
+            );
+        }
+
+        public function run(Project $project): void
+        {
+            $project->writeText(
+                'theme/parts/page-home--story.html',
+                '<!-- wp:group {"tagName":"section","anchor":"story"} -->'
+                    . '<section id="story" class="wp-block-group">'
+                    . '<!-- wp:cover {"overlayColor":"contrast","dimRatio":100} -->'
+                    . '<div class="wp-block-cover has-contrast-background-color has-background-dim-100 has-background-dim">'
+                    . '<span aria-hidden="true" class="wp-block-cover__background has-contrast-background-color has-background-dim-100 has-background-dim"></span>'
+                    . '<div class="wp-block-cover__inner-container">'
+                    . '<!-- wp:paragraph --><p>FOUNDATION-COVER</p><!-- /wp:paragraph -->'
+                    . '</div></div><!-- /wp:cover -->'
+                    . '</section><!-- /wp:group -->',
+            );
+        }
+    };
 }
 
 /** @return array<string,mixed> */
@@ -331,7 +377,12 @@ test('HTML-first multi-page build adopts one declared inset system in markup and
         $meta['critique_rounds'] = 1;
         $project->writeJson('meta.json', $meta);
 
-        $builder->pipeline()->runThrough($project);
+        $composition = StepComposition::default(
+            $llm,
+            new PromptRenderer(Package::promptsDir()),
+            blockFixer: BlockFixers::default(),
+        )->insertAfter('transform-site', html_first_foundation_cover_fixture_step());
+        $builder->pipeline($composition)->runThrough($project);
 
         $theme = $project->readJson('theme/theme.json');
         assert_eq('48rem', $theme['settings']['layout']['contentSize'] ?? null);
@@ -358,6 +409,45 @@ test('HTML-first multi-page build adopts one declared inset system in markup and
             $sectionCount += assert_html_first_page_sections_constrained($project, $slug);
         }
         assert_eq(4, $sectionCount, 'home and inner-page sections share constrained root layout');
+
+        $home = BlockMarkup::parse($project->readText('plugin/pages/home.html'));
+        $coverIndex = null;
+        foreach ($home->indices() as $index) {
+            if ($home->name($index) === 'cover') {
+                $coverIndex = $index;
+                break;
+            }
+        }
+        assert_true($coverIndex !== null, 'full pipeline delivers the generated cover block');
+        $coverAttrs = $home->attrs($coverIndex) ?? [];
+        assert_eq('full', $coverAttrs['align'] ?? null, 'delivered cover stays full bleed after FixBlocks');
+        assert_eq(
+            ['type' => 'constrained'],
+            $coverAttrs['layout'] ?? null,
+            'delivered cover inner content uses the declared content column',
+        );
+        assert_contains(
+            'is-layout-constrained',
+            $coverAttrs['className'] ?? '',
+            'delivered cover keeps the constrained-layout serializer bridge',
+        );
+        $coverHtml = $home->ownHtml($coverIndex);
+        assert_contains('alignfull', $coverHtml, 'delivered cover wrapper stays edge-to-edge');
+        assert_contains(
+            'is-layout-constrained',
+            $coverHtml,
+            'FixBlocks serializes the constrained-layout bridge on the delivered wrapper',
+        );
+        assert_contains(
+            '<div class="wp-block-cover__inner-container">',
+            $coverHtml,
+            'delivered cover keeps the core inner content container',
+        );
+        assert_contains(
+            'FOUNDATION-COVER',
+            $home->innerHtml($coverIndex),
+            'cover inner content survives full pipeline',
+        );
 
         $style = $project->readText('theme/style.css');
         foreach (['#hero', '#story', '#about-intro', '#about-values'] as $selector) {

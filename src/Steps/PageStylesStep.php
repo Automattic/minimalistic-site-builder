@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSyntaxScanner;
+use Automattic\BlocksEngine\PhpTransformer\HtmlToBlocks\Style\CssSelectorMatcher;
 use Automattic\SiteBuild\CssContrastAdjuster;
 use Automattic\SiteBuild\CssContrastCheck;
 use Automattic\SiteBuild\CssScrub;
@@ -260,7 +261,7 @@ CSS;
     {
         $chunks = [];
         $warnings = [];
-        $sectionRootIds = self::sectionRootIds($project, $warnings);
+        $sectionRootIds = self::sectionRoots($project, $warnings);
 
         $siteCss = self::scrubAndNeutralizeChunk(
             $project->readText(TransformArtifacts::SITE_CSS),
@@ -353,7 +354,7 @@ CSS;
      * declarations never reach this structural pass. A malformed stylesheet
      * keeps its scrubbed pre-neutralization bytes and records the degradation.
      *
-     * @param array<string,true> $sectionRootIds
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      * @param list<string>       $warnings
      */
     private static function scrubAndNeutralizeChunk(
@@ -363,7 +364,7 @@ CSS;
         array &$warnings,
     ): string {
         $css = self::scrubChunk($css, $source, $warnings);
-        if ($css === '' || $sectionRootIds === []) {
+        if ($css === '' || $sectionRootIds['roots'] === []) {
             return $css;
         }
 
@@ -403,13 +404,19 @@ CSS;
      * must not widen the delivered CSS mutation boundary.
      *
      * @param list<string> $warnings
-     * @return array<string,true>
+     * @return array{
+     *     ids:array<string,true>,
+     *     roots:list<\DOMElement>,
+     *     elements:list<\DOMElement>
+     * }
      */
-    private static function sectionRootIds(Project $project, array &$warnings): array
+    private static function sectionRoots(Project $project, array &$warnings): array
     {
         $files = glob($project->pluginPath('pages') . '/*.html') ?: [];
         sort($files, SORT_STRING);
         $ids = [];
+        $roots = [];
+        $elements = [];
         foreach ($files as $file) {
             $markup = @file_get_contents($file);
             if ($markup === false) {
@@ -432,24 +439,30 @@ CSS;
                 continue;
             }
             $xpath = new \DOMXPath($dom);
-            foreach ($xpath->query('/html/body[@id="page-styles-page-root"]/section[@id]') ?: [] as $section) {
+            foreach ($xpath->query('/html/body[@id="page-styles-page-root"]//*') ?: [] as $element) {
+                if ($element instanceof \DOMElement) {
+                    $elements[] = $element;
+                }
+            }
+            foreach ($xpath->query('/html/body[@id="page-styles-page-root"]/section') ?: [] as $section) {
                 if (!$section instanceof \DOMElement) {
                     continue;
                 }
+                $roots[] = $section;
                 $id = trim($section->getAttribute('id'));
                 if ($id !== '') {
                     $ids[$id] = true;
                 }
             }
         }
-        return $ids;
+        return ['ids' => $ids, 'roots' => $roots, 'elements' => $elements];
     }
 
     /**
      * Rewrite a stylesheet rule-list, recursing through grouping at-rules.
      * Returns null on syntax this bounded transformer cannot prove safe.
      *
-     * @param array<string,true> $sectionRootIds
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
      */
     private static function rewriteRuleList(
@@ -586,7 +599,7 @@ CSS;
     }
 
     /**
-     * @param array<string,true> $sectionRootIds
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
      */
     private static function rewriteQualifiedRule(
@@ -660,7 +673,7 @@ CSS;
     /**
      * @param list<array{kind:string,text:string}> $bodyItems
      * @param list<array{branch:string,resolved:list<string>,relation:int}> $branchInfo
-     * @param array<string,true> $sectionRootIds
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
      */
     private static function rewriteQualifiedRuleWithSharedNesting(
@@ -679,14 +692,59 @@ CSS;
         }
         $authoredSelectorText = $selectorText;
         $selectorText = trim($selectorText);
+        $rewritten = self::rewriteSharedBodyItems(
+            $bodyItems,
+            [],
+            $selectorText,
+            $branchInfo,
+            $parentSelectors,
+            $sectionRootIds,
+            $removals,
+            $error,
+        );
+        if ($rewritten === null) {
+            return null;
+        }
+
+        if (!$rewritten['changed']) {
+            return $leading . $authoredSelectorText . '{' . $originalBody . '}';
+        }
+        $indent = '';
+        if (preg_match('/\n([ \t]*)\z/', $leading, $match) === 1) {
+            $indent = $match[1];
+        }
+        return $leading . implode("\n{$indent}", $rewritten['pieces']);
+    }
+
+    /**
+     * Direct declaration chunks may move outward through grouping at-rules so
+     * root and non-root selector specificity stays unchanged. Nested selector
+     * chunks keep every grouping wrapper under the original complete parent
+     * selector list, preserving `&` max-list specificity and source order.
+     *
+     * @param list<array{kind:string,text:string}> $bodyItems
+     * @param list<string> $groupPreludes
+     * @param list<array{branch:string,resolved:list<string>,relation:int}> $branchInfo
+     * @param list<string> $parentSelectors
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
+     * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
+     * @return array{pieces:list<string>,changed:bool}|null
+     */
+    private static function rewriteSharedBodyItems(
+        array $bodyItems,
+        array $groupPreludes,
+        string $selectorText,
+        array $branchInfo,
+        array $parentSelectors,
+        array $sectionRootIds,
+        array &$removals,
+        ?string &$error,
+    ): ?array {
         $pieces = [];
         $anyChanged = false;
         foreach ($bodyItems as $item) {
             if ($item['kind'] === 'direct') {
                 if (self::isCssTrivia($item['text'])) {
-                    if ($item['text'] !== '') {
-                        $pieces[] = $item['text'];
-                    }
                     continue;
                 }
                 $direct = self::rewriteDirectRuleChunk(
@@ -700,8 +758,39 @@ CSS;
                 if ($direct === null) {
                     return null;
                 }
-                $pieces[] = $direct['text'];
+                $pieces[] = self::wrapGroupingRules($groupPreludes, $direct['text']);
                 $anyChanged = $anyChanged || $direct['changed'];
+                continue;
+            }
+
+            $block = self::nestedBlockParts($item['text'], $error);
+            if ($block === null) {
+                return null;
+            }
+            $atRule = self::atRuleName($block['prelude']);
+            if ($atRule !== null && self::isGroupingAtRule($atRule)) {
+                $hasNested = false;
+                $nestedItems = self::splitRuleBodyItems($block['body'], $hasNested, $error);
+                if ($nestedItems === null) {
+                    return null;
+                }
+                $nestedGroups = $groupPreludes;
+                $nestedGroups[] = trim($block['prelude']);
+                $grouped = self::rewriteSharedBodyItems(
+                    $nestedItems,
+                    $nestedGroups,
+                    $selectorText,
+                    $branchInfo,
+                    $parentSelectors,
+                    $sectionRootIds,
+                    $removals,
+                    $error,
+                );
+                if ($grouped === null) {
+                    return null;
+                }
+                array_push($pieces, ...$grouped['pieces']);
+                $anyChanged = $anyChanged || $grouped['changed'];
                 continue;
             }
 
@@ -718,23 +807,63 @@ CSS;
             if ($nested === null) {
                 return null;
             }
-            $pieces[] = $selectorText . ' {' . $nested . '}';
+            $pieces[] = $selectorText . ' {'
+                . self::wrapGroupingRules($groupPreludes, $nested)
+                . '}';
             $anyChanged = $anyChanged || $nestedChanged;
         }
+        return ['pieces' => $pieces, 'changed' => $anyChanged];
+    }
 
-        if (!$anyChanged) {
-            return $leading . $authoredSelectorText . '{' . $originalBody . '}';
+    /** @return array{prelude:string,body:string}|null */
+    private static function nestedBlockParts(string $block, ?string &$error): ?array
+    {
+        $state = CssSyntaxScanner::state();
+        $length = strlen($block);
+        for ($offset = 0; $offset < $length;) {
+            if (CssSyntaxScanner::isTopLevel($state) && $block[$offset] === '{') {
+                $close = self::matchingBrace($block, $offset, $error);
+                if ($close === null || !self::isCssTrivia(substr($block, $close + 1))) {
+                    $error ??= 'nested block has trailing non-trivia';
+                    return null;
+                }
+                return [
+                    'prelude' => substr($block, 0, $offset),
+                    'body' => substr($block, $offset + 1, $close - $offset - 1),
+                ];
+            }
+            $next = CssSyntaxScanner::consume($block, $offset, $state);
+            if ($next === null) {
+                $error = "invalid nested block at byte {$offset}";
+                return null;
+            }
+            $offset = $next;
         }
-        $indent = '';
-        if (preg_match('/\n([ \t]*)\z/', $leading, $match) === 1) {
-            $indent = $match[1];
+        $error = 'nested block has no opening brace';
+        return null;
+    }
+
+    /** @param list<string> $groupPreludes */
+    private static function wrapGroupingRules(array $groupPreludes, string $contents): string
+    {
+        for ($index = count($groupPreludes) - 1; $index >= 0; $index--) {
+            $contents = $groupPreludes[$index] . ' {' . $contents . '}';
         }
-        return $leading . implode("\n{$indent}", $pieces);
+        return $contents;
+    }
+
+    private static function isGroupingAtRule(string $atRule): bool
+    {
+        return in_array(
+            $atRule,
+            ['media', 'supports', 'container', 'layer', 'scope', 'document', 'starting-style'],
+            true,
+        );
     }
 
     /**
      * @param list<array{branch:string,resolved:list<string>,relation:int}> $branchInfo
-     * @param array<string,true> $sectionRootIds
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
      * @return array{text:string,changed:bool}|null
      */
@@ -939,10 +1068,16 @@ CSS;
         return $branches;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /**
+     * @param array{
+     *     ids:array<string,true>,
+     *     roots:list<\DOMElement>,
+     *     elements:list<\DOMElement>
+     * } $sectionRootIds
+     */
     private static function rootSubjectFilter(array $sectionRootIds): string
     {
-        $ids = array_keys($sectionRootIds);
+        $ids = array_keys($sectionRootIds['ids']);
         sort($ids, SORT_STRING);
         return implode(', ', array_map(self::cssIdSelector(...), $ids));
     }
@@ -1037,7 +1172,7 @@ CSS;
      * while applying disjoint zero-specificity subject filters.
      *
      * @param list<string> $selectors
-     * @param array<string,true> $sectionRootIds
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      */
     private static function selectorSetRootRelation(
         array $selectors,
@@ -1060,17 +1195,128 @@ CSS;
         return $sawOther ? self::ROOT_MIXED : self::ROOT_ALL;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /** @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds */
     private static function selectorRootRelation(
         string $selector,
         array $sectionRootIds,
         ?string &$error,
     ): ?int {
+        $matched = self::matchedSelectorRootRelation(trim($selector), $sectionRootIds);
+        if ($matched !== null) {
+            return $matched;
+        }
+
         $compound = self::finalSelectorCompound($selector, $error);
         if ($compound === null) {
             return null;
         }
+        $baseCompound = self::unsupportedTrailingPseudoBase($compound);
+        if ($baseCompound !== null) {
+            $matched = self::matchedSelectorRootRelation($baseCompound, $sectionRootIds);
+            if ($matched !== null) {
+                return $matched;
+            }
+        }
         return self::compoundRootRelation($compound, $sectionRootIds, $error);
+    }
+
+    /** @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds */
+    private static function matchedSelectorRootRelation(string $selector, array $sectionRootIds): ?int
+    {
+        $parsed = CssSelectorMatcher::parse($selector);
+        if (!($parsed['supported'] ?? false)) {
+            return null;
+        }
+        $rootObjectIds = [];
+        $sawRoot = false;
+        foreach ($sectionRootIds['roots'] as $root) {
+            $rootObjectIds[spl_object_id($root)] = true;
+            $match = CssSelectorMatcher::matches($root, $parsed, true);
+            if ($match['supported'] && $match['matches']) {
+                $sawRoot = true;
+            }
+        }
+        if (!$sawRoot) {
+            return self::ROOT_NONE;
+        }
+        foreach ($sectionRootIds['elements'] as $element) {
+            if (isset($rootObjectIds[spl_object_id($element)])) {
+                continue;
+            }
+            $match = CssSelectorMatcher::matches($element, $parsed, true);
+            if ($match['supported'] && $match['matches']) {
+                return self::ROOT_MIXED;
+            }
+        }
+        return self::ROOT_ALL;
+    }
+
+    /**
+     * Unsupported trailing pseudo-classes do not hide an otherwise resolvable
+     * section-root subject. Keep pseudo-elements and non-trailing compounds out
+     * of this bounded fallback rather than approximating full selector logic.
+     */
+    private static function unsupportedTrailingPseudoBase(string $compound): ?string
+    {
+        $length = strlen($compound);
+        $state = CssSyntaxScanner::state();
+        for ($offset = 0; $offset < $length;) {
+            $topLevel = CssSyntaxScanner::isTopLevel($state);
+            if ($topLevel && substr($compound, $offset, 2) === '/*') {
+                $end = strpos($compound, '*/', $offset + 2);
+                if ($end === false) {
+                    return null;
+                }
+                $offset = $end + 2;
+                continue;
+            }
+            if ($topLevel && $compound[$offset] === ':') {
+                if (($compound[$offset + 1] ?? '') === ':') {
+                    return null;
+                }
+                $base = trim(substr($compound, 0, $offset));
+                if ($base === '') {
+                    return null;
+                }
+                for ($suffix = $offset; $suffix < $length;) {
+                    $suffix = self::skipSelectorTrivia($compound, $suffix);
+                    if ($suffix >= $length) {
+                        return $base;
+                    }
+                    if ($compound[$suffix] !== ':' || ($compound[$suffix + 1] ?? '') === ':') {
+                        return null;
+                    }
+                    $pseudo = self::cssIdentifierAt($compound, $suffix + 1);
+                    if ($pseudo === null) {
+                        return null;
+                    }
+                    if (in_array(
+                        strtolower($pseudo['decoded']),
+                        ['before', 'after', 'first-letter', 'first-line'],
+                        true,
+                    )) {
+                        return null;
+                    }
+                    $suffix = self::skipSelectorTrivia($compound, $pseudo['end']);
+                    if (($compound[$suffix] ?? '') !== '(') {
+                        continue;
+                    }
+                    $suffixError = null;
+                    $end = self::selectorGroupEnd($compound, $suffix, '(', ')', $suffixError);
+                    if ($end === null) {
+                        return null;
+                    }
+                    $suffix = $end;
+                }
+                return $base;
+            }
+            $next = CssSyntaxScanner::consume($compound, $offset, $state);
+            if ($next === null) {
+                return null;
+            }
+            $offset = $next;
+        }
+        return null;
     }
 
     private static function finalSelectorCompound(string $selector, ?string &$error): ?string
@@ -1129,7 +1375,7 @@ CSS;
         return $compound;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /** @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds */
     private static function compoundRootRelation(
         string $compound,
         array $sectionRootIds,
@@ -1154,7 +1400,7 @@ CSS;
             if ($topLevel && $byte === '#') {
                 $identifier = self::cssIdentifierAt($compound, $offset + 1);
                 if ($identifier !== null) {
-                    if (isset($sectionRootIds[$identifier['decoded']])) {
+                    if (isset($sectionRootIds['ids'][$identifier['decoded']])) {
                         $relation = self::ROOT_ALL;
                     }
                     $offset = $identifier['end'];
@@ -1302,7 +1548,7 @@ CSS;
         return $excludesRoot ? self::ROOT_NONE : $relation;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /** @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds */
     private static function selectorArgumentRootRelation(
         string $arguments,
         array $sectionRootIds,
@@ -1346,7 +1592,7 @@ CSS;
             : null;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /** @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds */
     private static function selectorDefinitelyNamesRoot(
         string $selector,
         array $sectionRootIds,
@@ -1363,7 +1609,7 @@ CSS;
                 if (
                     $identifier !== null
                     && $identifier['end'] === strlen($branch)
-                    && isset($sectionRootIds[$identifier['decoded']])
+                    && isset($sectionRootIds['ids'][$identifier['decoded']])
                 ) {
                     return true;
                 }
@@ -1413,7 +1659,7 @@ CSS;
         return false;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /** @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds */
     private static function nthOfRootRelation(
         string $arguments,
         array $sectionRootIds,
@@ -1508,7 +1754,7 @@ CSS;
         return null;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /** @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds */
     private static function idAttributeRootRelation(string $attribute, array $sectionRootIds): int
     {
         $withoutComments = preg_replace('/\/\*.*?\*\//s', '', $attribute);
@@ -1545,7 +1791,7 @@ CSS;
         if ($modifier !== '' && !in_array($modifier, ['i', 's'], true)) {
             return self::ROOT_NONE;
         }
-        foreach ($sectionRootIds as $id => $_) {
+        foreach ($sectionRootIds['ids'] as $id => $_) {
             $candidate = $modifier === 'i' ? strtolower($id) : $id;
             $wanted = $modifier === 'i' ? strtolower($decoded) : $decoded;
             $matches = match ($operator) {
@@ -1665,7 +1911,7 @@ CSS;
      * resolved parent context. Direct declarations are neutralized only when
      * this rule's subject is known to be a delivered section root.
      *
-     * @param array<string,true> $sectionRootIds
+     * @param array{ids:array<string,true>,roots:list<\DOMElement>,elements:list<\DOMElement>} $sectionRootIds
      * @param list<string> $parentSelectors
      * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
      */
