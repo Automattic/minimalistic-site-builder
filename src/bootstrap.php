@@ -15,7 +15,10 @@ use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
+use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDefaults;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\WpcomImageClient;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -44,6 +47,56 @@ function step_temperatures(): array
 function llm_temperature(string $envSuffix, ?float $default): ?float
 {
     return StepDefaults::temperature($envSuffix, $default);
+}
+
+/**
+ * Normalize a `--pages` list against `--multi-page`.
+ *
+ * --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
+ * exist at all, so a list without the flag is a contradiction — it throws
+ * rather than let either flag be silently ignored. Blank entries left by a
+ * trailing or doubled comma are dropped; the first surviving title is the
+ * homepage.
+ *
+ * @return list<string>
+ */
+function parse_pages_flags(?string $pagesArg, bool $multiPage): array
+{
+    if ($pagesArg !== null && !$multiPage) {
+        throw new InvalidArgumentException('--pages requires --multi-page.');
+    }
+    if ($pagesArg === null) {
+        return [];
+    }
+
+    return array_values(array_filter(
+        array_map('trim', explode(',', $pagesArg)),
+        static fn (string $title): bool => $title !== '',
+    ));
+}
+
+/**
+ * Validate a `--provider` flag against config/models.json, returning it
+ * lowercased and trimmed (null when the flag was not given).
+ *
+ * Validating only — what the provider is then used FOR differs per entry point:
+ * bin/build.php exports it as LLM_PROVIDER for its own run, bin/build-demos.php
+ * forwards it to each child build instead. Both want the same friendly early
+ * error rather than a later failure deep in the transport.
+ */
+function normalize_provider(?string $provider): ?string
+{
+    if ($provider === null) {
+        return null;
+    }
+
+    $provider = strtolower(trim($provider));
+    if (!ModelConfig::hasProvider($provider)) {
+        throw new InvalidArgumentException("Unknown --provider '{$provider}'. Known: "
+            . implode(', ', ModelConfig::providerNames()));
+    }
+
+    return $provider;
 }
 
 /** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
@@ -136,6 +189,29 @@ function make_image_client(): ImageClient
         apiToken: Env::getRequired('GOOGLE_VERTEX_API_TOKEN'),
         model:    Env::get('IMAGE_MODEL', 'gemini-3.1-flash-image'),
     );
+}
+
+/**
+ * The opt-in image pair, in the order it has to run.
+ *
+ * Generation goes through the Vertex proxy rather than the LLM, but it is not a
+ * zero-token step: the Llm rewrites prompts the safety filter rejects (small
+ * tier) before regenerating. CoverContrastStep follows because only then do the
+ * real pixels exist to re-check cover text against — dimRatio and text colors
+ * were picked earlier against an image nobody had seen.
+ *
+ * Construction is shared; running is not. bin/build.php announces, times and
+ * records each step into its BuildReport, while bin/images.php times the
+ * generation alone — so callers run the steps themselves.
+ *
+ * @return list<Step>
+ */
+function image_generation_steps(?Llm $llm): array
+{
+    return [
+        new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null),
+        new CoverContrastStep(BlockFixers::default()),
+    ];
 }
 
 /** Project root path helper. */

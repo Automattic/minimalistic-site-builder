@@ -92,24 +92,16 @@ foreach (array_slice($argv, 1) as $a) {
     }
 }
 
-// --pages fixes WHICH pages each site gets; --multi-page owns WHETHER inner
-// pages exist at all, so a list without the flag is a contradiction — fail
-// loud here rather than let every child build fail with the same message.
-if ($pagesArg !== null && !$multiPage) {
-    fwrite(STDERR, "--pages requires --multi-page.\n");
+// Both flags are forwarded to the children, so check them once here rather than
+// let every child build fail with the same message. Only --provider's normalized
+// form is kept: the page list is forwarded verbatim, so this call is for the
+// "--pages requires --multi-page" guard alone.
+try {
+    parse_pages_flags($pagesArg, $multiPage);
+    $provider = normalize_provider($provider);
+} catch (InvalidArgumentException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
     exit(1);
-}
-
-// Validate --provider once up front and forward it to each child build.php, so
-// the whole demo set builds on one provider's model set. Per-step LLM_MODEL_*
-// env overrides still apply inside each child.
-if ($provider !== null) {
-    $provider = strtolower(trim($provider));
-    if (!\Automattic\SiteBuild\ModelConfig::hasProvider($provider)) {
-        fwrite(STDERR, "Unknown --provider '{$provider}'. Known: "
-            . implode(', ', \Automattic\SiteBuild\ModelConfig::providerNames()) . "\n");
-        exit(1);
-    }
 }
 
 $data = json_decode((string) file_get_contents($file), true);

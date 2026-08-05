@@ -1,11 +1,8 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
-use Automattic\SiteBuild\Steps\CoverContrastStep;
-use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
  * Generate (or regenerate) the AI images for an already-built project.
@@ -57,11 +54,13 @@ try {
     $llm = null;
 }
 
+[$generateImages, $coverContrast] = image_generation_steps($llm);
+
 $start = microtime(true);
-(new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null))->run($project);
+$generateImages->run($project);
 printf("  done in %.1fs\n", microtime(true) - $start);
 
 // With the real pixels on disk, verify cover text against the dimmed images.
-(new CoverContrastStep(BlockFixers::default()))->run($project);
+$coverContrast->run($project);
 
 echo "Output: {$project->themePath('assets')}\n";
