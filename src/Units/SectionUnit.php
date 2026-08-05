@@ -99,7 +99,12 @@ final class SectionUnit extends AbstractPageSectionUnit
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
-        $contract = CardStyleContract::enforce($markup, $cardStyle, $this->key($input));
+        $contract = CardStyleContract::enforce(
+            $markup,
+            $cardStyle,
+            $this->key($input),
+            themeJson: $input['theme_json'] ?? null,
+        );
         $markup = $contract['markup'];
         array_push($repairs, ...$contract['repairs']);
         array_push($warnings, ...$contract['warnings']);
