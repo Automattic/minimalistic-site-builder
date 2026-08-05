@@ -1,5 +1,14 @@
 [
     {
+        "project": "atlas27",
+        "slug": "atlas27",
+        "asset": "atlas27-playground-20260805T040713Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/atlas27-playground-20260805T040713Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fatlas27-playground-20260805T040713Z.zip",
+        "size_bytes": 16121814,
+        "created_at": "2026-08-05T04:07:21+00:00"
+    },
+    {
         "project": "lumen27",
         "slug": "lumen27",
         "asset": "lumen27-playground-20260805T040654Z.zip",
