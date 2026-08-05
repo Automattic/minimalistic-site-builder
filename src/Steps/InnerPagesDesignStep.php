@@ -1333,7 +1333,8 @@ final class InnerPagesDesignStep implements Step
                     return false;
                 }
             }
-            if ($name === 'footer' && ++$footerCount > 1) {
+            // Nested footers are idiomatic HTML5 attribution; limit only the page footer.
+            if ($name === 'footer' && $stack === [] && ++$footerCount > 1) {
                 return false;
             }
             if ($name === 'h1' || self::openingTagAttribute($html, $token, 'id') === 'hero') {
