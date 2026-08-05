@@ -266,6 +266,48 @@ test('collect-images keeps canonical fields for an assigned four-field AI_IMAGE 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('collect-images records one source when canonical and assigned parsing find the same image', function () {
+    [$project, $tmp] = collect_fixture();
+    $source = 'parts/page-home--hero.html';
+    $project->writeText('theme/' . $source,
+        '<img src="theme:./assets/shared-hero.jpg" '
+        . 'alt="AI_IMAGE: Dawn over a quiet valley | full-bleed homepage hero | photorealistic | square"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq([$source], $images[0]['sources']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images upgrades an earlier assigned image when a later file is canonical', function () {
+    [$project, $tmp] = collect_fixture();
+    $earlySource = 'parts/page-a--lead.html';
+    $laterSource = 'parts/page-z--hero.html';
+    $project->writeText('theme/' . $earlySource,
+        '<img src="theme:./assets/shared-scene.jpg" alt="AI_IMAGE: generic fallback scene"/>'
+    );
+    $project->writeText('theme/' . $laterSource,
+        '<img src="theme:./assets/shared-scene.jpg" '
+        . 'alt="AI_IMAGE: Sunrise over a mountain lake | homepage hero backdrop | cinematic | 21:9"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('Sunrise over a mountain lake', $images[0]['subject']);
+    assert_eq('homepage hero backdrop', $images[0]['pageContext']);
+    assert_eq('cinematic', $images[0]['style']);
+    assert_eq('21:9', $images[0]['aspectRatio']);
+    assert_eq([$earlySource, $laterSource], $images[0]['sources']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('collect-images keeps plain prose assigned image subjects unchanged', function () {
     [$project, $tmp] = collect_fixture();
     $subject = 'Studio flat lay with sketchbooks, pencils, and warm window light';
