@@ -24,6 +24,7 @@ use Automattic\SiteBuild\Steps\PageStylesStep;
 use Automattic\SiteBuild\Steps\RefinePromptStep;
 use Automattic\SiteBuild\Steps\ScaffoldPluginStep;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
+use Automattic\SiteBuild\Steps\SectionLayoutStep;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
 use Automattic\SiteBuild\Steps\SectionsStep;
 use Automattic\SiteBuild\Steps\SiteSpecStep;
@@ -149,6 +150,7 @@ final class StepComposition
                 ),
             ),
             new SectionRhythmStep(),
+            new SectionLayoutStep(),
             new CollectImagesStep(htmlFirst: true),
             new NormalizeLayoutStep(htmlFirst: true),
             new HeaderHeroStep(),
