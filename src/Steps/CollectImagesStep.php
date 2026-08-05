@@ -83,6 +83,8 @@ final class CollectImagesStep implements Step
     {
         /** @var array<string,array<string,mixed>> $byFilename keyed by filename, deduped */
         $byFilename = [];
+        /** @var array<string,bool> $canonicalByFilename keyed by filename */
+        $canonicalByFilename = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
@@ -90,20 +92,48 @@ final class CollectImagesStep implements Step
             if ($parsed['content'] !== $content) {
                 $project->writeText('theme/' . $rel, $parsed['content']);
             }
-            $images = $parsed['images'];
-            if ($this->htmlFirst) {
-                array_push($images, ...self::parseAssignedImages($parsed['content'], $rel));
+
+            // parseAndNormalize returns four-field canonical entries first,
+            // followed by recovery fallbacks. Preserve that parser provenance:
+            // assigned rows also carry a non-empty derived pageContext, so the
+            // fields alone cannot identify a canonical entry.
+            $canonicalCount = count(self::parseCanonicalPlaceholders($parsed['content']));
+            $images = [];
+            foreach ($parsed['images'] as $index => $image) {
+                $fromCanonicalParser = $index < $canonicalCount;
+                $images[] = [
+                    'image' => $image,
+                    'canonical' => $fromCanonicalParser && (
+                        $image['pageContext'] !== ''
+                        || $image['style'] !== ''
+                        || $image['aspectRatio'] !== 'landscape'
+                    ),
+                ];
             }
-            foreach ($images as $img) {
+            if ($this->htmlFirst) {
+                foreach (self::parseAssignedImages($parsed['content'], $rel) as $image) {
+                    $images[] = ['image' => $image, 'canonical' => false];
+                }
+            }
+            foreach ($images as $entry) {
+                $img = $entry['image'];
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
-                    // Same asset referenced from another file — just record the source.
-                    $byFilename[$filename]['sources'][] = $rel;
+                    if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
+                        $byFilename[$filename]['sources'][] = $rel;
+                    }
+                    if ($entry['canonical'] && !$canonicalByFilename[$filename]) {
+                        foreach (['subject', 'pageContext', 'style', 'aspectRatio'] as $field) {
+                            $byFilename[$filename][$field] = $img[$field];
+                        }
+                        $canonicalByFilename[$filename] = true;
+                    }
                     continue;
                 }
                 $img['sources'] = [$rel];
                 $img['status']  = 'pending';
                 $byFilename[$filename] = $img;
+                $canonicalByFilename[$filename] = $entry['canonical'];
             }
         }
 
