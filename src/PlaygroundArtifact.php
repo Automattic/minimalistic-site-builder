@@ -246,13 +246,6 @@ final class PlaygroundArtifact
     }
 
     /**
-     * WP site identity for a Blueprint's setSiteOptions step: the header's
-     * site-title/site-tagline blocks read these options, not the theme.
-     * A malformed siteSpec.json falls back to the theme header/slug.
-     *
-     * @return array<string,string>
-     */
-    /**
      * The one rendered text for wp:site-tagline (WP's blogdescription): the
      * user's stated tagline, or nothing. The spec's `topic` is deliberately
      * NOT a fallback (BIGR-773): it is a factual description of the whole
@@ -268,6 +261,13 @@ final class PlaygroundArtifact
         return trim((string) ($spec['tagline'] ?? ''));
     }
 
+    /**
+     * WP site identity for a Blueprint's setSiteOptions step: the header's
+     * site-title/site-tagline blocks read these options, not the theme.
+     * A malformed siteSpec.json falls back to the theme header/slug.
+     *
+     * @return array<string,string>
+     */
     public static function siteOptions(Project $project): array
     {
         $name = self::themeDisplayName($project);

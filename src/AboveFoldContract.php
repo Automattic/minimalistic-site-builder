@@ -510,7 +510,6 @@ final class AboveFoldContract
         return $pages[0];
     }
 
-    /** @return list<string> */
     /**
      * Canonical header text-shape facts (BIGR-773), shared byte-for-byte by
      * both above-fold authors. `displays_tagline` is true only when the
@@ -533,6 +532,7 @@ final class AboveFoldContract
         ];
     }
 
+    /** @return list<string> */
     private static function headerPool(
         string $mode,
         int $pageCount,
