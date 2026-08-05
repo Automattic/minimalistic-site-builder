@@ -15,8 +15,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * SectionRhythmStep owns the root group's block-axis spacing. This sibling
  * pass runs immediately afterwards and owns only the inline axis: every
  * section root becomes constrained, root-authored horizontal padding is
- * removed, and direct cover children opt into full bleed. Nested blocks stay
- * outside this ownership boundary.
+ * removed, and direct cover children opt into full bleed while carrying the
+ * constrained-layout class bridge their inner container needs. Nested blocks
+ * stay outside this ownership boundary.
  *
  * Rewrites are transactional per page. A malformed generated section keeps
  * that page's pre-transformation bytes, records one durable warning, and does
@@ -120,6 +121,8 @@ final class SectionLayoutStep implements Step
         if (count($covers) === 1) {
             $coverAttrs = $doc->attrs($covers[0]) ?? [];
             $coverAttrs['align'] = 'full';
+            $coverAttrs['layout'] = ['type' => 'constrained'];
+            self::constrainCommentClass($coverAttrs, "{$label}, direct cover");
             $doc->setAttrs($covers[0], $coverAttrs);
         }
 
