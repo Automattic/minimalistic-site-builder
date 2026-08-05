@@ -105,6 +105,192 @@ test('stripSurroundingProse preserves element-bearing prefixes and existing fail
     }
 });
 
+test('stripSurroundingProse preserves a quoted closing-tag decoy', function () {
+    $quoted = '<main><p title="</main>">AUTHORED-VISIBLE-TEXT';
+    $strip = new ReflectionMethod(InnerPagesDesignStep::class, 'stripSurroundingProse');
+    $strip->setAccessible(true);
+
+    assert_eq($quoted, $strip->invoke(null, $quoted));
+});
+
+test('stripSurroundingProse preserves a nested closing-tag decoy', function () {
+    $nested = '<main><footer></footer>AUTHORED-IN-OPEN-MAIN';
+    $strip = new ReflectionMethod(InnerPagesDesignStep::class, 'stripSurroundingProse');
+    $strip->setAccessible(true);
+
+    assert_eq($nested, $strip->invoke(null, $nested));
+});
+
+test('inner-pages-design never drops content around ambiguous closing-tag decoys', function () {
+    $quoted = '<main><p title="</main>">AUTHORED-VISIBLE-TEXT';
+    $nested = '<main><footer></footer>AUTHORED-IN-OPEN-MAIN';
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('quoted', 'Quoted', 'Keep quoted authored bytes'),
+        inner_page('nested', 'Nested', 'Keep nested authored bytes'),
+    ]);
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText($quoted);
+    $llm->queueText($nested);
+    $llm->queueText('AMBIGUOUS-CLOSER-REPAIR-SENTINEL');
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq(0, $llm->completeCalls, 'safe balancing must not consume serial repair completion');
+        assert_eq(
+            '<main><p title="&lt;/main&gt;">AUTHORED-VISIBLE-TEXT</p></main>',
+            $project->readText('design/quoted.html'),
+        );
+        assert_eq(
+            '<main><footer></footer>AUTHORED-IN-OPEN-MAIN</main>',
+            $project->readText('design/nested.html'),
+        );
+        assert_true(!$project->exists('design/quoted.failed'));
+        assert_true(!$project->exists('design/nested.failed'));
+        assert_contains('AUTHORED-VISIBLE-TEXT', $project->readText('design/quoted.html'));
+        assert_contains('AUTHORED-IN-OPEN-MAIN', $project->readText('design/nested.html'));
+        assert_eq('AMBIGUOUS-CLOSER-REPAIR-SENTINEL', $llm->complete('sentinel probe'));
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('primary salvage never reclassifies a sanitized suffix element as prose', function () {
+    $authored = "Preamble.\n<main><p>KEEP-MAIN</p></main>"
+        . '<marquee>AUTHORED-SUFFIX-ELEMENT-TEXT</marquee>';
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('suffix', 'Suffix', 'Keep authored suffix text'),
+    ]);
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText($authored);
+    $llm->queueText('<div>Repair remains invalid</div>');
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq(1, $llm->completeCalls, 'authored suffix text must reach the repair path');
+        assert_true(!$project->exists('design/suffix.html'));
+        assert_true($project->exists('design/suffix.failed'));
+        $repairCall = $llm->calls[array_key_last($llm->calls)];
+        assert_contains($authored, $repairCall['prompt']);
+        assert_contains('AUTHORED-SUFFIX-ELEMENT-TEXT', $repairCall['prompt']);
+        $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+        assert_contains('AUTHORED-SUFFIX-ELEMENT-TEXT', $warnings);
+        assert_contains('design/suffix.failed', $warnings);
+        assert_contains('disposition removed after one semantic repair', $warnings);
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('repair salvage never reclassifies a sanitized suffix element as prose', function () {
+    $repair = "Repair preamble.\n<main><p>KEEP-REPAIR-MAIN</p></main>"
+        . '<marquee>AUTHORED-REPAIR-SUFFIX-ELEMENT-TEXT</marquee>';
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('repair-suffix', 'Repair suffix', 'Keep repaired suffix text'),
+    ]);
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText('<div>Initial response has no main</div>');
+    $llm->queueText($repair);
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq(1, $llm->completeCalls, 'one repair output must not become a lossy success');
+        assert_true(!$project->exists('design/repair-suffix.html'));
+        assert_true($project->exists('design/repair-suffix.failed'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+        assert_contains('design/repair-suffix.failed', $warnings);
+        assert_contains('disposition removed after one semantic repair', $warnings);
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('default mode strips prose from repair output without losing page CSS', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('about', 'About', 'Explain the studio'),
+    ]);
+    $repaired = '<style data-page-css>.about{color:var(--ink)}</style>'
+        . '<main id="about-main"><p>REPAIRED-EXACT</p></main>';
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText('<div>Initial response has no main</div>');
+    $llm->queueText("Repair follows.\n\n" . $repaired);
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq(1, $llm->completeCalls);
+        assert_eq($repaired, $project->readText('design/about.html'));
+        assert_true(!$project->exists('design/about.failed'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+        assert_contains('Repair follows.', $warnings);
+        assert_contains('fragment with preamble removed', $warnings);
+        assert_contains('disposition deterministically repaired', $warnings);
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('section mode strips prose from primary home-body output', function () {
+    $previousMode = getenv('SITE_BUILD_GEN_UNIT');
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+    ]);
+    $homeBody = inner_pages_home_body('SECTION-PRIMARY-EXACT');
+    putenv('SITE_BUILD_GEN_UNIT=section');
+    try {
+        $llm->queueText("Primary home follows.\n\n" . $homeBody);
+
+        inner_pages_run($project, $llm);
+
+        assert_eq(0, $llm->completeCalls);
+        assert_eq($homeBody, $project->readText('design/home-body.html'));
+        assert_true(!$project->exists('design/home-body.failed'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+        assert_contains('Primary home follows.', $warnings);
+        assert_contains('fragment with preamble removed', $warnings);
+        assert_contains('disposition deterministically repaired', $warnings);
+    } finally {
+        $previousMode === false
+            ? putenv('SITE_BUILD_GEN_UNIT')
+            : putenv('SITE_BUILD_GEN_UNIT=' . $previousMode);
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('section mode strips prose from repair home-body output', function () {
+    $previousMode = getenv('SITE_BUILD_GEN_UNIT');
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+    ]);
+    $homeBody = inner_pages_home_body('SECTION-REPAIR-EXACT');
+    putenv('SITE_BUILD_GEN_UNIT=section');
+    try {
+        $llm->queueText('<section>Initial response has no home roots</section>');
+        $llm->queueText("Repair home follows.\n\n" . $homeBody);
+
+        inner_pages_run($project, $llm);
+
+        assert_eq(1, $llm->completeCalls);
+        assert_eq($homeBody, $project->readText('design/home-body.html'));
+        assert_true(!$project->exists('design/home-body.failed'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+        assert_contains('Repair home follows.', $warnings);
+        assert_contains('fragment with preamble removed', $warnings);
+        assert_contains('disposition deterministically repaired', $warnings);
+    } finally {
+        $previousMode === false
+            ? putenv('SITE_BUILD_GEN_UNIT')
+            : putenv('SITE_BUILD_GEN_UNIT=' . $previousMode);
+        inner_pages_cleanup($tmp);
+    }
+});
+
 test('stripSurroundingProse keeps clean fragments byte-exact and valid through the step', function () {
     $inner = '<style data-page-css>.card::before{content:"é < >";}</style>'
         . "\n<main id=\"clean-main\"><article><p>Keep exact bytes.</p></article></main>";

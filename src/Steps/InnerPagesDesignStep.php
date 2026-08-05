@@ -228,8 +228,9 @@ final class InnerPagesDesignStep implements Step
             }
 
             $authored = $batch->texts[$requestKey];
+            $strippedAuthored = self::stripSurroundingProse($authored);
             $sanitized = DesignMarkupSanitizer::sanitize(
-                $authored,
+                $strippedAuthored,
                 $path,
                 "page {$slug} batch response",
                 $warnings,
@@ -246,14 +247,30 @@ final class InnerPagesDesignStep implements Step
                 : static fn (string $fragment): bool => self::isValidFragment(trim($fragment));
             if ($isValid($sanitized)) {
                 self::writeSuccessfulDesign($project, $path, $failedPath, $sanitized);
+                if ($strippedAuthored !== $authored) {
+                    $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
+                        . self::warningValue($authored)
+                        . "; delivered {$path} fragment with preamble removed; "
+                        . 'disposition deterministically repaired';
+                }
                 continue;
             }
-            $balanced = self::balanceFragment($sanitized);
+            $strippedAfterSanitize = self::stripSurroundingProse($sanitized);
+            $stripped = $sanitized === $strippedAuthored
+                ? $strippedAfterSanitize
+                : $sanitized;
+            $balanced = self::balanceFragment($stripped);
             if ($isValid($balanced)) {
                 self::writeSuccessfulDesign($project, $path, $failedPath, $balanced);
+                $proseRemoved = $strippedAuthored !== $authored || $stripped !== $sanitized;
+                $delivered = $proseRemoved
+                    ? ($balanced !== $stripped
+                        ? "{$path} balanced fragment with preamble removed"
+                        : "{$path} fragment with preamble removed")
+                    : "{$path} balanced fragment";
                 $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
-                    . self::warningValue($sanitized)
-                    . "; delivered {$path} balanced fragment; disposition deterministically repaired";
+                    . self::warningValue($proseRemoved ? $authored : $sanitized)
+                    . "; delivered {$delivered}; disposition deterministically repaired";
                 continue;
             }
 
@@ -286,8 +303,10 @@ final class InnerPagesDesignStep implements Step
                     . 'disposition degraded: ' . self::warningValue($error->getMessage());
             }
 
+            $rawRepair = $repair;
+            $strippedRawRepair = self::stripSurroundingProse($rawRepair);
             $repair = DesignMarkupSanitizer::sanitize(
-                $repair,
+                $strippedRawRepair,
                 $path,
                 "page {$slug} semantic repair",
                 $warnings,
@@ -300,10 +319,23 @@ final class InnerPagesDesignStep implements Step
             );
             $repair = trim($repair);
             $unbalancedRepair = $repair;
-            $repair = self::balanceFragment($repair);
+            $strippedAfterSanitize = self::stripSurroundingProse($repair);
+            $strippedRepair = $repair === $strippedRawRepair
+                ? $strippedAfterSanitize
+                : $repair;
+            $repair = self::balanceFragment($strippedRepair);
             if ($isValid($repair)) {
                 self::writeSuccessfulDesign($project, $path, $failedPath, $repair);
-                if (!$isValid($unbalancedRepair)) {
+                $proseRemoved = $strippedRawRepair !== $rawRepair
+                    || $strippedRepair !== $unbalancedRepair;
+                if ($proseRemoved) {
+                    $delivered = $repair !== $strippedRepair
+                        ? "{$path} balanced fragment with preamble removed"
+                        : "{$path} fragment with preamble removed";
+                    $warnings[] = "malformed_design: {$path} context page {$slug} semantic repair; authored "
+                        . self::warningValue($rawRepair)
+                        . "; delivered {$delivered}; disposition deterministically repaired";
+                } elseif ($repair !== $strippedRepair) {
                     $warnings[] = "malformed_design: {$path} context page {$slug} semantic repair; authored "
                         . self::warningValue($unbalancedRepair)
                         . "; delivered {$path} balanced fragment; disposition deterministically repaired";
@@ -609,8 +641,9 @@ final class InnerPagesDesignStep implements Step
                 . 'delivered best available response; disposition degraded: ' . self::warningValue($note);
         }
         $authored = $batch->texts[$requestKey];
+        $strippedAuthored = self::stripSurroundingProse($authored);
         $candidate = DesignMarkupSanitizer::sanitize(
-            $authored,
+            $strippedAuthored,
             $path,
             "page {$slug} batch response",
             $warnings,
@@ -625,14 +658,30 @@ final class InnerPagesDesignStep implements Step
         $isValid = static fn (string $fragment): bool => self::isValidHomeBodyFragment(trim($fragment));
         if ($isValid($candidate)) {
             self::writeSuccessfulDesign($project, $path, $failedPath, $candidate);
+            if ($strippedAuthored !== $authored) {
+                $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
+                    . self::warningValue($authored)
+                    . "; delivered {$path} fragment with preamble removed; "
+                    . 'disposition deterministically repaired';
+            }
             return;
         }
-        $balanced = self::balanceFragment($candidate);
+        $strippedAfterSanitize = self::stripSurroundingProse($candidate);
+        $stripped = $candidate === $strippedAuthored
+            ? $strippedAfterSanitize
+            : $candidate;
+        $balanced = self::balanceFragment($stripped);
         if ($isValid($balanced)) {
             self::writeSuccessfulDesign($project, $path, $failedPath, $balanced);
+            $proseRemoved = $strippedAuthored !== $authored || $stripped !== $candidate;
+            $delivered = $proseRemoved
+                ? ($balanced !== $stripped
+                    ? "{$path} balanced fragment with preamble removed"
+                    : "{$path} fragment with preamble removed")
+                : "{$path} balanced fragment";
             $warnings[] = "malformed_design: {$path} context page {$slug} batch response; authored "
-                . self::warningValue($candidate)
-                . "; delivered {$path} balanced fragment; disposition deterministically repaired";
+                . self::warningValue($proseRemoved ? $authored : $candidate)
+                . "; delivered {$delivered}; disposition deterministically repaired";
             return;
         }
 
@@ -660,8 +709,10 @@ final class InnerPagesDesignStep implements Step
                 . 'delivered no repair after request failure; disposition degraded: '
                 . self::warningValue($error->getMessage());
         }
+        $rawRepair = $repair;
+        $strippedRawRepair = self::stripSurroundingProse($rawRepair);
         $repair = DesignMarkupSanitizer::sanitize(
-            $repair,
+            $strippedRawRepair,
             $path,
             "page {$slug} semantic repair",
             $warnings,
@@ -674,10 +725,23 @@ final class InnerPagesDesignStep implements Step
         );
         $repair = trim($repair);
         $unbalancedRepair = $repair;
-        $repair = self::balanceFragment($repair);
+        $strippedAfterSanitize = self::stripSurroundingProse($repair);
+        $strippedRepair = $repair === $strippedRawRepair
+            ? $strippedAfterSanitize
+            : $repair;
+        $repair = self::balanceFragment($strippedRepair);
         if ($isValid($repair)) {
             self::writeSuccessfulDesign($project, $path, $failedPath, $repair);
-            if (!$isValid($unbalancedRepair)) {
+            $proseRemoved = $strippedRawRepair !== $rawRepair
+                || $strippedRepair !== $unbalancedRepair;
+            if ($proseRemoved) {
+                $delivered = $repair !== $strippedRepair
+                    ? "{$path} balanced fragment with preamble removed"
+                    : "{$path} fragment with preamble removed";
+                $warnings[] = "malformed_design: {$path} context page {$slug} semantic repair; authored "
+                    . self::warningValue($rawRepair)
+                    . "; delivered {$delivered}; disposition deterministically repaired";
+            } elseif ($repair !== $strippedRepair) {
                 $warnings[] = "malformed_design: {$path} context page {$slug} semantic repair; authored "
                     . self::warningValue($unbalancedRepair)
                     . "; delivered {$path} balanced fragment; disposition deterministically repaired";
@@ -879,6 +943,79 @@ final class InnerPagesDesignStep implements Step
             }
         }
         return false;
+    }
+
+    /** Remove only pure-text commentary outside recognized fragment roots. */
+    private static function stripSurroundingProse(string $fragment): string
+    {
+        $tokens = self::sourceTokens($fragment);
+        if ($tokens === null) {
+            return $fragment;
+        }
+
+        $rootStart = null;
+        foreach ($tokens as $token) {
+            if (
+                $token['type'] === 'tag'
+                && !$token['closing']
+                && in_array($token['name'], ['main', 'style'], true)
+            ) {
+                $rootStart = $token['start'];
+                break;
+            }
+        }
+        if ($rootStart === null) {
+            return $fragment;
+        }
+
+        $prefix = substr($fragment, 0, $rootStart);
+        if (strpos($prefix, '<') !== false) {
+            return $fragment;
+        }
+        $candidate = trim($prefix) === ''
+            ? $fragment
+            : substr($fragment, $rootStart);
+
+        $tokens = self::sourceTokens($candidate);
+        if ($tokens === null) {
+            return $fragment;
+        }
+        $stack = [];
+        $closingEnd = null;
+        foreach ($tokens as $token) {
+            if ($token['type'] !== 'tag') {
+                return $fragment;
+            }
+            if ($token['closing']) {
+                if (in_array($token['name'], self::VOID_ELEMENTS, true)) {
+                    return $fragment;
+                }
+                $last = array_key_last($stack);
+                if ($last === null || $stack[$last] !== $token['name']) {
+                    return $fragment;
+                }
+                array_pop($stack);
+                if (
+                    $stack === []
+                    && in_array($token['name'], ['main', 'footer'], true)
+                ) {
+                    $closingEnd = $token['end'];
+                }
+                continue;
+            }
+            if (!in_array($token['name'], self::VOID_ELEMENTS, true)) {
+                $stack[] = $token['name'];
+            }
+        }
+        if ($stack !== [] || $closingEnd === null) {
+            return $fragment;
+        }
+
+        $suffix = substr($candidate, $closingEnd);
+        if ($suffix === '' || trim($suffix) === '' || strpos($suffix, '<') !== false) {
+            return $candidate;
+        }
+        return substr($candidate, 0, $closingEnd);
     }
 
     public static function balanceFragment(string $fragment): string
