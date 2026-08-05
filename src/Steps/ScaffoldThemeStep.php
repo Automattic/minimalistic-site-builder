@@ -102,9 +102,12 @@ final class ScaffoldThemeStep implements Step
         */
 
         /* Card image cropping (sections opt in via className on the wp:image).
-           Uniform media heights live here, in the theme stylesheet, instead of
-           per-image inline CSS — fix-blocks deletes inline styles that aren't
-           mirrored in block attributes, and a class hook survives untouched. */
+           Uniform media proportions live here, in the theme stylesheet, instead
+           of per-image inline CSS — fix-blocks deletes inline styles that
+           aren't mirrored in block attributes, and a class hook survives
+           untouched. Aspect ratios, not fixed pixel heights: a fixed crop
+           height distorts card media proportions across 2/3/4-column layouts
+           and viewports (BIGR-771); the tiny list thumb stays px-based. */
         .card-media img,
         .card-media-tall img,
         .card-media-thumb img {
@@ -112,8 +115,8 @@ final class ScaffoldThemeStep implements Step
             object-fit: cover;
             display: block;
         }
-        .card-media img { height: 200px; }
-        .card-media-tall img { height: 320px; }
+        .card-media img { aspect-ratio: 3 / 2; height: auto; }
+        .card-media-tall img { aspect-ratio: 4 / 5; height: auto; }
         .card-media-thumb img { height: 110px; }
 
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
@@ -127,9 +130,34 @@ final class ScaffoldThemeStep implements Step
             flex-direction: column;
             flex-grow: 1;
         }
+        /* The flex-column card above defeats core's constrained layout on its
+           media: `.is-layout-constrained > *` gives the figure auto side
+           margins, and in a flex container auto cross-axis margins beat
+           stretch, so the figure shrink-wraps to the image's intrinsic width
+           and floats centered (BIGR-771). Pin card media to the card's full
+           content box regardless of the source image's aspect ratio. */
+        .equal-cards .wp-block-group > figure.wp-block-image {
+            width: 100%;
+            margin-left: 0;
+            margin-right: 0;
+            align-self: stretch;
+        }
         .equal-cards .cta-bottom {
             margin-top: auto;
             justify-content: center;
+        }
+
+        /* Flush-media cards (sections opt in via className="card-flush" on the
+           card wp:group): the media is the card's first child at full width and
+           only an inner text group carries padding, so the group's own border
+           radius must clip the bleeding image. Radius and background come from
+           block attributes; this hook only supplies the clipping the
+           attributes cannot express. */
+        .card-flush {
+            overflow: hidden;
+        }
+        .card-flush > figure.wp-block-image img {
+            border-radius: 0;
         }
 
         /* Core gives pullquotes a font-relative 4em vertical pad and a trailing

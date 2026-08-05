@@ -61,6 +61,7 @@ function designdir_direction(): array
         ],
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
+        'card_style'       => 'framed',
         'signature_device' => 'hairline rules with small caps folios',
         'signature_device_slots' => ['hero', 'body'],
         'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
@@ -82,6 +83,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Fraunces', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
+    assert_eq('framed', $written['card_style']);
     assert_eq('hairline rules with small caps folios', $written['signature_device']);
     assert_eq(['hero', 'body'], $written['signature_device_slots']);
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
@@ -99,7 +101,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'signature_device', 'signature_device_slots', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'card_style', 'signature_device', 'signature_device_slots', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     $assigned = $written['hero_blueprint']['recipe'];
@@ -478,6 +480,41 @@ test('format renders the canvas commitment with its executable meaning', functio
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize commits a card style: bounded values pass through, everything else is flush', function () {
+    assert_eq('framed', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => ' Framed '], 'cinematic-safe-zone')['card_style']);
+    assert_eq('overlap', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => 'overlap'], 'cinematic-safe-zone')['card_style']);
+    assert_eq('borderless', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => 'borderless'], 'cinematic-safe-zone')['card_style']);
+    assert_eq('flush', DesignDirectionStep::normalize(['description' => 'x'], 'cinematic-safe-zone')['card_style']);
+
+    // An invalid value is a repair (delivered flush), not a durable warning.
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'card_style' => 'polaroid'],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('flush', $direction['card_style']);
+    assert_contains('card_style', implode(' ', $repairs));
+    assert_true(!str_contains(implode(' ', $warnings), 'card_style'), 'invalid card_style is a repair, not a durable warning');
+});
+
+test('format renders the card treatment with its executable meaning', function () {
+    $flush = DesignDirectionStep::format(['description' => 'x', 'card_style' => 'flush']);
+    assert_contains('**Card treatment**: flush', $flush);
+    assert_contains('bleeds to the card edges', $flush);
+
+    $framed = DesignDirectionStep::format(['description' => 'x', 'card_style' => 'framed']);
+    assert_contains('**Card treatment**: framed', $framed);
+    assert_contains('concentric corner radii', $framed);
+
+    // Directions persisted before the field existed carry no card fact —
+    // the section prompt's own default (flush) then applies.
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
 test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
@@ -491,6 +528,7 @@ test('design-direction delivers the deterministic fallback when the model return
     $direction = $project->readJson('designDirection.json');
     assert_true(trim((string) $direction['description']) !== '', 'fallback carries a usable narrative');
     assert_eq('full-bleed', $direction['canvas']);
+    assert_eq('flush', $direction['card_style']);
     $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
     assert_contains('no usable design direction', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));

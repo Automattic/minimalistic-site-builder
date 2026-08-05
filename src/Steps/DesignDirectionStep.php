@@ -86,6 +86,13 @@ final class DesignDirectionStep implements Step
     /** Slots in which the one global signature device may appear. */
     public const SIGNATURE_DEVICE_SLOTS = ['header', 'hero', 'body', 'closing', 'footer'];
 
+    /**
+     * Card constructions a direction may commit to. The section prompt's card
+     * anatomy documents one markup recipe per value; `flush` is the default so
+     * the dated inset-media card only appears when a direction opts into it.
+     */
+    public const CARD_STYLES = ['flush', 'framed', 'overlap', 'borderless'];
+
     public function __construct(
         private Llm $llm,
         private PromptRenderer $renderer,
@@ -270,6 +277,7 @@ final class DesignDirectionStep implements Step
             ],
             'image_grade'      => '',
             'canvas'           => $canvas,
+            'card_style'       => 'flush',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
             'signature_device' => '',
@@ -572,6 +580,13 @@ final class DesignDirectionStep implements Step
                 . self::describe($raw['canvas']) . ' delivered "full-bleed"; disposition repaired invalid value';
         }
 
+        $cardRaw = strtolower(trim((string) ($raw['card_style'] ?? '')));
+        $cardStyle = in_array($cardRaw, self::CARD_STYLES, true) ? $cardRaw : 'flush';
+        if ($cardRaw !== '' && $cardRaw !== $cardStyle) {
+            $repairs[] = 'designDirection.json: field card_style authored '
+                . self::describe($raw['card_style']) . ' delivered "flush"; disposition repaired invalid value';
+        }
+
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
             ? strtolower(trim($raw['motion']))
@@ -594,6 +609,10 @@ final class DesignDirectionStep implements Step
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
+            // Anything outside the bounded card constructions delivers the
+            // flush default — inset media must be an explicit opt-in, never
+            // the accidental look every site gets.
+            'card_style'       => $cardStyle,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
@@ -824,6 +843,20 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
         } elseif ($canvas !== '') {
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
+        }
+
+        // Render the card commitment with its executable meaning: the section
+        // prompt's card anatomy executes exactly the named construction, and
+        // defaults to flush when a direction predates the field.
+        $cardStyle = strtolower(trim((string) ($direction['card_style'] ?? '')));
+        if (in_array($cardStyle, self::CARD_STYLES, true)) {
+            $meaning = match ($cardStyle) {
+                'flush'      => 'card media bleeds to the card edges and padding wraps only the text — use the `flush` construction from the card anatomy',
+                'framed'     => 'card media sits inset behind padding on all sides — use the `framed` construction from the card anatomy, with concentric corner radii',
+                'overlap'    => 'the text panel rides up over the media\'s bottom edge — use the `overlap` construction from the card anatomy',
+                'borderless' => 'cards have no box at all; media above a plain text stack — use the `borderless` construction from the card anatomy',
+            };
+            $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
         }
 
         // Render the motion commitment with its executable meaning: the

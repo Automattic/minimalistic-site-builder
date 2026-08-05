@@ -19,10 +19,26 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('Description: {{DESCRIPTION}}', $css);
 
     // The card-cropping class hooks the section recipes reference (they keep
-    // card sizing out of inline CSS, which fix-blocks would strip).
+    // card sizing out of inline CSS, which fix-blocks would strip). Card media
+    // crops by aspect ratio, not fixed pixel heights, so proportions survive
+    // 2/3/4-column layouts (BIGR-771); only the tiny list thumb stays px-based.
     assert_contains('.card-media img', $css);
-    assert_contains('.card-media-tall img { height: 320px; }', $css);
+    assert_contains('.card-media img { aspect-ratio: 3 / 2; height: auto; }', $css);
+    assert_contains('.card-media-tall img { aspect-ratio: 4 / 5; height: auto; }', $css);
     assert_contains('.card-media-thumb img { height: 110px; }', $css);
+    assert_true(!str_contains($css, 'height: 200px'), 'fixed card crop heights are gone');
+    assert_true(!str_contains($css, 'height: 320px'), 'fixed tall crop heights are gone');
+
+    // Card media fills the card's content box even though the equal-cards card
+    // is a flex column (core's constrained-layout auto margins would otherwise
+    // shrink-wrap the figure to the image's intrinsic width, BIGR-771).
+    assert_contains('.equal-cards .wp-block-group > figure.wp-block-image', $css);
+    assert_contains('align-self: stretch;', $css);
+
+    // The flush-media card hook: the card group's radius clips the bleeding
+    // image, and the image contributes no radius of its own.
+    assert_contains('.card-flush {', $css);
+    assert_contains('.card-flush > figure.wp-block-image img', $css);
 
     // Core's font-relative pullquote spacing must not compound unpredictably
     // with the deterministic section rhythm.
