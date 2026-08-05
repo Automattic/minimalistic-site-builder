@@ -1,5 +1,14 @@
 [
     {
+        "project": "naturaleza26",
+        "slug": "naturaleza26",
+        "asset": "naturaleza26-playground-20260805T040829Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/naturaleza26-playground-20260805T040829Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fnaturaleza26-playground-20260805T040829Z.zip",
+        "size_bytes": 14393786,
+        "created_at": "2026-08-05T04:08:37+00:00"
+    },
+    {
         "project": "tbilisi26",
         "slug": "tbilisi26",
         "asset": "tbilisi26-playground-20260805T040815Z.zip",
