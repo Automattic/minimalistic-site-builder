@@ -1,5 +1,14 @@
 [
     {
+        "project": "hearth25",
+        "slug": "hearth25",
+        "asset": "hearth25-playground-20260805T040857Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/hearth25-playground-20260805T040857Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fhearth25-playground-20260805T040857Z.zip",
+        "size_bytes": 12676907,
+        "created_at": "2026-08-05T04:09:05+00:00"
+    },
+    {
         "project": "pulso25",
         "slug": "pulso25",
         "asset": "pulso25-playground-20260805T040844Z.zip",
