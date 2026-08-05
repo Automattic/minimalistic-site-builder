@@ -193,14 +193,14 @@ test('card contract assigns misplaced body hooks to their parent card and normal
             'outer_html' => 'wp-block-group has-base-background-color has-background card-style--framed',
             'image_radius' => '16px',
             'body' => ['style' => ['spacing' => ['padding' => $padding]]],
-            'body_html' => 'wp-block-group body-extra',
+            'body_html' => 'wp-block-group body-extra card-body',
         ],
         'borderless' => [
             'outer' => ['className' => 'card-style--borderless'],
             'outer_html' => 'wp-block-group card-style--borderless',
             'image_radius' => null,
             'body' => ['style' => ['spacing' => ['padding' => $padding]]],
-            'body_html' => 'wp-block-group body-extra',
+            'body_html' => 'wp-block-group body-extra card-body',
         ],
     ];
 
@@ -228,6 +228,142 @@ test('card contract assigns misplaced body hooks to their parent card and normal
         assert_eq($first['markup'], $second['markup'], "{$style} body hooks reach a byte fixed point");
         assert_eq([], $second['repairs']);
         assert_eq([], $second['warnings']);
+    }
+});
+
+test('card contract records exact reserved-hook drift when anatomy blocks class repair', function () {
+    $padding = ['top' => '1rem', 'right' => '1rem', 'bottom' => '1rem', 'left' => '1rem'];
+    $outerClasses = 'card-style--framed card-body overlap-up';
+    $bodyClasses = 'card-body card-style--overlap card-flush overlap-up';
+    $card = card_contract_group([
+        'backgroundColor' => 'base',
+        'className' => $outerClasses,
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['blockGap' => '0'],
+        ],
+    ], card_contract_image()
+        . card_contract_body(['style' => ['spacing' => ['padding' => $padding]]], $bodyClasses)
+        . '<!-- wp:paragraph --><p>Unexpected extra sibling.</p><!-- /wp:paragraph -->',
+        'wp-block-group has-base-background-color has-background ' . $outerClasses);
+
+    $first = CardStyleContract::enforce($card, 'flush', 'page-home--blocked-hooks');
+
+    assert_eq($card, $first['markup']);
+    assert_eq([], $first['repairs']);
+    assert_eq(1, count($first['warnings']));
+    $warning = $first['warnings'][0];
+    foreach ([
+        'direct_children=["wp:image","wp:group","wp:paragraph"]',
+        'outer_attribute_reserved_hooks=["card-style--framed","card-body","overlap-up"]',
+        'outer_html_reserved_hooks=["card-style--framed","card-body","overlap-up"]',
+        'body_attribute_reserved_hooks=["card-body","card-style--overlap","card-flush","overlap-up"]',
+        'body_html_reserved_hooks=["card-body","card-style--overlap","card-flush","overlap-up"]',
+        'outer_attribute_reserved_hooks=["card-style--flush","card-flush"]',
+        'body_attribute_reserved_hooks=["card-body"]',
+        'remain incorrect because anatomy blocked class repair',
+    ] as $evidence) {
+        assert_contains($evidence, $warning);
+    }
+
+    $second = CardStyleContract::enforce(
+        $first['markup'],
+        'flush',
+        'page-home--blocked-hooks',
+    );
+    assert_eq($first, $second, 'blocked hook evidence is a fixed point');
+});
+
+test('card contract quarantines a nested image-card subtree while repairing a sibling', function () {
+    $nested = card_contract_group(
+        ['className' => 'card-style--borderless'],
+        card_contract_image()
+            . '<!-- wp:paragraph --><p>Nested card copy stays exact.</p><!-- /wp:paragraph -->',
+        'wp-block-group card-style--borderless',
+    );
+    $outer = card_contract_group([
+        'backgroundColor' => 'base',
+        'className' => 'card-style--flush card-flush',
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['blockGap' => '0'],
+        ],
+    ], card_contract_image() . $nested,
+        'wp-block-group has-base-background-color has-background card-style--flush card-flush');
+    $markup = card_contract_grid(
+        card_contract_column($outer) . card_contract_column(card_contract_flush_card()),
+    );
+
+    $first = CardStyleContract::enforce($markup, 'flush', 'page-home--nested-card');
+
+    assert_eq(1, count($first['warnings']));
+    assert_eq(1, count($first['repairs']));
+    assert_contains($outer, $first['markup'], 'the entire conflicting outer subtree stays byte-exact');
+    assert_contains('nested_image_card=', $first['warnings'][0]);
+    assert_contains('card-style--borderless', $first['warnings'][0]);
+    assert_contains('a nested image card, not a text body', $first['warnings'][0]);
+    assert_contains('Nested card copy stays exact.', $first['markup']);
+
+    $second = CardStyleContract::enforce(
+        $first['markup'],
+        'flush',
+        'page-home--nested-card',
+    );
+    assert_eq($first['markup'], $second['markup']);
+    assert_eq([], $second['repairs']);
+    assert_eq($first['warnings'], $second['warnings'], 'nested-card quarantine warning is a fixed point');
+});
+
+test('card contract quarantines nested image cards across multi-group and deeper body shapes', function () {
+    $padding = ['top' => '1rem', 'right' => '1rem', 'bottom' => '1rem', 'left' => '1rem'];
+    $nested = card_contract_flush_card('card-style--framed');
+    $extraBody = card_contract_body(
+        ['style' => ['spacing' => ['padding' => $padding]]],
+        'extra-body',
+    );
+    $deepBody = card_contract_group(
+        [
+            'className' => 'card-body',
+            'style' => ['spacing' => ['padding' => $padding]],
+        ],
+        '<!-- wp:paragraph --><p>Outer body copy.</p><!-- /wp:paragraph -->' . $nested,
+        'wp-block-group card-body',
+    );
+    $outerAttrs = [
+        'backgroundColor' => 'base',
+        'className' => 'card-style--flush card-flush',
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['blockGap' => '0'],
+        ],
+    ];
+    $outerHtml = 'wp-block-group has-base-background-color has-background card-style--flush card-flush';
+    $cases = [
+        'multi-group' => card_contract_group(
+            $outerAttrs,
+            card_contract_image() . $nested . $extraBody,
+            $outerHtml,
+        ),
+        'deeper-body' => card_contract_group(
+            $outerAttrs,
+            card_contract_image() . $deepBody,
+            $outerHtml,
+        ),
+    ];
+
+    foreach ($cases as $case => $outer) {
+        $first = CardStyleContract::enforce($outer, 'flush', "page-home--nested-{$case}");
+
+        assert_eq($outer, $first['markup'], "{$case} outer subtree stays byte-exact");
+        assert_eq([], $first['repairs']);
+        assert_eq(1, count($first['warnings']));
+        assert_contains('nested_image_card=', $first['warnings'][0]);
+        assert_contains('card-style--framed', $first['warnings'][0]);
+        assert_eq($first, CardStyleContract::enforce(
+            $first['markup'],
+            'flush',
+            "page-home--nested-{$case}",
+        ));
     }
 });
 
@@ -473,6 +609,98 @@ test('card contract enforces the exact comparable framed radius formula', functi
     }
 });
 
+test('card contract validates missing and zero framed radii instead of bypassing the formula', function () {
+    $padding = ['top' => '8px', 'right' => '8px', 'bottom' => '8px', 'left' => '8px'];
+    $makeCard = static function (mixed $cardRadius, string $imageRadius) use ($padding): string {
+        $style = ['spacing' => ['padding' => $padding]];
+        if ($cardRadius !== null) {
+            $style['border'] = ['radius' => $cardRadius];
+        }
+        return card_contract_group([
+            'backgroundColor' => 'base',
+            'className' => 'card-style--framed',
+            'style' => $style,
+        ], card_contract_image($imageRadius)
+            . '<!-- wp:paragraph --><p>Radius boundary.</p><!-- /wp:paragraph -->',
+            'wp-block-group has-base-background-color has-background card-style--framed');
+    };
+
+    foreach ([
+        'missing' => $makeCard(null, '999px'),
+        'unitless-zero' => $makeCard('0', '2px'),
+    ] as $case => $card) {
+        $first = CardStyleContract::enforce($card, 'framed', "page-home--framed-{$case}");
+
+        assert_eq($card, $first['markup']);
+        assert_eq([], $first['repairs']);
+        assert_eq(1, count($first['warnings']));
+        foreach ([
+            'framed_radii={"card":',
+            'framed_radii={"card":"scalar px"',
+            '"padding":"uniform non-zero scalar px on all four sides"',
+            '"image":"scalar px"',
+            'max(card radius - uniform padding, 2px)',
+        ] as $evidence) {
+            assert_contains($evidence, $first['warnings'][0]);
+        }
+
+        $second = CardStyleContract::enforce(
+            $first['markup'],
+            'framed',
+            "page-home--framed-{$case}",
+        );
+        assert_eq($first, $second, "{$case} radius warning is a fixed point");
+    }
+
+    $zeroMismatch = $makeCard('0px', '999px');
+    $mismatchResult = CardStyleContract::enforce(
+        $zeroMismatch,
+        'framed',
+        'page-home--framed-zero-mismatch',
+    );
+    assert_eq($zeroMismatch, $mismatchResult['markup']);
+    assert_eq([], $mismatchResult['repairs']);
+    assert_eq(1, count($mismatchResult['warnings']));
+    assert_contains('framed_radii={"card":"0px"', $mismatchResult['warnings'][0]);
+    assert_contains('framed_radii={"image":"2px"', $mismatchResult['warnings'][0]);
+
+    $zeroValid = $makeCard('0px', '2px');
+    $validResult = CardStyleContract::enforce(
+        $zeroValid,
+        'framed',
+        'page-home--framed-zero-valid',
+    );
+    assert_eq($zeroValid, $validResult['markup']);
+    assert_eq([], $validResult['repairs']);
+    assert_eq([], $validResult['warnings']);
+});
+
+test('card contract accepts leading-decimal pixel values in the framed radius formula', function () {
+    $card = card_contract_group([
+        'backgroundColor' => 'base',
+        'className' => 'card-style--framed',
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['padding' => [
+                'top' => '.5px', 'right' => '.5px', 'bottom' => '.5px', 'left' => '.5px',
+            ]],
+        ],
+    ], card_contract_image('15.5px')
+        . '<!-- wp:paragraph --><p>Leading decimal.</p><!-- /wp:paragraph -->',
+        'wp-block-group has-base-background-color has-background card-style--framed');
+
+    $first = CardStyleContract::enforce($card, 'framed', 'page-home--framed-leading-decimal');
+
+    assert_eq($card, $first['markup']);
+    assert_eq([], $first['repairs']);
+    assert_eq([], $first['warnings']);
+    assert_eq($first, CardStyleContract::enforce(
+        $first['markup'],
+        'framed',
+        'page-home--framed-leading-decimal',
+    ));
+});
+
 test('card contract refuses to certify framed radii it cannot compare in pixels', function () {
     $cases = [
         'non-pixel' => [
@@ -520,7 +748,7 @@ test('card contract refuses to certify framed radii it cannot compare in pixels'
         assert_eq([], $first['repairs']);
         assert_eq(1, count($first['warnings']));
         assert_contains('framed_radii=', $first['warnings'][0]);
-        assert_contains('uniform px values', $first['warnings'][0]);
+        assert_contains('uniform non-zero scalar px', $first['warnings'][0]);
         assert_contains('cannot be verified safely', $first['warnings'][0]);
 
         $second = CardStyleContract::enforce(

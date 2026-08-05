@@ -248,13 +248,15 @@ final class CardStyleContract
         $candidates = array_values(array_unique($candidates));
         $candidateSet = array_fill_keys($candidates, true);
 
-        // A misplaced outer-card marker on the text body is owned by the
-        // surrounding card repair. Treating that body as a second card emits a
-        // stale warning before its parent removes the marker, and can make two
-        // candidate transactions contend for the same opening bytes.
+        // Keep one transaction owner for a candidate subtree. A sole group
+        // child without media is the card's text body, so its misplaced hooks
+        // belong to the parent repair. Any image-card candidate nested beneath
+        // another candidate is instead quarantined with that outer card. This
+        // prevents a descendant class repair from making the parent's
+        // "delivered unchanged" warning false.
         return array_values(array_filter(
             $candidates,
-            static fn (int $index): bool => !self::isBodyOwnedByCandidate(
+            static fn (int $index): bool => !self::isOwnedByCandidateSubtree(
                 $document,
                 $index,
                 $candidateSet,
@@ -265,8 +267,12 @@ final class CardStyleContract
     /**
      * @return array{
      *   index:int,path:string,attrs:array<mixed>,classes:list<string>,markers:list<string>,
+     *   attributeClasses:list<string>,htmlClasses:?list<string>,
      *   direct:list<int>,directNames:list<string>,image:?int,imageAttrs:array<mixed>,imageRadius:mixed,
-     *   body:?int,bodyAttrs:array<mixed>,bodyClasses:list<string>,box:bool,padding:mixed,blockGap:mixed
+     *   body:?int,bodyAttrs:array<mixed>,bodyClasses:list<string>,
+     *   bodyAttributeClasses:list<string>,bodyHtmlClasses:?list<string>,
+     *   nestedCard:?int,nestedCardPath:?string,nestedCardClasses:list<string>,
+     *   nestedCardDirectNames:list<string>,box:bool,padding:mixed,blockGap:mixed
      * }
      */
     private static function inspect(BlockMarkup $document, int $index): array
@@ -278,10 +284,19 @@ final class CardStyleContract
             $direct,
             static fn (int $child): bool => $document->name($child) === 'group',
         ));
-        $body = count($groups) === 1 ? $groups[0] : null;
+        $soleGroup = count($groups) === 1 ? $groups[0] : null;
+        $body = $soleGroup !== null && self::firstDirectImage($document, $soleGroup) === null
+            ? $soleGroup
+            : null;
+        $nestedCard = self::firstNestedImageGroup($document, $index);
         $bodyAttrs = $body === null ? [] : ($document->attrs($body) ?? []);
         $imageAttrs = $image === null ? [] : ($document->attrs($image) ?? []);
         $classes = self::nodeClasses($document, $index);
+        $attributeClasses = self::attributeClasses($attrs);
+        $htmlClasses = self::htmlClasses($document, $index);
+        $bodyClasses = $body === null ? [] : self::nodeClasses($document, $body);
+        $bodyAttributeClasses = self::attributeClasses($bodyAttrs);
+        $bodyHtmlClasses = $body === null ? [] : self::htmlClasses($document, $body);
 
         return [
             'index' => $index,
@@ -289,6 +304,8 @@ final class CardStyleContract
             'attrs' => $attrs,
             'classes' => $classes,
             'markers' => self::treatmentMarkers($classes),
+            'attributeClasses' => $attributeClasses,
+            'htmlClasses' => $htmlClasses,
             'direct' => $direct,
             'directNames' => array_map(
                 static fn (int $child): string => 'wp:' . $document->name($child),
@@ -299,7 +316,20 @@ final class CardStyleContract
             'imageRadius' => self::nested($imageAttrs, ['style', 'border', 'radius']),
             'body' => $body,
             'bodyAttrs' => $bodyAttrs,
-            'bodyClasses' => $body === null ? [] : self::nodeClasses($document, $body),
+            'bodyClasses' => $bodyClasses,
+            'bodyAttributeClasses' => $bodyAttributeClasses,
+            'bodyHtmlClasses' => $bodyHtmlClasses,
+            'nestedCard' => $nestedCard,
+            'nestedCardPath' => $nestedCard === null ? null : self::blockPath($document, $nestedCard),
+            'nestedCardClasses' => $nestedCard === null
+                ? []
+                : self::nodeClasses($document, $nestedCard),
+            'nestedCardDirectNames' => $nestedCard === null
+                ? []
+                : array_map(
+                    static fn (int $child): string => 'wp:' . $document->name($child),
+                    $document->children($nestedCard),
+                ),
             'box' => self::hasVisualBox($attrs),
             'padding' => self::nested($attrs, ['style', 'spacing', 'padding']),
             'blockGap' => self::nested($attrs, ['style', 'spacing', 'blockGap']),
@@ -320,27 +350,40 @@ final class CardStyleContract
             static fn (string $name): bool => $name === 'wp:image',
         ));
         if ($image === null) {
-            return [self::issue(
+            $issues[] = self::issue(
                 'direct_children',
                 $inspection['directNames'],
                 'a direct wp:image child',
                 'the marked card has no direct wp:image child',
-            )];
-        }
-        if ($directImageCount !== 1) {
-            $issues[] = self::issue(
-                'direct_images',
-                $inspection['directNames'],
-                'exactly one direct wp:image child',
-                'the card does not have exactly one direct primary image',
             );
+        } else {
+            if ($directImageCount !== 1) {
+                $issues[] = self::issue(
+                    'direct_images',
+                    $inspection['directNames'],
+                    'exactly one direct wp:image child',
+                    'the card does not have exactly one direct primary image',
+                );
+            }
+            if (($direct[0] ?? null) !== $image) {
+                $issues[] = self::issue(
+                    'direct_children',
+                    $inspection['directNames'],
+                    ['wp:image', 'wp:group'],
+                    'the card image is not its first direct child',
+                );
+            }
         }
-        if (($direct[0] ?? null) !== $image) {
+        if (is_int($inspection['nestedCard'])) {
             $issues[] = self::issue(
-                'direct_children',
-                $inspection['directNames'],
-                ['wp:image', 'wp:group'],
-                'the card image is not its first direct child',
+                'nested_image_card',
+                [
+                    'path' => $inspection['nestedCardPath'],
+                    'classes' => $inspection['nestedCardClasses'],
+                    'direct_children' => $inspection['nestedCardDirectNames'],
+                ],
+                'one text-body wp:group without a direct wp:image child',
+                'the sole group after the primary image is a nested image card, not a text body',
             );
         }
 
@@ -361,7 +404,9 @@ final class CardStyleContract
                     'outer card blockGap is not zero',
                 );
             }
-            if (count($direct) !== 2 || $inspection['body'] === null) {
+            if (count($direct) !== 2
+                || ($inspection['body'] === null && $inspection['nestedCard'] === null)
+            ) {
                 $issues[] = self::issue(
                     'direct_children',
                     $inspection['directNames'],
@@ -466,50 +511,41 @@ final class CardStyleContract
                 );
             }
             $cardRadius = self::nested($inspection['attrs'], ['style', 'border', 'radius']);
-            if (!self::isZeroOrAbsent($cardRadius)) {
-                if (self::isZeroOrAbsent($inspection['imageRadius'])) {
-                    $issues[] = self::issue(
-                        'image_radius',
-                        $inspection['imageRadius'],
-                        'max(card radius - uniform padding, 2px)',
-                        'the rounded framed card image has no concentric inner radius',
-                    );
-                } else {
-                    $comparable = self::comparableFramedRadii(
-                        $cardRadius,
-                        $inspection['padding'],
-                        $inspection['imageRadius'],
-                    );
-                    if ($comparable === null) {
-                        $issues[] = self::issue(
-                            'framed_radii',
-                            [
-                                'card' => $cardRadius,
-                                'padding' => $inspection['padding'],
-                                'image' => $inspection['imageRadius'],
-                            ],
-                            [
-                                'units' => 'uniform px values',
-                                'formula' => 'max(card radius - uniform padding, 2px)',
-                            ],
-                            'the framed card uses non-pixel, per-corner, or non-uniform values whose concentric radius cannot be verified safely',
-                        );
-                    } elseif (!$comparable['matches']) {
-                        $issues[] = self::issue(
-                            'framed_radii',
-                            [
-                                'card' => $cardRadius,
-                                'padding' => $inspection['padding'],
-                                'image' => $inspection['imageRadius'],
-                            ],
-                            [
-                                'image' => $comparable['expected'],
-                                'formula' => 'max(card radius - uniform padding, 2px)',
-                            ],
-                            'the framed card image radius does not satisfy the concentric pixel formula',
-                        );
-                    }
-                }
+            $comparable = self::comparableFramedRadii(
+                $cardRadius,
+                $inspection['padding'],
+                $inspection['imageRadius'],
+            );
+            if ($comparable === null) {
+                $issues[] = self::issue(
+                    'framed_radii',
+                    [
+                        'card' => $cardRadius,
+                        'padding' => $inspection['padding'],
+                        'image' => $inspection['imageRadius'],
+                    ],
+                    [
+                        'card' => 'scalar px',
+                        'padding' => 'uniform non-zero scalar px on all four sides',
+                        'image' => 'scalar px',
+                        'formula' => 'max(card radius - uniform padding, 2px)',
+                    ],
+                    'the framed card is missing scalar pixel radii or uses per-corner, non-pixel, or non-uniform values whose concentric radius cannot be verified safely',
+                );
+            } elseif (!$comparable['matches']) {
+                $issues[] = self::issue(
+                    'framed_radii',
+                    [
+                        'card' => $cardRadius,
+                        'padding' => $inspection['padding'],
+                        'image' => $inspection['imageRadius'],
+                    ],
+                    [
+                        'image' => $comparable['expected'],
+                        'formula' => 'max(card radius - uniform padding, 2px)',
+                    ],
+                    'the framed card image radius does not satisfy the concentric pixel formula',
+                );
             }
         }
 
@@ -541,7 +577,7 @@ final class CardStyleContract
                 'the outer card className is not a string',
             );
         }
-        if (in_array($style, ['flush', 'overlap'], true) && $inspection['body'] !== null) {
+        if ($inspection['body'] !== null) {
             $bodyClass = $inspection['bodyAttrs']['className'] ?? null;
             if ($bodyClass !== null && !is_string($bodyClass)) {
                 $issues[] = self::issue(
@@ -558,23 +594,26 @@ final class CardStyleContract
         // another defect prevents that transaction, keep their exact authored
         // values in the warning instead of hiding why the old inset rendering
         // survives.
-        if (in_array($style, ['flush', 'overlap'], true) && $issues !== []) {
-            if (!self::isZeroOrAbsent($inspection['padding'])) {
-                $issues[] = self::issue(
-                    'outer_padding',
-                    $inspection['padding'],
-                    '0 via a safely delivered card-flush hook',
-                    'outer card padding remains inset because the CSS-backed repair was unsafe',
-                );
+        if ($issues !== []) {
+            if (in_array($style, ['flush', 'overlap'], true)) {
+                if (!self::isZeroOrAbsent($inspection['padding'])) {
+                    $issues[] = self::issue(
+                        'outer_padding',
+                        $inspection['padding'],
+                        '0 via a safely delivered card-flush hook',
+                        'outer card padding remains inset because the CSS-backed repair was unsafe',
+                    );
+                }
+                if (!self::isZeroOrAbsent($inspection['imageRadius'])) {
+                    $issues[] = self::issue(
+                        'image_radius',
+                        $inspection['imageRadius'],
+                        '0 via a safely delivered card-flush hook',
+                        'the direct image radius remains because the CSS-backed repair was unsafe',
+                    );
+                }
             }
-            if (!self::isZeroOrAbsent($inspection['imageRadius'])) {
-                $issues[] = self::issue(
-                    'image_radius',
-                    $inspection['imageRadius'],
-                    '0 via a safely delivered card-flush hook',
-                    'the direct image radius remains because the CSS-backed repair was unsafe',
-                );
-            }
+            array_push($issues, ...self::reservedHookDriftIssues($inspection, $style));
         }
 
         return $issues;
@@ -789,6 +828,17 @@ final class CardStyleContract
                 'the card-flush behavior hook did not match the assigned treatment',
             );
         }
+        foreach (['attribute' => $attributeClasses, 'html' => $htmlClasses] as $source => $classes) {
+            $misplacedBodyHooks = array_values(array_intersect($classes, ['card-body', 'overlap-up']));
+            if ($misplacedBodyHooks !== []) {
+                $issues[] = self::issue(
+                    "outer_body_hooks_{$source}",
+                    $misplacedBodyHooks,
+                    'removed; body behavior hooks belong on the inner text group only',
+                    "the {$source} outer card retains inner-only body behavior hooks",
+                );
+            }
+        }
 
         $inspection = self::inspect($document, $index);
         $body = $inspection['body'];
@@ -815,9 +865,8 @@ final class CardStyleContract
             return $issues;
         }
         $expectedHooks = match ($style) {
-            'flush' => ['card-body'],
             'overlap' => ['card-body', 'overlap-up'],
-            default => [],
+            default => ['card-body'],
         };
         foreach (['attribute' => $bodyAttributeClasses, 'html' => $bodyHtmlClasses] as $source => $classes) {
             $deliveredHooks = array_values(array_intersect($classes, ['card-body', 'overlap-up']));
@@ -844,6 +893,66 @@ final class CardStyleContract
                     true,
                     false,
                     "the {$source} body retains the outer-only card-flush behavior hook",
+                );
+            }
+        }
+        return $issues;
+    }
+
+    /**
+     * Reserved class drift is normally repaired without a warning. If another
+     * anatomy defect blocks that transaction, record the exact comment and
+     * saved-HTML hook sets that will remain active in the delivered bytes.
+     *
+     * @param array<string,mixed> $inspection
+     * @return list<array{field:string,authored:mixed,required:mixed,message:string}>
+     */
+    private static function reservedHookDriftIssues(array $inspection, string $style): array
+    {
+        $issues = [];
+        $outerExpected = [self::MARKER_PREFIX . $style];
+        if (in_array($style, ['flush', 'overlap'], true)) {
+            $outerExpected[] = 'card-flush';
+        }
+        foreach ([
+            'attribute' => $inspection['attributeClasses'],
+            'html' => $inspection['htmlClasses'],
+        ] as $source => $classes) {
+            if (!is_array($classes)) {
+                continue;
+            }
+            $authored = self::reservedHooks($classes);
+            if (!self::sameClassSet($authored, $outerExpected)) {
+                $issues[] = self::issue(
+                    "outer_{$source}_reserved_hooks",
+                    $authored,
+                    $outerExpected,
+                    "the {$source} outer-card reserved hooks remain incorrect because anatomy blocked class repair",
+                );
+            }
+        }
+
+        if (!is_int($inspection['body'])) {
+            return $issues;
+        }
+        $bodyExpected = ['card-body'];
+        if ($style === 'overlap') {
+            $bodyExpected[] = 'overlap-up';
+        }
+        foreach ([
+            'attribute' => $inspection['bodyAttributeClasses'],
+            'html' => $inspection['bodyHtmlClasses'],
+        ] as $source => $classes) {
+            if (!is_array($classes)) {
+                continue;
+            }
+            $authored = self::reservedHooks($classes);
+            if (!self::sameClassSet($authored, $bodyExpected)) {
+                $issues[] = self::issue(
+                    "body_{$source}_reserved_hooks",
+                    $authored,
+                    $bodyExpected,
+                    "the {$source} text-body reserved hooks remain incorrect because anatomy blocked class repair",
                 );
             }
         }
@@ -912,6 +1021,9 @@ final class CardStyleContract
             if ($class === 'card-flush') {
                 continue;
             }
+            if ($class === 'card-body' || $class === 'overlap-up') {
+                continue;
+            }
             $out[] = $class;
         }
         if (!$markerInserted) {
@@ -933,13 +1045,29 @@ final class CardStyleContract
                 && $class !== 'card-flush'
                 && !str_starts_with($class, self::MARKER_PREFIX),
         ));
-        if (in_array($style, ['flush', 'overlap'], true)) {
-            $out[] = 'card-body';
-            if ($style === 'overlap') {
-                $out[] = 'overlap-up';
-            }
+        $out[] = 'card-body';
+        if ($style === 'overlap') {
+            $out[] = 'overlap-up';
         }
         return array_values(array_unique($out));
+    }
+
+    /** @param list<string> $classes @return list<string> */
+    private static function reservedHooks(array $classes): array
+    {
+        return array_values(array_filter(
+            $classes,
+            static fn (string $class): bool => str_starts_with($class, self::MARKER_PREFIX)
+                || in_array($class, ['card-flush', 'card-body', 'overlap-up'], true),
+        ));
+    }
+
+    /** @param list<string> $left @param list<string> $right */
+    private static function sameClassSet(array $left, array $right): bool
+    {
+        return count($left) === count($right)
+            && array_diff($left, $right) === []
+            && array_diff($right, $left) === [];
     }
 
     /** @return list<string> */
@@ -1168,23 +1296,53 @@ final class CardStyleContract
     }
 
     /** @param array<int,true> $candidateSet */
-    private static function isBodyOwnedByCandidate(
+    private static function isOwnedByCandidateSubtree(
         BlockMarkup $document,
         int $index,
         array $candidateSet,
     ): bool {
         $parent = $document->parent($index);
-        if ($parent === null
-            || !isset($candidateSet[$parent])
-            || $document->name($parent) !== 'group'
-        ) {
+        if ($parent === null) {
             return false;
         }
-        $groups = array_values(array_filter(
-            $document->children($parent),
-            static fn (int $child): bool => $document->name($child) === 'group',
-        ));
-        return $groups === [$index] && self::firstDirectImage($document, $parent) !== null;
+        if (isset($candidateSet[$parent]) && $document->name($parent) === 'group') {
+            $groups = array_values(array_filter(
+                $document->children($parent),
+                static fn (int $child): bool => $document->name($child) === 'group',
+            ));
+            if ($groups === [$index]) {
+                return true;
+            }
+        }
+
+        if (self::firstDirectImage($document, $index) === null) {
+            return false;
+        }
+        $cursor = $parent;
+        while ($cursor !== null) {
+            if (isset($candidateSet[$cursor])) {
+                return true;
+            }
+            $cursor = $document->parent($cursor);
+        }
+        return false;
+    }
+
+    private static function firstNestedImageGroup(BlockMarkup $document, int $root): ?int
+    {
+        $pending = array_reverse($document->children($root));
+        while ($pending !== []) {
+            $candidate = array_pop($pending);
+            if ($document->name($candidate) === 'group'
+                && self::firstDirectImage($document, $candidate) !== null
+            ) {
+                return $candidate;
+            }
+            foreach (array_reverse($document->children($candidate)) as $child) {
+                $pending[] = $child;
+            }
+        }
+        return null;
     }
 
     /** @param array<mixed> $attrs */
@@ -1279,7 +1437,7 @@ final class CardStyleContract
     private static function pixelValue(mixed $value): ?float
     {
         if (!is_string($value)
-            || preg_match('/^(?<value>[0-9]+(?:\.[0-9]+)?)px$/i', trim($value), $match) !== 1
+            || preg_match('/^(?<value>(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))px$/i', trim($value), $match) !== 1
         ) {
             return null;
         }

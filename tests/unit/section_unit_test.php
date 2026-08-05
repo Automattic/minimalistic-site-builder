@@ -149,6 +149,16 @@ test('SectionUnit documents the nested flush-card body contract', function () {
         $prompt,
         'the placement requirement explains why the body hook is structural',
     );
+    assert_contains(
+        'put ALL of that content in ONE such wrapper and give it `"className":"card-body"` regardless of treatment',
+        $prompt,
+        'every optional nested card text wrapper receives the shared structural hook',
+    );
+    assert_contains(
+        'REQUIRED for `flush` and `overlap`; it is OPTIONAL for `framed` and `borderless`',
+        $prompt,
+        'framed and borderless cards may stay flat but cannot create an unhooked nested body',
+    );
     foreach (['flush', 'framed', 'overlap', 'borderless'] as $treatment) {
         assert_contains(
             '`card-style--' . $treatment . '`',
