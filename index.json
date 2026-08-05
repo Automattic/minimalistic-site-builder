@@ -1,5 +1,14 @@
 [
     {
+        "project": "portfolio28",
+        "slug": "portfolio28",
+        "asset": "portfolio28-playground-20260805T040617Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/portfolio28-playground-20260805T040617Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fportfolio28-playground-20260805T040617Z.zip",
+        "size_bytes": 33156448,
+        "created_at": "2026-08-05T04:06:25+00:00"
+    },
+    {
         "project": "pr139-alignment-conflict",
         "slug": "pr139-alignment-conflict",
         "asset": "pr139-alignment-conflict-0cff288.zip",
