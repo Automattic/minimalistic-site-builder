@@ -158,6 +158,43 @@ test('inner-pages-design with no inner pages still generates one home body in on
     inner_pages_cleanup($tmp);
 });
 
+test('home-body accepts a nested attribution footer plus one page footer without repair', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'One-page site'),
+    ]);
+    $homeBody = '<main><section id="testimonials"><blockquote><p>Exceptional work.</p>'
+        . '<footer class="quote-attribution"><cite>Casey Rivera</cite></footer>'
+        . '</blockquote></section></main>'
+        . '<footer><p>Northstar Studio</p></footer>';
+    $llm->queueText($homeBody);
+    $llm->queueText('FOOTER-DEPTH-REPAIR-SENTINEL');
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq($homeBody, $project->readText('design/home-body.html'));
+        assert_true(!$project->exists('design/home-body.failed'));
+        assert_eq(0, $llm->completeCalls, 'valid nested footer must not consume serial repair completion');
+        assert_eq('FOOTER-DEPTH-REPAIR-SENTINEL', $llm->complete('sentinel probe'));
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('home-body footer depth change keeps top-level footer and all-depth main guards', function () {
+    $validate = new ReflectionMethod(InnerPagesDesignStep::class, 'isValidHomeBodyFragment');
+    $validate->setAccessible(true);
+    $invalid = [
+        'two top-level footers' => '<main><p>Body</p></main><footer></footer><footer></footer>',
+        'nested second main' => '<main><section><main><p>Nested main</p></main></section></main><footer></footer>',
+        'nested footer only' => '<main><blockquote><footer class="quote-attribution">Citation</footer></blockquote></main>',
+    ];
+
+    foreach ($invalid as $case => $html) {
+        assert_true(!$validate->invoke(null, $html), "{$case} must remain invalid");
+    }
+});
+
 test('inner-pages-design repairs one malformed page serially then marks only that page failed', function () {
     [$project, $llm, $tmp] = inner_pages_fixture([
         inner_page('home', 'Home', 'Welcome'),
