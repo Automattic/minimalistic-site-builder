@@ -188,6 +188,8 @@ test('home-body footer depth change keeps top-level footer and all-depth main gu
         'two top-level footers' => '<main><p>Body</p></main><footer></footer><footer></footer>',
         'nested second main' => '<main><section><main><p>Nested main</p></main></section></main><footer></footer>',
         'nested footer only' => '<main><blockquote><footer class="quote-attribution">Citation</footer></blockquote></main>',
+        'footer nested in page footer' => '<main><p>Body</p></main><footer><footer>x</footer></footer>',
+        'footer nested in address' => '<main><address><footer>x</footer></address></main><footer>Page</footer>',
     ];
 
     foreach ($invalid as $case => $html) {
