@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Env;
+use Automattic\SiteBuild\Eval\EvalMetrics;
 use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
@@ -138,41 +139,7 @@ function rebuild_report(): void
 /** @return array<string,mixed> */
 function collect_metrics(Project $project): array
 {
-    $m = ['name' => null, 'fonts' => null, 'fonts_loaded' => false, 'pages' => 0, 'content_blocks' => 0, 'sections' => 0, 'theme_bytes' => 0];
-    if ($project->exists('theme/functions.php')) {
-        $m['fonts_loaded'] = str_contains($project->readText('theme/functions.php'), 'fonts.googleapis.com');
-    }
-    if ($project->exists('siteSpec.json')) {
-        $spec = $project->readJson('siteSpec.json');
-        $m['name'] = $spec['name'] ?? null;
-        $m['sections'] = is_array($spec['sections'] ?? null) ? count($spec['sections']) : 0;
-    }
-    if ($project->exists('theme/theme.json')) {
-        $t = json_decode($project->readText('theme/theme.json'), true);
-        $fams = $t['settings']['typography']['fontFamilies'] ?? [];
-        // Show the primary family from each stack (more accurate than the label).
-        $m['fonts'] = implode(' + ', array_map(static function ($f) {
-            $primary = trim(explode(',', (string) ($f['fontFamily'] ?? ''))[0], " \"'");
-            return $primary !== '' ? $primary : ($f['name'] ?? '?');
-        }, $fams));
-    }
-    if ($project->exists('plugin/pages.json')) {
-        $manifest = $project->readJson('plugin/pages.json');
-        foreach ($manifest['pages'] ?? [] as $page) {
-            $m['pages']++;
-            $rel = 'plugin/pages/' . (string) ($page['slug'] ?? '') . '.html';
-            if ($project->exists($rel)) {
-                $m['content_blocks'] += preg_match_all('/<!--\s*wp:/', $project->readText($rel));
-            }
-        }
-    }
-    foreach (glob($project->themePath('') . '/{,*/}*.{html,json,css,txt}', GLOB_BRACE) ?: [] as $f) {
-        $m['theme_bytes'] += filesize($f);
-    }
-    foreach (glob($project->pluginPath('') . '/{,*/}*.{html,json,php}', GLOB_BRACE) ?: [] as $f) {
-        $m['theme_bytes'] += filesize($f);
-    }
-    return $m;
+    return EvalMetrics::collect($project);
 }
 
 /** @param array<string,mixed> $results */

@@ -10,7 +10,7 @@ namespace Automattic\SiteBuild;
  * no streaming, no tool use, no agentic loop. This is the production transport
  * for the builder; see PROGRESS.md for why the wpcom proxy is not used.
  */
-final class AnthropicClient implements FinishReasonAwareLlm
+final class AnthropicClient implements FinishReasonAwareLlm, UsageReporting
 {
     private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';

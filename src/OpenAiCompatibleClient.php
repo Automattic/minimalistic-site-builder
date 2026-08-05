@@ -14,7 +14,7 @@ namespace Automattic\SiteBuild;
  * Works with any OpenAI-compatible host. Defaults target OpenAI; for xAI set
  * baseUrl to https://api.x.ai/v1 (see make_llm() LLM_PROVIDER=xai).
  */
-final class OpenAiCompatibleClient implements FinishReasonAwareLlm
+final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporting
 {
     /** K3's default max-effort reasoning shares this budget with its answer. */
     private const KIMI_K3_MIN_MAX_TOKENS = 65536;

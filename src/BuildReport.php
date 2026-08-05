@@ -103,6 +103,12 @@ final class BuildReport
         return $this->totalInputTokens() + $this->totalOutputTokens();
     }
 
+    /** @return list<array{id:string,secs:float,in:int,out:int}> */
+    public function steps(): array
+    {
+        return $this->rows;
+    }
+
     /**
      * One formatted table row: id, wall time, total tokens. Shared by the live
      * console output and the log file so they never drift. Pure.
