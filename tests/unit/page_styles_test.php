@@ -877,6 +877,52 @@ CSS;
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path preserves parent-list nesting specificity while splitting direct root padding', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_parent_list_nesting_');
+    $siteCss = <<<'CSS'
+#hero, .shared {
+    padding: 1rem 2rem;
+    & .child {
+        padding: 3rem 4rem;
+    }
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section id="hero"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="hero"><div class="child">Root child</div></section>'
+            . '<div class="shared"><div class="child">Shared child</div></div>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(
+        preg_match(
+            '/#hero\s*,\s*\.shared\s*\{\s*&\s+\.child\s*\{\s*padding:\s*3rem 4rem;\s*\}\s*\}/s',
+            $style,
+        ) === 1,
+        'nested child stays under the original parent list and inherits its maximum ID specificity',
+    );
+    assert_true(
+        preg_match('/(?:^|\})\s*\.shared\s*\{[^{}]*&\s+\.child\s*\{/s', $style) !== 1,
+        'nested child is not moved under a split class-only parent',
+    );
+    assert_eq(1, substr_count($style, 'padding: 3rem 4rem;'), 'nested child rule stays single');
+    $rootBody = implode("\n", ps_css_bodies_for_selector($style, '#hero'));
+    assert_contains('padding-top: 1rem;', $rootBody);
+    assert_contains('padding-bottom: 1rem;', $rootBody);
+    assert_true(!str_contains($rootBody, 'padding: 1rem 2rem;'), 'root direct horizontal padding removed');
+    assert_contains(
+        'padding: 1rem 2rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '.shared')),
+        'non-root direct padding stays exact',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path recognizes advanced final-subject root selector forms only', function () {
     [$project, $tmp] = ps_project('builder_ps_foundation_advanced_root_selectors_');
     $siteCss = <<<'CSS'
@@ -941,6 +987,94 @@ CSS;
         ] as $declaration => $message
     ) {
         assert_contains($declaration, $style, $message);
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path resolves root-bearing attribute and nested-negation selectors without widening controls', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_root_selector_logic_');
+    $siteCss = <<<'CSS'
+section[id|=hero] {
+    padding: 3rem 4rem;
+}
+:not(:is(:not(#hero))) {
+    padding: 5rem 6rem;
+}
+#hero:not(#hero.featured) {
+    padding: 1rem 2rem;
+}
+section[id|=other] {
+    padding: 7rem 8rem;
+}
+:not(:is(#hero)) {
+    padding: 9rem 10rem;
+}
+#other:not(#hero.featured) {
+    padding: 11rem 12rem;
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section id="hero"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="hero"><section id="hero-panel">Nested</section></section>'
+            . '<div id="other">Other</div>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(
+        preg_match(
+            '/section\[id\|=hero\]:where\(#hero\)\s*\{([^{}]*)\}/s',
+            $style,
+            $attributeRoot,
+        ) === 1,
+        'dash-match id selector isolates the delivered root with a zero-specificity filter',
+    );
+    assert_true(!str_contains($attributeRoot[1] ?? '', 'padding: 3rem 4rem;'));
+    assert_contains('padding-top: 3rem;', $attributeRoot[1] ?? '');
+    assert_contains('padding-bottom: 3rem;', $attributeRoot[1] ?? '');
+    assert_true(
+        preg_match(
+            '/section\[id\|=hero\]:not\(:where\(#hero\)\)\s*\{([^{}]*)\}/s',
+            $style,
+            $attributeOther,
+        ) === 1,
+        'dash-match non-root alternative keeps its original specificity',
+    );
+    assert_contains(
+        'padding: 3rem 4rem;',
+        $attributeOther[1] ?? '',
+        'nested #hero-panel match keeps exact padding',
+    );
+    foreach (
+        [
+            ':not(:is(:not(#hero)))' => ['padding-top: 5rem;', 'padding-bottom: 5rem;'],
+            '#hero:not(#hero.featured)' => ['padding-top: 1rem;', 'padding-bottom: 1rem;'],
+        ] as $selector => $vertical
+    ) {
+        $body = implode("\n", ps_css_bodies_for_selector($style, $selector));
+        assert_contains($vertical[0], $body, "{$selector} keeps top padding");
+        assert_contains($vertical[1], $body, "{$selector} keeps bottom padding");
+        assert_true(
+            preg_match('/(?:^|;)\s*padding\s*:/i', $body) !== 1,
+            "{$selector} loses root-owned horizontal padding",
+        );
+    }
+    foreach (
+        [
+            'section[id|=other]' => 'padding: 7rem 8rem;',
+            ':not(:is(#hero))' => 'padding: 9rem 10rem;',
+            '#other:not(#hero.featured)' => 'padding: 11rem 12rem;',
+        ] as $selector => $declaration
+    ) {
+        assert_contains(
+            $declaration,
+            implode("\n", ps_css_bodies_for_selector($style, $selector)),
+            "{$selector} remains outside delivered-root scope",
+        );
     }
     exec('rm -rf ' . escapeshellarg($tmp));
 });
