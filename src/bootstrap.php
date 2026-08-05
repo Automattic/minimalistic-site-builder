@@ -7,11 +7,14 @@ declare(strict_types=1);
  */
 
 use Automattic\SiteBuild\AnthropicClient;
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
+use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\WpcomImageClient;
 
@@ -108,6 +111,22 @@ function make_llm(): Llm
             "Unknown LLM_PROVIDER '{$provider}'. Use anthropic, xai, openai, or openrouter."
         ),
     };
+}
+
+/**
+ * Build the production SiteBuilder: this package's prompts, the repo's
+ * projects/ directory as the output root, the default block fixer and the
+ * configured per-step models.
+ */
+function make_site_builder(Llm $llm): SiteBuilder
+{
+    return new SiteBuilder(
+        llm: $llm,
+        promptsDir: Package::promptsDir(),
+        outputRoot: repo_path('projects'),
+        blockFixer: BlockFixers::default(),
+        models: step_models(),
+    );
 }
 
 /** Build the image-generation transport (WPCOM AI proxy → Google Vertex Gemini). */

@@ -4,8 +4,6 @@ declare(strict_types=1);
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\BuildReport;
 use Automattic\SiteBuild\ModelConfig;
-use Automattic\SiteBuild\Package;
-use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
@@ -20,8 +18,10 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * env overrides still win. Unset falls back to LLM_PROVIDER / the config default.
  *
  * Seeds projects/<slug>/meta.json with the prompt, then runs the pipeline,
- * printing per-step timing and token spend and writing the full run overview to
- * projects/<slug>/logs/project.log. Without --slug the folder gets a short
+ * printing per-step timing, token spend and model as each step lands, then a
+ * consolidated report at the end. The same overview is written to
+ * projects/<slug>/logs/project.log, and the run's machine-readable accounting
+ * to projects/<slug>/build-stats.json. Without --slug the folder gets a short
  * arbitrary name (e.g. "amber-otter"); pass --slug to target a fixed directory
  * and reuse it across re-runs.
  *
@@ -149,14 +149,11 @@ if ($provider !== null) {
 }
 
 $llm = make_llm();
-$builder = new SiteBuilder(
-    llm: $llm,
-    promptsDir: Package::promptsDir(),
-    outputRoot: repo_path('projects'),
-    blockFixer: BlockFixers::default(),
-    models: step_models(),
-);
+$builder = make_site_builder($llm);
 $pipeline = $builder->pipeline();
+
+// step id => model, for the model column (see BuildReport::modelLabel).
+$models = step_models();
 
 // Validate --until BEFORE creating the project, so an unknown id fails loud
 // (instead of silently running the whole build) without leaving a stray project
@@ -185,8 +182,30 @@ try {
 }
 
 echo "Building '{$project->slug()}'\n";
+echo "  prompt: {$prompt}\n\n";
 
 $report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c'));
+
+// Announce a step before it runs, flushed immediately so it appears in real
+// time — a long step (landing-page, image generation) never leaves the build
+// looking frozen.
+$announce = static function (Step $step): void {
+    echo BuildReport::formatStartRow($step->id(), $step->label()), "\n";
+    flush();
+};
+
+// Run a step that lives OUTSIDE the pipeline (the opt-in image pair below):
+// announce it, time it, and record a row. Both spend no LLM tokens of their
+// own, so their token columns are a deterministic zero.
+$runExtraStep = static function (Step $step) use ($announce, $project, $report, $models): void {
+    $announce($step);
+    $start = microtime(true);
+    $step->run($project);
+    $secs = microtime(true) - $start;
+    $model = BuildReport::modelLabel($step->id(), $models);
+    $report->addStep($step->id(), $secs, 0, 0, $model);
+    echo BuildReport::formatRow($step->id(), $secs, 0, 0, $model), "\n";
+};
 
 // Attribute token spend to each step by diffing the client's cumulative usage
 // totals before and after it ran (the reporter fires once a step completes).
@@ -196,17 +215,20 @@ $report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c
 $prevIn = 0;
 $prevOut = 0;
 $currentStep = null;
+$wallStart = microtime(true);
 try {
-    $pipeline->runThrough($project, $until, function (Step $step, float $secs) use (&$report, &$prevIn, &$prevOut, $llm) {
+    $pipeline->runThrough($project, $until, function (Step $step, float $secs) use ($report, &$prevIn, &$prevOut, $llm, $models) {
         $u = $llm->usageTotals();
         $inDelta = $u['input_tokens'] - $prevIn;
         $outDelta = $u['output_tokens'] - $prevOut;
         $prevIn = $u['input_tokens'];
         $prevOut = $u['output_tokens'];
-        $report->addStep($step->id(), $secs, $inDelta, $outDelta);
-        echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
-    }, function (Step $step) use (&$currentStep): void {
+        $model = BuildReport::modelLabel($step->id(), $models);
+        $report->addStep($step->id(), $secs, $inDelta, $outDelta, $model);
+        echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta, $model), "\n";
+    }, function (Step $step) use (&$currentStep, $announce): void {
         $currentStep = $step->id();
+        $announce($step);
     });
 } catch (Throwable $e) {
     fwrite(STDERR, '✗ FAILED' . ($currentStep !== null ? " in step {$currentStep}" : '') . ": {$e->getMessage()}\n");
@@ -216,24 +238,14 @@ try {
 // Image generation is opt-in: slow and networked, so it runs only on request
 // and only for a full build (skipped when --until stops the pipeline early).
 if ($withImages && $until === null) {
-    // The Llm rewrites safety-filtered prompts (small tier) and regenerates.
-    $step = new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
-    $start = microtime(true);
-    $step->run($project);
-    $secs = microtime(true) - $start;
-    // Image generation uses the Vertex proxy, not Claude, so it spends no LLM
-    // tokens; the row records its wall time, and the tally comes from images.json.
-    $report->addStep($step->id(), $secs, 0, 0);
-    echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+    // Image generation goes through the Vertex proxy, not the LLM — its only
+    // model use is the Llm rewriting safety-filtered prompts (small tier) and
+    // regenerating. The tally comes from images.json below.
+    $runExtraStep(new GenerateImagesStep(make_image_client(), $llm, $models['image-prompt-repair'] ?? null));
 
     // Now that the real pixels exist, re-check cover text against the actual
     // (dimmed) images and raise dimRatio / flip text colors where needed.
-    $step = new CoverContrastStep(BlockFixers::default());
-    $start = microtime(true);
-    $step->run($project);
-    $secs = microtime(true) - $start;
-    $report->addStep($step->id(), $secs, 0, 0);
-    echo BuildReport::formatRow($step->id(), $secs, 0, 0), "\n";
+    $runExtraStep(new CoverContrastStep(BlockFixers::default()));
 
     $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
     $generated = 0;
@@ -249,6 +261,7 @@ if ($withImages && $until === null) {
 }
 
 $report->setRequestCount($llm->usageTotals()['requests']);
+$report->setWallSeconds(microtime(true) - $wallStart);
 
 // Surface the defects the build delivered through (warnings.json) so a
 // warned build never looks identical to a clean one on the console. A corrupt
@@ -258,17 +271,16 @@ $report->setWarnings(
     $project->exists('warnings.json') ? $project->readJson('warnings.json') : []
 );
 
-echo $report->totalLine(), "\n";
-if (($imagesLine = $report->imagesLine()) !== null) {
-    echo $imagesLine, "\n";
-}
-if (($warningsLine = $report->warningsLine()) !== null) {
-    echo $warningsLine, "\n";
-}
+// One consolidated breakdown of where the time, tokens and models went, so the
+// numbers don't have to be reassembled from the rows that scrolled past. The
+// very same bytes are persisted next to the per-call LLM transcripts.
+$overview = $report->render();
+echo "\n", $overview;
+$project->writeText('logs/project.log', $overview);
 
-// Persist the full run overview alongside the per-call LLM transcripts, so a
-// finished project carries its own step-by-step timing/token/image accounting.
-$project->writeText('logs/project.log', $report->render());
+// The same run as a machine-readable record, for comparing cost and model mix
+// across builds after the fact.
+$project->writeJson('build-stats.json', $report->stats(default_llm_model(), $models));
 
 echo "Output: {$project->path()}\n";
 

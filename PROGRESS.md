@@ -201,21 +201,23 @@ cp .env.example .env   # set ANTHROPIC_API_KEY
 php tests/run.php && php tests/run-integration.php
 
 # One-shot: prompt -> build (tokens + wall time) -> Playground + URL
-php bin/create.php "A neighborhood tea house and loose-leaf tea shop"
+php bin/build.php "A neighborhood tea house and loose-leaf tea shop"
+# ...or build into a fixed folder without launching Playground
+php bin/build.php "A cozy neighborhood bakery" --slug=my-bakery --no-serve
 
 # Lower-level pieces
-php bin/build.php "A cozy neighborhood bakery" --slug=my-bakery
 php bin/inspect.php my-bakery
 php bin/playground.php my-bakery   # boot a local WP with the theme activated
 php bin/eval.php                   # regenerate the 5 eval sites
 ```
 
-`bin/create.php` reports per-step time + tokens and totals, writes
-`projects/<slug>/build-stats.json`, then launches Playground. Example run
-("tea house" → "Steeped & Still"): **241.9s wall, 5 LLM requests,
-19,068 in + 24,505 out = 43,573 tokens** on claude-opus-4-8, served at the
-printed URL with the theme active and fonts loaded. Flags: `--slug=`, `--port=`,
-`--no-serve` (build + metrics only).
+`bin/build.php` reports per-step time + tokens + model and totals, writes
+`projects/<slug>/logs/project.log` and `projects/<slug>/build-stats.json`, then
+launches Playground. Example run ("tea house" → "Steeped & Still"): **241.9s
+wall, 5 LLM requests, 19,068 in + 24,505 out = 43,573 tokens** on
+claude-opus-4-8, served at the printed URL with the theme active and fonts
+loaded. Flags: `--slug=`, `--provider=`, `--until=`, `--port=`, `--no-serve`
+(build + metrics only).
 
 ---
 

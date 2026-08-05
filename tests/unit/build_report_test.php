@@ -10,6 +10,13 @@ test('build-report formats a row with right-aligned, thousands-separated tokens'
     assert_contains('3,210 tok', $row);
 });
 
+test('build-report row names the model an LLM step ran on', function () {
+    assert_contains('claude-opus-4-8', BuildReport::formatRow('site-spec', 2.34, 3000, 210, 'claude-opus-4-8'));
+    // A deterministic step ran on no model at all — an em dash, never a blank
+    // column, so the report never reads as "we forgot to record this one".
+    assert_contains('—', BuildReport::formatRow('scaffold-theme', 0.0, 0, 0));
+});
+
 test('build-report sums per-step tokens into the totals', function () {
     $r = new BuildReport('A cozy bakery', 'cozy-bakery', '/tmp/cozy-bakery', '2026-06-30T00:00:00+00:00');
     $r->addStep('scaffold-theme', 0.0, 0, 0);
@@ -48,6 +55,67 @@ test('build-report renders a full document with header, table, totals and images
     assert_contains('TOTAL', $out);
     assert_contains('LLM requests : 4', $out);
     assert_contains('Images: 2 generated, 0 failed (2 total)', $out);
+});
+
+test('build-report lines the starting line up with the row that completes it', function () {
+    $start = BuildReport::formatStartRow('site-spec', 'Draft the site spec');
+    $row = BuildReport::formatRow('site-spec', 2.34, 3000, 210);
+
+    assert_contains('site-spec', $start);
+    assert_contains('Draft the site spec…', $start);
+    // The "→ " marker eats exactly the two columns the id column gives back,
+    // so both lines start their second field in the same place. Nothing else
+    // enforces that, and the two are read together in the live output.
+    assert_eq(mb_strpos($row, '2.3s') - 4, mb_strpos($start, 'Draft'));
+});
+
+test('build-report resolves the model label of a concurrent step group', function () {
+    $models = ['theme-json' => 'small-model', 'page-plan' => 'small-model', 'sections' => 'large-model'];
+
+    assert_eq('large-model', BuildReport::modelLabel('sections', $models));
+    // A group id is its members joined by '+' and is never a map key itself;
+    // members sharing a tier collapse to one label rather than repeating it.
+    assert_eq('small-model', BuildReport::modelLabel('theme-json+page-plan', $models));
+    assert_eq('small-model, large-model', BuildReport::modelLabel('theme-json+sections', $models));
+    assert_eq(null, BuildReport::modelLabel('scaffold-theme', $models), 'a deterministic step ran on no model');
+});
+
+test('build-report carries each step model through into the rendered table', function () {
+    $r = new BuildReport('A cozy bakery', 'cozy-bakery', '/tmp/cozy-bakery', '2026-06-30T00:00:00+00:00');
+    $r->addStep('scaffold-theme', 0.0, 0, 0);
+    $r->addStep('site-spec', 2.3, 3000, 200, 'claude-haiku-4-8');
+
+    $out = $r->render();
+    assert_contains('claude-haiku-4-8', $out);
+    assert_contains('—', $out, 'the deterministic step keeps an em dash in the model column');
+});
+
+test('build-report serializes the run into build-stats.json shape', function () {
+    $r = new BuildReport('A cozy bakery', 'cozy-bakery', '/tmp/cozy-bakery', '2026-06-30T00:00:00+00:00');
+    $r->addStep('scaffold-theme', 0.0, 0, 0);
+    $r->addStep('site-spec', 2.34, 3000, 200, 'claude-haiku-4-8');
+    $r->setRequestCount(4);
+    // Wall time is measured, not summed: it also covers the work between steps.
+    $r->setWallSeconds(9.87);
+
+    $stats = $r->stats('claude-opus-4-8', ['site-spec' => 'claude-haiku-4-8']);
+
+    assert_eq('A cozy bakery', $stats['prompt']);
+    assert_eq(9.9, $stats['wall_seconds']);
+    assert_eq(4, $stats['requests']);
+    assert_eq(3000, $stats['input_tokens']);
+    assert_eq(200, $stats['output_tokens']);
+    assert_eq(3200, $stats['total_tokens']);
+    assert_eq('claude-opus-4-8', $stats['model'], 'the default model the run started from');
+    assert_eq(['site-spec' => 'claude-haiku-4-8'], $stats['step_models']);
+    assert_eq('2026-06-30T00:00:00+00:00', $stats['built_at']);
+    assert_eq(
+        [
+            ['id' => 'scaffold-theme', 'seconds' => 0.0, 'input_tokens' => 0, 'output_tokens' => 0, 'total_tokens' => 0, 'model' => null],
+            ['id' => 'site-spec', 'seconds' => 2.3, 'input_tokens' => 3000, 'output_tokens' => 200, 'total_tokens' => 3200, 'model' => 'claude-haiku-4-8'],
+        ],
+        $stats['steps'],
+    );
 });
 
 test('build-report surfaces warnings.json so a warned build never looks clean', function () {
