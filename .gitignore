@@ -1,4 +1,6 @@
+.DS_Store
 .env
+.playwright-mcp
 /projects/
 eval_run.log
 .playground-blueprint.json
