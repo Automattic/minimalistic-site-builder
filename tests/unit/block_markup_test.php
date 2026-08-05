@@ -211,6 +211,41 @@ test('removeClassTokenInOwnHtml tokenizes: any whitespace, exact tokens, both qu
     assert_contains('Mention reveal here', $out, 'text content untouched');
 });
 
+test('bounded class-token edits ignore class-like text inside sourced attributes', function () {
+    $href = "https://example.test/?class='no-border-radius'";
+    $src = '<!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link no-border-radius wp-element-button" '
+        . 'href="' . $href . '">Go</a></div>'
+        . '<!-- /wp:button -->';
+    $doc = BlockMarkup::parse($src);
+    $ownHtml = $doc->ownHtml(0);
+    $linkStart = strpos($ownHtml, '<a ');
+    $linkEnd = strpos($ownHtml, '>', $linkStart);
+    assert_true(is_int($linkStart) && is_int($linkEnd));
+
+    $doc->removeClassTokenInOwnHtmlRange(0, 'no-border-radius', $linkStart, $linkEnd + 1);
+    $out = $doc->render();
+
+    assert_contains('class="wp-block-button__link wp-element-button"', $out);
+    assert_contains('href="' . $href . '"', $out, 'the sourced URL stays byte-for-byte intact');
+});
+
+test('attribute edits preserve sourced empty object and empty array identity', function () {
+    $src = '<!-- wp:group {"metadata":{},"allowedBlocks":[],"numericObject":{"0":"zero"},'
+        . '"tagName":"section"} -->'
+        . '<section class="wp-block-group"></section><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $attrs = $doc->attrs(0);
+    $attrs['tagName'] = 'main';
+    $doc->setAttrs(0, $attrs);
+
+    $out = $doc->render();
+    assert_contains('"metadata":{}', $out);
+    assert_contains('"allowedBlocks":[]', $out);
+    assert_contains('"numericObject":{"0":"zero"}', $out);
+    assert_contains('"tagName":"main"', $out);
+});
+
 test('ownHtml covers the root tag only, not descendants', function () {
     $src = '<!-- wp:group --><div class="wp-block-group">'
         . '<!-- wp:paragraph --><p class="inner">Hi</p><!-- /wp:paragraph -->'
