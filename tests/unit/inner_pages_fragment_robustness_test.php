@@ -39,6 +39,107 @@ test('inner-pages-design balances primary inner-page and home-body fragments wit
     inner_pages_cleanup($tmp);
 });
 
+test('inner-pages-design strips surrounding prose without consuming repair completions', function () {
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('about', 'About', 'Explain the studio'),
+        inner_page('contact', 'Contact', 'Give practical contact details'),
+    ]);
+    $homeBody = '<main><section id="story"><h2>HOME-PREAMBLE</h2></section></main>'
+        . '<footer><p>HOME-FOOTER</p></footer>';
+    $about = '<style data-page-css>.about{color:var(--ink)}</style>'
+        . "\n<main id=\"about-main\"><p>INNER-PREAMBLE</p></main>";
+    $contact = '<main id="contact-main"><p>TRAILING-PROSE</p></main>';
+    $llm->queueText(
+        "I'll continue the established editorial system.\n\n" . $homeBody,
+    );
+    $llm->queueText("Here is the completed inner page.\n\n" . $about);
+    $llm->queueText($contact . "\n\nThat completes it.");
+    $llm->queueText('PREAMBLE-REPAIR-QUEUE-SENTINEL');
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq(0, $llm->completeCalls, 'prose stripping must not consume serial repair completion');
+        assert_eq($homeBody, $project->readText('design/home-body.html'));
+        assert_eq($about, $project->readText('design/about.html'));
+        assert_eq($contact, $project->readText('design/contact.html'));
+        assert_true(!$project->exists('design/home-body.failed'));
+        assert_true(!$project->exists('design/about.failed'));
+        assert_true(!$project->exists('design/contact.failed'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['inner-pages-design'] ?? []);
+        assert_eq(3, substr_count($warnings, 'preamble removed'));
+        assert_eq(3, substr_count($warnings, 'disposition deterministically repaired'));
+        assert_eq('PREAMBLE-REPAIR-QUEUE-SENTINEL', $llm->complete('sentinel probe'));
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('stripSurroundingProse preserves element-bearing prefixes and existing failure path', function () {
+    $guarded = '<section>real authored content</section>'
+        . '<main id="guarded-main"><p>Keep main too.</p></main>';
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('guarded', 'Guarded', 'Never drop authored roots'),
+    ]);
+    $llm->queueText(inner_pages_home_body());
+    $llm->queueText($guarded);
+    $llm->queueText('<div>Still no main after repair</div>');
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq(1, $llm->completeCalls, 'element-bearing prefix must use existing repair path');
+        assert_true(!$project->exists('design/guarded.html'));
+        assert_true($project->exists('design/guarded.failed'));
+        $repairCall = $llm->calls[array_key_last($llm->calls)];
+        assert_contains($guarded, $repairCall['prompt'], 'repair prompt must retain every authored byte');
+
+        $strip = new ReflectionMethod(InnerPagesDesignStep::class, 'stripSurroundingProse');
+        $strip->setAccessible(true);
+        assert_eq($guarded, $strip->invoke(null, $guarded));
+        assert_contains('real authored content', (string) $strip->invoke(null, $guarded));
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
+test('stripSurroundingProse keeps clean fragments byte-exact and valid through the step', function () {
+    $inner = '<style data-page-css>.card::before{content:"é < >";}</style>'
+        . "\n<main id=\"clean-main\"><article><p>Keep exact bytes.</p></article></main>";
+    $homeBody = '<main><section id="clean-story"><h2>Clean home</h2></section></main>'
+        . "\n<footer><p>Clean footer</p></footer>";
+    $strip = new ReflectionMethod(InnerPagesDesignStep::class, 'stripSurroundingProse');
+    $strip->setAccessible(true);
+
+    $strippedInner = (string) $strip->invoke(null, $inner);
+    $strippedHome = (string) $strip->invoke(null, $homeBody);
+    assert_eq($inner, $strippedInner);
+    assert_eq($inner, $strip->invoke(null, $strippedInner));
+    assert_eq($homeBody, $strippedHome);
+    assert_eq($homeBody, $strip->invoke(null, $strippedHome));
+
+    [$project, $llm, $tmp] = inner_pages_fixture([
+        inner_page('home', 'Home', 'Welcome'),
+        inner_page('clean', 'Clean', 'Keep exact bytes'),
+    ]);
+    $llm->queueText($homeBody);
+    $llm->queueText($inner);
+    $llm->queueText('CLEAN-REPAIR-QUEUE-SENTINEL');
+
+    try {
+        inner_pages_run($project, $llm);
+
+        assert_eq(0, $llm->completeCalls, 'clean fragments must validate without repair');
+        assert_eq($homeBody, $project->readText('design/home-body.html'));
+        assert_eq($inner, $project->readText('design/clean.html'));
+        assert_eq('CLEAN-REPAIR-QUEUE-SENTINEL', $llm->complete('sentinel probe'));
+    } finally {
+        inner_pages_cleanup($tmp);
+    }
+});
+
 test('inner-pages-design leaves no-main fragments on existing repair and failed-marker path', function () {
     $documentOnly = '<!doctype html><html><body><p>NO-MAIN</p></body></html>';
     assert_eq('', InnerPagesDesignStep::balanceFragment(''));
