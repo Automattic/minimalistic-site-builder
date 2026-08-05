@@ -105,7 +105,7 @@ test('FooterUnit ignores hero-only blueprint and above-fold context', function (
     $input = template_part_unit_input();
     $input['hero_blueprint'] = [
         'recipe' => 'typographic-poster',
-        'signature_device_use' => 'FOOTER-HERO-BLUEPRINT-LEAK-SENTINEL',
+        'media_mode' => 'FOOTER-HERO-BLUEPRINT-LEAK-SENTINEL',
     ];
     $input['above_fold_contract'] = 'FOOTER-ABOVE-FOLD-LEAK-SENTINEL';
     $input['neighbors'] = 'FOOTER-HERO-NEIGHBOR-LEAK-SENTINEL';
