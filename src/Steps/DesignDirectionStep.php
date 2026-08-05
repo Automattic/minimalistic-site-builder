@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\CardStyle;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\GeneratedJsonException;
 use Automattic\SiteBuild\HeroBlueprint;
@@ -91,7 +92,7 @@ final class DesignDirectionStep implements Step
      * anatomy documents one markup recipe per value; `flush` is the default so
      * the dated inset-media card only appears when a direction opts into it.
      */
-    public const CARD_STYLES = ['flush', 'framed', 'overlap', 'borderless'];
+    public const CARD_STYLES = CardStyle::ALL;
 
     public function __construct(
         private Llm $llm,
@@ -580,12 +581,7 @@ final class DesignDirectionStep implements Step
                 . self::describe($raw['canvas']) . ' delivered "full-bleed"; disposition repaired invalid value';
         }
 
-        $cardRaw = strtolower(trim((string) ($raw['card_style'] ?? '')));
-        $cardStyle = in_array($cardRaw, self::CARD_STYLES, true) ? $cardRaw : 'flush';
-        if ($cardRaw !== '' && $cardRaw !== $cardStyle) {
-            $repairs[] = 'designDirection.json: field card_style authored '
-                . self::describe($raw['card_style']) . ' delivered "flush"; disposition repaired invalid value';
-        }
+        $cardStyle = self::normalizeCardStyle($raw['card_style'] ?? null, $warnings);
 
         $motion = self::motionProfile($raw['motion'] ?? null);
         $rawMotion = is_string($raw['motion'] ?? null)
@@ -623,6 +619,30 @@ final class DesignDirectionStep implements Step
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
         ];
+    }
+
+    /**
+     * Normalize the one machine-readable card construction contract shared by
+     * direction generation and every downstream adapter. Missing/null/blank is
+     * the documented flush default. Any non-empty unsupported commitment loses
+     * authored intent, so its fallback is durable-warning material.
+     *
+     * @param list<string> $warnings
+     */
+    public static function normalizeCardStyle(mixed $authored, array &$warnings = []): string
+    {
+        $normalized = is_string($authored) ? strtolower(trim($authored)) : '';
+        if (in_array($normalized, self::CARD_STYLES, true)) {
+            return $normalized;
+        }
+        if ($authored === null || (is_string($authored) && $normalized === '')) {
+            return 'flush';
+        }
+
+        $warnings[] = 'designDirection.json: field card_style authored '
+            . Warnings::value($authored)
+            . '; delivered "flush"; disposition unsupported generated card treatment replaced by default';
+        return 'flush';
     }
 
     /**
@@ -848,7 +868,8 @@ final class DesignDirectionStep implements Step
         // Render the card commitment with its executable meaning: the section
         // prompt's card anatomy executes exactly the named construction, and
         // defaults to flush when a direction predates the field.
-        $cardStyle = strtolower(trim((string) ($direction['card_style'] ?? '')));
+        $rawCardStyle = $direction['card_style'] ?? null;
+        $cardStyle = is_string($rawCardStyle) ? strtolower(trim($rawCardStyle)) : '';
         if (in_array($cardStyle, self::CARD_STYLES, true)) {
             $meaning = match ($cardStyle) {
                 'flush'      => 'card media bleeds to the card edges and padding wraps only the text — use the `flush` construction from the card anatomy',
@@ -994,6 +1015,19 @@ final class DesignDirectionStep implements Step
     public static function dataFor(Project $project): array
     {
         return $project->exists(self::FILE) ? $project->readJson(self::FILE) : [];
+    }
+
+    /**
+     * The authoritative site-wide card construction, including the documented
+     * flush default. Adapter callers pass warnings through to their own durable
+     * step boundary so an invalid non-empty persisted value is never hidden.
+     *
+     * @param list<string> $warnings
+     */
+    public static function cardStyleFor(Project $project, array &$warnings = []): string
+    {
+        $direction = self::dataFor($project);
+        return self::normalizeCardStyle($direction['card_style'] ?? null, $warnings);
     }
 
     /**
