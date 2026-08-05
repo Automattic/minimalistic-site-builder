@@ -53,7 +53,7 @@ final class HeaderBehavior
     public const SURFACES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
 
     /** These compositions are too tall to remain useful as persistent chrome. */
-    public const TALL_ARCHETYPES = ['centered-masthead', 'oversized-wordmark', 'double-decker'];
+    public const TALL_ARCHETYPES = ['centered-masthead', 'oversized-wordmark'];
 
     private const FIELDS = [
         'behavior',

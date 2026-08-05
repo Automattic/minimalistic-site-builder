@@ -46,7 +46,7 @@ use Automattic\SiteBuild\Warnings;
  *     padding on the global core/group style, which matches every structural
  *     Group nested inside the header and compounds into a giant bar. Missing
  *     descendant top/bottom values are set to zero while explicit padding
- *     (including a double-decker strip) and the root's compact padding survive.
+ *     and the root's compact padding survive.
  *  5. Fold budget — in stacked mode an opaque header consumes ~100px of the
  *     first viewport, so a page-opening cover taller than 80vh is lowered to
  *     80vh (header + cover must fit ~100vh; audited covers ran 86-92vh and
