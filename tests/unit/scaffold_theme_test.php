@@ -35,10 +35,46 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('.equal-cards .wp-block-group > figure.wp-block-image', $css);
     assert_contains('align-self: stretch;', $css);
 
-    // The flush-media card hook: the card group's radius clips the bleeding
-    // image, and the image contributes no radius of its own.
-    assert_contains('.card-flush {', $css);
-    assert_contains('.card-flush > figure.wp-block-image img', $css);
+    // Flush/overlap copy lives inside a nested body group. That body must grow
+    // as a flex column, otherwise its nested CTA has no remaining height for
+    // margin-top:auto to consume and sibling card buttons do not align.
+    assert_contains(
+        ".equal-cards .wp-block-group.card-body {\n"
+            . "    display: flex;\n"
+            . "    flex-direction: column;\n"
+            . "    flex-grow: 1;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".equal-cards .cta-bottom {\n"
+            . "    margin-top: auto;\n"
+            . "    justify-content: center;\n"
+            . '}',
+        $css,
+    );
+
+    // The reset targets only the outer flush group, leaving .card-body padding
+    // intact. Importance makes the zero padding stable against later global
+    // Group styles and generated inline padding. Inline image radii need the
+    // same precedence; the descendant img selector also handles linked images.
+    assert_contains(
+        ".wp-block-group.card-flush {\n"
+            . "    overflow: hidden;\n"
+            . "    padding: 0 !important;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".wp-block-group.card-flush > figure.wp-block-image img {\n"
+            . "    border-radius: 0 !important;\n"
+            . '}',
+        $css,
+    );
+    assert_true(
+        !str_contains($css, '.card-flush .card-body'),
+        'the flush reset must not remove the inner text body padding',
+    );
 
     // Core's font-relative pullquote spacing must not compound unpredictably
     // with the deterministic section rhythm.

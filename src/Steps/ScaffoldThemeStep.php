@@ -130,6 +130,14 @@ final class ScaffoldThemeStep implements Step
             flex-direction: column;
             flex-grow: 1;
         }
+        /* Flush and overlap cards keep all text in a nested body group. Make
+           that body another growing flex column so a nested .cta-bottom can
+           consume its remaining height and align with CTAs in sibling cards. */
+        .equal-cards .wp-block-group.card-body {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+        }
         /* The flex-column card above defeats core's constrained layout on its
            media: `.is-layout-constrained > *` gives the figure auto side
            margins, and in a flex container auto cross-axis margins beat
@@ -149,15 +157,20 @@ final class ScaffoldThemeStep implements Step
 
         /* Flush-media cards (sections opt in via className="card-flush" on the
            card wp:group): the media is the card's first child at full width and
-           only an inner text group carries padding, so the group's own border
-           radius must clip the bleeding image. Radius and background come from
-           block attributes; this hook only supplies the clipping the
-           attributes cannot express. */
-        .card-flush {
+           only an inner .card-body group carries padding. Reset the card itself
+           with enough specificity and importance to beat a global Group
+           padding rule and stray generated inline padding without touching the
+           body's authored padding. The card's radius clips the bleeding image. */
+        .wp-block-group.card-flush {
             overflow: hidden;
+            padding: 0 !important;
         }
-        .card-flush > figure.wp-block-image img {
-            border-radius: 0;
+        /* An image's block attributes serialize radius inline. The flush-card
+           contract owns this edge, so importance is required to keep a stray
+           generated image radius from surviving; descendants also cover images
+           wrapped in a link. */
+        .wp-block-group.card-flush > figure.wp-block-image img {
+            border-radius: 0 !important;
         }
 
         /* Core gives pullquotes a font-relative 4em vertical pad and a trailing
