@@ -12,6 +12,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM, optional): implement an EXPLICIT user animation request.
@@ -36,7 +37,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * (no display:none / visibility:hidden anywhere; zero opacity only in a
  * `from`/`0%` keyframe step, so an entrance can start invisible but nothing
  * can END hidden), no resource-loading value forms (url(), image-set(), …) or
- * @import/@font-face, and the whole block is capped.
+ * @import/@font-face, and the whole block is capped. Shape-owned radius
+ * declarations are removed individually before validation so the remaining
+ * requested motion can still ship; every removal is recorded durably.
  * Rejected CSS is logged and skipped — the build never fails over decoration.
  */
 final class CustomMotionStep implements Step
@@ -99,6 +102,7 @@ final class CustomMotionStep implements Step
             ]);
             return;
         }
+        $shapeTagged = self::hasShapeTaggedElement($project);
 
         $rendered = $this->renderer->render('custom-motion.md', [
             'animation_request' => $request,
@@ -109,11 +113,31 @@ final class CustomMotionStep implements Step
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
         );
 
-        $problems = self::validate($css);
+        // Corner language is a closed build-owned commitment. Keep the
+        // requested motion whenever possible by removing only offending
+        // radius declarations, including declarations inside keyframes,
+        // before applying the rest of the CSS policy below.
+        [$css, $droppedShapeDeclarations] = self::dropShapeOwnedDeclarations($css, $shapeTagged);
+        if ($droppedShapeDeclarations !== []) {
+            $project->addWarnings($this->id(), array_map(
+                static fn (string $declaration): string =>
+                    "file='theme/style.css'; block='generated custom-motion CSS'; authored="
+                    . Warnings::value($declaration)
+                    . '; delivered=removed; disposition=dropped a shape-owned corner declaration '
+                    . 'before validating and appending the remaining motion CSS — see logs/' . self::LOG_FILE,
+                $droppedShapeDeclarations,
+            ));
+        }
+        $problems = self::validate($css, $shapeTagged);
         if ($problems !== []) {
             file_put_contents(
                 $project->logPath(self::LOG_FILE),
-                "REJECTED CSS:\n{$css}\n\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
+                "REJECTED CSS:\n{$css}\n"
+                . ($droppedShapeDeclarations === []
+                    ? ''
+                    : "\nSHAPE-OWNED DECLARATIONS REMOVED BEFORE VALIDATION:\n- "
+                        . implode("\n- ", $droppedShapeDeclarations) . "\n")
+                . "\nPROBLEMS:\n- " . implode("\n- ", $problems) . "\n"
             );
             echo '  custom-motion: CSS rejected (' . count($problems)
                 . ' problem(s)); skipped — see logs/' . self::LOG_FILE . "\n";
@@ -124,6 +148,17 @@ final class CustomMotionStep implements Step
                 self::LOG_FILE,
             )]);
             return;
+        }
+
+        if ($droppedShapeDeclarations !== []) {
+            file_put_contents(
+                $project->logPath(self::LOG_FILE),
+                "SALVAGED CSS (shape-owned declarations removed):\n{$css}\n\nDROPPED:\n- "
+                . implode("\n- ", $droppedShapeDeclarations) . "\n"
+            );
+            echo '  custom-motion: dropped ' . count($droppedShapeDeclarations)
+                . ' shape-owned declaration(s), kept the remaining motion — see logs/'
+                . self::LOG_FILE . "\n";
         }
 
         // The reduced-motion wrapper is added HERE, deterministically, so a
@@ -170,6 +205,32 @@ final class CustomMotionStep implements Step
         return array_slice($found, 0, 10);
     }
 
+    /** Whether the custom-motion class is attached to an owned image/button block. */
+    public static function hasShapeTaggedElement(Project $project): bool
+    {
+        $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
+        foreach ($project->themeFiles() as $rel) {
+            $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
+            foreach ($doc->indices() as $i) {
+                $name = $doc->name($i);
+                $name = str_contains($name, '/') ? $name : 'core/' . $name;
+                if (!in_array($name, ['core/image', 'core/button'], true)) {
+                    continue;
+                }
+                $attrs = $doc->attrs($i);
+                $className = is_array($attrs) && is_string($attrs['className'] ?? null)
+                    ? $attrs['className']
+                    : '';
+                if (preg_match('/' . $token . '/', $className) === 1
+                    || preg_match('/\bclass\s*=\s*(["\'])[^"\']*' . $token . '[^"\']*\1/i', $doc->ownHtml($i)) === 1
+                ) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static function clip(string $element): string
     {
         return strlen($element) > 300 ? substr($element, 0, 300) . '…' : $element;
@@ -181,7 +242,7 @@ final class CustomMotionStep implements Step
      *
      * @return string[]
      */
-    public static function validate(string $css): array
+    public static function validate(string $css, bool $shapeTagged = false): array
     {
         $css = trim($css);
         if ($css === '') {
@@ -211,6 +272,10 @@ final class CustomMotionStep implements Step
         }
         foreach (CssChecks::disallowedAtRules($stripped, ['media', 'keyframes']) as $problem) {
             $problems[] = $problem;
+        }
+        foreach (self::shapeOwnedDeclarations($stripped, $shapeTagged) as $declaration) {
+            $problems[] = 'shape-owned image/button corner declaration is not allowed: '
+                . trim($declaration['raw']);
         }
 
         [$keyframeNames, $rules, $keyframeBodies] = self::stripKeyframes($stripped);
@@ -263,6 +328,50 @@ final class CustomMotionStep implements Step
         }
 
         return $problems;
+    }
+
+    /**
+     * Remove only declarations that can change the committed corner language.
+     * Innermost rule bodies cover ordinary style rules and individual keyframe
+     * steps, including rules nested under @media. Selectors, at-rules, and all
+     * non-radius declarations survive for the normal validator to assess.
+     *
+     * Comments are stripped only when a repair is needed: braces inside a
+     * comment must not confuse the rule-body walk. Generated comments carry no
+     * runtime behavior, so this does not lose authored motion semantics.
+     *
+     * @return array{0:string,1:list<string>} repaired CSS and dropped declarations
+     */
+    public static function dropShapeOwnedDeclarations(string $css, bool $shapeTagged = false): array
+    {
+        $owned = self::shapeOwnedDeclarations($css, $shapeTagged);
+        $ownedStarts = array_fill_keys(array_column($owned, 'start'), true);
+        [$repaired, $dropped] = CssChecks::dropDeclarations(
+            $css,
+            static fn (array $declaration): bool => isset($ownedStarts[$declaration['start']]),
+        );
+        return [
+            $repaired,
+            array_map(static fn (array $declaration): string => trim($declaration['raw']), $dropped),
+        ];
+    }
+
+    /**
+     * @return list<array{property:string,value:string,raw:string,start:int,end:int,
+     *     context:string,ancestors:list<string>,kind:string}>
+     */
+    private static function shapeOwnedDeclarations(string $css, bool $shapeTagged): array
+    {
+        return CssChecks::shapeAffectingDeclarations(
+            $css,
+            static fn (string $selector): bool => CssChecks::selectorTargetsShape($selector)
+                || ($shapeTagged && self::selectorTargetsCustomMotionRoot($selector)),
+        );
+    }
+
+    private static function selectorTargetsCustomMotionRoot(string $selector): bool
+    {
+        return CssChecks::selectorTargetsSubject($selector, '.' . self::CLASS_NAME);
     }
 
     /**

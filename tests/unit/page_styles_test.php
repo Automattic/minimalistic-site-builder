@@ -97,6 +97,61 @@ test('validate rejects motion overrides even under an allowed layout selector', 
     assert_contains('profile-owned', implode('; ', $problems));
 });
 
+test('validate rejects corner setters and all resets only on owned image/button selectors', function () {
+    foreach ([
+        'border-radius',
+        'border-top-left-radius',
+        'border-start-start-radius',
+        '-webkit-border-radius',
+    ] as $property) {
+        $problems = PageStylesStep::validate(
+            ".masonry-3 .wp-block-image img {\n    {$property}: 9999px !important;\n}",
+        );
+        assert_contains('shape-owned', implode('; ', $problems), "rejects {$property}");
+    }
+
+    $problems = PageStylesStep::validate(
+        ".masonry-3 .wp-block-button__link {\n    all: initial !important;\n}",
+    );
+    assert_contains('shape-owned', implode('; ', $problems), 'CSS-wide reset cannot bypass button radius');
+
+    foreach ([
+        '.masonry-3 > *',
+        '.masonry-3 > a',
+        '.masonry-3 [class]',
+        '.masonry-3 :not(.card)',
+    ] as $selector) {
+        $problems = PageStylesStep::validate(
+            "{$selector} {\n    border-radius: 9999px !important;\n}",
+        );
+        assert_contains('shape-owned', implode('; ', $problems), "broad subject {$selector}");
+        [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations(
+            "{$selector} { border-radius: 9999px !important; color: inherit; }",
+        );
+        assert_eq(1, count($dropped), "salvages broad subject {$selector}");
+        assert_true(!str_contains($salvaged, 'border-radius'));
+        assert_contains('color: inherit', $salvaged);
+    }
+
+    assert_eq(
+        [],
+        PageStylesStep::validate(
+            ".overlap-up, .overlap-up .card {\n    border-radius: 1rem;\n    --card-border-radius: 1rem;\n    all: revert-layer;\n}",
+        ),
+        'generic utility/card geometry remains outside image/button ownership',
+    );
+});
+
+test('shape scanning ignores declaration-looking text inside quoted and custom-property values', function () {
+    $css = '.masonry-3::before { content: "foo; border-radius: 2rem"; '
+        . '--card-template: { border-radius: 3rem; }; margin:0; }';
+
+    assert_eq([], PageStylesStep::validate($css));
+    [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
+    assert_eq($css, $salvaged);
+    assert_eq([], $dropped);
+});
+
 test('validate rejects CSS that hides generated content', function () {
     foreach ([
         ".masonry-3 > * {\n    opacity: 0;\n}",
@@ -132,6 +187,9 @@ test('dropOffendingDeclarations removes bad declarations and keeps the rest', fu
         . "    --motion-enter-duration: 150ms;\n"
         . "    z-index: 2;\n"
         . "}\n"
+        . ".masonry-3 .wp-block-image img {\n"
+        . "    border-radius: 9999px !important;\n"
+        . "}\n"
         . "@media (max-width: 600px) {\n"
         . "    .masonry-3 {\n"
         . "        columns: 1;\n"
@@ -140,10 +198,11 @@ test('dropOffendingDeclarations removes bad declarations and keeps the rest', fu
         . "}";
     [$salvaged, $dropped] = PageStylesStep::dropOffendingDeclarations($css);
 
-    assert_eq(3, count($dropped), 'three offending declarations dropped');
+    assert_eq(4, count($dropped), 'four offending declarations dropped');
     assert_contains('raw color literal', implode('; ', $dropped));
     assert_contains('profile-owned', implode('; ', $dropped));
     assert_contains('hides content', implode('; ', $dropped));
+    assert_contains('shape-owned', implode('; ', $dropped));
     assert_contains('margin-top: -4rem', $salvaged, 'clean declarations kept');
     assert_contains('z-index: 2', $salvaged, 'declarations after a dropped one kept');
     assert_contains('columns: 1', $salvaged, 'media-nested rule bodies salvaged too');
@@ -151,6 +210,7 @@ test('dropOffendingDeclarations removes bad declarations and keeps the rest', fu
     assert_true(!str_contains($salvaged, 'rgba'), 'raw color gone');
     assert_true(!str_contains($salvaged, '--motion-'), 'motion override gone');
     assert_true(!str_contains($salvaged, 'opacity'), 'hidden-content declaration gone');
+    assert_true(!str_contains($salvaged, 'border-radius'), 'shape override gone');
     assert_eq([], PageStylesStep::validate($salvaged), 'salvaged CSS validates clean');
 });
 
@@ -176,6 +236,9 @@ test('run drops offending declarations and ships the rest of the appendix', func
         . "    position: relative;\n"
         . "    z-index: 2;\n"
         . "    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);\n"
+        . "}\n"
+        . ".overlap-up .wp-block-image img {\n"
+        . "    border-radius: 9999px !important;\n"
         . "}"
     );
 
@@ -185,12 +248,16 @@ test('run drops offending declarations and ships the rest of the appendix', func
     assert_contains('margin-top: -4rem', $style, 'appendix shipped');
     assert_contains('page-styles step', $style, 'marker comment present');
     assert_true(!str_contains($style, 'rgba'), 'offending declaration not shipped');
+    assert_true(!str_contains($style, 'border-radius'), 'shape-owned declaration not shipped');
     $log = $project->readText('logs/page-styles.log');
     assert_contains('SALVAGED', $log);
     assert_contains('raw color literal', $log);
+    assert_contains('shape-owned', $log);
     // Each dropped declaration is recorded durably for the repair pass.
     $joined = implode(' ', $project->readJson('warnings.json')['page-styles'] ?? []);
     assert_contains('dropped offending CSS declaration', $joined);
+    assert_contains('border-radius: 9999px !important', $joined);
+    assert_contains('delivered removed', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -242,6 +309,7 @@ test('run appends validated CSS to style.css and passes the configured model', f
     assert_true(!str_contains($llm->calls[0]['prompt'], '- .hover-reveal'), 'hover-reveal is not a requested utility');
     assert_true(!str_contains($llm->calls[0]['prompt'], 'MOTION TUNING'), 'motion timing is not offered');
     assert_true(!str_contains($llm->calls[0]['prompt'], '- .sticky-side'), 'unused class not requested');
+    assert_contains('The design direction owns contained-image and button corners', $llm->calls[0]['prompt']);
     assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
