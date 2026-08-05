@@ -79,9 +79,8 @@ final class DesignDirectionStep implements Step
 
     /**
      * The corner languages a direction may commit to. `sharp` is the default
-     * and wires nothing; `soft`/`round` make ThemeJsonStep wire a corner
-     * radius onto contained imagery, and the theme-json prompt aligns button
-     * radius with the same commitment.
+     * and wires square corners; `soft`/`round` make downstream repair wire a
+     * corner radius onto contained core/image media and buttons.
      */
     public const SHAPES = ['sharp', 'soft', 'round'];
 
@@ -594,14 +593,16 @@ final class DesignDirectionStep implements Step
         // The corner language is a fixed list; anything unrecognized falls
         // back to sharp — an accidental radius reads as template styling, so
         // rounding only ships on an explicit commitment.
-        $shape = self::shape($raw['shape'] ?? null);
-        $rawShape = is_string($raw['shape'] ?? null)
-            ? strtolower(trim($raw['shape']))
-            : '';
-        if ($rawShape !== '' && $rawShape !== $shape) {
-            $repairs[] = 'designDirection.json: field shape authored '
-                . self::describe($raw['shape']) . ' delivered ' . self::describe($shape)
-                . '; disposition repaired invalid corner language';
+        $rawShape = $raw['shape'] ?? null;
+        $explicitShape = self::explicitShape($rawShape);
+        $shape = $explicitShape ?? 'sharp';
+        if (
+            array_key_exists('shape', $raw)
+            && $explicitShape === null
+        ) {
+            $warnings[] = "file='designDirection.json'; path=\"shape\"; authored="
+                . Warnings::value($rawShape)
+                . '; delivered="sharp"; disposition=invalid corner language replaced by deterministic sharp fallback';
         }
 
         return [
@@ -850,15 +851,15 @@ final class DesignDirectionStep implements Step
         }
 
         // Render the shape commitment with its executable meaning. The build
-        // wires the image-corner radius itself; this line exists so theme-json
-        // aligns button radius with it and no prompt re-interprets a bare
-        // keyword. Directions persisted before the field existed carry none.
-        $shape = strtolower(trim((string) ($direction['shape'] ?? '')));
-        if (in_array($shape, self::SHAPES, true)) {
+        // wires contained core/image and button radii itself; this
+        // line keeps prompts from re-interpreting a bare keyword. Directions
+        // persisted before the field existed carry none.
+        $shape = self::explicitShape($direction['shape'] ?? null);
+        if ($shape !== null) {
             $facts[] = match ($shape) {
-                'sharp' => '- **Shape**: sharp — contained imagery and cards keep square corners; do not add border radius to images.',
-                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained images; give buttons a modest matching borderRadius. Full-bleed media stays square.',
-                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained images; buttons follow the same language, up to pill. Full-bleed media stays square.',
+                'sharp' => '- **Shape**: sharp — the build keeps contained `core/image` media and buttons square. Full-bleed media stays square.',
+                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained `core/image` media and a modest radius onto buttons. Full-bleed media stays square.',
+                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained `core/image` media and pill-shaped buttons. Full-bleed media stays square.',
             };
         }
 
@@ -1044,24 +1045,28 @@ final class DesignDirectionStep implements Step
     }
 
     /**
-     * The committed corner language ("sharp", "soft" or "round") ThemeJsonStep
-     * executes as image-corner wiring. Fails closed: no direction, or one that
-     * predates/garbled the field, means `sharp` — a step run in isolation must
-     * not surprise-round a site whose direction never committed to it.
+     * The explicit committed corner language ("sharp", "soft" or "round"),
+     * or null when no direction was persisted or its shape field is absent or
+     * garbled. The producing step normalizes every generated direction onto a
+     * valid value; null lets isolated downstream steps preserve pre-field
+     * artifacts instead of silently rewriting them as sharp.
      */
-    public static function shapeFor(Project $project): string
+    public static function shapeFor(Project $project): ?string
     {
         if (!$project->exists(self::FILE)) {
-            return 'sharp';
+            return null;
         }
-        return self::shape($project->readJson(self::FILE)['shape'] ?? null);
+        return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
     }
 
-    /** Coerce a raw shape value onto the fixed corner-language list. */
-    private static function shape(mixed $raw): string
+    /** Parse only an explicit valid corner-language commitment. */
+    private static function explicitShape(mixed $raw): ?string
     {
-        $shape = strtolower(trim((string) (is_string($raw) ? $raw : '')));
-        return in_array($shape, self::SHAPES, true) ? $shape : 'sharp';
+        if (!is_string($raw)) {
+            return null;
+        }
+        $shape = strtolower(trim($raw));
+        return in_array($shape, self::SHAPES, true) ? $shape : null;
     }
 
     /**

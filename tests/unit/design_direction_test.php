@@ -478,31 +478,117 @@ test('format renders the canvas commitment with its executable meaning', functio
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
-test('normalize commits a shape: the fixed corner languages pass through, everything else is sharp', function () {
-    assert_eq('soft', DesignDirectionStep::normalize(['description' => 'x', 'shape' => ' Soft '])['shape']);
-    assert_eq('round', DesignDirectionStep::normalize(['description' => 'x', 'shape' => 'round'])['shape']);
-    assert_eq('sharp', DesignDirectionStep::normalize(['description' => 'x'])['shape']);
-    assert_eq('sharp', DesignDirectionStep::normalize(['description' => 'x', 'shape' => 'wavy'])['shape']);
-    assert_eq('sharp', DesignDirectionStep::normalize(['description' => 'x', 'shape' => ['round']])['shape']);
+test('normalize commits a shape while valid normalization and a missing field stay silent', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach ([
+        ['raw' => $base + ['shape' => ' Soft '], 'delivered' => 'soft'],
+        ['raw' => $base + ['shape' => 'ROUND'], 'delivered' => 'round'],
+        ['raw' => $base, 'delivered' => 'sharp'],
+    ] as $case) {
+        $repairs = [];
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $case['raw'],
+            'cinematic-safe-zone',
+            '',
+            $repairs,
+            $warnings,
+        );
+
+        assert_eq($case['delivered'], $direction['shape']);
+        assert_eq([], $repairs, 'valid shape normalization needs no repair evidence');
+        assert_eq([], $warnings, 'valid or absent shape needs no durable warning');
+    }
+});
+
+test('normalize warns actionably when invalid string and non-string shapes fall back to sharp', function () {
+    $base = [
+        'description' => 'x',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ];
+    foreach (['wavy', '   ', ['round'], true, 7, null] as $authored) {
+        $repairs = [];
+        $warnings = [];
+        $direction = DesignDirectionStep::normalize(
+            $base + ['shape' => $authored],
+            'cinematic-safe-zone',
+            '',
+            $repairs,
+            $warnings,
+        );
+
+        assert_eq('sharp', $direction['shape']);
+        assert_eq([], $repairs, 'a fallback that loses an authored value is not a successful repair');
+        assert_eq(1, count($warnings));
+        foreach ([
+            "file='designDirection.json'",
+            'path="shape"',
+            'authored=',
+            'delivered="sharp"',
+            'disposition=',
+        ] as $context) {
+            assert_contains($context, $warnings[0]);
+        }
+    }
+});
+
+test('design-direction persists invalid shape fallback evidence in warnings.json', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $direction = designdir_direction();
+    $direction['shape'] = ['round'];
+    $llm->queueJson(['direction' => $direction]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq('sharp', $project->readJson('designDirection.json')['shape']);
+    $shapeWarning = '';
+    foreach ($project->readJson('warnings.json')['design-direction'] ?? [] as $warning) {
+        if (str_contains($warning, 'path="shape"')) {
+            $shapeWarning = $warning;
+            break;
+        }
+    }
+    foreach ([
+        "file='designDirection.json'",
+        'path="shape"',
+        'authored=["round"]',
+        'delivered="sharp"',
+        'disposition=invalid corner language replaced by deterministic sharp fallback',
+    ] as $context) {
+        assert_contains($context, $shapeWarning);
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('format renders the shape commitment with its executable meaning', function () {
     $sharp = DesignDirectionStep::format(['description' => 'x', 'shape' => 'sharp']);
     assert_contains('**Shape**: sharp', $sharp);
-    assert_contains('square corners', $sharp);
+    assert_contains('contained `core/image` media and buttons square', $sharp);
+    assert_contains('Full-bleed media stays square', $sharp);
+    assert_true(!str_contains($sharp, 'cards'), 'shape does not promise generic card geometry');
 
     $soft = DesignDirectionStep::format(['description' => 'x', 'shape' => 'soft']);
     assert_contains('**Shape**: soft', $soft);
     assert_contains('subtle corner radius', $soft);
+    assert_contains('modest radius onto buttons', $soft);
+    assert_contains('Full-bleed media stays square', $soft);
 
     $round = DesignDirectionStep::format(['description' => 'x', 'shape' => 'round']);
     assert_contains('**Shape**: round', $round);
     assert_contains('decisive corner radius', $round);
+    assert_contains('pill-shaped buttons', $round);
+    assert_contains('Full-bleed media stays square', $round);
 
     // Directions persisted before the field existed carry no shape fact,
-    // and an unrecognized value renders none rather than guessing.
+    // and an unrecognized or wrong-typed value renders none rather than
+    // guessing (or emitting an array-to-string warning).
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.', 'shape' => 'wavy']));
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.', 'shape' => ['round']]));
 });
 
 test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
@@ -944,14 +1030,17 @@ test('every cataloged hero recipe bears an image (the image-free poster is retir
     }
 });
 
-test('shapeFor fails closed to sharp', function () {
+test('shapeFor returns only an explicit valid commitment', function () {
     $tmp = sys_get_temp_dir() . '/builder_ddshape_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
 
-    assert_eq('sharp', DesignDirectionStep::shapeFor($project), 'no direction file');
+    assert_eq(null, DesignDirectionStep::shapeFor($project), 'no direction file');
 
     $project->writeJson('designDirection.json', ['description' => 'x']);
-    assert_eq('sharp', DesignDirectionStep::shapeFor($project), 'direction predates the field');
+    assert_eq(null, DesignDirectionStep::shapeFor($project), 'direction predates the field');
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => ['round']]);
+    assert_eq(null, DesignDirectionStep::shapeFor($project), 'garbled persisted shape is not guessed');
 
     $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => ' Round ']);
     assert_eq('round', DesignDirectionStep::shapeFor($project));

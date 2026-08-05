@@ -12,36 +12,302 @@ use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
-test('repairShapeWiring executes the committed corner language and lets a model radius win', function () {
-    // soft/round fill the core/image radius the direction committed.
-    [$soft, $warnings] = ThemeJsonStep::repairShapeWiring([], 'soft');
+test('repairShapeWiring installs every explicit corner language and leaves a missing commitment alone', function () {
+    [$soft, $repairs] = ThemeJsonStep::repairShapeWiring([], 'soft');
     assert_eq('0.5rem', $soft['styles']['blocks']['core/image']['border']['radius']);
-    assert_eq([], $warnings);
-    [$round] = ThemeJsonStep::repairShapeWiring([], 'round');
+    assert_eq('0.5rem', $soft['styles']['elements']['button']['border']['radius']);
+    assert_eq([], $repairs);
+    [$round, $repairs] = ThemeJsonStep::repairShapeWiring([], 'round');
     assert_eq('1.25rem', $round['styles']['blocks']['core/image']['border']['radius']);
+    assert_eq('9999px', $round['styles']['elements']['button']['border']['radius']);
+    assert_eq([], $repairs);
 
-    // sharp — and a direction that predates the field — wires nothing.
-    [$sharp] = ThemeJsonStep::repairShapeWiring([], 'sharp');
-    assert_eq([], $sharp);
-    [$none] = ThemeJsonStep::repairShapeWiring([], '');
-    assert_eq([], $none);
+    [$sharp, $repairs] = ThemeJsonStep::repairShapeWiring([], 'sharp');
+    assert_true(!isset($sharp['styles']['blocks']['core/image']), 'sharp does not emit an image radius');
+    assert_eq('0', $sharp['styles']['elements']['button']['border']['radius']);
+    assert_eq([], $repairs);
 
-    // A well-shaped model-authored radius wins at the leaf, same as every
-    // scaffold fill; siblings survive.
-    $authored = ['styles' => ['blocks' => ['core/image' => [
-        'border' => ['radius' => '2px'],
-        'typography' => ['fontSize' => 'var:preset|font-size|caption'],
-    ]]]];
-    [$kept] = ThemeJsonStep::repairShapeWiring($authored, 'round');
-    assert_eq('2px', $kept['styles']['blocks']['core/image']['border']['radius']);
-    assert_eq('var:preset|font-size|caption', $kept['styles']['blocks']['core/image']['typography']['fontSize']);
+    $legacy = ['styles' => [
+        'blocks' => ['core/image' => ['border' => ['radius' => '2px']]],
+        'elements' => ['button' => ['border' => ['radius' => '3px']]],
+    ]];
+    [$none, $repairs] = ThemeJsonStep::repairShapeWiring($legacy, '');
+    assert_eq($legacy, $none, 'a direction persisted before the shape field is a complete no-op');
+    assert_eq([], $repairs);
+});
 
-    // A malformed border container is replaced with the wiring, durably recorded.
-    $malformed = ['styles' => ['blocks' => ['core/image' => ['border' => 'rounded']]]];
-    [$repaired, $repairWarnings] = ThemeJsonStep::repairShapeWiring($malformed, 'soft');
+test('repairShapeWiring overrides conflicts, reports repairs, preserves siblings, and reaches a fixed point', function () {
+    $authored = ['styles' => [
+        'blocks' => ['core/image' => [
+            'border' => ['radius' => '2px', 'color' => '#123456'],
+            'typography' => ['fontSize' => 'var:preset|font-size|caption'],
+        ], 'core/button' => [
+            'border' => ['radius' => '4px', 'color' => '#654321'],
+            ':active' => ['border' => ['radius' => '6px', 'color' => '#abcdef']],
+        ]],
+        'elements' => ['button' => [
+            'border' => ['radius' => '3px', 'width' => '1px'],
+            'color' => ['background' => 'var:preset|color|accent'],
+            ':hover' => ['border' => ['radius' => '42px', 'color' => '#fedcba']],
+            ':focus-visible' => ['border' => ['radius' => '7px', 'width' => '2px']],
+        ]],
+    ]];
+
+    [$round, $repairs] = ThemeJsonStep::repairShapeWiring($authored, 'round');
+    assert_eq('1.25rem', $round['styles']['blocks']['core/image']['border']['radius']);
+    assert_eq('#123456', $round['styles']['blocks']['core/image']['border']['color']);
+    assert_eq('var:preset|font-size|caption', $round['styles']['blocks']['core/image']['typography']['fontSize']);
+    assert_true(!isset($round['styles']['blocks']['core/button']['border']['radius']));
+    assert_eq('#654321', $round['styles']['blocks']['core/button']['border']['color']);
+    assert_true(!isset($round['styles']['blocks']['core/button'][':active']['border']['radius']));
+    assert_eq('#abcdef', $round['styles']['blocks']['core/button'][':active']['border']['color']);
+    assert_eq('9999px', $round['styles']['elements']['button']['border']['radius']);
+    assert_eq('1px', $round['styles']['elements']['button']['border']['width']);
+    assert_eq('var:preset|color|accent', $round['styles']['elements']['button']['color']['background']);
+    assert_true(!isset($round['styles']['elements']['button'][':hover']['border']['radius']));
+    assert_eq('#fedcba', $round['styles']['elements']['button'][':hover']['border']['color']);
+    assert_true(!isset($round['styles']['elements']['button'][':focus-visible']['border']['radius']));
+    assert_eq('2px', $round['styles']['elements']['button'][':focus-visible']['border']['width']);
+    assert_eq(6, count($repairs));
+    $joined = implode(' ', $repairs);
+    assert_contains('theme/theme.json styles.blocks.core/image.border.radius: authored "2px"; delivered "1.25rem"', $joined);
+    assert_contains('theme/theme.json styles.blocks.core/button.border.radius: authored "4px"; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.blocks.core/button.:active.border.radius: authored "6px"; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.elements.button.border.radius: authored "3px"; delivered "9999px"', $joined);
+    assert_contains('theme/theme.json styles.elements.button.:hover.border.radius: authored "42px"; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.elements.button.:focus-visible.border.radius: authored "7px"; delivered removed', $joined);
+    assert_contains('disposition replaced conflicting radius to enforce committed round shape', $joined);
+    [$fixedRound, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($round, 'round');
+    assert_eq($round, $fixedRound);
+    assert_eq([], $fixedWarnings, 'fixed point produces no warnings');
+
+    [$sharp, $repairs] = ThemeJsonStep::repairShapeWiring($authored, 'sharp');
+    assert_true(!isset($sharp['styles']['blocks']['core/image']['border']['radius']));
+    assert_eq('#123456', $sharp['styles']['blocks']['core/image']['border']['color']);
+    assert_true(!isset($sharp['styles']['blocks']['core/button']['border']['radius']));
+    assert_eq('#654321', $sharp['styles']['blocks']['core/button']['border']['color']);
+    assert_true(!isset($sharp['styles']['blocks']['core/button'][':active']['border']['radius']));
+    assert_eq('#abcdef', $sharp['styles']['blocks']['core/button'][':active']['border']['color']);
+    assert_eq('0', $sharp['styles']['elements']['button']['border']['radius']);
+    assert_eq('1px', $sharp['styles']['elements']['button']['border']['width']);
+    assert_true(!isset($sharp['styles']['elements']['button'][':hover']['border']['radius']));
+    assert_eq('#fedcba', $sharp['styles']['elements']['button'][':hover']['border']['color']);
+    assert_true(!isset($sharp['styles']['elements']['button'][':focus-visible']['border']['radius']));
+    assert_eq('2px', $sharp['styles']['elements']['button'][':focus-visible']['border']['width']);
+    assert_eq(6, count($repairs));
+    $joined = implode(' ', $repairs);
+    assert_contains('theme/theme.json styles.blocks.core/image.border.radius: authored "2px"; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.blocks.core/button.border.radius: authored "4px"; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.blocks.core/button.:active.border.radius: authored "6px"; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.elements.button.border.radius: authored "3px"; delivered "0"', $joined);
+    assert_contains('theme/theme.json styles.elements.button.:hover.border.radius: authored "42px"; delivered removed', $joined);
+    assert_contains('theme/theme.json styles.elements.button.:focus-visible.border.radius: authored "7px"; delivered removed', $joined);
+    assert_contains('disposition removed conflicting radius to enforce committed sharp shape', $joined);
+    [$fixedSharp, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($sharp, 'sharp');
+    assert_eq($sharp, $fixedSharp);
+    assert_eq([], $fixedWarnings, 'fixed point produces no warnings');
+});
+
+test('repairShapeWiring removes responsive variation and nested button/image radius overrides', function () {
+    $authored = ['styles' => [
+        'blocks' => [
+            'core/image' => [
+                'border' => ['radius' => '2px', 'color' => '#111111'],
+                'elements' => ['caption' => ['border' => ['radius' => '6px', 'width' => '1px']]],
+                '@mobile' => ['border' => ['radius' => '8px', 'width' => '1px']],
+                'variations' => ['default' => [
+                    'border' => ['radius' => '7px', 'color' => '#222222'],
+                ]],
+            ],
+            'core/button' => [
+                'border' => ['radius' => '4px', 'color' => '#333333'],
+                '@tablet' => ['border' => ['radius' => '5px', 'width' => '2px']],
+                'variations' => ['outline' => [
+                    'border' => ['radius' => '6px', 'style' => 'solid'],
+                    ':hover' => ['border' => ['radius' => '9px', 'color' => '#444444']],
+                ]],
+            ],
+            'core/buttons' => ['elements' => ['button' => [
+                'border' => ['radius' => '10px', 'width' => '3px'],
+                ':focus' => ['border' => ['radius' => '11px', 'color' => '#555555']],
+                '@mobile' => ['border' => ['radius' => '12px', 'style' => 'dashed']],
+            ]]],
+            'core/group' => ['variations' => ['framed' => ['blocks' => [
+                'core/button' => ['border' => ['radius' => '13px', 'color' => '#666666']],
+                'core/image' => ['border' => ['radius' => '14px', 'width' => '4px']],
+            ]]]],
+        ],
+        'elements' => ['button' => [
+            'border' => ['radius' => '3px', 'width' => '5px'],
+            '@mobile' => ['border' => ['radius' => '15px', 'color' => '#777777']],
+        ]],
+    ]];
+
+    [$repaired, $repairs, $warnings] = ThemeJsonStep::repairShapeWiring($authored, 'soft');
+
     assert_eq('0.5rem', $repaired['styles']['blocks']['core/image']['border']['radius']);
-    assert_eq(1, count($repairWarnings));
-    assert_contains('styles.blocks.core/image.border', $repairWarnings[0]);
+    assert_eq('#111111', $repaired['styles']['blocks']['core/image']['border']['color']);
+    assert_eq(
+        '6px',
+        $repaired['styles']['blocks']['core/image']['elements']['caption']['border']['radius'],
+        'caption geometry does not inherit image ownership',
+    );
+    assert_eq('0.5rem', $repaired['styles']['elements']['button']['border']['radius']);
+    assert_eq('5px', $repaired['styles']['elements']['button']['border']['width']);
+    foreach ([
+        ['blocks', 'core/image', '@mobile'],
+        ['blocks', 'core/image', 'variations', 'default'],
+        ['blocks', 'core/button'],
+        ['blocks', 'core/button', '@tablet'],
+        ['blocks', 'core/button', 'variations', 'outline'],
+        ['blocks', 'core/button', 'variations', 'outline', ':hover'],
+        ['blocks', 'core/buttons', 'elements', 'button'],
+        ['blocks', 'core/buttons', 'elements', 'button', ':focus'],
+        ['blocks', 'core/buttons', 'elements', 'button', '@mobile'],
+        ['blocks', 'core/group', 'variations', 'framed', 'blocks', 'core/button'],
+        ['blocks', 'core/group', 'variations', 'framed', 'blocks', 'core/image'],
+        ['elements', 'button', '@mobile'],
+    ] as $path) {
+        $node = $repaired['styles'];
+        foreach ($path as $key) {
+            $node = $node[$key];
+        }
+        assert_true(!isset($node['border']['radius']), implode('.', $path) . ' radius removed');
+    }
+    assert_eq('1px', $repaired['styles']['blocks']['core/image']['@mobile']['border']['width']);
+    assert_eq('solid', $repaired['styles']['blocks']['core/button']['variations']['outline']['border']['style']);
+    assert_eq('#555555', $repaired['styles']['blocks']['core/buttons']['elements']['button'][':focus']['border']['color']);
+    assert_eq('4px', $repaired['styles']['blocks']['core/group']['variations']['framed']['blocks']['core/image']['border']['width']);
+    assert_eq([], $warnings, 'structured authoritative repairs stay out of warnings.json');
+    $joined = implode(' ', $repairs);
+    foreach ([
+        'styles.blocks.core/image.@mobile.border.radius',
+        'styles.blocks.core/button.variations.outline.:hover.border.radius',
+        'styles.blocks.core/buttons.elements.button.border.radius',
+        'styles.blocks.core/group.variations.framed.blocks.core/image.border.radius',
+        'styles.elements.button.@mobile.border.radius',
+    ] as $path) {
+        assert_contains($path, $joined);
+    }
+
+    [$fixed, $fixedRepairs, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($repaired, 'soft');
+    assert_eq($repaired, $fixed);
+    assert_eq([], $fixedRepairs);
+    assert_eq([], $fixedWarnings);
+});
+
+test('repairShapeWiring removes only custom CSS that reaches image/button corners', function () {
+    $authored = ['styles' => [
+        'css' => '.card { border-radius: 2rem; color: red; } '
+            . '.wp-block-image img { all: var(--shape-reset, initial) !important; filter: none; } '
+            . '.plain { margin: 0; }',
+        'blocks' => [
+            'core/button' => ['css' => '& { border-radius: 4px; color: currentColor; }'],
+            'core/image' => [
+                'css' => 'animation-name: image-shape; '
+                    . '&:not(:has(.excluded)) { all: initial; filter: none; } '
+                    . '& figcaption { animation-name: caption-shape; } '
+                    . '@keyframes image-shape { to { border-radius: 4rem; transform: none; } } '
+                    . '@keyframes caption-shape { to { border-radius: 5rem; opacity: 1; } }',
+                'variations' => ['default' => [
+                    'css' => '& img { border-start-start-radius: 6px; filter: none; } '
+                        . '& figcaption { border-radius: 5px; padding: 2px; }',
+                ]],
+            ],
+            'core/group' => ['css' => '& { border-radius: 8px; padding: 1rem; } '
+                . '& .wp-block-button__link { border-radius: 1px; color: inherit; }'],
+        ],
+    ]];
+
+    [$repaired, $repairs, $warnings] = ThemeJsonStep::repairShapeWiring($authored, 'round');
+
+    assert_contains('.card { border-radius: 2rem', $repaired['styles']['css']);
+    assert_true(!str_contains($repaired['styles']['css'], 'all: var('));
+    assert_contains('color: red', $repaired['styles']['css']);
+    assert_contains('filter: none', $repaired['styles']['css']);
+    assert_contains('margin: 0', $repaired['styles']['css']);
+    assert_contains('color: currentColor', $repaired['styles']['blocks']['core/button']['css']);
+    $baseImageCss = $repaired['styles']['blocks']['core/image']['css'];
+    assert_true(!str_contains($baseImageCss, 'all: initial'), 'balanced implicit-root reset is repaired');
+    assert_contains('filter: none', $baseImageCss, 'implicit-root declaration sibling survives');
+    assert_true(!str_contains($baseImageCss, 'border-radius: 4rem'), 'owned image keyframe is repaired');
+    assert_contains('transform: none', $baseImageCss, 'non-corner image motion survives');
+    assert_contains('border-radius: 5rem', $baseImageCss, 'caption-only keyframe geometry survives');
+    $imageCss = $repaired['styles']['blocks']['core/image']['variations']['default']['css'];
+    assert_true(!str_contains($imageCss, 'border-start-start-radius'));
+    assert_contains('filter: none', $imageCss);
+    assert_contains('figcaption { border-radius: 5px', $imageCss, 'caption rule survives');
+    $groupCss = $repaired['styles']['blocks']['core/group']['css'];
+    assert_contains('& { border-radius: 8px', $groupCss, 'generic group geometry survives');
+    assert_contains('padding: 1rem', $groupCss);
+    assert_true(!str_contains($groupCss, 'border-radius: 1px'), 'descendant button override removed');
+    assert_contains('color: inherit', $groupCss);
+    $joinedRepairs = implode(' ', $repairs);
+    assert_contains('styles.css', $joinedRepairs);
+    assert_contains('styles.blocks.core/button.css', $joinedRepairs);
+    assert_contains('styles.blocks.core/image.variations.default.css', $joinedRepairs);
+    assert_contains('styles.blocks.core/group.css', $joinedRepairs);
+    assert_eq([], $warnings, 'exact owned-selector repairs do not lose unrelated geometry');
+
+    [$fixed, $fixedRepairs, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($repaired, 'round');
+    assert_eq($repaired, $fixed);
+    assert_eq([], $fixedRepairs);
+    assert_eq([], $fixedWarnings);
+});
+
+test('repairShapeWiring removes structurally unsafe owned CSS with durable context', function () {
+    $authored = ['styles' => [
+        'css' => '.wp-block-image img { color:red; border-radius:99px',
+        'blocks' => [
+            'core/image' => ['css' => '& img { all:initial!important'],
+            'core/group' => ['css' => '& { border-radius:8px'],
+        ],
+    ]];
+
+    [$repaired, $repairs, $warnings] = ThemeJsonStep::repairShapeWiring($authored, 'soft');
+
+    assert_true(!isset($repaired['styles']['css']), 'unsafe global image override is isolated');
+    assert_true(!isset($repaired['styles']['blocks']['core/image']['css']), 'unsafe scoped image override is isolated');
+    assert_eq(
+        '& { border-radius:8px',
+        $repaired['styles']['blocks']['core/group']['css'],
+        'malformed generic group geometry remains outside shape ownership',
+    );
+    assert_eq(2, count($warnings));
+    $joined = implode(' ', $warnings);
+    assert_contains('theme/theme.json styles.css', $joined);
+    assert_contains('theme/theme.json styles.blocks.core/image.css', $joined);
+    assert_contains('authored', $joined);
+    assert_contains('delivered removed', $joined);
+    assert_contains('structurally malformed', $joined);
+    assert_contains('could not be isolated safely', $joined);
+
+    [$fixed, $fixedRepairs, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($repaired, 'soft');
+    assert_eq($repaired, $fixed);
+    assert_eq([], $fixedRepairs);
+    assert_eq([], $fixedWarnings);
+});
+
+test('repairShapeWiring isolates malformed radius containers with actionable repair notes', function () {
+    $malformed = ['styles' => [
+        'blocks' => ['core/image' => ['border' => 'rounded']],
+        'elements' => ['button' => ['border' => [
+            'radius' => ['topLeft' => '2px'],
+            'width' => '1px',
+        ]]],
+    ]];
+    [$repaired, $repairNotes] = ThemeJsonStep::repairShapeWiring($malformed, 'soft');
+    assert_eq('0.5rem', $repaired['styles']['blocks']['core/image']['border']['radius']);
+    assert_eq('0.5rem', $repaired['styles']['elements']['button']['border']['radius']);
+    assert_eq('1px', $repaired['styles']['elements']['button']['border']['width']);
+    assert_eq(2, count($repairNotes));
+    $joined = implode(' ', $repairNotes);
+    assert_contains('styles.blocks.core/image.border: authored "rounded"; delivered {"radius":"0.5rem"}', $joined);
+    assert_contains('styles.elements.button.border.radius: authored {"topLeft":"2px"}; delivered "0.5rem"', $joined);
+    assert_contains('disposition replaced malformed container to enforce committed soft shape', $joined);
+    [$fixed, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($repaired, 'soft');
+    assert_eq($repaired, $fixed);
+    assert_eq([], $fixedWarnings, 'fixed point produces no warnings');
 });
 
 test('theme-json wires the direction-committed shape into the written theme', function () {
@@ -51,12 +317,25 @@ test('theme-json wires the direction-committed shape into the written theme', fu
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
     seed_test_design_direction($project, 'cinematic-safe-zone', ['shape' => 'round']);
 
+    $payload = valid_theme_payload();
+    $payload['styles'] = [
+        'blocks' => ['core/image' => ['border' => ['radius' => '2px', 'color' => '#123456']]],
+        'elements' => ['button' => ['border' => ['radius' => '3px', 'width' => '1px']]],
+    ];
     $llm = new FakeLlm();
-    $llm->queueJson(valid_theme_payload());
+    $llm->queueJson($payload);
     (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
 
     $theme = $project->readJson('theme/theme.json');
     assert_eq('1.25rem', $theme['styles']['blocks']['core/image']['border']['radius']);
+    assert_eq('#123456', $theme['styles']['blocks']['core/image']['border']['color']);
+    assert_eq('9999px', $theme['styles']['elements']['button']['border']['radius']);
+    assert_eq('1px', $theme['styles']['elements']['button']['border']['width']);
+    $report = $project->readText('logs/theme-json-shape.txt');
+    assert_contains('styles.blocks.core/image.border.radius: authored "2px"; delivered "1.25rem"', $report);
+    assert_contains('styles.elements.button.border.radius: authored "3px"; delivered "9999px"', $report);
+    $warnings = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
+    assert_true(!str_contains($warnings, 'border.radius'), 'successful shape repairs stay out of warnings.json');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -73,6 +352,24 @@ test('theme-json wires no image radius without a shape commitment', function () 
 
     $theme = $project->readJson('theme/theme.json');
     assert_true(!isset($theme['styles']['blocks']['core/image']['border']), 'direction predates the field, no radius');
+    assert_true(!isset($theme['styles']['elements']['button']['border']), 'direction predates the field, no button radius');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json safely leaves a garbled persisted shape uncommitted', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjbadshape_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['shape' => ['round']]);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_true(!isset($theme['styles']['blocks']['core/image']['border']), 'invalid shape does not guess a radius');
+    assert_true(!isset($theme['styles']['elements']['button']['border']), 'invalid shape does not guess button geometry');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -153,7 +450,7 @@ test('theme-json delivers a deterministic base theme when repaired model JSON is
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    seed_test_design_direction($project);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['shape' => 'sharp']);
 
     $llm = new class implements Llm {
         public int $rounds = 0;
@@ -194,6 +491,8 @@ test('theme-json delivers a deterministic base theme when repaired model JSON is
         ['base', 'contrast', 'primary', 'secondary', 'accent'],
         array_column($theme['settings']['color']['palette'], 'slug'),
     );
+    assert_true(!isset($theme['styles']['blocks']['core/image']['border']['radius']));
+    assert_eq('0', $theme['styles']['elements']['button']['border']['radius']);
     assert_eq(2, $llm->rounds, 'one malformed response and one malformed repair response');
     $joined = implode(' ', $project->readJson('warnings.json')['theme-json'] ?? []);
     assert_contains('generated JSON remained unusable', $joined);
@@ -720,7 +1019,7 @@ function theme_json_preset(array $presets, string $slug): array
 
 test('theme-json declares every artifact it writes', function () {
     $step = new ThemeJsonStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
-    assert_eq(['theme/theme.json', 'warnings.json'], $step->declaration()->writes);
+    assert_eq(['theme/theme.json', 'logs/theme-json-shape.txt', 'warnings.json'], $step->declaration()->writes);
 });
 
 test('theme-json font-size repair preserves model sizes and fills each omission', function () {
@@ -1158,6 +1457,30 @@ test('theme-json receives the front hero blueprint as focused sizing context', f
     assert_contains('headline', strtolower($prompt));
     assert_eq(1, substr_count($prompt, 'cinematic-safe-zone'), 'recipe appears only in focused context');
     assert_true(!str_contains($prompt, 'hero_composition'), 'removed prose field is not a sizing source');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json request makes both committed shape radii build-owned', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_shape_prompt_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cold-water swim club']);
+    $project->writeJson('siteSpec.json', ['name' => 'Teal Valley']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['shape' => 'round']);
+
+    $request = (new ThemeJsonStep(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->requests($project)['theme-json'];
+    $prompt = $request['prompt'];
+
+    assert_contains('**Shape**: round', $prompt);
+    assert_contains('`sharp` removes the `core/image` radius and gives buttons `0`', $prompt);
+    assert_contains('`soft` gives both `0.5rem`', $prompt);
+    assert_contains('`round` gives `core/image` `1.25rem` and buttons `9999px`', $prompt);
+    assert_contains('Never restate or reset either build-owned radius', $prompt);
+    assert_contains('in a theme.json `css` string or structured style', $prompt);
+    assert_contains('block variations, and responsive or interaction states', $prompt);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
