@@ -121,7 +121,9 @@ test('transform residual evidence names physical sources while outputs keep sema
             ['slug' => 'site', 'title' => 'Site', 'purpose' => 'Delivered'],
         ],
     ]);
-    $project->writeJson('designDirection.json', ['description' => 'Mapped editorial']);
+    $project->writeJson('designDirection.json', test_design_direction('cinematic-safe-zone', [
+        'description' => 'Mapped editorial',
+    ]));
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => []]);
     $project->writeText(TransformArtifacts::SITE_CSS, '.mapped{display:block;}');
     $project->writeJson('design/page-artifact-map.json', [

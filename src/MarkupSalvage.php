@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild;
 
+use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
+
 /**
  * Best-effort repair of truncated generated block markup.
  *
@@ -25,16 +27,13 @@ namespace Automattic\SiteBuild;
 final class MarkupSalvage
 {
     /** HTML void elements: nothing to close when rebuilding a tag stack. */
-    private const VOID_TAGS = [
-        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-        'link', 'meta', 'param', 'source', 'track', 'wbr',
-    ];
+    private const VOID_TAGS = HtmlNode::VOID_TAGS;
 
     /**
      * Repair $markup when it is truncated; a complete document is returned
      * byte-for-byte untouched with no notes.
      *
-     * @return array{markup:string,notes:list<string>}
+     * @return array{markup:string,repairs:list<string>,warnings:list<string>}
      * @throws \RuntimeException when nothing complete remains to keep
      */
     public static function repair(string $markup): array
@@ -51,7 +50,7 @@ final class MarkupSalvage
             throw new \RuntimeException('markup has malformed block delimiters and cannot be safely salvaged');
         }
         if ($open === [] && $dangling === null && !$doc->hasMismatchedDelimiters()) {
-            return ['markup' => $markup, 'notes' => []];
+            return ['markup' => $markup, 'repairs' => [], 'warnings' => []];
         }
         if ($doc->hasMismatchedDelimiters()) {
             throw new \RuntimeException('markup has mismatched block delimiters and cannot be safely salvaged');
@@ -93,19 +92,20 @@ final class MarkupSalvage
             throw new \RuntimeException('markup is truncated beyond salvage (no complete block to keep)');
         }
 
-        $notes = [];
+        $repairs = [];
+        $warnings = [];
         if ($dropped > 0) {
-            $notes[] = "dropped {$dropped} incomplete trailing block(s)";
+            $warnings[] = "salvaged truncated markup: dropped {$dropped} incomplete trailing block(s)";
+        } elseif ($dangling !== null) {
+            $warnings[] = 'salvaged truncated markup: dropped an incomplete trailing block delimiter';
         }
         if ($keep >= 0) {
-            $notes[] = 'closed ' . ($keep + 1) . ' unclosed block(s)';
-        }
-        if ($notes === []) {
-            $notes[] = 'trimmed an incomplete trailing delimiter';
+            $repairs[] = 'salvaged truncated markup: closed ' . ($keep + 1) . ' unclosed block(s)';
         }
         return [
-            'markup' => $salvaged,
-            'notes'  => ['salvaged truncated markup: ' . implode(', ', $notes)],
+            'markup'   => $salvaged,
+            'repairs'  => $repairs,
+            'warnings' => $warnings,
         ];
     }
 

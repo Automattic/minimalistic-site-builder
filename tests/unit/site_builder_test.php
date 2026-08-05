@@ -1,7 +1,6 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\HomepageDesignStep;
@@ -11,25 +10,6 @@ use Automattic\SiteBuild\Tests\FakeLlm;
  * SiteBuilder facade: assembles the default pipeline from injected deps and
  * seeds projects the same way bin/build.php does.
  */
-
-/** @param array<string,string> $models */
-function make_test_builder(FakeLlm $llm, string $outputRoot, ?BlockFixer $fixer = null, array $models = []): SiteBuilder
-{
-    $fixer ??= new class implements BlockFixer {
-        public function fix(string $themeDir): string
-        {
-            return '[fix-templates] noop';
-        }
-    };
-
-    return new SiteBuilder(
-        llm: $llm,
-        promptsDir: Package::promptsDir(),
-        outputRoot: $outputRoot,
-        blockFixer: $fixer,
-        models: $models,
-    );
-}
 
 test('SiteBuilder pipeline exposes the default step order and stop ids', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
@@ -104,6 +84,116 @@ test('SiteBuilder createProject records a fixed page list only when given', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('SiteBuilder accepts a host-supplied siteSpec and preserves its page tree by default', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    $siteSpec = [
+        'name' => 'Host Cafe',
+        'language' => 'en',
+        'pages' => [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome'],
+            ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'Food and drinks'],
+        ],
+    ];
+
+    $project = $builder->createProject(
+        prompt: 'A cafe website',
+        slug: 'host-cafe',
+        siteSpec: $siteSpec,
+    );
+    $meta = $project->readJson('meta.json');
+
+    assert_eq($siteSpec, $meta['site_spec']);
+    assert_eq(true, $meta['multi_page'], 'an omitted scope must preserve a supplied page tree');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder fixed pages override a host-supplied siteSpec tree', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $llm = new FakeLlm();
+    $builder = make_test_builder($llm, $tmp);
+    $project = $builder->createProject(
+        prompt: 'A cafe website',
+        slug: 'fixed-host-pages',
+        pages: ['Home', 'Contact'],
+        siteSpec: [
+            'name' => 'Host Cafe',
+            'language' => 'en',
+            'pages' => [
+                ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome'],
+                ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'Show the menu'],
+            ],
+        ],
+    );
+
+    (new \Automattic\SiteBuild\Steps\SiteSpecStep(
+        $llm,
+        new \Automattic\SiteBuild\PromptRenderer(Package::promptsDir()),
+    ))->run($project);
+
+    assert_eq(0, $llm->completeJsonCalls);
+    assert_eq(['home', 'contact'], array_column($project->readJson('siteSpec.json')['pages'], 'slug'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder supplied siteSpec bypasses the site-spec LLM in the default pipeline', function () {
+    $llm = new FakeLlm();
+    $llm->queueText('A refined brief for the host-provided cafe.'); // refine-prompt only
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder($llm, $tmp);
+
+    $project = $builder->createProject(
+        prompt: 'A cafe website',
+        slug: 'provided-cafe',
+        siteSpec: [
+            'name' => 'Provided Cafe',
+            'language' => 'en',
+            'pages' => [
+                ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome'],
+                ['title' => 'Visit', 'slug' => 'visit', 'purpose' => 'Hours and location'],
+            ],
+        ],
+    );
+    $builder->pipeline()->runThrough($project, 'site-spec');
+
+    assert_eq(1, $llm->completeCalls, 'refine-prompt still consumes the user prompt');
+    assert_eq(0, $llm->completeJsonCalls, 'site-spec candidate generation is bypassed');
+    assert_eq('Provided Cafe', $project->readJson('siteSpec.json')['name']);
+    assert_eq(2, count($project->readJson('siteSpec.json')['pages']));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder explicit single-page scope still overrides a supplied siteSpec tree', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    $project = $builder->createProject(
+        prompt: 'A cafe website',
+        slug: 'one-page-host-cafe',
+        multiPage: false,
+        siteSpec: [
+            'name' => 'Host Cafe',
+            'language' => 'en',
+            'pages' => [
+                ['title' => 'Home', 'slug' => 'home', 'children' => []],
+                ['title' => 'Menu', 'slug' => 'menu', 'children' => []],
+            ],
+        ],
+    );
+
+    (new \Automattic\SiteBuild\Steps\SiteSpecStep(
+        new FakeLlm(),
+        new \Automattic\SiteBuild\PromptRenderer(Package::promptsDir()),
+    ))->run($project);
+
+    assert_eq(false, $project->readJson('meta.json')['multi_page']);
+    assert_eq(1, count($project->readJson('siteSpec.json')['pages']));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('SiteBuilder runs through site-spec via injected FakeLlm', function () {
     $llm = new FakeLlm();
     // refine-prompt (text), then site-spec (json) — same order as the integration harness
@@ -136,5 +226,89 @@ test('SiteBuilder accepts a retired homepage model override without restoring th
     $builder = make_test_builder(new FakeLlm(), $tmp, models: ['homepage-design' => 'claude-haiku-4-5']);
     assert_true(!in_array('homepage-design', $builder->pipeline()->stepIds(), true));
     assert_true(class_exists(HomepageDesignStep::class), 'retired implementation remains available and tested');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder validates and seeds caller-owned hero constraints and writing direction', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    $project = $builder->createProject(
+        'a test cafe',
+        'structured-inputs',
+        designConstraints: [
+            'hero_canvas' => 'FRAMED',
+            'allowed_hero_media_modes' => ['cover-image', 'foreground-image', 'cover-image'],
+            'max_hero_images' => 1,
+            'hero_copy_capacity' => 'standard',
+        ],
+        writingDirection: 'RTL',
+    );
+    $meta = $project->readJson('meta.json');
+    assert_eq([
+        'hero_canvas' => 'framed',
+        'allowed_hero_media_modes' => ['cover-image', 'foreground-image'],
+        'max_hero_images' => 1,
+        'hero_copy_capacity' => 'standard',
+    ], $meta['design_constraints']);
+    assert_eq('rtl', $meta['writing_direction']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder invalid structured inputs fail before creating a project directory', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    assert_throws(fn () => $builder->createProject(
+        'a test cafe',
+        'invalid-inputs',
+        designConstraints: ['allowed_hero_media_modes' => ['none'], 'hero_copy_capacity' => 'standard'],
+    ));
+    assert_true(!is_dir($tmp . '/invalid-inputs'));
+
+    assert_throws(fn () => $builder->createProject(
+        'a test cafe',
+        'invalid-direction',
+        writingDirection: 'auto',
+    ));
+    assert_true(!is_dir($tmp . '/invalid-direction'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder leaves pre-seeded structured inputs untouched when optional arguments are absent', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    $pre = $builder->store()->create('pre-seeded-hero');
+    $pre->writeJson('meta.json', [
+        'design_constraints' => ['max_hero_images' => 0],
+        'writing_direction' => 'rtl',
+    ]);
+    $project = $builder->createProject('a test cafe', 'pre-seeded-hero');
+    $meta = $project->readJson('meta.json');
+    assert_eq(['max_hero_images' => 0], $meta['design_constraints']);
+    assert_eq('rtl', $meta['writing_direction']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('createProject rejects pages when multiPage is explicitly false', function () {
+    $tmp = sys_get_temp_dir() . '/builder_guard_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    assert_throws(static fn () => $builder->createProject(
+        prompt: 'A bakery',
+        multiPage: false,
+        pages: [['title' => 'About', 'slug' => 'about', 'purpose' => 'About us']],
+    ));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('createProject rejects a site spec that cannot serialize to JSON', function () {
+    $tmp = sys_get_temp_dir() . '/builder_guard_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+
+    assert_throws(static fn () => $builder->createProject(
+        prompt: 'A bakery',
+        siteSpec: ['bytes' => "\xB1\x31"],
+    ));
+
     exec('rm -rf ' . escapeshellarg($tmp));
 });

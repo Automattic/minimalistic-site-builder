@@ -24,31 +24,10 @@ namespace Automattic\SiteBuild;
  */
 final class ImageLogger
 {
-    /** Target dir for logs, set per run from the active project; null = no-op. */
-    private static ?string $dir = null;
-    private static bool $disabled = false;
+    use TranscriptLogger;
 
-    /** Count of requests logged this run, used to prefix files in call order. */
-    private static int $seq = 0;
-
-    /** Where logs are written, or null when no project context is set. */
-    public static function dir(): ?string
-    {
-        return self::$dir;
-    }
-
-    /** Point logging at the active project's logs/images/ dir (null disables it). */
-    public static function setDir(?string $dir): void
-    {
-        self::$dir = $dir;
-        self::$seq = 0; // new run → restart the request-order numbering
-    }
-
-    /** Turn logging on/off (off is handy for tests). */
-    public static function setEnabled(bool $enabled): void
-    {
-        self::$disabled = !$enabled;
-    }
+    /** Slug used when a label reduces to nothing. */
+    private const SLUG_FALLBACK = 'image';
 
     /**
      * Write one image-request transcript. Never throws.
@@ -66,57 +45,11 @@ final class ImageLogger
      */
     public static function log(string $label, array $request, array $result = [], ?string $error = null): void
     {
-        if (self::$disabled) {
-            return;
-        }
-        $dir = self::$dir;
-        if ($dir === null) {
-            // No active project context — nowhere to log (and never the repo root).
-            return;
-        }
-        try {
-            if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
-                return;
-            }
-            // Prefix the filename with the request's position this run (01, 02, …)
-            // so the directory listing reflects generation order, and tag failures
-            // so they stand out in the listing.
-            $prefix = sprintf('%02d', ++self::$seq);
-            $name = $prefix . '-' . $label . ($error !== null ? '-failed' : '');
-            $path = self::uniquePath($dir, $name);
-            @file_put_contents($path, self::format($label, $request, $result, $error));
-        } catch (\Throwable $e) {
-            // Best-effort: a logging failure must never break a build.
-        }
-    }
-
-    /**
-     * Next free path for a label: `<label>.log`, then `<label>-02.log`, … so two
-     * requests that produced the same asset name never collide. Pure apart from
-     * the filesystem existence checks — unit-testable.
-     */
-    public static function uniquePath(string $dir, string $label): string
-    {
-        $base = self::slug($label);
-        $path = "{$dir}/{$base}.log";
-        if (!file_exists($path)) {
-            return $path;
-        }
-        for ($n = 2; ; $n++) {
-            $candidate = sprintf('%s/%s-%02d.log', $dir, $base, $n);
-            if (!file_exists($candidate)) {
-                return $candidate;
-            }
-        }
-    }
-
-    /** Make a label safe as a filename: lowercase, only [a-z0-9._-]. Pure. */
-    public static function slug(string $label): string
-    {
-        $label = strtolower(trim($label));
-        $label = preg_replace('/[^a-z0-9._-]+/', '-', $label) ?? '';
-        $label = trim($label, '-');
-        return $label === '' ? 'image' : $label;
+        self::writeTranscript(
+            $label,
+            $error,
+            fn (): string => self::format($label, $request, $result, $error)
+        );
     }
 
     /**
@@ -151,7 +84,7 @@ final class ImageLogger
         }
         $headerLines = array_merge($headerLines, [
             'Status       : ' . ($error !== null ? 'FAILED' : 'OK'),
-            'Logged at    : ' . date('Y-m-d H:i:s'),
+            'Logged at    : ' . gmdate('Y-m-d H:i:s'),
         ]);
         if ($error === null) {
             $path = (string) ($result['path'] ?? '');

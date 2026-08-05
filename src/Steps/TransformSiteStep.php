@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\BlocksEngine\PhpTransformer\ArtifactCompiler\ArtifactCompiler;
 use Automattic\BlocksEngine\PhpTransformer\Contract\TransformerResult;
 use Automattic\SiteBuild\DesignMarkupSanitizer;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -16,6 +17,7 @@ use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\TransformArtifacts;
 use Automattic\SiteBuild\Units\FooterUnit;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Units\HeaderUnit;
 use DOMDocument;
 use DOMElement;
@@ -83,6 +85,7 @@ final class TransformSiteStep implements Step
             writes: [
                 'theme/parts/*',
                 'pages.json',
+                'aboveFold.json',
                 TransformArtifacts::CARRIED_CSS,
                 TransformArtifacts::REPORT,
                 'warnings.json',
@@ -535,6 +538,41 @@ final class TransformSiteStep implements Step
             $project->writeText($path, $content);
         }
         $project->writeJson('pages.json', ['pages' => $deliveredPages]);
+        // The HTML-first path has no in-flight above-fold contract (the
+        // transformer produced the sections, not SectionsStep::run). Rebuild
+        // the delivery-phase contract from the delivered parts so HeaderHeroStep
+        // reads the same artifact it does on the legacy path.
+        $delivery = SectionsStep::deliveryContract($project, $deliveredPages);
+        $project->writeJson('aboveFold.json', $delivery);
+        // Legacy generation stamps the hero-composition marker during section
+        // generation, so SectionRhythmStep (which caps the opening hero's top
+        // padding only when it sees that marker) works. HeaderHeroStep re-stamps
+        // it later here, but that runs AFTER section-rhythm — so stamp it now,
+        // mirroring the legacy hero unit, or the htmlFirst opening hero never caps.
+        $heroPart = (string) ($delivery['hero_part'] ?? '');
+        $heroRel = 'theme/parts/' . $heroPart . '.html';
+        if ($heroPart !== ''
+            && $project->exists($heroRel)
+            && in_array($delivery['recipe'] ?? '', HeroComposition::RECIPES, true)
+        ) {
+            $stampRepairs = [];
+            $heroMarkup = $project->readText($heroRel);
+            $heroMarkup = GeneratedMarkup::withRootClassMarker(
+                $heroMarkup,
+                'hero-composition--',
+                'hero-composition--' . (string) $delivery['recipe'],
+                $heroPart,
+                $stampRepairs,
+            );
+            $heroMarkup = GeneratedMarkup::withRootClassMarker(
+                $heroMarkup,
+                'hero-mobile--',
+                'hero-mobile--' . (string) $delivery['mobile_transformation'],
+                $heroPart,
+                $stampRepairs,
+            );
+            $project->writeText($heroRel, $heroMarkup);
+        }
 
         $allMarkup = implode("\n", $outputs);
         $project->writeText(TransformArtifacts::CARRIED_CSS, self::carriedCss($assetSets, $allMarkup));
@@ -1014,6 +1052,7 @@ final class TransformSiteStep implements Step
             'site_pages' => PagePlanStep::sitePagesList($pages),
         ];
         $requests = [];
+        $inputs = [];
         foreach ($missing as $area) {
             $input = $common;
             if ($area === 'header') {
@@ -1022,8 +1061,26 @@ final class TransformSiteStep implements Step
                     'nav_rule' => SectionsStep::navRuleFor(count($pages)),
                     'archetype_assignment' => 'standard-row',
                 ];
+                $inputs[$area] = $input;
                 $requests[$area] = $this->headerUnit->request($input);
             } else {
+                $frontSections = [];
+                foreach ($pages as $candidate) {
+                    if (!empty($candidate['front'])) {
+                        $frontSections = (array) ($candidate['sections'] ?? []);
+                        break;
+                    }
+                }
+                $input += [
+                    'final_section_brief' => SectionsStep::finalSectionBrief($frontSections),
+                    'composition_archetype' => SectionsStep::footerArchetype(
+                        $pages,
+                        $project->readText('siteSpec.json'),
+                        DesignDirectionStep::readFor($project),
+                    ),
+                    'page_count' => count($pages),
+                ];
+                $inputs[$area] = $input;
                 $requests[$area] = $this->footerUnit->request($input);
             }
         }
@@ -1047,13 +1104,11 @@ final class TransformSiteStep implements Step
                 if (!is_string($raw)) {
                     throw new \RuntimeException('shell batch returned no result');
                 }
-                $markup = $area === 'header'
-                    ? $this->headerUnit->finish($raw, $common + [
-                        'hero_brief' => 'HTML-first homepage',
-                        'nav_rule' => SectionsStep::navRuleFor(count($pages)),
-                        'archetype_assignment' => 'standard-row',
-                    ], $notes)
-                    : $this->footerUnit->finish($raw, $common, $notes);
+                $result = $area === 'header'
+                    ? $this->headerUnit->finish($raw, $inputs[$area])
+                    : $this->footerUnit->finish($raw, $inputs[$area]);
+                $markup = $result->markup;
+                array_push($notes, ...$result->warnings, ...$result->repairs);
             } catch (\RuntimeException $error) {
                 $markup = SectionsStep::fallbackChrome($area);
                 $notes[] = "missing {$area}: legacy shell output unusable; deterministic minimal shell delivered";

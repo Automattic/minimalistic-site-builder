@@ -14,6 +14,22 @@ test('sanitize removes script elements with their bodies', function () {
     assert_contains('<p>Kept.</p>', $out);
 });
 
+test('sanitize removes style elements so model CSS cannot claim shell positioning', function () {
+    // Not script-capable, but one rule overrides the trusted header shell's
+    // position-ownership contract in the delivered theme.
+    $out = MarkupSanitizer::sanitize(
+        '<style>.site-header-shell{position:fixed}</style>'
+        . '<!-- wp:paragraph --><p>Kept.</p><!-- /wp:paragraph -->'
+    );
+    assert_true(!str_contains($out, '<style'), 'style tag removed');
+    assert_true(!str_contains($out, 'position:fixed'), 'style body removed');
+    assert_contains('<p>Kept.</p>', $out);
+
+    $notes = [];
+    MarkupSanitizer::sanitize('<style>.x{color:red}</style>', $notes);
+    assert_contains('removed script-capable element markup', implode(' | ', $notes));
+});
+
 test('sanitize removes SVG SMIL animation elements that can animate an href to javascript:', function () {
     // <animate>/<set> set the live value of a sibling's attribute, so a link
     // whose own href is inert still executes on click.
@@ -286,10 +302,11 @@ test('sanitize removes meta so http-equiv refresh cannot redirect visitors', fun
 });
 
 test('sanitize treats a spaced closer as text, not a raw-text boundary', function () {
-    // `</ style>` is a bogus comment to a browser, so the element runs on and
-    // its body stays inert. The seeder's copy of this scanner must agree.
-    $out = MarkupSanitizer::sanitize('<style>a</ style><img src=x onerror=alert(1)>');
-    assert_eq('<style>a</ style><img src=x onerror=alert(1)>', $out);
+    // `</ style>` / `</ iframe>` are bogus comments to a browser, so each
+    // element runs on unclosed and the whole stripped container consumes to
+    // EOF — nothing after it can leak out live. The seeder's copy of this
+    // scanner must agree.
+    assert_eq('', MarkupSanitizer::sanitize('<style>a</ style><img src=x onerror=alert(1)>'));
     assert_eq('', MarkupSanitizer::sanitize('<iframe>x</ iframe><img src=x onerror=alert(1)>'));
 });
 
@@ -310,8 +327,7 @@ test('sanitize and normalize report their removals through the notes out-param',
     MarkupSanitizer::sanitize('<!-- wp:paragraph --><p>Safe.</p><!-- /wp:paragraph -->', $clean);
     assert_eq([], $clean);
 
-    // The intake normalize prefixes each note with its part key, so the
-    // caller can route them into warnings.json verbatim.
+    // Intake normalization turns each loss into a self-contained durable row.
     $intake = [];
     GeneratedMarkup::normalize(
         '<!-- wp:html --><script>alert(1)</script><!-- /wp:html -->'
@@ -319,7 +335,17 @@ test('sanitize and normalize report their removals through the notes out-param',
         'section-test',
         $intake
     );
-    assert_contains("part 'section-test': sanitized script-capable markup", implode(' | ', $intake));
+    $intakeWarning = implode(' | ', $intake);
+    foreach ([
+        "file='theme/parts/section-test.html'",
+        "block='generated part intake'",
+        'sanitized script-capable markup',
+        'authored=',
+        'delivered=',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $intakeWarning);
+    }
 });
 
 test('normalize reports truncation salvage through the notes out-param', function () {
@@ -332,5 +358,8 @@ test('normalize reports truncation salvage through the notes out-param', functio
     );
     assert_eq($kept, $out);
     assert_true($notes !== [], 'salvage produces a durable note');
-    assert_contains("part 'section-test':", $notes[0]);
+    assert_contains("file='theme/parts/section-test.html'", $notes[0]);
+    assert_contains('dropped 1 incomplete trailing block(s)', $notes[0]);
+    assert_contains('delivered=', $notes[0]);
+    assert_contains('disposition=', $notes[0]);
 });

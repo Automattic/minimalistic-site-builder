@@ -34,8 +34,9 @@ declare `warnings.json` in `writes[]`, so hosts and later repair steps can
 discover the artifact without parsing console output or human-oriented logs.
 Mutating repair steps may deliver through only an explicitly reviewed,
 deterministic safe degradation; advisory final validators may report residual
-problems without rewriting the artifact. Warnings are not a substitute for
-failing closed on malformed, unsupported, or unreviewed transformations.
+problems without rewriting the artifact. Generated-content failures fix,
+degrade, warn, and continue at the smallest safe unit; missing/corrupt required
+artifacts and programming invariants remain fatal.
 
 ## Two building-block decisions (resolved)
 
@@ -44,6 +45,24 @@ failing closed on malformed, unsupported, or unreviewed transformations.
    As of BIGR-645, steps implement `declaration(): StepDeclaration`, lists are validated by `StepGraph` at assembly time (default seed `meta.json`), the CLI default graph lives in `StepComposition::default()`, and hosts can export order via `StepGraph::describe()` (portable data only — no host tool names). See `docs/superpowers/specs/2026-07-16-bigr-645-declarative-steps-design.md`.
 
 2. **Portable `Unit` type.** Fan-out units are `generate(array $input): output` with **no `Project`**. `ConcurrentStep` becomes a thin `Project`-adapter over units. Statelessness is *structural* (the type can't touch disk), units are reusable across a lean composition and a richer one, and the wpcom ability body *is* `Unit::generate($input)`.
+
+   The markup family now has four units: `HeroUnit`, `SectionUnit`,
+   `HeaderUnit`, and `FooterUnit`. Routing is structural: only the front page's
+   first section uses `HeroUnit`; interior openings remain ordinary sections
+   with a recipe-free header-contract subset. Each unit returns the same
+   JSON-serializable `MarkupResult` envelope (`markup`, successful `repairs`,
+   durable `warnings`). A host must preserve the whole envelope, including on
+   its Project-free hero/header/page-opening fallback path, so transport
+   boundaries cannot silently discard a delivered-value loss.
+
+   Hero topology is a code-owned extension surface, not global prompt prose.
+   `designDirection.json` persists one normalized structured blueprint and
+   `aboveFold.json` persists the shared header/hero/opening/seam relation. The
+   sections composition writes its delivery phase; the deterministic
+   post-rhythm header/hero pass writes its final phase. Consumers declare the
+   artifact and reject the wrong phase. General section and footer inputs stay
+   free of recipe topology, which keeps footer behavior independently
+   extensible.
 
 Together these make host composition safe and step reuse provable.
 

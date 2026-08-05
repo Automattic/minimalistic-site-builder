@@ -43,38 +43,6 @@ final class JsonNative
         if ($value === [] && in_array('object', $types, true) && !in_array('array', $types, true)) {
             return new JsonObject();
         }
-        if (is_array($value) && !array_is_list($value)) {
-            $object = new JsonObject();
-            foreach ($value as $key => $item) {
-                $object->set((string) $key, self::fromUntyped($item));
-            }
-            return $object;
-        }
-        return self::fromUntyped($value);
-    }
-
-    private static function fromUntyped(mixed $value): JsonValue
-    {
-        if ($value instanceof JsonValue) {
-            return $value;
-        }
-        if ($value instanceof \stdClass) {
-            $object = new JsonObject();
-            foreach (get_object_vars($value) as $key => $item) {
-                $object->set((string) $key, self::fromUntyped($item));
-            }
-            return $object;
-        }
-        if (is_array($value)) {
-            if (array_is_list($value)) {
-                return new JsonArray(array_map(self::fromUntyped(...), $value));
-            }
-            $object = new JsonObject();
-            foreach ($value as $key => $item) {
-                $object->set((string) $key, self::fromUntyped($item));
-            }
-            return $object;
-        }
         return JsonValue::fromNative($value);
     }
 }

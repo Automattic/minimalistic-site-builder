@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild;
 use Automattic\SiteBuild\Steps\ApplyIdentityStep;
 use Automattic\SiteBuild\Steps\AssemblePagesStep;
 use Automattic\SiteBuild\Steps\AssignImageSourcesStep;
+use Automattic\SiteBuild\Steps\BundleFontsStep;
 use Automattic\SiteBuild\Steps\CollectImagesStep;
 use Automattic\SiteBuild\Steps\ContrastFixStep;
 use Automattic\SiteBuild\Steps\CustomMotionStep;
@@ -49,6 +50,7 @@ final class StepComposition
         'theme/style.css',
         'theme/readme.txt',
         'theme/assets/motion/*',
+        'theme/assets/header/*',
         'plugin/site-content.php',
         'siteSpec.json',
         'designDirection.json',
@@ -79,9 +81,10 @@ final class StepComposition
         array $models = [],
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
     ): self {
         if (Env::get('SITE_BUILD_LEGACY') === '1') {
-            return self::legacy($llm, $renderer, $models, $temperatures, $blockFixer);
+            return self::legacy($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher);
         }
 
         $blockFixer ??= BlockFixers::default();
@@ -189,6 +192,7 @@ final class StepComposition
         array $models = [],
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
     ): self {
         $blockFixer ??= BlockFixers::default();
         $models = array_merge(StepDefaults::models(), $models);
@@ -237,11 +241,12 @@ final class StepComposition
             // declarations), and those must exist when the policies run or
             // repaired markup would bypass them unchecked.
             new NormalizeLayoutStep(),
-            // Deterministic backstop for the header/hero composition contract
-            // the sections step injected into both prompts (BIGR-735). BEFORE
-            // contrast-fix, so its overlay-header lint judges the header's
-            // final overlay/stacked wiring; and BEFORE fix-blocks like every
-            // attribute-editing pass, so the re-serialization syncs the HTML.
+            // Deterministic markup finalizer for the delivery-phase
+            // aboveFold.json contract shared by header, hero, openings, and
+            // the following seam. It runs after section rhythm/layout, writes
+            // the final phase atomically with any objective repairs, and stays
+            // before contrast/fix-blocks so later serialization can mirror its
+            // attributes into saved HTML.
             new HeaderHeroStep(),
             // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
             // repairs rewrite only the block-comment JSON attributes, and the
@@ -267,12 +272,15 @@ final class StepComposition
             // it verbatim) AND a section tagged its target. Default path: no-op,
             // zero LLM calls.
             new CustomMotionStep($llm, $renderer, $models['custom-motion'], $temps['custom-motion']),
-            // Also after fix-blocks: writes fonts.php from the design direction,
-            // validated against a deterministic scan of the final theme.json +
-            // markup (every family/weight/italic the build uses MUST be requested;
-            // scan-built fallback otherwise).
-            // Deterministic: builds fonts.php from the scanned requirements.
-            // It takes no model — see BIGR-750.
+            // Also after fix-blocks: ships each Google family the scan selected as
+            // theme assets declared in theme.json, so visitors are never sent to
+            // fonts.googleapis.com. A family the catalog does not know, or whose
+            // faces fail to download, degrades to the link path below.
+            new BundleFontsStep($fontFetcher),
+            // Hotlinks exactly the families BundleFontsStep left unbundled.
+            // Deterministic: builds fonts.php from the committed typography floor
+            // plus final theme/markup usage — usage may add variants, never remove
+            // direction-selected ones. It takes no model — see BIGR-750.
             new FontsPhpStep(),
             // Sole owner of functions.php: the deterministic loader that enqueues
             // style.css and require_once's the generated fonts.php.
@@ -296,8 +304,9 @@ final class StepComposition
         array $models = [],
         array $temperatures = [],
         ?BlockFixer $blockFixer = null,
+        ?FontFetcher $fontFetcher = null,
     ): self {
-        $steps = self::legacy($llm, $renderer, $models, $temperatures, $blockFixer)->steps();
+        $steps = self::legacy($llm, $renderer, $models, $temperatures, $blockFixer, $fontFetcher)->steps();
         foreach ($steps as $index => $step) {
             if ($step->id() === 'design-direction') {
                 return new self(array_slice($steps, $index + 1), self::LEGACY_TAIL_SEEDS);

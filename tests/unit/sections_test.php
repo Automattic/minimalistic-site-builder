@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\FooterComposition;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Steps\SectionsStep;
@@ -16,6 +19,12 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
 function sections_page(string $slug, array $sections, array $overrides = []): array
 {
     static $order = ['home' => 0, 'menu' => 10];
+    $sections = array_map(static function (mixed $section): mixed {
+        if (is_array($section) && !array_key_exists('primary_action', $section)) {
+            $section['primary_action'] = null;
+        }
+        return $section;
+    }, $sections);
     return array_merge([
         'slug'       => $slug,
         'title'      => ucwords($slug),
@@ -33,7 +42,21 @@ function sections_fixture(): array
     $tmp = sys_get_temp_dir() . '/builder_sec_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', ['version' => 3]);
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'name' => 'Base', 'color' => '#ffffff'],
+            ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#111111'],
+            ['slug' => 'primary', 'name' => 'Primary', 'color' => '#274c77'],
+            ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#e5e7eb'],
+            ['slug' => 'accent', 'name' => 'Accent', 'color' => '#9a3412'],
+        ]]],
+    ]);
+    $project->writeJson('designDirection.json', [
+        'description' => 'A clear, confident direction.',
+        'canvas' => 'full-bleed',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ]);
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
             ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base about split below.'],
@@ -57,7 +80,8 @@ test('sections requests one part per header/footer/page-section', function () {
     assert_eq(['header', 'footer', 'page-home--hero', 'page-home--about'], array_keys($reqs));
     assert_true(!array_key_exists('cached_prefixes', $reqs['header']), 'header is not cached');
     assert_true(!array_key_exists('cached_prefixes', $reqs['footer']), 'footer is not cached');
-    assert_eq(2, count($reqs['page-home--hero']['cached_prefixes'] ?? []), 'sections carry both cache layers');
+    assert_true(!array_key_exists('cached_prefixes', $reqs['page-home--hero']), 'the dedicated hero request is not cached');
+    assert_eq(2, count($reqs['page-home--about']['cached_prefixes'] ?? []), 'ordinary sections retain both cache layers');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -66,6 +90,7 @@ test('sections fans out across every page and gives each section its own page co
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
             ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the footer below.'],
+            ['slug' => 'home-details', 'title' => 'Home Details', 'role' => 'closing', 'type' => 'details', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between the hero above and the footer below.'],
         ]),
         sections_page('menu', [
             ['slug' => 'menu-hero', 'title' => 'Menu Hero', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the bread list below.'],
@@ -76,11 +101,12 @@ test('sections fans out across every page and gives each section its own page co
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_eq(
-        ['header', 'footer', 'page-home--hero', 'page-menu--menu-hero', 'page-menu--breads'],
+        ['header', 'footer', 'page-home--hero', 'page-home--home-details', 'page-menu--menu-hero', 'page-menu--breads'],
         array_keys($reqs)
     );
 
-    $homePrefixes = $reqs['page-home--hero']['cached_prefixes'] ?? [];
+    assert_true(!array_key_exists('cached_prefixes', $reqs['page-home--hero']));
+    $homePrefixes = $reqs['page-home--home-details']['cached_prefixes'] ?? [];
     $menuPrefixes = $reqs['page-menu--menu-hero']['cached_prefixes'] ?? [];
     assert_eq($homePrefixes[0] ?? null, $menuPrefixes[0] ?? null, 'build layer is byte-identical across pages');
     assert_true(($homePrefixes[1] ?? null) !== ($menuPrefixes[1] ?? null), 'page layer differs across pages');
@@ -102,15 +128,22 @@ test('sections fans out across every page and gives each section its own page co
     // Role and free-form semantic type remain distinct in each section brief.
     assert_true((bool) preg_match('/Role:\s+closing/', $reqs['page-menu--breads']['prompt']));
     assert_true((bool) preg_match('/Type:\s+bread-catalog/', $reqs['page-menu--breads']['prompt']));
+    assert_contains('GLOBAL HEADER CONTRACT (this page opening only):', sections_request_text($reqs['page-menu--menu-hero']));
+    assert_true(
+        !str_contains(sections_request_text($reqs['page-menu--breads']), 'GLOBAL HEADER CONTRACT (this page opening only):'),
+        'only the interior page opening receives the header-facing contract',
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections passes the design direction and hero brief to header and footer prompts', function () {
+test('sections passes the design direction and the front-page edge briefs to chrome prompts', function () {
     [$project, $tmp] = sections_fixture();
     $project->writeJson('designDirection.json', [
         'title'       => 'Archivo Silencioso',
         'description' => 'Full-bleed black-and-white photography, chrome-less.',
+        'canvas' => 'full-bleed',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
@@ -124,6 +157,110 @@ test('sections passes the design direction and hero brief to header and footer p
     assert_contains('Archivo Silencioso', $reqs['header']['prompt']);
     assert_contains('Archivo Silencioso', $reqs['footer']['prompt']);
     assert_contains('Full-viewport cover photo.', $reqs['header']['prompt']);
+    assert_contains('Title: About', $reqs['footer']['prompt']);
+    assert_contains('Role: closing', $reqs['footer']['prompt']);
+    assert_contains('Layout archetype: centered-stack', $reqs['footer']['prompt']);
+    assert_contains('Background: base', $reqs['footer']['prompt']);
+    assert_true(
+        !str_contains($reqs['footer']['prompt'], 'Full-viewport cover photo.'),
+        'the footer receives the final section, not the hero brief'
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('footer composition is stable, varied, and shared with the closing-section handoff', function () {
+    [$project, $tmp] = sections_fixture();
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $step = new SectionsStep(new FakeLlm(), $renderer);
+    $reqs = $step->requests($project);
+    $footer = $reqs['footer']['prompt'];
+
+    assert_true(
+        (bool) preg_match(
+            '/ASSIGNED FOOTER COMPOSITION for this build: \*\*([a-z-]+)\*\*/',
+            $footer,
+            $match,
+        ),
+        'footer prompt carries one assigned composition'
+    );
+    $archetype = $match[1];
+    assert_true(in_array($archetype, SectionsStep::FOOTER_ARCHETYPES, true));
+    $surface = FooterComposition::surface($archetype);
+    assert_contains("ASSIGNED FOOTER SURFACE: **{$surface}**", $footer);
+    $closingPrompt = sections_request_text($reqs['page-home--about']);
+    assert_contains(
+        "Below: the site footer (this is the last section) — assigned {$archetype} composition opening on the exact **{$surface}** background surface",
+        $closingPrompt
+    );
+    assert_contains('This section owns its planned narrative, facts, imagery, and primary CTA', $closingPrompt);
+    assert_contains('otherwise make one decisive color or image cut', $closingPrompt);
+
+    $pages = $project->readJson('pages.json')['pages'];
+    $siteSpec = $project->readText('siteSpec.json');
+    $direction = \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project);
+    assert_eq(
+        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
+        SectionsStep::footerArchetype($pages, $siteSpec, $direction),
+        'identical build context always selects the same composition'
+    );
+
+    $picks = [];
+    foreach (range(1, 30) as $n) {
+        $pick = SectionsStep::footerArchetype($pages, "{\"name\":\"Site {$n}\"}", "Direction {$n}");
+        $picks[$pick] = true;
+    }
+    assert_true(count($picks) >= 4, 'different site identities spread across the footer catalog');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('footer prompt renders only its selected high-impact recipe without overriding signature placement', function () {
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('designDirection.json', [
+        'title' => 'Restricted device',
+        'description' => 'A graphic editorial system.',
+        'signature_device' => 'Use the stepped accent only in the hero and nowhere else.',
+        'canvas' => 'full-bleed',
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
+    ]);
+    $reqs = (new SectionsStep(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))->requests($project);
+    $footer = $reqs['footer']['prompt'];
+
+    assert_true(
+        (bool) preg_match(
+            '/ASSIGNED FOOTER COMPOSITION for this build: \*\*([a-z-]+)\*\*/',
+            $footer,
+            $match,
+        ),
+        'footer prompt carries one assigned composition'
+    );
+    $archetype = $match[1];
+    $recipeMarkers = [
+        'typographic-billboard' => 'ONE viewport-filling brand line',
+        'photographic-split' => 'deliberately unequal 60/40 or 65/35',
+        'image-plinth' => 'Treat ONE foreground wp:image as the focal object',
+        'conversion-panel' => 'Build a bold, offset invitation',
+        'editorial-colophon' => 'final plate of a book or',
+        'split-ledger' => 'Build a strong 65/35 or 70/30 split',
+    ];
+    assert_contains($recipeMarkers[$archetype], $footer);
+    foreach ($recipeMarkers as $otherArchetype => $marker) {
+        if ($otherArchetype !== $archetype) {
+            assert_true(!str_contains($footer, $marker), "recipe for {$otherArchetype} stays out of the prompt");
+        }
+    }
+    assert_contains('ONE dominant focal gesture and low content density', $footer);
+    assert_contains('FIT-TEXT IDENTITY LINE', $footer);
+    assert_contains('"fitText":true', $footer);
+    assert_contains('signature-device PLACEMENT restrictions are binding', $footer);
+    assert_contains('ONLY when the direction explicitly makes it site-wide', $footer);
+    assert_contains('NEVER set `"tagName":"footer"`', $footer);
+    assert_contains('External/social links use only an exact URL present in the SITE SPEC', $footer);
+    assert_contains('NEVER invent `is-style-none`, `is-style-plain`', $footer);
+    assert_eq(
+        FooterComposition::usesGeneratedImage($archetype),
+        str_contains($footer, 'AI_IMAGE: subject | page-context | style | aspect-ratio'),
+        'only image-led recipes receive image-generation instructions'
+    );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -148,19 +285,21 @@ test('sections falls back to a descriptive language phrase for specs without one
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections passes each part its assigned composition and its neighbors\' assignments', function () {
+test('sections routes the front hero to one recipe and keeps generic composition on ordinary sections', function () {
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     $hero = sections_request_text($reqs['page-home--hero']);
-    assert_true((bool) preg_match('/Layout archetype:\s+full-bleed-cover/', $hero), 'hero archetype in prompt');
-    assert_true((bool) preg_match('/Background:\s+image/', $hero), 'hero background in prompt');
-    assert_true((bool) preg_match('/Vertical density:\s+standard/', $hero), 'hero density in prompt');
-    assert_contains('Between the site header above and the base about split below.', $hero);
+    assert_true(
+        (bool) preg_match('/ASSIGNED HERO COMPOSITION for this build: \*\*([a-z-]+)\*\*/', $hero, $match),
+        'front hero receives one code-owned recipe assignment',
+    );
+    assert_contains('hero-composition--' . $match[1], $hero);
+    assert_contains('NORMALIZED HERO BLUEPRINT', $hero);
+    assert_true(!str_contains($hero, 'Execute the assigned layout archetype:'), 'generic section topology stays out of HeroUnit');
     assert_contains('Above: the site header (this is the first section)', $hero);
     assert_contains('Below: "About" — asymmetric-split on base background, standard vertical density', $hero);
-    assert_contains('If SECTION Notes mention a different layout or background', $hero);
 
     $about = sections_request_text($reqs['page-home--about']);
     assert_true((bool) preg_match('/Layout archetype:\s+asymmetric-split/', $about), 'about archetype in prompt');
@@ -188,7 +327,8 @@ test('sections throws when a planned section is missing composition fields', fun
     $project->writeJson('theme/theme.json', ['version' => 3]);
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
-            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero'],
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the header and the next section.'],
+            ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about'],
         ]),
     ]]);
     $renderer = new PromptRenderer(repo_path('prompts'));
@@ -234,189 +374,184 @@ test('sections persists the deterministic plan repairs back into pages.json', fu
     (new SectionsStep($llm, $renderer))->run($project);
 
     // The plan artifact on disk carries the corrected role/type the parts
-    // were generated from — a warning saying "corrected" must not leave the
-    // defect in the artifact downstream consumers read.
+    // were generated from. These semantics-preserving corrections belong in
+    // the step report, never warnings.json.
     $hero = $project->readJson('pages.json')['pages'][0]['sections'][0];
     assert_eq('hero', $hero['role']);
     assert_eq('content', $hero['type']);
-    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
-    assert_contains("role '' corrected to 'hero'", $joined);
-    assert_contains("missing semantic type; defaulted to 'content'", $joined);
+    $warnings = $project->exists('warnings.json')
+        ? implode(' ', $project->readJson('warnings.json')['sections'] ?? [])
+        : '';
+    assert_true(!str_contains($warnings, "role '' corrected to 'hero'"));
+    assert_true(!str_contains($warnings, 'missing semantic type'));
+    $report = $project->readText('logs/sections.txt');
+    assert_contains("role '' corrected to 'hero'", $report);
+    assert_contains("missing semantic type; defaulted to 'content'", $report);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections leaves pages.json untouched when the generation batch fails operationally', function () {
+test('sections degrades a permanent generation batch failure at each unit boundary', function () {
     [$project, $tmp] = sections_fixture();
     $pages = $project->readJson('pages.json');
     unset($pages['pages'][0]['sections'][0]['role']);
     unset($pages['pages'][0]['sections'][0]['type']);
     $project->writeJson('pages.json', $pages);
-    $before = $project->readText('pages.json');
-
-    // No queued responses: cache warming degrades, then the actual batch
-    // throws. Repairs used to build the requests must remain in-memory until
-    // generated output has been normalized successfully.
+    // No queued responses: cache warming degrades, then the all-or-nothing
+    // raw-text batch throws. Contract-critical units fall back at their
+    // planned keys and the ordinary sibling is the smallest removable unit.
     $llm = new FakeLlm();
     $renderer = new PromptRenderer(repo_path('prompts'));
-    assert_throws(static fn () => (new SectionsStep($llm, $renderer))->run($project));
+    (new SectionsStep($llm, $renderer))->run($project);
 
-    assert_eq($before, $project->readText('pages.json'), 'operational failure leaves the input artifact byte-identical');
-    assert_true(!$project->exists('warnings.json'), 'uncommitted repairs do not produce delivered-output warnings');
+    assert_true($project->exists('theme/parts/header.html'));
+    assert_true($project->exists('theme/parts/footer.html'));
+    assert_true($project->exists('theme/parts/page-home--hero.html'));
+    assert_true(!$project->exists('theme/parts/page-home--about.html'));
+    $delivered = $project->readJson('pages.json')['pages'];
+    assert_eq(['hero'], array_column($delivered[0]['sections'], 'slug'));
+    assert_eq('delivery', $project->readJson('aboveFold.json')['phase']);
+    $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains('generation batch failed', $warnings);
+    assert_contains('header fallback', $warnings);
+    assert_contains('topology-family fallback', $warnings);
+    assert_contains("part 'page-home--about'", $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('heroBrief selects only the structural hero role, not the semantic type', function () {
+test('heroBrief uses the positional front opening that routes to HeroUnit', function () {
     $brief = SectionsStep::heroBrief([
-        ['slug' => 'decoy', 'title' => 'Not the Hero', 'role' => 'content', 'type' => 'hero'],
-        ['slug' => 'intro', 'title' => 'Big Hero', 'role' => 'hero', 'type' => 'cinematic-welcome', 'purpose' => 'Wow', 'content_notes' => 'Edge to edge.'],
+        ['slug' => 'intro', 'title' => 'Opening', 'role' => 'content', 'type' => 'opening-note', 'purpose' => 'Orient visitors.', 'content_notes' => 'Lead clearly.'],
+        ['slug' => 'stale', 'title' => 'Stale Hero', 'role' => 'hero', 'type' => 'hero'],
     ]);
-    assert_contains('Title: Big Hero', $brief);
-    assert_contains('Role: hero', $brief);
-    assert_contains('Type: cinematic-welcome', $brief);
-    assert_contains('Purpose: Wow', $brief);
-    assert_contains('Notes: Edge to edge.', $brief);
-    assert_true(!str_contains($brief, 'Not the Hero'), 'a semantic type named hero does not override the structural role');
+    assert_contains('Title: Opening', $brief);
+    assert_contains('Role: content', $brief);
+    assert_contains('Type: opening-note', $brief);
+    assert_contains('Purpose: Orient visitors.', $brief);
+    assert_contains('Notes: Lead clearly.', $brief);
+    assert_true(!str_contains($brief, 'Stale Hero'), 'a later semantic role cannot override positional routing');
 
-    // No hero-role section: do not silently treat another structural role as the hero.
     $brief = SectionsStep::heroBrief([['slug' => 'intro', 'title' => 'Intro', 'role' => 'content', 'type' => 'opening-note']]);
-    assert_eq('(No hero section planned.)', $brief);
+    assert_contains('Title: Intro', $brief);
 
     assert_eq('(No hero section planned.)', SectionsStep::heroBrief([]));
 });
 
-/** A one-page pages.json fixture whose front hero has the given plan fields. */
-function sections_pages_with_hero(array $hero, array $more = []): array
-{
-    return array_merge([sections_page('home', [array_merge([
-        'slug' => 'hero', 'role' => 'hero', 'type' => 'welcome',
-    ], $hero)])], $more);
-}
-
-test('header mode is overlay only for image-led full-bleed heroes over dark openings', function () {
-    $imageHero = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
-    assert_eq(SectionsStep::MODE_OVERLAY, SectionsStep::headerMode($imageHero));
-
-    $imageBand = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'image']);
-    assert_eq(SectionsStep::MODE_OVERLAY, SectionsStep::headerMode($imageBand), 'image band hero floats the header');
-
-    $plainHero = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'base']);
-    assert_eq(SectionsStep::MODE_STACKED, SectionsStep::headerMode($plainHero));
-
-    // A framed canvas keeps a mat around the hero — nothing to float over.
-    assert_eq(SectionsStep::MODE_STACKED, SectionsStep::headerMode($imageHero, 'framed'));
-
-    // The header renders on EVERY page: one page opening on a light band
-    // breaks the one-text-color guarantee, so the site falls back to stacked.
-    $lightInnerPage = sections_pages_with_hero(
-        ['layout_archetype' => 'full-bleed-cover', 'background' => 'image'],
-        [sections_page('menu', [['slug' => 'menu-hero', 'role' => 'hero', 'type' => 'menu', 'background' => 'base']])],
-    );
-    assert_eq(SectionsStep::MODE_STACKED, SectionsStep::headerMode($lightInnerPage));
-
-    $darkInnerPage = sections_pages_with_hero(
-        ['layout_archetype' => 'full-bleed-cover', 'background' => 'image'],
-        [sections_page('menu', [['slug' => 'menu-hero', 'role' => 'hero', 'type' => 'menu', 'background' => 'contrast']])],
-    );
-    assert_eq(SectionsStep::MODE_OVERLAY, SectionsStep::headerMode($darkInnerPage), 'contrast bands read as dark openings');
-});
-
-test('header archetype pool follows the header mode', function () {
-    // Overlay mode: the pool IS minimal-overlay — the audited failure was the
-    // overlay CSS shipping unused because the archetype lost a random draw.
-    $imageHero = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
-    assert_eq(['minimal-overlay'], SectionsStep::headerArchetypePool($imageHero));
-
-    // Stacked, one-page, plan has a hero: overlay, split-nav and the
-    // display-scale oversized-wordmark are all out.
-    $plainHero = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'base']);
-    $pool = SectionsStep::headerArchetypePool($plainHero);
-    foreach (['minimal-overlay', 'split-nav', 'oversized-wordmark'] as $out) {
-        assert_true(!in_array($out, $pool, true), "'{$out}' excluded for a one-page headline-led site");
+test('finalSectionBrief describes the positional footer neighbor', function () {
+    $brief = SectionsStep::finalSectionBrief([
+        ['title' => 'Hero', 'role' => 'hero', 'type' => 'welcome', 'content_notes' => 'Opening image.'],
+        [
+            'title' => 'Reserve',
+            'role' => 'closing',
+            'type' => 'reservation',
+            'purpose' => 'Turn interest into a booking.',
+            'content_notes' => 'Show the canonical hours and one booking action.',
+            'layout_archetype' => 'asymmetric-split',
+            'background' => 'contrast',
+            'vertical_density' => 'spacious',
+            'handoff' => 'Contrast band meets the footer.',
+        ],
+    ]);
+    foreach (
+        [
+            'Title: Reserve',
+            'Role: closing',
+            'Type: reservation',
+            'Purpose: Turn interest into a booking.',
+            'Notes: Show the canonical hours and one booking action.',
+            'Layout archetype: asymmetric-split',
+            'Background: contrast',
+            'Vertical density: spacious',
+            'Planned handoff: Contrast band meets the footer.',
+        ] as $expected
+    ) {
+        assert_contains($expected, $brief);
     }
-    assert_true(in_array('centered-masthead', $pool, true), 'masthead allowed over a non-image hero');
-
-    // Stacked because framed, but still image-led: the tall centered-masthead
-    // would push a viewport-scale cover below the fold.
-    $framed = SectionsStep::headerArchetypePool($imageHero, 'framed');
-    assert_true(!in_array('centered-masthead', $framed, true), 'masthead excluded over an image-led hero');
-    assert_true(!in_array('minimal-overlay', $framed, true), 'framed canvas never floats the header');
-
-    // A two-page site keeps split-nav in stacked mode.
-    $twoPages = sections_pages_with_hero(
-        ['layout_archetype' => 'centered-stack', 'background' => 'base'],
-        [sections_page('menu', [['slug' => 'menu-hero', 'role' => 'hero', 'type' => 'menu', 'background' => 'base']])],
-    );
-    assert_true(in_array('split-nav', SectionsStep::headerArchetypePool($twoPages), true));
+    assert_true(!str_contains($brief, 'Opening image.'), 'only the section directly above the footer is described');
+    assert_eq('(No final section planned.)', SectionsStep::finalSectionBrief([]));
 });
 
-test('header assignment offers two distinct stacked archetypes from the pool', function () {
-    putenv(SectionsStep::ARCHETYPE_ENV); // a forced archetype in the caller's env would skip the two-pick branch
-    $pages = sections_pages_with_hero(['layout_archetype' => 'centered-stack', 'background' => 'base']);
-    for ($i = 0; $i < 10; $i++) {
-        $assignment = SectionsStep::headerAssignment($pages);
-        assert_true((bool) preg_match('/\*\*([a-z-]+)\*\* or \*\*([a-z-]+)\*\*/', $assignment, $m), 'two archetypes offered');
-        assert_true($m[1] !== $m[2], 'the two picks are distinct');
-        foreach ([$m[1], $m[2]] as $pick) {
-            assert_true(in_array($pick, SectionsStep::headerArchetypePool($pages), true), "'{$pick}' is in the compatible pool");
-        }
-        assert_contains('STACKS as an opaque bar', $assignment, 'stacked assignments carry the contract');
-    }
+test('a singleton hero gives the footer its exact primary-action ownership facts', function () {
+    $brief = SectionsStep::finalSectionBrief([[
+        'title' => 'Welcome',
+        'role' => 'hero',
+        'type' => 'welcome',
+        'primary_action' => [
+            'label' => 'View the menu',
+            'intent' => 'Help visitors explore the current menu.',
+            'destination' => '/menu/',
+        ],
+    ]]);
+
+    assert_contains('Primary action label (authoritative): View the menu', $brief);
+    assert_contains('Primary action destination: /menu/', $brief);
+    assert_contains('Primary action intent (planning context, never button copy): Help visitors explore the current menu.', $brief);
 });
 
-test('header assignment mandates minimal-overlay with its class hook in overlay mode', function () {
-    putenv(SectionsStep::ARCHETYPE_ENV);
-    $pages = sections_pages_with_hero(['layout_archetype' => 'full-bleed-cover', 'background' => 'image']);
-    $assignment = SectionsStep::headerAssignment($pages);
-    assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $assignment);
-    assert_contains('"className":"header-overlay"', $assignment);
-});
-
-test('header contract text matches the mode and reaches only hero-role sections', function () {
-    assert_contains('floats TRANSPARENTLY', SectionsStep::headerContract(SectionsStep::MODE_OVERLAY));
-    assert_contains('reach the very top edge', SectionsStep::headerContract(SectionsStep::MODE_OVERLAY));
-    assert_contains('OPAQUE site header', SectionsStep::headerContract(SectionsStep::MODE_STACKED));
-    assert_contains('"minHeight":80', SectionsStep::headerContract(SectionsStep::MODE_STACKED));
-
+test('the canonical front contract reaches only the dedicated hero request', function () {
     [$project, $tmp] = sections_fixture(); // front hero is image-led → overlay mode
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
     $hero = sections_request_text($reqs['page-home--hero']);
     $about = sections_request_text($reqs['page-home--about']);
-    assert_contains('HEADER CONTRACT (this is a page-opening section)', $hero, 'the page-opening section gets the contract');
-    assert_contains('floats TRANSPARENTLY', $hero, 'the contract carries the computed mode');
+    assert_contains('AUTHORITATIVE ABOVE-FOLD CONTRACT', $hero, 'the front opening receives the canonical contract');
+    assert_contains('"mode": "overlay"', $hero, 'the contract carries the computed mode exactly');
     assert_true(
-        !str_contains($about, 'HEADER CONTRACT (this is a page-opening section)'),
+        !str_contains($about, 'ABOVE-FOLD CONTRACT (authoritative; front page only):'),
         'non-opening sections share no viewport with the header'
     );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('an overlay-planned site whose palette fails the scrim check is briefed as stacked', function () {
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV); // a forced archetype would bypass the contract pool
+    [$project, $tmp] = sections_fixture(); // front hero is image-led → the PLAN alone says overlay
+    // Every palette role is a mid grey: the contract's token verification
+    // cannot prove a readable overlay foreground, so the resolved MODE
+    // diverges from the structural plan and both seams brief stacked.
+    $project->writeJson('theme/theme.json', [
+        'version' => 3,
+        'settings' => ['color' => ['palette' => [
+            ['slug' => 'base', 'name' => 'Base', 'color' => '#8A8A8A'],
+            ['slug' => 'contrast', 'name' => 'Contrast', 'color' => '#7A7A7A'],
+            ['slug' => 'primary', 'name' => 'Primary', 'color' => '#6E6E6E'],
+            ['slug' => 'secondary', 'name' => 'Secondary', 'color' => '#9A9A9A'],
+            ['slug' => 'accent', 'name' => 'Accent', 'color' => '#808080'],
+        ]]],
+    ]);
+    $renderer = new PromptRenderer(repo_path('prompts'));
+    $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
+
+    $header = $reqs['header']['prompt'];
+    assert_contains('"mode": "stacked"', $header, 'the unreadable palette downgrades the briefed relation');
+    assert_true(
+        !str_contains($header, 'ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**'),
+        'the unreadable overlay must not be assigned'
+    );
+    assert_true(
+        !str_contains($header, 'DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid'),
+        'the behavior contract must not promise the overlay shell'
+    );
+    $hero = sections_request_text($reqs['page-home--hero']);
+    assert_contains('"mode": "stacked"', $hero, 'the hero composes for stacked chrome');
+    assert_true(!str_contains($hero, '"mode": "overlay"'), 'no overlay contract reaches the hero');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('HEADER_ARCHETYPE env forces the header archetype in the header prompt', function () {
     [$project, $tmp] = sections_fixture();
-    putenv(SectionsStep::ARCHETYPE_ENV . '=branded-lockup');
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV . '=branded-lockup');
     try {
         $renderer = new PromptRenderer(repo_path('prompts'));
         $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
         assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **branded-lockup**', $reqs['header']['prompt']);
     } finally {
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
 
-test('an unknown HEADER_ARCHETYPE aborts instead of silently generating', function () {
-    putenv(SectionsStep::ARCHETYPE_ENV . '=mega-header');
-    try {
-        assert_throws(function () {
-            SectionsStep::headerAssignment(sections_pages_with_hero(['type' => 'quiet-welcome']));
-        }, 'not a header archetype');
-    } finally {
-        putenv(SectionsStep::ARCHETYPE_ENV);
-    }
-});
-
 test('the header prompt carries an archetype assignment and the full catalog', function () {
-    putenv(SectionsStep::ARCHETYPE_ENV); // a forced archetype in the caller's env would skip the two-pick branch
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
     [$project, $tmp] = sections_fixture();
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
@@ -426,6 +561,8 @@ test('the header prompt carries an archetype assignment and the full catalog', f
     assert_contains('ASSIGNED HEADER ARCHETYPE for this build: **minimal-overlay**', $reqs['header']['prompt']);
     assert_contains('branded-lockup', $reqs['header']['prompt']); // new catalog entries render
     assert_contains('wp:site-logo', $reqs['header']['prompt']);
+    assert_contains('DETERMINISTIC HEADER BEHAVIOR: overlay-to-solid', $reqs['header']['prompt']);
+    assert_contains('NEVER add `style.position`', $reqs['header']['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -443,6 +580,7 @@ test('sections writes header, footer and a part per page section', function () {
 
     assert_eq(1, $llm->completeBatchCalls, 'all parts sent through one concurrent batch');
     assert_eq(1, $llm->completeCalls, 'step sends exactly one single cache warm-up probe');
+    assert_eq(0, $llm->remaining(), 'one queued response per part, all consumed');
     foreach (['parts/header.html', 'parts/footer.html', 'parts/page-home--hero.html', 'parts/page-home--about.html'] as $rel) {
         assert_true($project->exists('theme/' . $rel), "{$rel} written");
         assert_contains('wp:', $project->readText('theme/' . $rel));
@@ -490,8 +628,12 @@ test('sections writes header AND footer with a constrained layout when the model
 
     assert_contains('"layout":{"type":"constrained"}', $project->readText('theme/parts/header.html'));
     assert_contains('"layout":{"type":"constrained"}', $project->readText('theme/parts/footer.html'));
-    // Sections are not touched — their width discipline is their own.
-    assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), '"layout"'), 'section untouched');
+    // HeroUnit establishes its objective root envelope; ordinary sections
+    // retain their existing width behavior.
+    $hero = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains('"layout":{"type":"constrained"}', $hero);
+    assert_contains('hero-composition--', $hero);
+    assert_true(!str_contains($project->readText('theme/parts/page-home--about.html'), '"layout"'), 'ordinary section untouched');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -563,7 +705,7 @@ test('sections strips a stray markdown code fence from a part response', functio
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections drops a part with no block markup and prunes it from the plan', function () {
+test('sections falls back at the failed front-hero key without promoting its sibling', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
@@ -575,20 +717,63 @@ test('sections drops a part with no block markup and prunes it from the plan', f
 
     (new SectionsStep($llm, $renderer))->run($project);
 
-    // One unusable section is dropped; every paid-for sibling still ships,
-    // and the plan is pruned so downstream steps agree with the parts on disk.
-    assert_true(!$project->exists('theme/parts/page-home--hero.html'), 'unusable section not written');
+    // The contract-critical opening retains its key through a recipe-family
+    // fallback; the ordinary sibling is not promoted into an opening role it
+    // was never generated to satisfy.
+    assert_true($project->exists('theme/parts/page-home--hero.html'), 'failed hero receives a fallback at its existing key');
+    assert_contains('hero-fallback--', $project->readText('theme/parts/page-home--hero.html'));
     assert_contains('<h2>About</h2>', $project->readText('theme/parts/page-home--about.html'));
     $sections = $project->readJson('pages.json')['pages'][0]['sections'];
-    assert_eq(['about'], array_column($sections, 'slug'), 'dropped section pruned from the plan');
-    assert_eq('hero', $sections[0]['role'], 'positional roles are recomputed after pruning');
+    assert_eq(['hero', 'about'], array_column($sections, 'slug'));
+    assert_eq('hero', $sections[0]['role']);
+    assert_eq('closing', $sections[1]['role']);
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
-    assert_contains("part 'page-home--hero': unusable generated markup", $joined);
-    assert_contains("role 'closing' corrected to 'hero'", $joined);
+    assert_contains("file='theme/parts/page-home--hero.html'", $joined);
+    assert_contains('topology-family fallback', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('sections delivers deterministic chrome and an empty front page when every generated section is unusable', function () {
+test('sections replaces a complete but invalid interior opening at its key and preserves siblings', function () {
+    [$project, $tmp] = sections_fixture();
+    $project->writeJson('pages.json', ['pages' => [
+        sections_page('home', [
+            ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between header and about.'],
+            ['slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about', 'layout_archetype' => 'asymmetric-split', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between hero and footer.'],
+        ]),
+        sections_page('menu', [
+            ['slug' => 'menu-opening', 'title' => 'Menu Opening', 'role' => 'hero', 'type' => 'opening', 'layout_archetype' => 'centered-stack', 'background' => 'contrast', 'vertical_density' => 'compact', 'handoff' => 'Between header and breads.'],
+            ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'standard', 'handoff' => 'Between opening and footer.'],
+        ]),
+    ]]);
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+    $llm->queueText('<!-- wp:heading --><h1>Hero</h1><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+    $invalidOpening = '<!-- wp:paragraph --><p>Complete, but not a contract opening root.</p><!-- /wp:paragraph -->';
+    $llm->queueText($invalidOpening);
+    $sibling = '<!-- wp:heading --><h2>Breads remain.</h2><!-- /wp:heading -->';
+    $llm->queueText($sibling);
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $opening = $project->readText('theme/parts/page-menu--menu-opening.html');
+    assert_true(!str_contains($opening, $invalidOpening));
+    assert_contains('Menu', $opening, 'fallback uses the real page title');
+    assert_contains($sibling, $project->readText('theme/parts/page-menu--breads.html'));
+    assert_eq(['menu-opening', 'breads'], array_column(
+        $project->readJson('pages.json')['pages'][1]['sections'],
+        'slug',
+    ));
+    $joined = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("file='theme/parts/page-menu--menu-opening.html'", $joined);
+    assert_contains('page-opening fallback', $joined);
+    assert_contains('one complete top-level wp:group', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('sections retains a hero fallback when every generated page section is unusable', function () {
     [$project, $tmp] = sections_fixture();
     $llm = new FakeLlm();
     $llm->queueText('OK');
@@ -602,11 +787,15 @@ test('sections delivers deterministic chrome and an empty front page when every 
 
     assert_true($project->exists('theme/parts/header.html'), 'surviving header is delivered');
     assert_true($project->exists('theme/parts/footer.html'), 'surviving footer is delivered');
-    assert_eq([], $project->readJson('pages.json')['pages'][0]['sections'], 'front page remains with no sections');
+    assert_contains('hero-fallback--', $project->readText('theme/parts/page-home--hero.html'));
+    assert_true(!$project->exists('theme/parts/page-home--about.html'), 'ordinary failed sibling is pruned');
+    assert_eq(['hero'], array_column(
+        $project->readJson('pages.json')['pages'][0]['sections'],
+        'slug',
+    ));
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
-    assert_contains("part 'page-home--hero': unusable generated markup", $joined);
+    assert_contains('topology-family fallback', $joined);
     assert_contains("part 'page-home--about': unusable generated markup", $joined);
-    assert_contains("empty front page delivered", $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -626,18 +815,75 @@ test('sections falls back to deterministic chrome when the header markup is unus
     assert_contains('wp:site-title', $header, 'fallback chrome carries the site title');
     assert_contains('"layout":{"type":"constrained"}', $header);
     $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
-    assert_contains("part 'header': unusable generated markup", $joined);
-    assert_contains('deterministic minimal header delivered', $joined);
+    assert_contains("file='theme/parts/header.html'", $joined);
+    assert_contains('delivered=mode-aware', $joined);
+    assert_contains('header fallback', $joined);
+    assert_contains('disposition=', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('header nav rule follows the page count: anchors for one page, page-list for several', function () {
+test('sections keeps the assigned surface when generated footer markup is unusable', function () {
+    [$project, $tmp] = sections_fixture();
+    $pages = $project->readJson('pages.json')['pages'];
+    $archetype = SectionsStep::footerArchetype(
+        $pages,
+        $project->readText('siteSpec.json'),
+        \Automattic\SiteBuild\Steps\DesignDirectionStep::readFor($project)
+    );
+    $surface = FooterComposition::surface($archetype);
+
+    $llm = new FakeLlm();
+    $llm->queueText('OK');
+    $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+    $llm->queueText('just prose, not a footer');
+    $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+    $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+
+    (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $footer = $project->readText('theme/parts/footer.html');
+    assert_contains("\"backgroundColor\":\"{$surface}\"", $footer);
+    assert_contains("has-{$surface}-background-color", $footer);
+    assert_contains('wp:site-title', $footer);
+    $joined = implode(' ', $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains("part 'footer': unusable generated markup", $joined);
+    assert_contains("file='theme/parts/footer.html'", $joined);
+    assert_contains("block='part root'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=deterministic minimal footer', $joined);
+    assert_contains('disposition=', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('fallback chrome relies on the template-part landmark instead of nesting one', function () {
+    foreach (['header', 'footer'] as $key) {
+        $markup = SectionsStep::fallbackChrome($key);
+        assert_contains('<div class="wp-block-group', $markup);
+        assert_true(!str_contains($markup, '"tagName"'), "{$key} fallback has no redundant tagName");
+        assert_true(!str_contains($markup, "<{$key}"), "{$key} fallback has no nested semantic landmark");
+    }
+    $contrastFooter = SectionsStep::fallbackChrome('footer', 'contrast');
+    assert_contains('"backgroundColor":"contrast"', $contrastFooter);
+    assert_contains('"textColor":"base"', $contrastFooter);
+    assert_contains('"isLink":false', $contrastFooter);
+    assert_contains('has-contrast-background-color', $contrastFooter);
+    assert_true(
+        !str_contains(SectionsStep::fallbackChrome('footer', 'contrast', 2), '"isLink":false'),
+        'a multi-page fallback may link the site title home'
+    );
+});
+
+test('chrome nav rules follow the page count: anchors for one page, page-list for several', function () {
     [$project, $tmp] = sections_fixture(); // homepage only
     $renderer = new PromptRenderer(repo_path('prompts'));
     $reqs = (new SectionsStep(new FakeLlm(), $renderer))->requests($project);
 
     assert_contains('do NOT use `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_contains('href="#menu-highlights"', $reqs['header']['prompt']);
+    assert_contains('This site is ONE page: NEVER use `wp:page-list`', $reqs['footer']['prompt']);
+    assert_contains('root-relative `/#anchor`', $reqs['footer']['prompt']);
+    assert_contains('`href="/"`', $reqs['footer']['prompt']);
+    assert_contains('site-title MUST explicitly set `"isLink":false`', $reqs['footer']['prompt']);
 
     $project->writeJson('pages.json', ['pages' => [
         sections_page('home', [
@@ -651,6 +897,8 @@ test('header nav rule follows the page count: anchors for one page, page-list fo
 
     assert_contains('should contain `<!-- wp:page-list /-->`', $reqs['header']['prompt']);
     assert_true(!str_contains($reqs['header']['prompt'], 'do NOT use `<!-- wp:page-list /-->`'), 'multi-page header keeps the page-list default');
+    assert_contains('A compact `wp:page-list` is permitted', $reqs['footer']['prompt']);
+    assert_true(!str_contains($reqs['footer']['prompt'], 'This site is ONE page'), 'multi-page footer may list pages');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

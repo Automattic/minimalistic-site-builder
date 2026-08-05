@@ -32,17 +32,17 @@ test('apply-identity replaces all theme placeholders', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('apply-identity keeps a hostile site name inert in the plugin PHP header', function () {
+test('apply-identity keeps a hostile site name inert throughout the plugin PHP', function () {
     $tmp = sys_get_temp_dir() . '/builder_identity_inj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
 
     (new ScaffoldThemeStep())->run($project);
     (new \Automattic\SiteBuild\Steps\ScaffoldPluginStep())->run($project);
     $project->writeJson('siteSpec.json', [
-        // A name that tries to close the docblock and run PHP before the
-        // ABSPATH guard — including a split terminator that a naive
-        // single-pass replace would let reassemble.
-        'name'        => "Evil **//*/ */ Bakery\n * Plugin Name: forged",
+        // A name that tries both executable contexts: close the docblock before
+        // the ABSPATH guard, then escape the quoted log prefix later. It also
+        // carries a split terminator that a naive replace would let reassemble.
+        'name'        => "Evil **//*/ */ Bakery\n * Plugin Name: forged'); } error_log('INJECTED_TOP_LEVEL'); function injected_wrapper(){ error_log('",
         'slug'        => 'evil-bakery',
         'description' => "line one\r\nline two */ echo 'pwned';",
     ]);
@@ -65,6 +65,18 @@ test('apply-identity keeps a hostile site name inert in the plugin PHP header', 
         assert_eq(T_IF, $id, 'executable code injected before the ABSPATH guard');
         break;
     }
+    $executable = '';
+    foreach (token_get_all($php) as $token) {
+        $id = is_array($token) ? $token[0] : null;
+        if (in_array($id, [T_DOC_COMMENT, T_COMMENT], true)) {
+            continue;
+        }
+        $executable .= is_array($token) ? $token[1] : $token;
+    }
+    assert_true(
+        !str_contains($executable, 'INJECTED_TOP_LEVEL'),
+        'site identity cannot escape a generated PHP string later in the plugin'
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

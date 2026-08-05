@@ -466,7 +466,8 @@ test('OpenRouter batch retries wait only until the latest Retry-After deadline',
 
     assert_eq('A', $result['a']['text']);
     assert_eq('B', $result['b']['text']);
-    assert_eq([2], $slept, 'expired and elapsed portions of server delays are not slept again');
+    // [0] is the shared helper's forwarded zero-second backoff wave.
+    assert_eq([0, 2], $slept, 'expired and elapsed portions of server delays are not slept again');
 });
 
 test('a huge Retry-After is clamped so a quota 429 cannot park the build', function () {
@@ -505,8 +506,8 @@ test('a huge Retry-After is clamped so a quota 429 cannot park the build', funct
     );
 
     assert_eq('A', $result['a']['text']);
-    assert_eq(1, count($slept), 'one honored wait');
-    assert_eq(120, $slept[0], 'the hour-long server delay is capped');
+    // [0] is the shared helper's forwarded zero-second backoff wave.
+    assert_eq([0, 120], $slept, 'the hour-long server delay is capped');
 });
 
 test('Retry-After parsing supports seconds and HTTP dates as absolute deadlines', function () {
@@ -1269,15 +1270,68 @@ test('parseSse recognizes nested choice errors only for OpenRouter', function ()
     }
 });
 
-test('OpenAiCompatibleClient concurrencyWindows applies a provider-specific cap', function () {
-    $bodies = [];
-    for ($i = 0; $i < 9; $i++) {
-        $bodies["r{$i}"] = ['model' => 'm'];
-    }
-    assert_eq([9], array_map('count', OpenAiCompatibleClient::concurrencyWindows($bodies)));
-    $windows = OpenAiCompatibleClient::concurrencyWindows($bodies, 4);
-    assert_eq([4, 4, 1], array_map('count', $windows));
-    assert_eq(array_keys($bodies), array_keys(array_merge(...$windows)), 'keys and order are preserved');
+test('OpenRouter batch retries pooled held launches without burning the transient budget', function () {
+    // The OpenAI-compatible transport now runs the shared rolling pool, so a
+    // held outcome ('held' => true, never sent after a sibling 429) can reach
+    // its retry layer too. It must ride retryOpenRouterBatch without charging
+    // the finite transient rounds and without capturing a Retry-After
+    // deadline it never received. delays = [0]: one transient round for
+    // really-attempted requests.
+    $bodies = ['real' => ['model' => 'm'], 'held' => ['model' => 'm']];
+    $round = 0;
+    $slept = [];
+    $results = OpenAiCompatibleClient::retryOpenRouterBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            $out = [];
+            foreach ($subset as $key => $_body) {
+                $out[$key] = match (true) {
+                    $key === 'real' && $round === 1 => ['ok' => false, 'transient' => true, 'error' => 'HTTP 429: slow down'],
+                    $key === 'held' && $round <= 2 => ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)'],
+                    default => ['ok' => true, 'text' => strtoupper((string) $key), 'input' => 1, 'output' => 1],
+                };
+            }
+            return $out;
+        },
+        [0],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+        static fn (): int => 100,
+    );
+    assert_eq('REAL', $results['real']['text']);
+    assert_eq('HELD', $results['held']['text'], 'a twice-held launch still gets its real attempt after the budget');
+    assert_eq(3, $round, 'held keys retry in their own round instead of aborting');
+    // Only the shared helper's forwarded zero-second backoff waves: no
+    // Retry-After deadline is invented for a request that was never sent.
+    assert_eq([0, 0], $slept, 'no Retry-After wait for a request that was never sent');
+});
+
+test('OpenRouter batch forwards its test sleeper to the shared backoff', function () {
+    // retryOpenRouterBatch delegates the normal backoff to retryTextBatch; if
+    // the injected sleeper were not forwarded, tests with nonzero delays (and
+    // the held-only-wave backoff) would really sleep.
+    $bodies = ['a' => ['model' => 'm']];
+    $round = 0;
+    $slept = [];
+    $results = OpenAiCompatibleClient::retryOpenRouterBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            return ['a' => $round === 1
+                ? ['ok' => false, 'transient' => true, 'error' => 'HTTP 500']
+                : ['ok' => true, 'text' => 'A', 'input' => 1, 'output' => 1]];
+        },
+        [5],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+    );
+    assert_eq('A', $results['a']['text']);
+    assert_eq([5], $slept, 'the shared backoff wait goes through the injected sleeper, not sleep()');
 });
 
 test('OpenAiCompatibleClient interpretStream classifies a transfer with no response at all as transient', function () {

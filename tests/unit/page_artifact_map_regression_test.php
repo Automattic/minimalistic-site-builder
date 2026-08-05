@@ -21,7 +21,9 @@ function pam_transform_fixture(array $pages, array $map): array
         'language' => 'English',
         'pages' => $pages,
     ]);
-    $project->writeJson('designDirection.json', ['description' => 'Mapped editorial system']);
+    $project->writeJson('designDirection.json', test_design_direction('cinematic-safe-zone', [
+        'description' => 'Mapped editorial system',
+    ]));
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => []]);
     $project->writeText('design/site.css', ".mapped{color:#123}\n");
     $project->writeJson('design/page-artifact-map.json', $map);

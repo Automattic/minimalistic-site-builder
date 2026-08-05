@@ -3,11 +3,12 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\Imagen;
+use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (deterministic): collect the AI image placeholders the sections step
@@ -74,6 +75,7 @@ final class CollectImagesStep implements Step
             writes: [
                 'images.json',
                 'theme/parts/*',
+                'warnings.json',
             ],
             concurrent: false,
         );
@@ -85,6 +87,7 @@ final class CollectImagesStep implements Step
         $byFilename = [];
         /** @var array<string,bool> $canonicalByFilename keyed by filename */
         $canonicalByFilename = [];
+        $warnings = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
@@ -117,6 +120,20 @@ final class CollectImagesStep implements Step
             }
             foreach ($images as $entry) {
                 $img = $entry['image'];
+                $cappedForFooter = false;
+                $authoredRatio = $img['aspectRatio'] ?? null;
+                if ($rel === 'parts/footer.html'
+                    && is_string($authoredRatio)
+                    && self::isPortraitAspectRatio($authoredRatio)
+                ) {
+                    $img['aspectRatio'] = 'square';
+                    $cappedForFooter = true;
+                    $warnings[] = "file='theme/parts/footer.html'; block='AI_IMAGE placeholder'; asset="
+                        . Warnings::value($img['src'] ?? $img['filename'] ?? 'unknown') . '; authored aspect-ratio='
+                        . Warnings::value($authoredRatio) . '; delivered aspect-ratio="square"; '
+                        . 'disposition=portrait-oriented footer image capped after placeholder recovery '
+                        . 'so it cannot stretch the footer band';
+                }
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
                     if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
@@ -128,6 +145,12 @@ final class CollectImagesStep implements Step
                         }
                         $canonicalByFilename[$filename] = true;
                     }
+                    if ($cappedForFooter) {
+                        // A shared asset must use the footer-safe shape even if an
+                        // earlier non-footer source (or a canonical row above) set a
+                        // portrait ratio, so the footer band can't be stretched.
+                        $byFilename[$filename]['aspectRatio'] = 'square';
+                    }
                     continue;
                 }
                 $img['sources'] = [$rel];
@@ -138,6 +161,7 @@ final class CollectImagesStep implements Step
         }
 
         $project->writeJson('images.json', array_values($byFilename));
+        $project->addWarnings($this->id(), $warnings);
     }
 
     /**
@@ -464,20 +488,40 @@ final class CollectImagesStep implements Step
     }
 
     /**
-     * The aspect ratio named anywhere in a recovered spec. Explicit supported
-     * ratios survive, unsupported numeric ratios are mapped by Imagen to the
-     * closest supported shape, and named ratios remain named. Defaults to
+     * The aspect ratio in a recovered spec. The documented structured form's
+     * trailing pipe field wins over ratio-like words in its subject, context or
+     * style; malformed forms then fall back to an explicit `ratio:` label and,
+     * finally, a heuristic keyword anywhere in the value. Explicit supported
+     * ratios survive, unsupported numeric ratios are mapped by GeminiImage to
+     * the closest supported shape, and named ratios remain named. Defaults to
      * landscape, the full-bleed default.
      */
     private static function sniffAspectRatio(string $body): string
     {
-        $matched = preg_match('/ratio:\s*(\d+:\d+|square|portrait|landscape)/i', $body, $m)
-            || preg_match('/\b(\d+:\d+|square|portrait|landscape)\b/i', $body, $m);
-        if (!$matched) {
-            return 'landscape';
+        $token = '(\d+:\d+|card-landscape|card-portrait|ultrawide|square|portrait|landscape)';
+        $patterns = [
+            // Canonical AI_IMAGE: subject | page context | style | aspect ratio.
+            '/\|\s*(?:ratio:\s*)?' . $token . '\s*$/i',
+            '/ratio:\s*' . $token . '/i',
+            '/\b' . $token . '\b/i',
+        ];
+        foreach ($patterns as $pattern) {
+            if (!preg_match($pattern, $body, $m)) {
+                continue;
+            }
+            $ratio = strtolower($m[1]);
+            return preg_match('/^\d+:\d+$/', $ratio) ? GeminiImage::aspectRatio($ratio) : $ratio;
         }
 
-        $ratio = strtolower($m[1]);
-        return preg_match('/^\d+:\d+$/', $ratio) ? Imagen::aspectRatio($ratio) : $ratio;
+        return 'landscape';
+    }
+
+    /** Whether Gemini's delivered shape for this authored ratio is portrait. */
+    private static function isPortraitAspectRatio(string $ratio): bool
+    {
+        if (preg_match('/^(\d+):(\d+)$/', GeminiImage::aspectRatio($ratio), $parts) !== 1) {
+            return false;
+        }
+        return (int) $parts[1] < (int) $parts[2];
     }
 }

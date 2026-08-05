@@ -153,7 +153,7 @@ final class MotionSanityStep implements Step
      */
     public static function fileGroups(Project $project): array
     {
-        $all = FixBlocksStep::themeFiles($project);
+        $all = $project->themeFiles();
 
         $pages = $project->exists('pages.json')
             ? (array) ($project->readJson('pages.json')['pages'] ?? [])
@@ -240,8 +240,8 @@ final class MotionSanityStep implements Step
             }
 
             // A block tagged for the custom-motion step is the user's ONE
-            // explicit animation request; the kit's higher-specificity rules
-            // The static motion selector (html.motion-js
+            // explicit animation request. The kit's higher-specificity static
+            // motion selector (html.motion-js
             // .reveal-*.motion-target.is-visible) would override the generated
             // .custom-motion animation, so preset motion is evicted here.
             $customTarget = in_array(CustomMotionStep::CLASS_NAME, $jsonTokens, true)

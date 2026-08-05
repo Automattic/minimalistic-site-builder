@@ -12,13 +12,14 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Warnings;
 
 /**
  * Step (LLM): generate the block theme's theme.json.
  *
- * Input:  meta.json (user prompt) + siteSpec.json (factual info). The model
- *         makes the design decisions (palette, typography, spacing) inline —
- *         there is no separate design document.
+ * Input:  meta.json (user prompt) + siteSpec.json (factual info) +
+ *         designDirection.json (the committed creative and typography floor).
+ *         The model translates that direction into theme.json tokens.
  * Output: theme/theme.json — palette, typography, spacing, layout, element styles.
  *
  * Validates the structure the templates depend on (version 3, the five color
@@ -276,10 +277,12 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 ]);
             }
         }
+        $heroBlueprint = DesignDirectionStep::heroBlueprintFor($project);
         $rendered = $this->renderer->render('theme-json.md', [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
             'site_spec'        => $project->readText('siteSpec.json'),
             'design_direction' => $designDirection,
+            'hero_sizing_context' => DesignDirectionStep::formatHeroBlueprint($heroBlueprint),
         ]);
 
         return [self::REQ => $this->withOptions(['prompt' => $rendered])];
@@ -327,7 +330,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             && (!is_array($theme['styles'])
                 || ($theme['styles'] !== [] && array_is_list($theme['styles'])))) {
             $warnings[] = 'theme/theme.json styles: authored '
-                . self::warningValue($theme['styles'])
+                . Warnings::value($theme['styles'])
                 . '; delivered build-supplied styles object'
                 . '; disposition replaced malformed shape before normalization';
             $theme['styles'] = [];
@@ -340,7 +343,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 || ($theme['styles']['spacing'] !== []
                     && array_is_list($theme['styles']['spacing'])))) {
             $warnings[] = 'theme/theme.json styles.spacing: authored '
-                . self::warningValue($theme['styles']['spacing'])
+                . Warnings::value($theme['styles']['spacing'])
                 . '; delivered {"blockGap":"var:preset|spacing|md"}'
                 . '; disposition replaced malformed shape before normalization';
             $theme['styles']['spacing'] = [];
@@ -353,23 +356,24 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Missing required slugs are filled deterministically instead of
         // aborting the build: the direction's committed hexes first, neutral
         // readable defaults otherwise. Every fill is recorded durably.
-        $direction = $project->exists('designDirection.json')
-            ? $project->readJson('designDirection.json')
-            : [];
+        $direction = DesignDirectionStep::dataFor($project);
         $preferred = is_array($direction['palette'] ?? null) ? $direction['palette'] : [];
         [$theme, $colorWarnings] = self::repairColors($theme, $preferred);
-        [$theme, $fontWarnings] = self::repairFonts($theme);
+        $preferredType = is_array($direction['type'] ?? null) ? $direction['type'] : [];
+        [$theme, $fontWarnings] = self::repairFonts($theme, $preferredType);
         [$theme, $sizeWarnings] = self::repairFontSizes($theme);
 
         // Last: the scaffold references the preset slugs repaired above, and
         // every well-shaped model-authored leaf wins over the wiring it fills in.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
+        [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
             $colorWarnings,
             $fontWarnings,
             $sizeWarnings,
             $scaffoldWarnings,
+            $groupPaddingWarnings,
         );
 
         if ($warnings !== []) {
@@ -498,6 +502,91 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     }
 
     /**
+     * Remove vertical padding from the global core/group block style.
+     *
+     * Group is a recursive layout primitive: WordPress expands this path to a
+     * selector matching every .wp-block-group, including structural wrappers
+     * nested inside headers, sections and cards. Section-scale padding there
+     * therefore compounds at every nesting level. Vertical rhythm belongs to
+     * explicit block instances (SectionRhythmStep, header/footer roots and
+     * authored components), while a model-authored horizontal treatment may
+     * still survive here.
+     *
+     * Scalar padding applies to all four sides. Preserve its horizontal intent
+     * by rewriting it to left/right longhands while dropping the unsafe
+     * vertical default. Empty containers are pruned so theme.json retains the
+     * object shapes WordPress expects. Pure and idempotent — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function normalizeGroupBlockPadding(array $theme): array
+    {
+        return self::repairGroupBlockPadding($theme)[0];
+    }
+
+    /**
+     * normalizeGroupBlockPadding() plus a durable warning row per removed or
+     * rewritten model-authored declaration, in the same grammar as every
+     * sibling repair in writeTheme(). Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairGroupBlockPadding(array $theme): array
+    {
+        $warnings = [];
+        $padding = $theme['styles']['blocks']['core/group']['spacing']['padding'] ?? null;
+        $pathExists = isset($theme['styles']['blocks']['core/group']['spacing'])
+            && is_array($theme['styles']['blocks']['core/group']['spacing'])
+            && array_key_exists('padding', $theme['styles']['blocks']['core/group']['spacing']);
+        if (!$pathExists) {
+            return [$theme, $warnings];
+        }
+
+        if (is_string($padding) || is_int($padding) || is_float($padding)) {
+            $delivered = ['left' => $padding, 'right' => $padding];
+            $theme['styles']['blocks']['core/group']['spacing']['padding'] = $delivered;
+            $warnings[] = 'theme/theme.json styles.blocks.core/group.spacing.padding: authored '
+                . Warnings::value($padding) . '; delivered ' . Warnings::value($delivered)
+                . '; disposition rewrote the four-side shorthand to horizontal longhands because its vertical'
+                . ' default compounds inside every nested Group';
+            return [$theme, $warnings];
+        }
+        if (!is_array($padding) || ($padding !== [] && array_is_list($padding))) {
+            return [$theme, $warnings];
+        }
+
+        foreach (['top', 'bottom'] as $side) {
+            if (!array_key_exists($side, $padding)) {
+                continue;
+            }
+            $warnings[] = "theme/theme.json styles.blocks.core/group.spacing.padding.{$side}: authored "
+                . Warnings::value($padding[$side])
+                . '; delivered removed'
+                . '; disposition removed recursive vertical Group padding that compounds inside every nested Group';
+        }
+        unset(
+            $theme['styles']['blocks']['core/group']['spacing']['padding']['top'],
+            $theme['styles']['blocks']['core/group']['spacing']['padding']['bottom'],
+        );
+        if ($theme['styles']['blocks']['core/group']['spacing']['padding'] === []) {
+            unset($theme['styles']['blocks']['core/group']['spacing']['padding']);
+        }
+        if ($theme['styles']['blocks']['core/group']['spacing'] === []) {
+            unset($theme['styles']['blocks']['core/group']['spacing']);
+        }
+        if ($theme['styles']['blocks']['core/group'] === []) {
+            unset($theme['styles']['blocks']['core/group']);
+        }
+        if ($theme['styles']['blocks'] === []) {
+            unset($theme['styles']['blocks']);
+        }
+
+        return [$theme, $warnings];
+    }
+
+    /**
      * Ensure every required palette slug exists, filling gaps from the design
      * direction's committed hexes and then the neutral fallbacks. Malformed
      * entries are removed at the smallest unit and recorded before a required
@@ -525,13 +614,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
             if ($slug === '') {
                 $warnings[] = 'theme.json palette: entry with missing or invalid slug '
-                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                    . Warnings::value($entry['slug'] ?? null) . ' removed';
                 continue;
             }
             $color = $entry['color'] ?? null;
             if (!is_string($color) || preg_match('/^#[0-9A-F]{3}(?:[0-9A-F]{3})?$/i', trim($color)) !== 1) {
                 $warnings[] = "theme.json palette slug '{$slug}': invalid color "
-                    . self::warningValue($color) . '; malformed entry removed';
+                    . Warnings::value($color) . '; malformed entry removed';
                 continue;
             }
             $entry['slug'] = $slug;
@@ -567,9 +656,25 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * @param array<mixed> $theme
      * @return array{0:array<mixed>,1:list<string>} theme, warnings
      */
-    public static function repairFonts(array $theme): array
+    public static function repairFonts(array $theme, array $preferredType = []): array
     {
         $warnings = [];
+        $preferred = [];
+        foreach (self::REQUIRED_FONTS as $slot) {
+            $typeSlot = is_array($preferredType[$slot] ?? null) ? $preferredType[$slot] : [];
+            $family = is_string($typeSlot['family'] ?? null) ? trim($typeSlot['family']) : '';
+            if (
+                $family !== ''
+                && preg_match("/^\\p{L}[\\p{L}\\p{N} .&'_-]{0,99}$/u", $family) === 1
+            ) {
+                $preferred[$slot] = $family;
+            } elseif ($family !== '') {
+                $warnings[] = 'designDirection.json: type.' . $slot . '.family authored value '
+                    . Warnings::value($family)
+                    . '; delivered removed; disposition invalid family name could not be applied to theme.json';
+            }
+        }
+
         $families = $theme['settings']['typography']['fontFamilies'] ?? null;
         if (!is_array($families)) {
             $warnings[] = 'theme.json missing settings.typography.fontFamilies; rebuilt with system stacks';
@@ -585,17 +690,20 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
             if ($slug === '') {
                 $warnings[] = 'theme.json fontFamilies: entry with missing or invalid slug '
-                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                    . Warnings::value($entry['slug'] ?? null) . ' removed';
                 continue;
             }
             $family = $entry['fontFamily'] ?? null;
             if (!is_string($family) || trim($family) === '') {
                 $warnings[] = "theme.json fontFamilies slug '{$slug}': invalid fontFamily "
-                    . self::warningValue($family) . '; malformed entry removed';
+                    . Warnings::value($family) . '; malformed entry removed';
                 continue;
             }
             $entry['slug'] = $slug;
             $entry['fontFamily'] = trim($family);
+            if (isset($preferred[$slug])) {
+                $entry['fontFamily'] = self::replacePrimaryFamily($entry['fontFamily'], $preferred[$slug]);
+            }
             $entries[] = $entry;
         }
         if ($nonObjects > 0) {
@@ -608,12 +716,25 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             if (in_array($needed, $slugs, true)) {
                 continue;
             }
-            $stack = self::FALLBACK_FONTS[$needed];
+            $stack = isset($preferred[$needed])
+                ? self::replacePrimaryFamily(self::FALLBACK_FONTS[$needed], $preferred[$needed])
+                : self::FALLBACK_FONTS[$needed];
             $families[] = ['slug' => $needed, 'name' => ucfirst($needed), 'fontFamily' => $stack];
-            $warnings[] = "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
+            $warnings[] = isset($preferred[$needed])
+                ? "theme.json fontFamilies missing slug '{$needed}'; filled from designDirection.json with {$stack}"
+                : "theme.json fontFamilies missing slug '{$needed}'; filled with the system stack";
         }
         $theme['settings']['typography']['fontFamilies'] = $families;
         return [$theme, $warnings];
+    }
+
+    private static function replacePrimaryFamily(string $stack, string $family): string
+    {
+        $parts = explode(',', $stack, 2);
+        $fallback = isset($parts[1]) && trim($parts[1]) !== ''
+            ? ', ' . trim($parts[1])
+            : ', system-ui, sans-serif';
+        return '"' . $family . '"' . $fallback;
     }
 
     /**
@@ -631,7 +752,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($sizes) || ($sizes !== [] && !array_is_list($sizes))) {
             if ($sizes !== null) {
                 $warnings[] = 'theme.json settings.typography.fontSizes: invalid container '
-                    . self::warningValue($sizes) . '; rebuilt from the default scale';
+                    . Warnings::value($sizes) . '; rebuilt from the default scale';
             }
             $sizes = [];
         }
@@ -641,27 +762,27 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         foreach ($sizes as $entry) {
             if (!is_array($entry)) {
                 $warnings[] = 'theme.json fontSizes: removed malformed (non-object) entry '
-                    . self::warningValue($entry);
+                    . Warnings::value($entry);
                 continue;
             }
             $slug = is_string($entry['slug'] ?? null) ? trim($entry['slug']) : '';
             if ($slug === '') {
                 $warnings[] = 'theme.json fontSizes: entry with missing or invalid slug '
-                    . self::warningValue($entry['slug'] ?? null) . ' removed';
+                    . Warnings::value($entry['slug'] ?? null) . ' removed';
                 continue;
             }
             $size = $entry['size'] ?? null;
             if (!is_string($size) || !self::isSafeFontSize($size)) {
                 $warnings[] = "theme.json fontSizes slug '{$slug}': invalid size "
-                    . self::warningValue($size) . '; malformed entry removed';
+                    . Warnings::value($size) . '; malformed entry removed';
                 continue;
             }
             $entry['slug'] = $slug;
             $entry['size'] = trim($size);
             if (isset($seen[$slug])) {
                 $warnings[] = "theme.json fontSizes duplicate slug '{$slug}': authored size "
-                    . self::warningValue($entry['size']) . '; delivered first authored size '
-                    . self::warningValue($seen[$slug]) . '; disposition removed duplicate';
+                    . Warnings::value($entry['size']) . '; delivered first authored size '
+                    . Warnings::value($seen[$slug]) . '; disposition removed duplicate';
                 continue;
             }
             // Only the name is missing — keep the authored size rather than
@@ -805,7 +926,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         if (!is_array($parent[$leaf])
             || ($parent[$leaf] !== [] && array_is_list($parent[$leaf]))) {
             $warnings[] = "theme/theme.json {$label}: authored "
-                . self::warningValue($parent[$leaf])
+                . Warnings::value($parent[$leaf])
                 . '; delivered removed'
                 . '; disposition removed malformed context-free color container';
             unset($parent[$leaf]);
@@ -815,7 +936,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             return;
         }
         $warnings[] = "theme/theme.json {$label}.text: authored "
-            . self::warningValue($parent[$leaf]['text'])
+            . Warnings::value($parent[$leaf]['text'])
             . '; delivered removed'
             . '; disposition removed context-free text color invisible to contrast repair';
         unset($parent[$leaf]['text']);
@@ -879,23 +1000,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 || (!is_array($scaffoldValue)
                     && get_debug_type($modelValue) !== get_debug_type($scaffoldValue))) {
                 $warnings[] = "theme/theme.json {$currentPath}: authored "
-                    . self::warningValue($modelValue) . '; delivered '
-                    . self::warningValue($scaffoldValue)
+                    . Warnings::value($modelValue) . '; delivered '
+                    . Warnings::value($scaffoldValue)
                     . '; disposition replaced malformed shape with scaffold default';
                 $model[$key] = $scaffoldValue;
             }
         }
 
         return $model;
-    }
-
-    /** Compact authored-value evidence for one actionable warnings.json row. */
-    private static function warningValue(mixed $value): string
-    {
-        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($encoded)) {
-            return get_debug_type($value);
-        }
-        return mb_strlen($encoded) > 160 ? mb_substr($encoded, 0, 157) . '...' : $encoded;
     }
 }

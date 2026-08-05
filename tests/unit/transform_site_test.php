@@ -37,7 +37,9 @@ function transform_site_fixture(string $home, array $inner = [], int $repairBudg
         $artifactMap['team'] = 'team';
     }
     $project->writeJson('design/page-artifact-map.json', $artifactMap);
-    $project->writeJson('designDirection.json', ['description' => 'Crisp editorial system']);
+    $project->writeJson('designDirection.json', test_design_direction('cinematic-safe-zone', [
+        'description' => 'Crisp editorial system',
+    ]));
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => []]);
     $project->writeJson('images.json', []);
     $project->writeText('design/site.css', ".shared{color:#123}\n");

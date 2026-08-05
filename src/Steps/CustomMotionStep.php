@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\CodeFences;
+use Automattic\SiteBuild\CssChecks;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
 use Automattic\SiteBuild\Project;
@@ -103,9 +105,9 @@ final class CustomMotionStep implements Step
             'design_direction'  => DesignDirectionStep::readFor($project),
             'tagged_elements'   => implode("\n", $tagged),
         ]);
-        $css = self::stripFences(trim(
+        $css = CodeFences::strip(
             $this->llm->complete($rendered, $this->withOptions(['log_label' => $this->id()]))
-        ));
+        );
 
         $problems = self::validate($css);
         if ($problems !== []) {
@@ -149,7 +151,7 @@ final class CustomMotionStep implements Step
     {
         $found = [];
         $token = '(?<![\w-])' . self::CLASS_NAME . '(?![\w-])';
-        foreach (FixBlocksStep::themeFiles($project) as $rel) {
+        foreach ($project->themeFiles() as $rel) {
             $doc = BlockMarkup::parse($project->readText('theme/' . $rel));
             foreach ($doc->indices() as $i) {
                 if (preg_match_all('/<[a-z][^>]*class="[^"]*' . $token . '[^"]*"[^>]*>/i', $doc->ownHtml($i), $m) > 0) {
@@ -192,41 +194,23 @@ final class CustomMotionStep implements Step
         }
 
         $stripped = (string) preg_replace('~/\*.*?\*/~s', '', $css);
-        // Walk the depth instead of comparing totals: a leading stray `}`
-        // (balanced by a trailing open brace) would close the deterministic
-        // reduced-motion wrapper this CSS gets concatenated into, letting the
-        // rest of the block escape it.
-        $depth = 0;
-        foreach (str_split($stripped) as $char) {
-            if ($char === '{') {
-                $depth++;
-            } elseif ($char === '}' && --$depth < 0) {
-                break;
-            }
-        }
-        if ($depth !== 0) {
+        // A stray `}` here would close the deterministic reduced-motion
+        // wrapper this CSS gets concatenated into, letting the rest of the
+        // block escape it.
+        if (!CssChecks::braceDepthBalanced($stripped)) {
             $problems[] = 'unbalanced braces';
             return $problems; // the structural walks below need balanced braces
         }
 
-        // url() is not the only resource-bearing value form: image-set("…"),
-        // image("…"), cross-fade() and friends fetch too (including with
-        // vendor prefixes, which is why the match is a bare substring).
-        if (preg_match('/(?:image-set|cross-fade|element|paint|url|src|image)\s*\(/i', $stripped) === 1) {
-            $problems[] = 'resource-loading CSS functions (url(), image-set(), image(), cross-fade(), …) are not allowed';
+        $resource = CssChecks::resourceLoadingProblem($stripped);
+        if ($resource !== null) {
+            $problems[] = $resource;
         }
-        if (preg_match('/(?<![-\w])display\s*:\s*none/i', $stripped) === 1) {
-            $problems[] = 'display:none hides generated content';
+        foreach (CssChecks::hiddenContentProblems($stripped) as $problem) {
+            $problems[] = $problem;
         }
-        if (preg_match('/(?<![-\w])visibility\s*:\s*hidden/i', $stripped) === 1) {
-            $problems[] = 'visibility:hidden hides generated content';
-        }
-        if (preg_match_all('/@([a-zA-Z-]+)/', $stripped, $atRules) > 0) {
-            foreach (array_unique($atRules[1]) as $at) {
-                if (!in_array(strtolower($at), ['media', 'keyframes'], true)) {
-                    $problems[] = "disallowed at-rule: @{$at}";
-                }
-            }
+        foreach (CssChecks::disallowedAtRules($stripped, ['media', 'keyframes']) as $problem) {
+            $problems[] = $problem;
         }
 
         [$keyframeNames, $rules, $keyframeBodies] = self::stripKeyframes($stripped);
@@ -271,18 +255,11 @@ final class CustomMotionStep implements Step
         }
 
         // Every remaining rule selector must live under the dedicated class.
-        $body = (string) preg_replace('/@media[^{]*\{/i', '', $rules);
-        if (preg_match_all('/(?:^|[{}])\s*([^{};]+?)\s*\{/s', $body, $m) > 0) {
-            foreach ($m[1] as $selectorList) {
-                foreach (explode(',', $selectorList) as $selector) {
-                    $selector = trim($selector);
-                    if (preg_match('/^\.' . self::CLASS_NAME . '(?![\w])/', $selector) !== 1
-                        && preg_match('/^\.' . self::CLASS_NAME . '-[\w-]+/', $selector) !== 1
-                    ) {
-                        $problems[] = "selector not scoped under ." . self::CLASS_NAME . ": {$selector}";
-                    }
-                }
-            }
+        $isScoped = static fn (string $selector): bool =>
+            preg_match('/^\.' . self::CLASS_NAME . '(?![\w])/', $selector) === 1
+            || preg_match('/^\.' . self::CLASS_NAME . '-[\w-]+/', $selector) === 1;
+        foreach (CssChecks::unscopedSelectors($rules, $isScoped) as $selector) {
+            $problems[] = "selector not scoped under ." . self::CLASS_NAME . ": {$selector}";
         }
 
         return $problems;
@@ -338,15 +315,5 @@ final class CustomMotionStep implements Step
         }
         $number = (float) $m[1];
         return ($m[2] === '%' ? $number / 100 : $number) <= 0.0;
-    }
-
-    /** Strip a leading/trailing markdown code fence if the model added one. */
-    private static function stripFences(string $text): string
-    {
-        if (str_starts_with($text, '```')) {
-            $text = preg_replace('/^```[a-zA-Z]*\n/', '', $text);
-            $text = preg_replace('/\n```$/', '', (string) $text);
-        }
-        return trim((string) $text);
     }
 }

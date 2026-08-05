@@ -85,7 +85,7 @@ test('StepComposition legacy env preserves the full legacy graph byte-for-byte',
             'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
             'theme-json+page-plan', 'sections', 'section-rhythm',
             'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
-            'assemble-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
+            'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
         ], $ids);
         assert_true(!in_array('homepage-design', $ids, true));
         assert_true(!in_array('transform-site', $ids, true));

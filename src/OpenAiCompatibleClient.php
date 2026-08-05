@@ -171,6 +171,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         return JsonBatchRecovery::run(
             $requests,
             fn (array $subset): array => $this->responseBatch($subset, true),
+            defaultMaxTokens: $this->defaultMaxTokens,
         );
     }
 
@@ -428,7 +429,8 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
      * @param callable(array<array-key,array<string,mixed>>):array<array-key,array<string,mixed>> $transport
      * @param list<int> $delays
      * @param null|callable(string|int,string,float):void $onFailure
-     * @param null|callable(int):void $sleeper Test seam for the remaining wait
+     * @param null|callable(int):void $sleeper Test seam for the remaining
+     *        Retry-After wait and the shared helper's backoff waits
      * @param null|callable():int $clock Test seam returning the current epoch
      * @return array<array-key,array<string,mixed>>
      */
@@ -443,6 +445,9 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         /** @var array<array-key,int> $retryAfterDeadlineByKey */
         $retryAfterDeadlineByKey = [];
         $clock ??= static fn (): int => time();
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
 
         $wrappedTransport = function (array $subset) use (
             $transport,
@@ -459,11 +464,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
                 );
                 if ($remainingWait > 0) {
                     Narrator::write("    (OpenRouter Retry-After still requires {$remainingWait}s after normal backoff)\n");
-                    if ($sleeper !== null) {
-                        $sleeper($remainingWait);
-                    } else {
-                        sleep($remainingWait);
-                    }
+                    $sleeper($remainingWait);
                 }
                 foreach (array_keys($retryingDeadlines) as $key) {
                     unset($retryAfterDeadlineByKey[$key]);
@@ -488,6 +489,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
             $wrappedTransport,
             $delays,
             $onFailure,
+            $sleeper,
         );
     }
 
@@ -525,41 +527,24 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
     }
 
     /**
+     * Run a set of streaming Chat Completions requests through the shared
+     * curl_multi rolling pool — at most maxConcurrency in flight, the freed
+     * slot refilled the moment any transfer completes — and classify each
+     * transfer via interpretStream. Previously windowed (a slow member
+     * stalled every request behind its window barrier); the rolling pool also
+     * brings the 429 launch-hold and refused-add handling (see CurlMultiPool)
+     * that the pooled clients already had, whose transient/held outcomes the
+     * batch retry layer re-sends after its backoff.
+     *
      * @param array<array-key,array<string,mixed>> $bodies
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,time?:float,stop_reason?:?string}>
+     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,held?:bool,retry_without?:string,retry_after_at?:int,time?:float,stop_reason?:?string}>
      */
     private function streamMulti(array $bodies): array
     {
-        $out = [];
-        foreach (self::concurrencyWindows($bodies, $this->maxConcurrency) as $chunk) {
-            $out += $this->streamChunk($chunk);
-        }
-        return $out;
-    }
-
-    /**
-     * Windows of concurrent requests, delegating to the shared implementation
-     * so the two transports cannot drift apart on the default cap.
-     *
-     * @param array<array-key,array<string,mixed>> $bodies
-     * @return list<array<array-key,array<string,mixed>>>
-     */
-    public static function concurrencyWindows(array $bodies, ?int $maxConcurrency = null): array
-    {
-        return array_values(AnthropicClient::concurrencyWindows($bodies, $maxConcurrency));
-    }
-
-    /**
-     * @param array<array-key,array<string,mixed>> $bodies
-     * @return array<array-key,array{ok:bool,text?:string,input?:int,output?:int,error?:string,transient?:bool,retry_without?:string,retry_after_at?:int,time?:float,stop_reason?:?string}>
-     */
-    private function streamChunk(array $bodies): array
-    {
-        $multi = curl_multi_init();
-        $handles = [];
         $raw = [];
         $retryAfterDeadlines = [];
-        foreach ($bodies as $key => $body) {
+
+        $buildHandle = function (string|int $key, array $body) use (&$raw, &$retryAfterDeadlines): \CurlHandle {
             $raw[$key] = '';
             $ch = curl_init($this->endpoint);
             $options = [
@@ -584,31 +569,16 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
                 };
             }
             curl_setopt_array($ch, $options);
-            $handles[$key] = $ch;
-            curl_multi_add_handle($multi, $ch);
-        }
+            return $ch;
+        };
 
-        do {
-            $status = curl_multi_exec($multi, $running);
-            if ($running && curl_multi_select($multi, 1.0) === -1) {
-                usleep(1000);
-            }
-        } while ($running && $status === CURLM_OK);
-
-        $out = [];
-        foreach ($handles as $key => $ch) {
-            $errno  = curl_errno($ch);
-            $error  = curl_error($ch);
-            $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $time   = (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME);
-            curl_multi_remove_handle($multi, $ch);
-            curl_close($ch);
+        $classify = function (string|int $key, \CurlHandle $ch, int $httpStatus) use (&$raw, &$retryAfterDeadlines): array {
             $outcome = self::interpretStream(
                 $raw[$key],
-                $errno,
-                $error,
+                curl_errno($ch),
+                curl_error($ch),
                 $httpStatus,
-                $time,
+                (float) curl_getinfo($ch, CURLINFO_TOTAL_TIME),
                 true,
                 $this->provider,
             );
@@ -622,11 +592,11 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
                     $outcome['retry_after_at'] = $retryAfterDeadline;
                 }
             }
-            $out[$key] = $outcome;
-        }
+            unset($raw[$key], $retryAfterDeadlines[$key]);
+            return $outcome;
+        };
 
-        curl_multi_close($multi);
-        return $out;
+        return (new CurlMultiPool())->run($bodies, $buildHandle, $classify, $this->maxConcurrency);
     }
 
     /**
@@ -684,12 +654,12 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
                 : self::isLegacyTransientStreamError($parsed);
             return ['ok' => false, 'transient' => $transient, 'error' => "stream error: {$parsed['error']}", 'time' => $time];
         }
-        $terminationError = JsonBatchRecovery::terminationError($parsed['stop_reason']);
+        $terminationError = StopReasons::terminationError($parsed['stop_reason']);
         // Batch callers preserve abnormal terminal responses so
         // TextBatchRecovery / JsonBatchRecovery can selectively regenerate
         // only the affected member. Keep the explicit false mode for callers
         // that need the legacy immediate rejection policy.
-        if (!$preserveAbnormalTerminal && TextBatchRecovery::isTruncation($parsed['stop_reason'])) {
+        if (!$preserveAbnormalTerminal && StopReasons::isTruncation($parsed['stop_reason'])) {
             return [
                 'ok' => false,
                 'transient' => false,
@@ -717,7 +687,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
 
     private static function isTransientCurl(int $errno): bool
     {
-        return in_array($errno, [6, 7, 28, 35, 52, 55, 56], true);
+        return in_array($errno, TransientApiException::TRANSIENT_CURL_ERRNOS, true);
     }
 
     private static function isTransientStatus(int $status, string $provider = 'openai'): bool
@@ -864,6 +834,9 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
         bool $surfaceTruncatedPartial = false,
     ): array
     {
+        $sleeper ??= static function (int $seconds): void {
+            sleep($seconds);
+        };
         $attempt = 0;
         $retriedTruncation = false;
         while (true) {
@@ -871,11 +844,10 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
                 $result = $transport($body);
                 $empty = trim($result['text']) === '';
                 $stopReason = $result['stop_reason'] ?? null;
-                $normalizedStopReason = is_string($stopReason) ? trim($stopReason) : '';
-                $probeReachedOutputLimit = TextBatchRecovery::isTruncation($stopReason)
-                    && $normalizedStopReason !== 'model_context_window_exceeded';
+                // Deliberately narrower than isTruncation — see StopReasons::OUTPUT_LIMIT.
+                $probeReachedOutputLimit = StopReasons::isOutputLimit($stopReason);
                 $terminationError = $recoverTerminalReasons
-                    ? JsonBatchRecovery::terminationError($stopReason)
+                    ? StopReasons::terminationError($stopReason)
                     : null;
                 if ($surfaceTruncatedPartial
                     && !$empty
@@ -909,11 +881,7 @@ final class OpenAiCompatibleClient implements FinishReasonAwareLlm, UsageReporti
                     : max($fallback, (int) $retryDelay($fallback));
                 $attempt++;
                 Narrator::write("    (transient API error: {$e->getMessage()}; retry {$attempt} in {$wait}s)\n");
-                if ($sleeper !== null) {
-                    $sleeper($wait);
-                } else {
-                    sleep($wait);
-                }
+                $sleeper($wait);
             } catch (\RuntimeException $e) {
                 $param = self::rejectedParam($e->getMessage());
                 if ($param === null || !array_key_exists($param, $body)) {

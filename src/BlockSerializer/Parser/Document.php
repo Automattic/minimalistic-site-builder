@@ -28,36 +28,4 @@ final class Document implements \Countable, \IteratorAggregate
     {
         yield from $this->nodes;
     }
-
-    /**
-     * Pinned default-parser shaped data for oracle comparisons.
-     *
-     * @return list<array<string,mixed>>
-     */
-    public function toParsedBlocks(): array
-    {
-        return array_map(self::nodeToParsedBlock(...), $this->nodes);
-    }
-
-    /** @return array<string,mixed> */
-    private static function nodeToParsedBlock(DocumentNode $node): array
-    {
-        if ($node instanceof FreeformNode) {
-            return [
-                'blockName' => null,
-                'attrs' => new \stdClass(),
-                'innerBlocks' => [],
-                'innerHTML' => $node->content,
-                'innerContent' => [$node->content],
-            ];
-        }
-
-        return [
-            'blockName' => $node->name,
-            'attrs' => $node->attributes?->toNative(),
-            'innerBlocks' => array_map(self::nodeToParsedBlock(...), $node->innerBlocks),
-            'innerHTML' => $node->innerHTML,
-            'innerContent' => $node->innerContent,
-        ];
-    }
 }

@@ -134,6 +134,7 @@ final class SectionRhythm
         $degradations = [];
         foreach ($normalized as $i => $entry) {
             $preset = self::DENSITY_PRESETS[$entry['density']];
+            $topPreset = $i === 0 ? self::openingTopPreset($entry['markup'], $preset) : $preset;
             $next = $normalized[$i + 1] ?? null;
             $nextBackground = $next['background'] ?? ($i === count($normalized) - 1 ? $followingBackground : null);
             $sharedSeam = is_string($nextBackground)
@@ -145,6 +146,7 @@ final class SectionRhythm
                 $sharedSeam,
                 $entry['background'],
                 $entry['label'],
+                $topPreset,
             );
             $markups[] = $markup;
 
@@ -169,8 +171,11 @@ final class SectionRhythm
                     $degradationRecord !== null => $degradationRecord['message'],
                     $entry['background'] === 'image' =>
                         "{$entry['label']}: set root padding=0 and image-cover padding top={$preset}, bottom={$preset}; outer margins=0",
-                    default => "{$entry['label']}: set outer padding top={$preset}, bottom={$bottom}; outer margins=0",
+                    default => "{$entry['label']}: set outer padding top={$topPreset}, bottom={$bottom}; outer margins=0",
                 };
+                if ($topPreset !== $preset) {
+                    $note .= " (opening hero top capped from {$preset})";
+                }
                 if ($sharedSeam) {
                     $owner = $next['label'] ?? 'the footer';
                     $note .= " (shared {$entry['background']} seam is owned by {$owner})";
@@ -186,6 +191,43 @@ final class SectionRhythm
     private static function sharesContinuousSurface(string $current, string $next): bool
     {
         return $current === $next && in_array($current, self::COLLAPSIBLE_SURFACES, true);
+    }
+
+    /**
+     * The top preset for a page's OPENING section. A hero that leads with its
+     * media sits tight under the header (hero.md caps it at `sm`; audited
+     * density-mapped `xl` tops opened a dead band that pushed the rail or
+     * copy below the fold), and a copy-led hero keeps breathing room but
+     * never more than `md`. Non-hero openers keep the plain density map.
+     * The bottom edge and every later section are untouched, so the page's
+     * internal rhythm stays exactly as planned.
+     */
+    private static function openingTopPreset(string $markup, string $preset): string
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+        } catch (\Throwable) {
+            return $preset;
+        }
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $preset;
+        }
+        $rootClass = (string) (($document->attrs($root) ?? [])['className'] ?? '');
+        if (!str_contains($rootClass, 'hero-composition--')) {
+            return $preset;
+        }
+        $children = $document->children($root);
+        $mediaLed = $children !== []
+            && in_array($document->name($children[0]), ['image', 'cover'], true)
+            && str_contains(
+                (string) (($document->attrs($children[0]) ?? [])['className'] ?? ''),
+                'hero-composition__media'
+            );
+        if ($mediaLed) {
+            return 'sm';
+        }
+        return in_array($preset, ['lg', 'xl', 'xxl'], true) ? 'md' : $preset;
     }
 
     /**
@@ -212,7 +254,9 @@ final class SectionRhythm
         bool $sharedSeam,
         string $background,
         string $label,
+        ?string $topPreset = null,
     ): array {
+        $topPreset ??= $preset;
         $originalMarkup = $markup;
         [$attrs, $openingOffset, $openingLength] = self::rootGroup($markup, $label);
         $degradation = $background === 'image' && self::hasClassToken($attrs, self::DEGRADED_IMAGE_CLASS)
@@ -223,43 +267,21 @@ final class SectionRhythm
             ]
             : null;
         $spacingBackground = $degradation === null ? $background : 'base';
-        $before = self::encodeAttrs($attrs);
-        $markup = self::stripOwnedWrapperClasses(
+        // $topPreset diverges from $preset only for the page-opening hero
+        // (BIGR-755's top cap: sm media-led / md copy-led) — the shared
+        // wrapper rewrite must honor it on the top edge.
+        $rewritten = self::rewriteWrapperBlock(
+            $markup,
             $attrs,
-            $markup,
-            $openingOffset + $openingLength,
+            $openingOffset,
+            $openingLength,
+            'wp:group',
+            $spacingBackground === 'image' ? '0' : self::presetRef($topPreset),
+            $spacingBackground === 'image' || $sharedSeam ? '0' : self::presetRef($preset),
             $label,
-        );
-
-        $style = self::objectProperty($attrs, 'style', $label, 'style');
-        $spacing = self::objectProperty($style, 'spacing', $label, 'style.spacing');
-        $padding = self::boxProperty($spacing, 'padding', $label, 'style.spacing.padding');
-        $margin = self::boxProperty($spacing, 'margin', $label, 'style.spacing.margin');
-        $shorthandProperties = self::preserveWrapperHorizontalSpacing(
-            $markup,
-            $openingOffset + $openingLength,
-            $padding,
-            $margin,
             $label,
+            'style',
         );
-        $padding->top = $spacingBackground === 'image' ? '0' : self::presetRef($preset);
-        $padding->bottom = $spacingBackground === 'image' || $sharedSeam ? '0' : self::presetRef($preset);
-
-        $margin->top = '0';
-        $margin->bottom = '0';
-
-        // Patch the wrapper HTML first: it sits after the opener, so the
-        // opener's offsets stay valid for the substr_replace below.
-        $rewritten = self::patchWrapperStyle($markup, $openingOffset + $openingLength, [
-            'margin-top'     => '0',
-            'margin-bottom'  => '0',
-            'padding-top'    => self::cssSpacingValue($padding->top),
-            'padding-bottom' => self::cssSpacingValue($padding->bottom),
-        ], $shorthandProperties);
-        if (self::encodeAttrs($attrs) !== $before) {
-            $opening = '<!-- wp:group ' . self::encodeAttrs($attrs) . ' -->';
-            $rewritten = substr_replace($rewritten, $opening, $openingOffset, $openingLength);
-        }
 
         if ($background === 'image' && $degradation === null) {
             $coverResult = self::rewriteImageCover($rewritten, $preset, $label);
@@ -410,39 +432,18 @@ final class SectionRhythm
         }
 
         try {
-            $before = self::encodeAttrs($attrs);
-            $markup = self::stripOwnedWrapperClasses(
+            $patched = self::rewriteWrapperBlock(
+                $markup,
                 $attrs,
-                $markup,
-                $offset + $length,
+                $offset,
+                $length,
+                'wp:cover',
+                self::presetRef($preset),
+                self::presetRef($preset),
+                $label,
                 $label . ' direct cover',
+                'cover style',
             );
-            $style = self::objectProperty($attrs, 'style', $label, 'cover style');
-            $spacing = self::objectProperty($style, 'spacing', $label, 'cover style.spacing');
-            $padding = self::boxProperty($spacing, 'padding', $label, 'cover style.spacing.padding');
-            $margin = self::boxProperty($spacing, 'margin', $label, 'cover style.spacing.margin');
-            $shorthandProperties = self::preserveWrapperHorizontalSpacing(
-                $markup,
-                $offset + $length,
-                $padding,
-                $margin,
-                $label . ' direct cover',
-            );
-            $padding->top = self::presetRef($preset);
-            $padding->bottom = self::presetRef($preset);
-            $margin->top = '0';
-            $margin->bottom = '0';
-
-            $patched = self::patchWrapperStyle($markup, $offset + $length, [
-                'margin-top'     => '0',
-                'margin-bottom'  => '0',
-                'padding-top'    => self::cssSpacingValue($padding->top),
-                'padding-bottom' => self::cssSpacingValue($padding->bottom),
-            ], $shorthandProperties);
-            if (self::encodeAttrs($attrs) !== $before) {
-                $newOpening = '<!-- wp:cover ' . self::encodeAttrs($attrs) . ' -->';
-                $patched = substr_replace($patched, $newOpening, $offset, $length);
-            }
         } catch (\RuntimeException $error) {
             return self::imageCoverFailure(
                 $originalMarkup,
@@ -451,6 +452,65 @@ final class SectionRhythm
             );
         }
         return ['markup' => $patched, 'degradation' => null];
+    }
+
+    /**
+     * Take ownership of one wrapper's vertical rhythm: strip owned classes,
+     * mirror horizontal shorthands into the attrs, pin the vertical
+     * padding/margin, and splice the updated opener back into the markup.
+     *
+     * @param string $wrapperLabel label for saved-HTML edits (strip/preserve)
+     * @param string $stylePath attribute path prefix used in error messages
+     */
+    private static function rewriteWrapperBlock(
+        string $markup,
+        \stdClass $attrs,
+        int $offset,
+        int $length,
+        string $blockName,
+        string $paddingTop,
+        string $paddingBottom,
+        string $label,
+        string $wrapperLabel,
+        string $stylePath,
+    ): string {
+        $before = self::encodeAttrs($attrs);
+        $markup = self::stripOwnedWrapperClasses(
+            $attrs,
+            $markup,
+            $offset + $length,
+            $wrapperLabel,
+        );
+
+        $style = self::objectProperty($attrs, 'style', $label, $stylePath);
+        $spacing = self::objectProperty($style, 'spacing', $label, "{$stylePath}.spacing");
+        $padding = self::boxProperty($spacing, 'padding', $label, "{$stylePath}.spacing.padding");
+        $margin = self::boxProperty($spacing, 'margin', $label, "{$stylePath}.spacing.margin");
+        $shorthandProperties = self::preserveWrapperHorizontalSpacing(
+            $markup,
+            $offset + $length,
+            $padding,
+            $margin,
+            $wrapperLabel,
+        );
+        $padding->top = $paddingTop;
+        $padding->bottom = $paddingBottom;
+        $margin->top = '0';
+        $margin->bottom = '0';
+
+        // Patch the wrapper HTML first: it sits after the opener, so the
+        // opener's offsets stay valid for the substr_replace below.
+        $patched = self::patchWrapperStyle($markup, $offset + $length, [
+            'margin-top'     => '0',
+            'margin-bottom'  => '0',
+            'padding-top'    => self::cssSpacingValue($paddingTop),
+            'padding-bottom' => self::cssSpacingValue($paddingBottom),
+        ], $shorthandProperties);
+        if (self::encodeAttrs($attrs) !== $before) {
+            $opening = "<!-- {$blockName} " . self::encodeAttrs($attrs) . ' -->';
+            $patched = substr_replace($patched, $opening, $offset, $length);
+        }
+        return $patched;
     }
 
     /**
@@ -580,11 +640,11 @@ final class SectionRhythm
         array $shorthandProperties,
     ): string
     {
-        $tagHtml = self::wrapperTag($markup, $searchOffset);
+        $tagHtml = MarkupScan::wrapperTag($markup, $searchOffset);
         if ($tagHtml === null) {
             return $markup;
         }
-        $style = self::tagAttribute($tagHtml, 'style');
+        $style = MarkupScan::tagAttribute($tagHtml, 'style');
         if ($style === null) {
             return $markup;
         }
@@ -592,9 +652,8 @@ final class SectionRhythm
 
         $seen = [];
         $out = [];
-        foreach (explode(';', $value) as $segment) {
-            $colon = strpos($segment, ':');
-            $property = strtolower(trim($colon === false ? $segment : substr($segment, 0, $colon)));
+        foreach (MarkupScan::parseInlineStyle($value) as $declaration) {
+            $property = $declaration['property'];
             if (isset($owned[$property])) {
                 if (!isset($seen[$property])) {
                     $seen[$property] = true;
@@ -610,7 +669,7 @@ final class SectionRhythm
             if (in_array($property, self::SUPERSEDED_WRAPPER_PROPERTIES, true)) {
                 continue;
             }
-            $out[] = $segment;
+            $out[] = $declaration['segment'];
         }
 
         $newValue = implode(';', $out);
@@ -619,46 +678,6 @@ final class SectionRhythm
         }
         $newTag = substr_replace($tagHtml, $newValue, $valueOffset, strlen($value));
         return substr_replace($markup, $newTag, $searchOffset, strlen($tagHtml));
-    }
-
-    /** The first HTML element immediately following a block opener. */
-    private static function wrapperTag(string $markup, int $searchOffset): ?string
-    {
-        $rest = substr($markup, $searchOffset);
-        if (preg_match('/\A\s*<[a-zA-Z][a-zA-Z0-9-]*(?=[\x20\t\r\n\f\/>])/', $rest, $start) !== 1) {
-            return null;
-        }
-
-        $quote = null;
-        $length = strlen($rest);
-        for ($i = strlen($start[0]); $i < $length; $i++) {
-            $char = $rest[$i];
-            if ($quote !== null) {
-                if ($char === $quote) {
-                    $quote = null;
-                }
-                continue;
-            }
-            if ($char === '"' || $char === "'") {
-                $quote = $char;
-                continue;
-            }
-            if ($char === '>') {
-                return substr($rest, 0, $i + 1);
-            }
-        }
-        return null;
-    }
-
-    /** @return array{string,int}|null attribute value and its byte offset inside the tag */
-    private static function tagAttribute(string $tagHtml, string $name): ?array
-    {
-        $pattern = '/[\x20\t\r\n\f]' . preg_quote($name, '/')
-            . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i';
-        if (preg_match($pattern, $tagHtml, $match, PREG_OFFSET_CAPTURE) !== 1) {
-            return null;
-        }
-        return ($match[1][1] ?? -1) !== -1 ? $match[1] : $match[2];
     }
 
     /**
@@ -690,8 +709,8 @@ final class SectionRhythm
             }
         }
 
-        $tagHtml = self::wrapperTag($markup, $searchOffset);
-        $classAttr = $tagHtml === null ? null : self::tagAttribute($tagHtml, 'class');
+        $tagHtml = MarkupScan::wrapperTag($markup, $searchOffset);
+        $classAttr = $tagHtml === null ? null : MarkupScan::tagAttribute($tagHtml, 'class');
         if ($classAttr === null) {
             return $markup;
         }
@@ -770,8 +789,8 @@ final class SectionRhythm
         \stdClass $margin,
         string $label,
     ): array {
-        $tagHtml = self::wrapperTag($markup, $searchOffset);
-        $style = $tagHtml === null ? null : self::tagAttribute($tagHtml, 'style');
+        $tagHtml = MarkupScan::wrapperTag($markup, $searchOffset);
+        $style = $tagHtml === null ? null : MarkupScan::tagAttribute($tagHtml, 'style');
         if ($style === null) {
             return [];
         }
@@ -781,13 +800,12 @@ final class SectionRhythm
             'margin'  => ['right' => null, 'left' => null],
         ];
         $shorthandProperties = [];
-        foreach (explode(';', $style[0]) as $segment) {
-            $colon = strpos($segment, ':');
-            if ($colon === false) {
+        foreach (MarkupScan::parseInlineStyle($style[0]) as $declaration) {
+            if ($declaration['value'] === null) {
                 continue;
             }
-            $property = strtolower(trim(substr($segment, 0, $colon)));
-            $rawValue = substr($segment, $colon + 1);
+            $property = $declaration['property'];
+            $rawValue = $declaration['value'];
 
             if ($property === 'padding' || $property === 'margin') {
                 $shorthandProperties[$property] = true;
@@ -872,7 +890,7 @@ final class SectionRhythm
     {
         $raw = $value['important']
             ? self::cssSpacingValue($value['value'])
-            : self::blockSpacingValue($value['value']);
+            : MarkupScan::blockSpacingValue($value['value']);
         return $raw . ($value['important'] ? ' !important' : '');
     }
 
@@ -881,14 +899,6 @@ final class SectionRhythm
     {
         $raw = self::cssSpacingValue($value['value']);
         return $raw . ($value['important'] ? ' !important' : '');
-    }
-
-    /** Convert a rendered preset variable back to block-attribute syntax. */
-    private static function blockSpacingValue(string $value): string
-    {
-        return preg_match('/^var\(--wp--preset--spacing--([a-z0-9_-]+)\)$/', $value, $match) === 1
-            ? "var:preset|spacing|{$match[1]}"
-            : $value;
     }
 
     /**

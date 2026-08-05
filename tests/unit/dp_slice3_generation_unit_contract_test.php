@@ -41,7 +41,9 @@ function dp3_contract_fixture(?array $pages = null): array
     $project = (new ProjectStore($tmp))->create('demo');
     $project->writeJson('meta.json', $input['meta']);
     $project->writeJson('siteSpec.json', $input['site_spec']);
-    $project->writeJson('designDirection.json', $input['design_direction']);
+    $designDirection = $input['design_direction'];
+    $designDirection['hero_blueprint'] ??= \Automattic\SiteBuild\HeroBlueprint::defaultFor('cinematic-safe-zone');
+    $project->writeJson('designDirection.json', $designDirection);
     $project->writeText('design/site.css', $input['site_css']);
     $project->writeText('design/preview.html', $input['preview_html']);
     return [$project, new FakeLlm(), $tmp, $golden];
@@ -145,6 +147,7 @@ function dp3_contract_planned_sections(array $sections): array
             'background' => $section['background'],
             'vertical_density' => $section['vertical_density'],
             'handoff' => $section['handoff'],
+            'primary_action' => null,
         ];
     }
     return $planned;

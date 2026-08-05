@@ -29,7 +29,9 @@ function numeric_map_transform_fixture(array $map): array
             ['slug' => '2026', 'title' => 'Year 2026', 'purpose' => 'Archive'],
         ],
     ]);
-    $project->writeJson('designDirection.json', ['description' => 'Numeric editorial']);
+    $project->writeJson('designDirection.json', test_design_direction('cinematic-safe-zone', [
+        'description' => 'Numeric editorial',
+    ]));
     $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => []]);
     $project->writeText(TransformArtifacts::SITE_CSS, '.numeric-map{display:block;}');
     $project->writeJson('design/page-artifact-map.json', $map);

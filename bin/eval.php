@@ -2,9 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixers;
-use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Eval\EvalMetrics;
-use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -34,7 +32,6 @@ const SITES = [
 ];
 
 $only = $argv[1] ?? null;
-$store = new ProjectStore(repo_path('projects'));
 
 // Report-only mode: rebuild eval/report.md from projects already on disk,
 // reusing captured step timings from eval/results.json. Used after a
@@ -145,21 +142,29 @@ function collect_metrics(Project $project): array
 /** @param array<string,mixed> $results */
 function write_report(array $results): void
 {
-    $stepIds = ['scaffold-theme', 'scaffold-plugin', 'site-spec', 'apply-identity', 'design-direction', 'theme-json+page-plan', 'sections', 'collect-images', 'fix-blocks', 'assemble-pages', 'finalize-theme'];
+    // Derive the columns from the step ids actually recorded (in run order),
+    // so a renamed pipeline step can never silently render as "–".
+    $stepIds = [];
+    foreach ($results as $r) {
+        foreach (array_keys($r['timings']) as $sid) {
+            if (!in_array($sid, $stepIds, true)) {
+                $stepIds[] = $sid;
+            }
+        }
+    }
 
     $md = "# Builder — Phase 2 Evaluation\n\n";
-    // Resolve the large tier the run actually used rather than naming a model
-    // literally: a hardcoded fallback silently mislabels every report the day
-    // the packaged default changes, and the report is the artifact a model
-    // rollout is judged on.
-    $provider = Env::get('LLM_PROVIDER') ?: ModelConfig::defaultProvider();
-    $model = Env::get('LLM_MODEL') ?: ModelConfig::tierModel($provider, 'large');
-    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . $model . "\n\n";
+    $md .= 'Generated: ' . gmdate('Y-m-d H:i') . " UTC · model: " . default_llm_model() . "\n\n";
 
     // Speed table.
     $md .= "## Speed (seconds per step)\n\n";
-    $md .= '| Site | ' . implode(' | ', array_map(fn ($s) => short($s), $stepIds)) . " | **Total** |\n";
-    $md .= '|' . str_repeat('---|', count($stepIds) + 2) . "\n";
+    $speedHeaders = array_merge(
+        ['Site'],
+        array_map(fn ($s) => short($s), $stepIds),
+        ['**Total**']
+    );
+    $md .= '| ' . implode(' | ', $speedHeaders) . " |\n";
+    $md .= '|' . str_repeat('---|', count($speedHeaders)) . "\n";
     foreach ($results as $slug => $r) {
         $row = ["`{$slug}`"];
         foreach ($stepIds as $sid) {
@@ -207,9 +212,23 @@ function write_report(array $results): void
         $md .= "None — all sites structurally valid.\n";
     }
 
-    @mkdir(repo_path('eval'), 0775, true);
-    file_put_contents(repo_path('eval/report.md'), $md);
-    file_put_contents(repo_path('eval/results.json'), json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    $evalDir = repo_path('eval');
+    if (!is_dir($evalDir) && !mkdir($evalDir, 0775, true)) {
+        fwrite(STDERR, "Failed to create {$evalDir}\n");
+        exit(1);
+    }
+    if (file_put_contents($evalDir . '/report.md', $md) === false) {
+        fwrite(STDERR, "Failed to write {$evalDir}/report.md\n");
+        exit(1);
+    }
+    $resultsJson = json_encode(
+        $results,
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+    );
+    if (file_put_contents($evalDir . '/results.json', $resultsJson) === false) {
+        fwrite(STDERR, "Failed to write {$evalDir}/results.json\n");
+        exit(1);
+    }
 }
 
 function short(string $stepId): string

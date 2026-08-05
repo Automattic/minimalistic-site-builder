@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\Serializer;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\SectionRhythm;
 
 /** @param array<mixed> $attrs */
@@ -655,4 +657,77 @@ test('section rhythm patches the image cover wrapper style, not just its attribu
     assert_true(!array_key_exists('className', $coverAttrs), 'the rhythm-owned cover cannot overlap upward');
     assert_true(!str_contains($result['markups'][0], 'overlap-up'));
     assert_true(!str_contains($result['markups'][0], '12rem'));
+});
+
+test('every code-owned hero recipe has a section-rhythm-compatible root skeleton', function () {
+    foreach (HeroComposition::RECIPES as $recipe) {
+        $projection = HeroComposition::planProjection(HeroBlueprint::defaultFor($recipe));
+        $background = $projection['default_background'];
+        $inner = '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Title</h1><!-- /wp:heading -->';
+        if ($background === 'image') {
+            $inner = '<!-- wp:cover {"align":"full","dimRatio":50} -->'
+                . '<div class="wp-block-cover alignfull"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span>'
+                . '<div class="wp-block-cover__inner-container">' . $inner . '</div></div><!-- /wp:cover -->';
+        }
+        $markup = sr_section([
+            'className' => 'hero-composition--' . $recipe,
+            'layout' => ['type' => 'constrained'],
+        ], $inner);
+
+        $result = SectionRhythm::rewrite([[
+            'slug' => 'hero',
+            'markup' => $markup,
+            'density' => 'standard',
+            'background' => $background,
+        ]]);
+
+        assert_eq([], $result['degradations'], "{$recipe} skeleton retains its intended rhythm mode");
+        assert_eq(
+            'hero-composition--' . $recipe,
+            sr_root_attrs($result['markups'][0])['className'] ?? null,
+        );
+        if ($background === 'image') {
+            assert_eq('var:preset|spacing|xl', sr_first_attrs($result['markups'][0], 'cover')['style']['spacing']['padding']['top']);
+        } else {
+            // The opening hero's top edge is capped at md (copy-led skeleton
+            // here); the bottom keeps the plain density map.
+            assert_eq('var:preset|spacing|md', sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['top']);
+            assert_eq('var:preset|spacing|xl', sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom']);
+        }
+    }
+});
+
+test('the opening hero top cap is sm for media-led roots and leaves later sections alone', function () {
+    // Regression: the density map (standard -> xl) re-imposed a dead band on
+    // media-led heroes after HeroUnit had already clamped them (naturaleza8's
+    // panorama band opened ~160px under the header, rail below the fold).
+    $mediaHero = sr_section([
+        'className' => 'hero-composition--panorama-rail',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:image {"className":"hero-composition__media"} -->'
+        . '<figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt=""/></figure>'
+        . '<!-- /wp:image -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Rail headline</h1><!-- /wp:heading -->');
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $mediaHero, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'story', 'markup' => $plain, 'density' => 'standard', 'background' => 'contrast'],
+    ]);
+    $heroAttrs = sr_root_attrs($result['markups'][0]);
+    assert_eq('var:preset|spacing|sm', $heroAttrs['style']['spacing']['padding']['top'], 'media-led hero top is sm');
+    assert_eq('var:preset|spacing|xl', $heroAttrs['style']['spacing']['padding']['bottom']);
+    assert_eq(
+        'var:preset|spacing|xl',
+        sr_root_attrs($result['markups'][1])['style']['spacing']['padding']['top'],
+        'later sections keep the plain density map'
+    );
+    assert_contains('opening hero top capped', implode("\n", $result['notes']));
+
+    // A non-hero opener is not capped.
+    $plainFirst = SectionRhythm::rewrite([
+        ['slug' => 'opening', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
+    ]);
+    assert_eq('var:preset|spacing|xl', sr_root_attrs($plainFirst['markups'][0])['style']['spacing']['padding']['top']);
 });

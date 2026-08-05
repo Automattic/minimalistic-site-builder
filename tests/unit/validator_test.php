@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SectionRhythm;
@@ -26,6 +28,101 @@ function validator_project(): array
 test('validator passes a well-formed theme', function () {
     [$project, $tmp] = validator_project();
     assert_eq([], ThemeValidator::validate($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+/** @return array{0:\Automattic\SiteBuild\Project,1:string} */
+function validator_above_fold_project(): array
+{
+    [$project, $tmp] = validator_project();
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'title' => 'Home',
+            'layout_archetype' => 'mixed-width-editorial',
+            'background' => 'contrast',
+            'primary_action' => null,
+        ]],
+    ]];
+    $blueprint = HeroBlueprint::defaultFor('focal-subject-stage');
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        $blueprint,
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'validator-test', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'standard-row',
+    );
+    $header = '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast"} -->'
+        . '<div class="wp-block-group header-archetype--standard-row has-base-background-color has-contrast-color"></div>'
+        . '<!-- /wp:group -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage"></div><!-- /wp:group -->';
+    $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
+        'part_keys' => ['header', 'page-home--hero'],
+        'opening_overlay_support' => ['page-home--hero' => false],
+        'primary_action_delivered' => true,
+    ]);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $final);
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $hero . "\n");
+    return [$project, $tmp];
+}
+
+test('final above-fold validator accepts the persisted header and hero relation', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    assert_eq([], ThemeValidator::aboveFoldWarnings($project));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator reports downstream drift without mutating markup', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    $header = str_replace('header-archetype--standard-row', 'header-archetype--split-nav', $project->readText('theme/parts/header.html'));
+    $hero = str_replace('hero-composition--focal-subject-stage', 'hero-composition--editorial-split', $project->readText('plugin/pages/home.html'));
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $hero);
+
+    $warnings = ThemeValidator::aboveFoldWarnings($project);
+    $joined = implode("\n", $warnings);
+    assert_contains('header.archetype', $joined);
+    assert_contains('hero.recipe_marker', $joined);
+    assert_contains("file='theme/parts/header.html'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=', $joined);
+    assert_contains('disposition=', $joined);
+    assert_eq($header, $project->readText('theme/parts/header.html'), 'advisory validation must not mutate header');
+    assert_eq($hero, $project->readText('plugin/pages/home.html'), 'advisory validation must not mutate page');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('final above-fold validator reports competing stacked chrome and an over-budget opening cover', function () {
+    [$project, $tmp] = validator_above_fold_project();
+    $header = str_replace(
+        '"backgroundColor":"base"',
+        '"backgroundColor":"base","gradient":"invented-gradient"',
+        $project->readText('theme/parts/header.html'),
+    );
+    $opening = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage">'
+        . '<!-- wp:cover {"minHeight":92,"minHeightUnit":"vh"} --><div class="wp-block-cover" style="min-height:92vh"></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $header);
+    $project->writeText('plugin/pages/home.html', $opening);
+
+    $warnings = ThemeValidator::aboveFoldWarnings($project);
+    $joined = implode("\n", $warnings);
+    assert_contains('header.stacked_surface', $joined);
+    assert_contains('stacked_cover_max_vh', $joined);
+    assert_contains('authored=80', $joined);
+    assert_contains('delivered=92', $joined);
+    assert_eq($header, $project->readText('theme/parts/header.html'));
+    assert_eq($opening, $project->readText('plugin/pages/home.html'));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -243,7 +340,7 @@ function validator_linked_project(): array
     $project->writeText('plugin/pages/visit.html',
         '<!-- wp:group {"anchor":"directions"} --><div class="wp-block-group" id="directions">'
         . '<!-- wp:paragraph --><p><a href="/">Home</a> · <a href="#directions">Top</a> · '
-        . '<a href="https://example.com">Ext</a> · <a href="mailto:a@b.c">Mail</a> · <a href="#">Social</a></p><!-- /wp:paragraph -->'
+        . '<a href="https://example.com">Ext</a> · <a href="mailto:a@b.c">Mail</a></p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->');
     return [$project, $tmp];
 }
@@ -331,6 +428,73 @@ test('validator flags button links without an href', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('validator reports placeholder links with actionable delivery context', function () {
+    [$project, $tmp] = validator_linked_project();
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:button {"url":"#"} --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="#">Instagram</a></div><!-- /wp:button -->'
+        . '<!-- wp:navigation-link {"label":"Social","url":"#"} --><!-- /wp:navigation-link -->'
+        . "<!-- wp:paragraph --><p><a href='#'>Legal</a></p><!-- /wp:paragraph -->"
+        . '<!-- wp:paragraph --><p><a href=#>Privacy</a></p><!-- /wp:paragraph -->'
+        . '<!-- wp:cover {"url":"#"} --><div class="wp-block-cover">'
+        . '<img class="wp-block-cover__image-background" src=# alt=""/></div><!-- /wp:cover -->'
+    );
+
+    $problems = ThemeValidator::placeholderLinkProblems($project);
+    assert_eq(4, count($problems), 'rendered and mirrored block URLs are reported once per dead interaction');
+    $joined = implode("\n", $problems);
+    assert_contains('theme/parts/footer.html', $joined);
+    assert_contains('link[1]', $joined);
+    assert_contains('link[2]', $joined);
+    assert_contains('link[3]', $joined);
+    assert_contains('authored href="#" -> delivered href="#"', $joined);
+    assert_contains('block-url[1]', $joined);
+    assert_contains('authored url="#" -> delivered url="#"', $joined);
+    assert_contains('disposition:', $joined);
+
+    $media = ThemeValidator::placeholderMediaSourceProblems($project);
+    assert_eq(1, count($media), 'mirrored block and HTML media sources describe one broken image');
+    assert_contains('media-src[1]', $media[0]);
+    assert_contains('authored src="#" -> delivered src="#"', $media[0]);
+    assert_contains('dead media source', $media[0]);
+    assert_contains('disposition:', $media[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator reports empty list blocks and leaves populated siblings alone', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:list --><ul class="wp-block-list"></ul><!-- /wp:list -->'
+        . '<!-- wp:list --><ul class="wp-block-list"><!-- wp:list-item -->'
+        . '<li>Kept</li><!-- /wp:list-item --></ul><!-- /wp:list -->'
+    );
+
+    $problems = ThemeValidator::emptyListProblems($project);
+    assert_eq(1, count($problems));
+    assert_contains('theme/parts/footer.html', $problems[0]);
+    assert_contains('wp:list[1]', $problems[0]);
+    assert_contains('authored list block -> delivered empty list (0 items)', $problems[0]);
+    assert_contains('disposition:', $problems[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator reports an empty nested list without flagging its populated parent', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText(
+        'theme/parts/footer.html',
+        '<!-- wp:list --><ul class="wp-block-list"><!-- wp:list-item -->'
+        . '<li>Parent<!-- wp:list --><ul class="wp-block-list"></ul><!-- /wp:list --></li>'
+        . '<!-- /wp:list-item --></ul><!-- /wp:list -->'
+    );
+
+    $problems = ThemeValidator::emptyListProblems($project);
+    assert_eq(1, count($problems));
+    assert_contains('wp:list[2]', $problems[0]);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('link checks stay quiet without pages.json', function () {
     [$project, $tmp] = validator_project();
     $project->writeText('theme/parts/header.html', '<!-- wp:navigation-link {"label":"X","url":"/nowhere/"} /-->');
@@ -358,6 +522,23 @@ test('plan warnings flag interior pages opening with a full-bleed cover', functi
     assert_contains("interior page 'menu'", $warnings[0]);
     assert_contains('full-bleed-cover', $warnings[0]);
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('plan warnings report a footer-like page section without hiding valid siblings', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeJson('pages.json', ['pages' => [
+        ['slug' => 'home', 'front' => true, 'sections' => [
+            ['slug' => 'hero', 'title' => 'Hero', 'type' => 'hero', 'layout_archetype' => 'full-bleed-cover'],
+            ['slug' => 'legal', 'title' => 'Legal', 'type' => 'footerInfo', 'layout_archetype' => 'centered-stack'],
+        ]],
+    ]]);
+
+    $warnings = ThemeValidator::planWarnings($project);
+    assert_eq(1, count($warnings));
+    assert_contains('pages.json: page[home]/sections[legal]', $warnings[0]);
+    assert_contains('delivered alongside theme/parts/footer.html', $warnings[0]);
+    assert_contains('disposition:', $warnings[0]);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
@@ -411,6 +592,28 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     $project->writeJson('theme/theme.json', $theme);
     $joined = implode(' ', ThemeValidator::spacingWarnings($project));
     assert_contains('bounded canonical profile', $joined);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('spacing warnings report residual global Group vertical padding actionably', function () {
+    [$project, $tmp] = validator_project();
+    $theme = ThemeJsonStep::normalizeSpacingSettings(['version' => 3]);
+    $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
+        'top' => 'var:preset|spacing|xl',
+        'bottom' => 'var:preset|spacing|xl',
+        'left' => 'var:preset|spacing|md',
+    ];
+    $project->writeJson('theme/theme.json', $theme);
+
+    $joined = implode("\n", ThemeValidator::spacingWarnings($project));
+    assert_contains("file='theme/theme.json'", $joined);
+    assert_contains("block='styles.blocks.core/group.spacing.padding'", $joined);
+    assert_contains('authored=', $joined);
+    assert_contains('delivered=unchanged', $joined);
+    assert_contains('disposition=remove global top/bottom Group padding', $joined);
+
+    $project->writeJson('theme/theme.json', ThemeJsonStep::normalizeGroupBlockPadding($theme));
+    assert_eq([], ThemeValidator::spacingWarnings($project), 'normalized theme passes');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

@@ -63,6 +63,50 @@ $builder->pipeline()->runThrough($project);
 
 Same step, same pipeline, four different transports, and only that first line moves.
 
+### A host can supply the site spec
+
+Some hosts already have the factual site spec before this package starts. They
+pass that package-canonical decoded object as request data instead of asking the
+shared library to infer it again:
+
+```php
+$project = $builder->createProject(
+    prompt: $userPrompt,
+    slug: $projectSlug,
+    siteSpec: $canonicalSiteSpec,
+);
+$builder->pipeline()->runThrough($project);
+```
+
+`createProject()` persists the value under `meta.json.site_spec`. The existing
+`site-spec` graph node remains in place and remains the sole declared writer of
+`siteSpec.json`; it simply takes the supplied value as its candidate, applies
+the same deterministic normalization/page-scope/warning rules, and makes zero
+site-spec LLM calls. Keeping the node and artifact stable matters for graph
+validation, checkpoints, and workflows split across processes.
+
+With `multiPage` omitted, a supplied spec retains its complete page tree. An
+explicit `multiPage: false` still forces the homepage-only product. A non-empty
+`pages:` list implies multi-page scope and has highest precedence over the
+supplied tree. A missing `siteSpec` keeps the CLI/default behavior: the step
+generates the candidate from the refined prompt.
+
+The machine-readable input contract is
+[`schemas/site-spec.schema.json`](../schemas/site-spec.schema.json), with a
+complete payload at [`examples/site-spec.json`](../examples/site-spec.json).
+Both ship with the package and are available programmatically through
+`Package::siteSpecSchemaPath()` and `Package::siteSpecExamplePath()`. The schema
+requires all 16 canonical fixed fields, permits additional grounded factual
+properties at the top level, and defines strict recursive page objects. It
+describes the recommended input and normalized artifact; intake remains
+repair-oriented rather than adding a fatal schema-validation boundary.
+
+That contract is the package's `siteSpec.json` shape, not a host's similarly
+named metadata object. WordPress.com maps its own SiteSpec representation at its
+adapter/ability boundary and passes a decoded JSON object, not a double-encoded
+string. The shared package deliberately contains no WordPress.com-specific
+field aliases.
+
 ## The four hosts
 
 - **Command line.** Talks straight to the Anthropic API with a key from the environment. It fans section generation out concurrently, so a build finishes in about the time of its slowest call.
@@ -84,21 +128,23 @@ So the shared part is the core, and only the core: the steps, the prompts, the `
 
 The native path is built out of wpcom's own agent primitives, with the shared core doing the actual theme work. Start with the vendored core - loaded via `require_lib` - then register block-theme generation as something the WP Orchestrator can call.
 
-Four abilities do it. The first is a workflow-ability, `generate_block_theme`: you register it like any ability, but its body builds and runs a `WorkflowAgent` internally (the same `Add_Page_Workflow_Ability` pattern wpcom already uses). That workflow encodes the same step graph as the library `Pipeline` - site spec, design direction, theme.json and the section plan, scaffold, then the part batch, then assemble and fix blocks. The other three are unit abilities — `generate_section`, `generate_header`, and `generate_footer` — whose bodies are thin wrappers over the shared core's stateless `SectionUnit`, `HeaderUnit`, and `FooterUnit`. For example:
+Five abilities do it. The first is a workflow-ability, `generate_block_theme`: you register it like any ability, but its body builds and runs a `WorkflowAgent` internally (the same `Add_Page_Workflow_Ability` pattern wpcom already uses). That workflow composes the shared steps - site spec, design direction, theme.json and the section plan, scaffold, then the part batch, deterministic passes, and assembly. The other four are unit abilities — `generate_hero`, `generate_section`, `generate_header`, and `generate_footer` — whose bodies are thin wrappers over the shared core's stateless `HeroUnit`, `SectionUnit`, `HeaderUnit`, and `FooterUnit`. For example:
 
 ```php
 // wpcom 'generate_section' unit ability - a stateless wrapper over the shared core
-'execute_callback' => function ( array $input ): string {
+'execute_callback' => function ( array $input ): array {
     require_lib( 'a8c/site-build' );
     $llm      = new WpcomAiLlm( feature: 'block-theme-generator' );
     $renderer = new PromptRenderer( Package::promptsDir() );
-    return ( new SectionUnit( $llm, $renderer ) )->generate( $input );
+    return ( new SectionUnit( $llm, $renderer ) )->generate( $input )->toArray();
 },
 ```
 
-The section input carries `site_spec` and `theme_json` (either decoded arrays or JSON text), `language`, the formatted `design_direction`, the shared `outline`, a nested `section` brief (`slug`, its required structural `role` of `hero` / `content` / `closing`, copy fields, and its assigned `layout_archetype` / `background` / `vertical_density` / `handoff`), and the precomputed `neighbors` summary. Header uses the common context plus `hero_brief`; footer uses only the common context. All values are ordinary JSON-serializable HTTP arguments. Each analogous ability constructs its matching unit and returns `generate( $input )`.
+The ordinary section input carries `site_spec` and `theme_json` (either decoded arrays or JSON text), `language`, the formatted global `design_direction`, the shared `outline` and `site_pages`, a nested `page`, a nested `section` brief (`slug`, structural role, copy fields, assigned `layout_archetype` / `background` / `vertical_density` / `handoff`, and nullable `primary_action`), and the precomputed `neighbors` summary. An interior opening additionally receives the recipe-free global header subset. Only `page.front && sectionIndex === 0` routes to `HeroUnit`; that request adds the focused structured `hero_blueprint` and the canonical front-page `above_fold_contract`, then renders exactly the blueprint's one code-owned recipe fragment. Header receives the identical canonical relation plus its one exact assigned archetype. Footer receives global direction and its existing footer inputs, but never the hero blueprint, recipe fragment, or hero-specific topology.
 
-Then two moves make it live: register all four abilities on `wp_abilities_api_init`, and grant the workflow entry point to the orchestrator by adding `generate_block_theme` to the `wp-orchestrator` route's abilities list, right next to `add_page`. Nothing in wpcom's `ai-agent.php` changes - it already authenticates, streams, and dispatches any registered ability by name. The orchestrator turns each granted ability into a tool signature from its name, description, and input schema, so a clear description is what makes the capability discoverable.
+Every markup unit returns the same JSON-serializable envelope: `markup`, semantics-preserving `repairs`, and durable value-loss/removal `warnings`. An HTTP wrapper returns that complete envelope rather than dropping finish notes; its parent writes repairs to the step report and only warnings to `warnings.json`. All input and output values remain ordinary JSON-serializable HTTP arguments.
+
+Then two moves make it live: register all five abilities on `wp_abilities_api_init`, and grant the workflow entry point to the orchestrator by adding `generate_block_theme` to the `wp-orchestrator` route's abilities list, right next to `add_page`. Nothing in wpcom's `ai-agent.php` changes - it already authenticates, streams, and dispatches any registered ability by name. The orchestrator turns each granted ability into a tool signature from its name, description, and input schema, so a clear description is what makes the capability discoverable.
 
 ## Driving a build
 
@@ -110,7 +156,9 @@ The useful part is that it's just a registered capability. The orchestrator can 
 
 ## Two concurrency engines
 
-Both orchestrators run the same section graph; they just fan it out differently. The library orchestrator does it in-process: `SectionsStep` asks each Project-free section/header/footer unit to prepare its request, collects the requests into one `completeBatch`, and the Anthropic client runs them with `curl_multi` against the direct API (or the proxy) through a rolling pool of ten in flight — a freed slot starts the next request immediately. Once every result is back, the same units normalize and validate their own output before the step writes any project files.
+Both orchestrators run the same part graph; they just fan it out differently. The library orchestrator does it in-process: `SectionsStep` resolves one versioned `aboveFold.json` delivery contract, asks each Project-free hero/section/header/footer unit to prepare its request, collects the requests into one `completeBatch`, and the Anthropic client runs them with `curl_multi` against the direct API (or the proxy) through a rolling pool of ten in flight — a freed slot starts the next request immediately. The dedicated hero is excluded from ordinary section cache warming. Once every result is back, the same units normalize their own output before the step transactionally commits parts, the reconciled page plan, warnings, and the delivery-phase contract.
+
+The header, front hero, every page opening, the following front-page section, and the footer seam coordinate through that one artifact. After section rhythm and layout normalization, `HeaderHeroStep` performs only objective repairs and changes the artifact to `phase: final`; later consumers reject the wrong phase. If generated markup loses overlay protection or an authoritative primary action, the contract narrows to the reviewed stacked/null relation, matching markup and `pages.json` change in the same transaction, and an actionable warning records the authored and delivered values. Final theme validation repeats these checks advisorially without rewriting or aborting a usable site.
 
 The wpcom workflow does it out-of-process. Inside the workflow the header, footer, and per-section steps are marked `promise: true` - emitted, not run inline - and a single `execute_promises` step hands the whole batch to wpcom's `promise-all`, which fires them concurrently with `curl_multi`, up to 25 at once. Each promise is a fresh, stateless HTTP call to its matching unit ability, and each result streams back over SSE (through the `ai_agent_update` hook for the feature) the moment it lands. Plan more than 23 sections (plus header and footer) and you split the work across more than one promise group.
 
@@ -120,7 +168,7 @@ So it's one section graph and two concurrency engines: an in-process `curl_multi
 
 Both orchestrators can share one core because of one rule the fan-out units follow: they're stateless. A promise is a fresh HTTP request - a new process, no shared memory, no on-disk `Project` to read. So a section unit can't reach for state the way an in-process step can; it takes everything it needs as arguments and returns everything it produced. Inputs to output.
 
-That single constraint is what lets the two orchestrators wrap the same code. The library `SectionsStep` is the stateful adapter: it reads the on-disk `Project`, builds self-contained unit inputs, batches the unit-built requests, and writes the finished outputs. A wpcom unit ability calls `generate()` on the same unit with HTTP arguments, where state rides in the request. The core logic in the middle doesn't change; only the wrapper around it does. Header and footer use the same unit contract because they participate in the same fan-out. Without it you'd write each generator twice - once for disk, once for HTTP - and the copies would drift. With it, there's one generator and two ways to feed it.
+That single constraint is what lets the two orchestrators wrap the same code. The library `SectionsStep` is the stateful adapter: it reads the on-disk `Project`, builds self-contained unit inputs, batches the unit-built requests, and writes the finished outputs. A wpcom unit ability calls `generate()` on the same unit with HTTP arguments, where state rides in the request. The core logic in the middle doesn't change; only the wrapper around it does. Hero, ordinary sections, header, and footer use the same result-envelope contract because they participate in the same fan-out. Topology-family hero, page-opening, and mode-aware header fallbacks are also Project-free, so both orchestrators degrade at the same unit boundary. Without this you'd write each generator and its failure behavior twice - once for disk, once for HTTP - and the copies would drift. With it, there's one generator, one degradation contract, and two ways to feed it.
 
 ## Why it's worth doing
 

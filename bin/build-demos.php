@@ -13,6 +13,13 @@ use Automattic\SiteBuild\ProjectStore;
  * an incrementing number: photo-journalism-portfolio → photo-journalism-portfolio2
  * → -3 … so re-running the command never overwrites prior testing evidence.
  *
+ * An entry may carry a `site_spec` object in the package-canonical shape
+ * (examples/site-spec.json). It is pre-seeded into the project's meta.json, so
+ * the site-spec step normalizes it deterministically instead of making an LLM
+ * call — a reproducible probe of the host-supplied-spec path (BIGR-754). Page
+ * scope still follows the runner flags: without --multi-page the spec's page
+ * tree is cut down to the homepage like every other demo build.
+ *
  * Builds run CONCURRENTLY, one `bin/build.php` child process per entry. Child
  * processes keep the per-step timing/token accounting clean: every child owns
  * its LLM client, so each demo's logs/project.log carries exactly its own
@@ -139,26 +146,40 @@ foreach ($entries as $i => $entry) {
         $failures++;
         continue;
     }
+    // An entry may carry a canonical site spec (see examples/site-spec.json):
+    // seeded below as meta.json `site_spec`, it makes the site-spec step
+    // normalize it deterministically instead of generating one via LLM —
+    // testing the host-supplied-spec path with a fixed, reproducible input.
+    $siteSpec = $entry['site_spec'] ?? null;
+    if ($siteSpec !== null && !is_array($siteSpec)) {
+        $label = (string) ($entry['id'] ?? $entry['slug'] ?? '#' . ($i + 1));
+        fwrite(STDERR, "  ✗ SKIPPED: prompt entry '{$label}' has a non-object site_spec\n");
+        $failures++;
+        continue;
+    }
     $baseSlug = ProjectStore::slugify((string) ($entry['slug'] ?? $prompt));
     $slug = $store->freeSlug($baseSlug);
 
     $project = $store->create($slug);
-    $project->writeJson('meta.json', [
+    $project->writeJson('meta.json', array_merge([
         'prompt'           => $prompt,
         'provisional_slug' => $project->slug(),
         'created_at'       => gmdate('c'),
         // Absolute path so a built project stays traceable to its source prompt
         // file regardless of where the command was invoked from. bin/build.php
-        // merges its own meta over this seed, preserving these two fields.
+        // merges its own meta over this seed, preserving the extra fields.
         'demo_source'      => realpath($file) ?: $file,
         'demo_id'          => $entry['id'] ?? $baseSlug,
-    ]);
+    ], $siteSpec !== null ? ['site_spec' => $siteSpec] : []));
 
     echo '[' . ($i + 1) . '/' . count($entries) . "] queued '{$project->slug()}'\n";
     if ($slug !== $baseSlug) {
         echo "  (folder '{$baseSlug}' existed → used '{$slug}')\n";
     }
     echo "  prompt: {$prompt}\n";
+    if ($siteSpec !== null) {
+        echo "  site spec: supplied by the entry — the site-spec step will make no LLM call\n";
+    }
 
     $jobs[] = [
         'slug' => $project->slug(),

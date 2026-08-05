@@ -16,6 +16,14 @@ namespace Automattic\SiteBuild;
  */
 final class ConcurrentGroup implements Step
 {
+    /**
+     * Shared sinks whose API appends entries atomically during the sequential
+     * consume phase. They are not ordinary concurrently-authored artifacts.
+     *
+     * @var list<string>
+     */
+    private const SHARED_APPEND_ONLY_WRITES = ['warnings.json'];
+
     /** @var ConcurrentStep[] */
     private array $steps;
 
@@ -74,12 +82,15 @@ final class ConcurrentGroup implements Step
     /** Keep numeric-string paths as strings while de-duplicating the union. */
     private static function pathSetKey(string $path): string
     {
-        return "\0path:" . $path;
+        return StepGraph::PATH_SET_PREFIX . $path;
     }
 
     /**
      * Concurrent members may share inputs that already exist, but they cannot
-     * exchange outputs or write to the same project path while running.
+     * exchange outputs or write to the same project path while running. The
+     * sole exception is an explicitly reviewed append-only sink: member
+     * consume() methods run sequentially, and Project::addWarnings() preserves
+     * previously written entries in warnings.json.
      */
     private function validateMembers(): void
     {
@@ -102,7 +113,10 @@ final class ConcurrentGroup implements Step
                 $leftDeclaration = $declarations[$i];
                 $rightDeclaration = $declarations[$j];
 
-                $overlap = self::firstOverlap($leftDeclaration->writes, $rightDeclaration->writes);
+                $overlap = self::firstConflictingWriteOverlap(
+                    $leftDeclaration->writes,
+                    $rightDeclaration->writes
+                );
                 if ($overlap !== null) {
                     [$leftPath, $rightPath] = $overlap;
                     throw new \InvalidArgumentException(
@@ -174,6 +188,31 @@ final class ConcurrentGroup implements Step
         }
 
         return str_ends_with($right, '/*') && str_starts_with($left, substr($right, 0, -1));
+    }
+
+    private static function isSharedAppendOnlyWrite(string $left, string $right): bool
+    {
+        return $left === $right && in_array($left, self::SHARED_APPEND_ONLY_WRITES, true);
+    }
+
+    /**
+     * @param list<string> $left
+     * @param list<string> $right
+     * @return array{string, string}|null
+     */
+    private static function firstConflictingWriteOverlap(array $left, array $right): ?array
+    {
+        foreach ($left as $leftPath) {
+            foreach ($right as $rightPath) {
+                if (
+                    self::pathsOverlap($leftPath, $rightPath)
+                    && !self::isSharedAppendOnlyWrite($leftPath, $rightPath)
+                ) {
+                    return [$leftPath, $rightPath];
+                }
+            }
+        }
+        return null;
     }
 
     public function run(Project $project): void

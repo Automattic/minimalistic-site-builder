@@ -2,9 +2,11 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\PromptRenderer;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\Units\FooterUnit;
 use Automattic\SiteBuild\Units\HeaderUnit;
+use Automattic\SiteBuild\Units\HeroUnit;
 use Automattic\SiteBuild\Units\SectionUnit;
 
 /** @return array<string,mixed> */
@@ -36,9 +38,14 @@ test('markup generation units share one output-only contract', function () {
         'header' => (new HeaderUnit($llm, $renderer))->request($input + [
             'hero_brief' => 'A text-led hero.',
             'nav_rule' => '- Use wp:page-list.',
-            'archetype_assignment' => 'ASSIGNED HEADER ARCHETYPE: standard-row',
+            'above_fold_contract' => test_above_fold_contract(),
+            'header_behavior' => 'DETERMINISTIC HEADER BEHAVIOR: static.',
         ]),
-        'footer' => (new FooterUnit($llm, $renderer))->request($input),
+        'footer' => (new FooterUnit($llm, $renderer))->request($input + [
+            'final_section_brief' => 'A quiet closing section.',
+            'composition_archetype' => 'typographic-billboard',
+            'page_count' => 1,
+        ]),
         'section' => (new SectionUnit($llm, $renderer))->request($input + [
             'page' => [
                 'slug' => 'home',
@@ -59,6 +66,30 @@ test('markup generation units share one output-only contract', function () {
             ],
             'neighbors' => 'Above: header. Below: content.',
             'header_contract' => '',
+        ]),
+        'hero' => (new HeroUnit($llm, $renderer))->request($input + [
+            'page' => [
+                'slug' => 'home',
+                'title' => 'Home',
+                'path' => '/',
+                'front' => true,
+            ],
+            'section' => [
+                'slug' => 'hero',
+                'title' => 'Hero',
+                'role' => 'hero',
+                'type' => 'hero',
+                'purpose' => 'Introduce the site.',
+                'content_notes' => 'Lead with the value proposition.',
+                'layout_archetype' => 'asymmetric-split',
+                'background' => 'base',
+                'vertical_density' => 'standard',
+                'handoff' => 'Between the header and the next section.',
+                'primary_action' => null,
+            ],
+            'neighbors' => 'Above: header. Below: content.',
+            'hero_blueprint' => HeroBlueprint::defaultFor('focal-subject-stage'),
+            'above_fold_contract' => test_above_fold_contract(),
         ]),
     ];
 

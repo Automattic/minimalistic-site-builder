@@ -232,7 +232,7 @@ final class FixBlocksStep implements Step
         $excluded = array_fill_keys($excluded, true);
         $contentSize = self::themeContentSize($project);
         $spacingSlugs = self::themeSpacingSlugs($project);
-        foreach (self::themeFiles($project) as $rel) {
+        foreach ($project->themeFiles() as $rel) {
             if (isset($excluded[$rel])) {
                 continue;
             }
@@ -540,7 +540,7 @@ final class FixBlocksStep implements Step
     private static function snapshotThemeFiles(Project $project): array
     {
         $snapshot = [];
-        foreach (self::themeFiles($project) as $relative) {
+        foreach ($project->themeFiles() as $relative) {
             $snapshot[$relative] = $project->readText('theme/' . $relative);
         }
         return $snapshot;
@@ -554,18 +554,6 @@ final class FixBlocksStep implements Step
         }
     }
 
-    /** @return string[] parts/*.html and templates/*.html, theme-relative */
-    public static function themeFiles(Project $project): array
-    {
-        $rels = [];
-        foreach (['parts', 'templates'] as $sub) {
-            foreach (glob($project->themePath($sub) . '/*.html') ?: [] as $file) {
-                $rels[] = $sub . '/' . basename($file);
-            }
-        }
-        return $rels;
-    }
-
     /**
      * The theme's spacing-scale slugs (settings.spacing.spacingSizes), for
      * LayoutFixer's bare-slug spacing repair. Empty when unknown.
@@ -574,10 +562,10 @@ final class FixBlocksStep implements Step
      */
     public static function themeSpacingSlugs(Project $project): array
     {
-        if (!$project->exists('theme/theme.json')) {
+        $theme = self::readThemeJson($project);
+        if ($theme === null) {
             return [];
         }
-        $theme = json_decode($project->readText('theme/theme.json'), true);
         $sizes = $theme['settings']['spacing']['spacingSizes'] ?? [];
         if (!is_array($sizes)) {
             return [];
@@ -594,13 +582,28 @@ final class FixBlocksStep implements Step
     /** theme.json settings.layout.contentSize in px, when parseable. */
     public static function themeContentSize(Project $project): ?float
     {
-        if (!$project->exists('theme/theme.json')) {
+        $theme = self::readThemeJson($project);
+        if ($theme === null) {
             return null;
         }
-        $theme = json_decode($project->readText('theme/theme.json'), true);
         $size = $theme['settings']['layout']['contentSize'] ?? null;
         return is_string($size) && preg_match('/^([0-9.]+)px$/', $size, $m) === 1
             ? (float) $m[1]
             : null;
+    }
+
+    /**
+     * theme.json decoded fail-open: null when missing or malformed, so the
+     * theme helpers degrade to their defaults instead of throwing.
+     *
+     * @return array<mixed>|null
+     */
+    private static function readThemeJson(Project $project): ?array
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return null;
+        }
+        $theme = json_decode($project->readText('theme/theme.json'), true);
+        return is_array($theme) ? $theme : null;
     }
 }

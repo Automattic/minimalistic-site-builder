@@ -2,10 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\ConcurrentGroup;
-use Automattic\SiteBuild\ConcurrentStep;
-use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
-use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /**
@@ -13,34 +10,6 @@ use Automattic\SiteBuild\Tests\FakeLlm;
  * batched call and routes each result back to the member that asked for it,
  * even when two members use the same local request key.
  */
-
-/** A minimal ConcurrentStep that records what it consumes, for the test. */
-final class RecordingConcurrentStep implements ConcurrentStep
-{
-    public array $consumed = [];
-
-    /**
-     * @param array<string,array<string,mixed>> $requests
-     * @param list<string>                      $reads
-     * @param list<string>                      $writes
-     */
-    public function __construct(
-        private string $id,
-        private array $requests,
-        private array $reads = [],
-        private array $writes = [],
-    ) {}
-
-    public function id(): string { return $this->id; }
-    public function label(): string { return $this->id; }
-    public function requests(Project $project): array { return $this->requests; }
-    public function consume(Project $project, array $results): void { $this->consumed = $results; }
-    public function run(Project $project): void {}
-    public function declaration(): StepDeclaration
-    {
-        return new StepDeclaration($this->id, $this->id, $this->reads, $this->writes, false);
-    }
-}
 
 test('ConcurrentGroup declaration unions member reads/writes and is concurrent', function () {
     $llm = new FakeLlm();
@@ -79,6 +48,34 @@ test('ConcurrentGroup rejects overlapping member writes', function () {
     $llm = new FakeLlm();
     $directoryWriter = new RecordingConcurrentStep('directory-writer', [], [], ['theme/parts/*']);
     $fileWriter = new RecordingConcurrentStep('file-writer', [], [], ['theme/parts/header.html']);
+
+    assert_throws(fn () => new ConcurrentGroup($llm, [$directoryWriter, $fileWriter]));
+});
+
+test('ConcurrentGroup allows members to share the append-only warnings sink', function () {
+    $llm = new FakeLlm();
+    $a = new RecordingConcurrentStep('alpha', [], [], ['alpha.json', 'warnings.json']);
+    $b = new RecordingConcurrentStep('beta', [], [], ['beta.json', 'warnings.json']);
+
+    $declaration = (new ConcurrentGroup($llm, [$a, $b]))->declaration();
+
+    assert_eq(['alpha.json', 'warnings.json', 'beta.json'], $declaration->writes);
+});
+
+test('shared warnings do not mask another overlapping member write', function () {
+    $llm = new FakeLlm();
+    $directoryWriter = new RecordingConcurrentStep(
+        'directory-writer',
+        [],
+        [],
+        ['warnings.json', 'theme/parts/*']
+    );
+    $fileWriter = new RecordingConcurrentStep(
+        'file-writer',
+        [],
+        [],
+        ['warnings.json', 'theme/parts/footer.html']
+    );
 
     assert_throws(fn () => new ConcurrentGroup($llm, [$directoryWriter, $fileWriter]));
 });

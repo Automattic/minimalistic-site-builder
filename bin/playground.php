@@ -31,8 +31,12 @@ foreach (array_slice($argv, 1) as $a) {
         $port = (int) substr($a, 7);
     } elseif (str_starts_with($a, '--workers=')) {
         $workers = substr($a, 10);
-    } elseif ($slug === null) {
+    } elseif ($slug === null && !str_starts_with($a, '--')) {
         $slug = $a;
+    } else {
+        fwrite(STDERR, "Unknown argument: {$a}\n");
+        fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
+        exit(1);
     }
 }
 
@@ -106,7 +110,14 @@ $blueprint = [
 ];
 // Pid-stamped, instance-unique path — the why lives on the helper.
 $blueprintPath = playground_blueprint_path($slug, getmypid());
-file_put_contents($blueprintPath, json_encode($blueprint, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+$blueprintJson = json_encode(
+    $blueprint,
+    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+);
+if (file_put_contents($blueprintPath, $blueprintJson) === false) {
+    fwrite(STDERR, "Failed to write blueprint to {$blueprintPath}\n");
+    exit(1);
+}
 register_shutdown_function(static fn () => @unlink($blueprintPath));
 
 $mount = $themeDir . ':/wordpress/wp-content/themes/' . $slug;
@@ -152,7 +163,7 @@ function command_exists(string $bin): bool
     return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
 }
 
-/** Return the first free TCP port at or after $start (gives up after 50 tries). */
+/** Return the first free TCP port at or after $start (fails after 50 tries). */
 function find_free_port(int $start): int
 {
     for ($port = $start; $port < $start + 50; $port++) {
@@ -162,5 +173,6 @@ function find_free_port(int $start): int
         }
         fclose($conn);
     }
-    return $start;
+    fwrite(STDERR, sprintf("No free TCP port in %d..%d.\n", $start, $start + 49));
+    exit(1);
 }

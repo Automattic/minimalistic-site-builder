@@ -19,6 +19,8 @@ THIS PAGE:
 
 {{page_emphasis}}
 
+{{front_hero_context}}
+
 Tailor the section choice to the site's `site_type` / `area` and THIS page's purpose, for example:
 - portfolio → project or photo gallery, selected work, about the maker
 - SaaS / product → feature grids, how-it-works, pricing tiers
@@ -41,10 +43,26 @@ Return a single JSON object with this exact shape:
       "layout_archetype": "one of: full-bleed-cover, asymmetric-split, centered-stack, offset-grid, mixed-width-editorial, equal-card-grid, list-with-thumbnails",
       "background": "one of: base, tinted, contrast, image",
       "vertical_density": "one of: compact, standard, spacious",
-      "handoff": "1 line: what visually sits immediately above and below this section (each neighbor's background + archetype), so the transitions are designed rather than accidental"
+      "handoff": "1 line: what visually sits immediately above and below this section (each neighbor's background + archetype), so the transitions are designed rather than accidental",
+      "primary_action": null
     }
   ]
 }
+
+`primary_action` is REQUIRED on every section and is either null or exactly:
+{
+  "label": "Short visitor-facing action copy in the site's language",
+  "intent": "One planning sentence explaining what the action helps the visitor do",
+  "destination": "/an-exact-page-path/ or #an-exact-planned-section-anchor"
+}
+{{primary_action_rule}}
+When present, keep `label` to 1-80 Unicode grapheme clusters of plain text with no
+markup or control characters. Use that exact visitor-facing label; `intent` is
+non-empty plain-text planning context and must never become button copy;
+`destination` is also plain text. Never invent or guess a
+route, placeholder `#`, phone number, or external URL. A contact mailto may
+mint a short local part only at SITE SPEC's exact `email_domain`; never invent
+an alternate domain.
 
 Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text
@@ -57,7 +75,7 @@ Layout archetypes (pick the one that best serves each section's content):
 
 Section structure and types:
 - List sections in their intended page order. The builder derives each section's structural role from that order after generation, so do not return a `role` field.
-- `type` is an open-ended semantic label. Choose or invent the most specific short label for what the section actually contains; do not collapse a menu, timeline, case-study index, process, event calendar, or location guide into a generic bucket.
+- `type` is an open-ended semantic label, always in English. Choose or invent the most specific short label for what the section actually contains; do not collapse a menu, timeline, case-study index, process, event calendar, or location guide into a generic bucket.
 
 Background treatments:
 - base — the default page background
@@ -76,13 +94,14 @@ author improvises:
   moments where whitespace itself carries the composition
 
 Rules:
-- LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" stays lowercase a-z ASCII regardless (transliterate).
+- LANGUAGE: every "title" and every copy point inside "content_notes" is written in {{language}} — section titles become on-page headings and the notes seed each section's copy, so a plan in the wrong language leaks into the page. "slug" and "type" are machine-facing identifiers and are ALWAYS plain English words in lowercase a-z ASCII, regardless of {{language}} — they are never rendered on the page.
 - IDENTITY: where the plan names the brand or the person, use the spec's `name` / `persona_name` exactly, and any planned email uses the spec's `email_domain` — never invent alternates.
 - THIS PAGE ONLY: plan only content that belongs here per this page's purpose and the SITE PAGES list. Content that lives on a sibling page gets, at most, a teaser that links onward — "content_notes" may reference another page by its path ONLY when that exact path appears in SITE PAGES (e.g. "closes with a link to /menu/"). Never invent paths for pages that are not listed; on a one-page site, keep CTAs on-page (section anchors or same-page actions) instead of dead routes like /menu/ or /about/.
 - The FIRST section is the page-opening hero. In a plan with two or more sections, the LAST provides a strong closing next step, while every section between them carries the page's content. A one-section plan is necessarily the opening hero.
 - "slug" is lowercase a-z, 0-9 and hyphens only, unique across the list, and descriptive (e.g. "hero", "menu-highlights", "meet-the-team").
 - "content_notes" must be specific to THIS site (use the spec's facts), not generic filler.
-- "content_notes" must never include site chrome — no wordmark, site title lockup, navigation, or menu links, even if the design direction's hero composition mentions them. The site header is a separate template part that renders above (or overlaid on) the hero; planning nav into a section produces a doubled header.
+- "content_notes" must never include site chrome — no wordmark, site title lockup, navigation, or menu links, even if the design direction mentions them. The site header is a separate template part that renders above (or overlaid on) the hero; planning nav into a section produces a doubled header.
+- Never plan a footer or site-chrome section. The theme generates exactly one separate footer template part and appends it after this page's LAST section, so a section whose slug, title, or type is `footer`, `footer-info`, `site-footer`, or equivalent would produce a duplicate ending. Make the LAST section a page-owned next step that follows from THIS page's purpose and the spec's facts — not global navigation, legal links, or footer contact columns.
 - Decorative ornaments (drawn flourishes, motif marks, illustrated icons) are NEVER planned as generated imagery — AI-generated ornaments come out off-palette and wobbly. Glyph marks are not a planning tool either: plan a typographic glyph mark ONLY if the design direction's signature device explicitly commits to a specific character, use exactly that character and color, and only at the few moments the direction names — at most 1-2 on the whole page. Never invent glyph marks the direction didn't commit to, and never use one as a list bullet, metadata separator, or a mark repeated before every heading. Plain rules, hairlines and underlines are never planned as imagery — they are borders/separators the section authors build with styles. Likewise, never plan words, names or calligraphic lettering as imagery (generated images garble glyphs): anything meant to be read is planned as real text, styled by the theme's typography. Planned imagery is content imagery only: hero covers, feature/gallery/card images, photographic bands.
 - Variety is mandatory: NO layout_archetype may be used by two ADJACENT sections, and "equal-card-grid" may appear at most TWICE on the whole page.
 - Plan the background rhythm deliberately: mostly "base" with 1-2 "contrast" or "image" bands placed for pacing (e.g. under the hero's fold and before the closing CTA) — never alternating stripes, and let the design direction's mood decide how heavy the dark/image bands feel.
@@ -90,7 +109,7 @@ Rules:
 - Plan vertical density across the WHOLE page. Use `standard` by default, `compact` for tall/image-dense sections, and `spacious` only for short sections where the design direction explicitly needs a pause. Never make a long gallery or information-heavy section spacious, never assign spacious to adjacent sections, and use it at most twice on the page.
 - Adjacent sections on the same guaranteed-continuous solid surface (`base` or `contrast`) share one seam budget: the deterministic rhythm pass removes the upper section's bottom padding and lets the lower section's top padding own that gap. Tinted gradients and image assets keep separate edges because two independently authored instances may differ. Write handoff prose with that distinction in mind rather than budgeting whitespace twice.
 - An "image" background wraps whatever archetype the section uses inside a full-bleed cover band; pairing it with "full-bleed-cover" is the classic image-led band (a natural hero choice, not a redundancy). Reserve "image" for the 1-2 sections where imagery should carry the band.
-- When the DESIGN DIRECTION's **Canvas** is `framed`, "full-bleed" archetypes and bands still apply but render inside the page's mat (capped at wide width) rather than touching the viewport edge — plan the rhythm knowing every band keeps a visible margin of page background around it.
+- When the DESIGN DIRECTION's **Canvas** is `framed`, "full-bleed" archetypes and bands still apply but render inside the page's mat (capped at wide width) rather than touching the viewport edge — plan the rhythm knowing every band below the hero keeps a visible margin of page background around it. The page-opening hero is exempt: it runs edge-to-edge on every canvas, and the mat begins with the second section.
 - "handoff" must name the actual neighbors' assignments (e.g. "Sits between the full-bleed image hero above and the base-background menu grid below; this contrast band gives the eye a rest between two image-heavy blocks."). For the first section the neighbor above is the site header; for the last it is the footer.
 - Before returning, re-check the finished list top-to-bottom: if any two ADJACENT sections share a layout_archetype, or "equal-card-grid" appears more than twice, change one of them — the plan is rejected otherwise.
 

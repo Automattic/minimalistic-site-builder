@@ -37,8 +37,13 @@ final class MarkupSanitizer
         // The scanner is quote/comment aware and follows nested
         // object/applet boundaries; a first-closer regex can expose exactly
         // the content this pass is meant to remove.
+        // `style` is not script-capable, but a single model-authored rule
+        // (`.site-header-shell{position:fixed}`) overrides the trusted theme
+        // shell's positioning contract in the delivered site. Generated
+        // markup never legitimately ships a stylesheet element — delivered
+        // CSS belongs to the trusted asset kit — so the whole element goes.
         $containers = [
-            'script', 'iframe', 'object', 'applet',
+            'script', 'style', 'iframe', 'object', 'applet',
             'noembed', 'noframes', 'noscript',
         ];
         // SVG SMIL animation elements set the LIVE value of a sibling's
@@ -156,6 +161,21 @@ final class MarkupSanitizer
     private static function isEventAttribute(string $name): bool
     {
         return strlen($name) > 2 && str_starts_with($name, 'on');
+    }
+
+    /**
+     * Share the sanitizer's browser-like attribute tokenization with
+     * deterministic generated-markup repairs. Callers receive source spans
+     * into the supplied opening tag, so edits never mistake attribute-shaped
+     * text inside a quoted value for a real attribute.
+     *
+     * @return list<array{
+     *   name:string,start:int,end:int,valueStart:?int,valueEnd:?int
+     * }>
+     */
+    public static function openingTagAttributes(string $tag): array
+    {
+        return self::attributes($tag);
     }
 
     /**

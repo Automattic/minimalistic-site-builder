@@ -3,9 +3,13 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
-use Automattic\SiteBuild\ConcurrentStep;
+use Automattic\SiteBuild\FooterSectionIdentity;
+use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\GeneratedJsonFallbackStep;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -22,8 +26,9 @@ use Automattic\SiteBuild\StepDeclaration;
  * Output: pages.json — { "pages": [ { slug, title, path, front, parent,
  *         menu_order, purpose, sections: [ { slug, title, role, type, purpose,
  *         content_notes, layout_archetype, background, vertical_density,
- *         handoff } ] } ] }, a FLAT list in display order, parents before
- *         children.
+ *         handoff, primary_action } ] } ] }, a FLAT list in display order, parents before
+ *         children; warnings.json records every generated value removed or
+ *         replaced by a deterministic fallback.
  *
  * Each page's plan enriches the spec's purpose into concrete section briefs,
  * which the sections step then generates independently and in parallel and
@@ -32,8 +37,10 @@ use Automattic\SiteBuild\StepDeclaration;
  * section a layout archetype and background treatment (validated below, with
  * an adjacency rule) so every page has a deliberate visual rhythm.
  */
-final class PagePlanStep implements ConcurrentStep
+final class PagePlanStep implements GeneratedJsonFallbackStep
 {
+    private const REPORT_FILE = 'page-plan.txt';
+
     use LlmOptions;
 
     /** Composition menu — must match the archetypes offered in page-plan.md. */
@@ -110,7 +117,7 @@ final class PagePlanStep implements ConcurrentStep
             id: $this->id(),
             label: $this->label(),
             reads: ['meta.json', 'siteSpec.json', 'designDirection.json'],
-            writes: ['pages.json'],
+            writes: ['pages.json', 'warnings.json'],
             concurrent: true,
         );
     }
@@ -134,6 +141,21 @@ final class PagePlanStep implements ConcurrentStep
             'background'       => ['type' => 'string', 'enum' => self::BACKGROUNDS],
             'vertical_density' => ['type' => 'string', 'enum' => self::VERTICAL_DENSITIES],
             'handoff'          => ['type' => 'string'],
+            'primary_action'   => [
+                'anyOf' => [
+                    ['type' => 'null'],
+                    [
+                        'type'                 => 'object',
+                        'additionalProperties' => false,
+                        'required'             => ['label', 'intent', 'destination'],
+                        'properties'           => [
+                            'label'       => ['type' => 'string', 'minLength' => 1, 'maxLength' => 80],
+                            'intent'      => ['type' => 'string', 'minLength' => 1],
+                            'destination' => ['type' => 'string', 'minLength' => 1],
+                        ],
+                    ],
+                ],
+            ],
         ];
 
         return [
@@ -193,21 +215,18 @@ final class PagePlanStep implements ConcurrentStep
     public function runForSlugs(Project $project, array $slugs): array
     {
         $wanted = array_fill_keys($slugs, true);
+        $sitePages = self::flattenPages($project->readJson('siteSpec.json'));
         $pages = array_values(array_filter(
-            self::flattenPages($project->readJson('siteSpec.json')),
+            $sitePages,
             static fn (array $page): bool => isset($wanted[(string) $page['slug']]),
         ));
         if ($pages === []) {
             return [];
         }
 
-        $requests = $this->requestsForPages(
-            $project,
-            $pages,
-            self::flattenPages($project->readJson('siteSpec.json')),
-        );
+        $requests = $this->requestsForPages($project, $pages, $sitePages);
         try {
-            return $this->plannedPages($project, $pages, $this->llm->completeJsonBatch($requests));
+            $results = $this->llm->completeJsonBatch($requests);
         } catch (\RuntimeException $error) {
             $warnings = [];
             foreach ($pages as &$page) {
@@ -222,9 +241,14 @@ final class PagePlanStep implements ConcurrentStep
             $project->addWarnings($this->id(), $warnings);
             return $pages;
         }
+        return $this->plannedPages($project, $pages, $results);
     }
 
     /**
+     * Render the page-plan requests for an explicit page list, resolving the
+     * shared SITE PAGES context from $sitePages (the full delivered site) so a
+     * scoped subset request still sees every sibling page.
+     *
      * @param array<int,array<string,mixed>> $pages
      * @param array<int,array<string,mixed>>|null $sitePages
      * @return array<string,array<string,mixed>>
@@ -232,6 +256,8 @@ final class PagePlanStep implements ConcurrentStep
     private function requestsForPages(Project $project, array $pages, ?array $sitePages = null): array
     {
         $meta = $project->readJson('meta.json');
+        $blueprint = DesignDirectionStep::heroBlueprintFor($project);
+        $projection = HeroComposition::planProjection($blueprint);
 
         $shared = [
             'user_prompt'      => (string) ($meta['prompt'] ?? ''),
@@ -244,12 +270,21 @@ final class PagePlanStep implements ConcurrentStep
         $requests = [];
         $jsonSchema = ['name' => 'page_plan', 'schema' => self::jsonSchema()];
         foreach ($pages as $page) {
+            $front = (bool) $page['front'];
             $requests[$page['slug']] = $this->withOptions([
                 'prompt' => $this->renderer->render('page-plan.md', $shared + [
-                    'page_title'    => (string) $page['title'],
-                    'page_slug'     => (string) $page['slug'],
-                    'page_purpose'  => (string) $page['purpose'],
-                    'page_emphasis' => $page['front'] ? self::FRONT_EMPHASIS : self::INTERIOR_EMPHASIS,
+                    'page_title'             => (string) $page['title'],
+                    'page_slug'              => (string) $page['slug'],
+                    'page_purpose'           => (string) $page['purpose'],
+                    'page_emphasis'          => $front ? self::FRONT_EMPHASIS : self::INTERIOR_EMPHASIS,
+                    'front_hero_context'     => $front
+                        ? self::frontHeroPromptContext($blueprint, $projection)
+                        : '',
+                    'primary_action_rule'    => $front
+                        ? 'Only this front page\'s FIRST section may provide `primary_action`. Use a real, useful '
+                            . 'destination from SITE PAGES, a real section anchor planned on this site, or a contact '
+                            . 'destination stated in SITE SPEC; otherwise return null. Every later section returns null.'
+                        : 'This is not the front-page hero. Return `primary_action`: null on EVERY section.',
                 ]),
                 'json_schema' => $jsonSchema,
             ]);
@@ -257,44 +292,120 @@ final class PagePlanStep implements ConcurrentStep
         return $requests;
     }
 
+    /**
+     * Render the one assigned blueprint plus its code-owned generic-plan
+     * projection for the front-page planning request only. Interior requests
+     * receive an empty replacement and therefore cannot learn hero topology.
+     *
+     * @param array<string,mixed> $blueprint
+     * @param array<string,mixed> $projection
+     */
+    private static function frontHeroPromptContext(array $blueprint, array $projection): string
+    {
+        [$archetype, $backgrounds, $default] = self::projectionContract($projection);
+
+        return DesignDirectionStep::formatHeroBlueprint($blueprint)
+            . "\n\nCode-owned page-plan projection (authoritative):\n"
+            . "- The FIRST section's layout_archetype is exactly `{$archetype}`.\n"
+            . '- Its background is one of: ' . implode(', ', array_map(
+                static fn (string $value): string => "`{$value}`",
+                $backgrounds
+            )) . ".\n"
+            . "- Prefer `{$default}` when no other allowed surface better serves the real following section.\n"
+            . '- Do not reinterpret or replace this topology. Design the following section around the locked opening.';
+    }
+
     public function consume(Project $project, array $results): void
     {
-        $pages = self::flattenPages($project->readJson('siteSpec.json'));
-        $project->writeJson('pages.json', ['pages' => $this->plannedPages($project, $pages, $results)]);
+        $this->consumeResults($project, $results);
     }
 
     /**
-     * Normalize and repair model results for the supplied page subset, then
-     * return complete page-plan entries in that subset's existing order.
-     *
-     * @param array<int,array<string,mixed>> $pages
-     * @param array<array-key,array<mixed>> $results
-     * @return array<int,array<string,mixed>>
+     * @param array<string,array<mixed>> $results
+     * @param list<string> $initialWarnings
      */
-    private function plannedPages(Project $project, array $pages, array $results): array
+    private function consumeResults(Project $project, array $results, array $initialWarnings = []): void
     {
+        $siteSpec = $project->readJson('siteSpec.json');
+        $pages = self::flattenPages($siteSpec);
+        $blueprint = DesignDirectionStep::heroBlueprintFor($project);
+        $frontProjection = HeroComposition::planProjection($blueprint);
+        $actionContext = self::primaryActionContext($siteSpec, $pages);
 
         // First pass: normalize what the model returned, collecting every page
         // that broke a rule so they can all be re-asked together below.
         $sectionsBySlug = [];
         $rejected = [];
+        $warnings = $initialWarnings;
+        $successfulRepairs = [];
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
+            $front = (bool) $page['front'];
+            $projection = $front ? $frontProjection : null;
             $plan = $results[$slug] ?? null;
             if (!is_array($plan)) {
-                throw new \RuntimeException("page-plan: missing model output for page '{$slug}'");
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'missing generated page-plan result',
+                    'deterministic fallback substituted for the missing page result',
+                    $projection,
+                    $actionContext,
+                );
+                continue;
+            }
+
+            $rawSections = $plan['sections'] ?? null;
+            $sectionCount = self::sectionArrayCount($rawSections);
+            $rawSections = self::removeTemplateFooterSections($rawSections, $warnings, $slug);
+            $removedFooter = self::sectionArrayCount($rawSections) < $sectionCount;
+            if ($removedFooter && self::sectionArrayCount($rawSections) === 0) {
+                $sectionsBySlug[$slug] = self::fallbackAfterFooterRemoval(
+                    $front,
+                    $warnings,
+                    $slug,
+                    $projection,
+                    $actionContext,
+                );
+                continue;
             }
 
             try {
-                $sections = self::normalize($plan['sections'] ?? null, (bool) $page['front']);
+                $normalizationWarnings = [];
+                $normalizationRepairs = [];
+                $sections = self::normalize(
+                    $rawSections,
+                    $front,
+                    $projection,
+                    $actionContext,
+                    $normalizationWarnings,
+                    $slug,
+                    $normalizationRepairs,
+                );
                 if ($sections === []) {
                     throw new \RuntimeException(
                         "page-plan: page '{$slug}' has no sections — return the full JSON object with a non-empty \"sections\" array"
                     );
                 }
                 $sectionsBySlug[$slug] = $sections;
+                $warnings = array_merge($warnings, $normalizationWarnings);
+                $successfulRepairs = array_merge($successfulRepairs, $normalizationRepairs);
             } catch (\RuntimeException $e) {
-                $rejected[$slug] = ['plan' => $plan, 'errors' => $e->getMessage()];
+                // The repair prompt must not reintroduce a section the
+                // deterministic template-ownership guard already removed.
+                $filteredPlan = $plan;
+                $discardedRepairs = [];
+                $filteredPlan['sections'] = is_array($rawSections)
+                    ? self::reconcileFrontHeroProjection(
+                        $rawSections,
+                        $front,
+                        $projection,
+                        $discardedRepairs,
+                        $slug,
+                    )
+                    : $rawSections;
+                $rejected[$slug] = ['plan' => $filteredPlan, 'errors' => $e->getMessage()];
             }
         }
 
@@ -304,46 +415,243 @@ final class PagePlanStep implements ConcurrentStep
         // instead of aborting the build. recoverSections() is the backstop:
         // field + variety coercion for every known normalize rejection, and a
         // single fallback section if a future rule slips past both passes.
-        // Only an empty section list still ends the page (nothing to coerce).
-        $warnings = [];
+        // Empty, missing, and terminally malformed repairs degrade per page;
+        // valid siblings and every already-paid-for plan still ship.
         $frontBySlug = array_column($pages, 'front', 'slug');
-        foreach ($this->repairAll($project, $rejected) as $slug => $repaired) {
+        $repairs = [];
+        $repairFailures = [];
+        try {
+            $repairs = $this->repairAll($project, $rejected);
+        } catch (GeneratedJsonException $e) {
+            $repairs = $e->partialResults;
+            $repairFailures = $e->failures;
+        }
+        if (array_intersect_key($repairs, $repairFailures) !== []) {
+            throw new \RuntimeException('page-plan: repair failure routing overlaps successful results');
+        }
+        foreach (array_keys($repairs + $repairFailures) as $slug) {
+            if (!array_key_exists($slug, $rejected)) {
+                throw new \RuntimeException("page-plan: repair returned unknown page '{$slug}'");
+            }
+        }
+        foreach ($rejected as $slug => $_rejection) {
             $slug = (string) $slug;
             $front = (bool) ($frontBySlug[$slug] ?? false);
-            try {
-                $sections = self::normalize($repaired['sections'] ?? null, $front);
-            } catch (\RuntimeException $stillInvalid) {
-                $sections = self::recoverSections(
-                    $repaired['sections'] ?? null,
+            if (isset($repairFailures[$slug])) {
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
                     $front,
                     $warnings,
-                    $slug
+                    $slug,
+                    'unusable generated repair JSON (' . $repairFailures[$slug] . ')',
+                    'deterministic fallback substituted after the model repair remained unusable',
+                    $front ? $frontProjection : null,
+                    $actionContext,
+                );
+                continue;
+            }
+            $repaired = $repairs[$slug] ?? null;
+            if (!is_array($repaired)) {
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'missing generated repair result',
+                    'deterministic fallback substituted for the missing repair result',
+                    $front ? $frontProjection : null,
+                    $actionContext,
+                );
+                continue;
+            }
+            $rawSections = $repaired['sections'] ?? null;
+            $sectionCount = self::sectionArrayCount($rawSections);
+            $rawSections = self::removeTemplateFooterSections($rawSections, $warnings, $slug);
+            $removedFooter = self::sectionArrayCount($rawSections) < $sectionCount;
+            if ($removedFooter && self::sectionArrayCount($rawSections) === 0) {
+                $sectionsBySlug[$slug] = self::fallbackAfterFooterRemoval(
+                    $front,
+                    $warnings,
+                    $slug,
+                    $front ? $frontProjection : null,
+                    $actionContext,
+                );
+                continue;
+            }
+            try {
+                $normalizationWarnings = [];
+                $normalizationRepairs = [];
+                $sections = self::normalize(
+                    $rawSections,
+                    $front,
+                    $front ? $frontProjection : null,
+                    $actionContext,
+                    $normalizationWarnings,
+                    $slug,
+                    $normalizationRepairs,
+                );
+                $warnings = array_merge($warnings, $normalizationWarnings);
+                $successfulRepairs = array_merge($successfulRepairs, $normalizationRepairs);
+            } catch (\RuntimeException $stillInvalid) {
+                $sections = self::recoverSections(
+                    $rawSections,
+                    $front,
+                    $warnings,
+                    $slug,
+                    $front ? $frontProjection : null,
+                    $actionContext,
+                    $successfulRepairs,
                 );
             }
             if ($sections === []) {
-                throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
+                $sections = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'empty repaired sections array',
+                    'deterministic fallback substituted after the repair preserved no page-owned section',
+                    $front ? $frontProjection : null,
+                    $actionContext,
+                );
             }
             $sectionsBySlug[$slug] = $sections;
         }
 
-        // Every coercion changed delivered output, so it belongs in the durable
-        // record rather than only in the narration, which is best-effort.
-        $project->addWarnings($this->id(), $warnings);
-
         $out = [];
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
-            // A repair batch that answers fewer pages than it was asked about
-            // must fail loud: assembling the page without sections would write
-            // a null into pages.json and break far downstream instead.
             if (!isset($sectionsBySlug[$slug])) {
-                throw new \RuntimeException("page-plan: page '{$slug}' produced no sections");
+                // Defensive backstop for a future branch added above: never
+                // write null sections or abort over generated page content.
+                $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
+                    (bool) $page['front'],
+                    $warnings,
+                    $slug,
+                    'no generated sections reached final assembly',
+                    'deterministic fallback substituted at the page-plan boundary',
+                    !empty($page['front']) ? $frontProjection : null,
+                    $actionContext,
+                );
             }
             $page['sections'] = $sectionsBySlug[$slug];
             $out[] = $page;
         }
 
+        // The plan prompt demands a hero, at least 3 content sections, and a
+        // closing — a 1-2 section front page is a degenerate plan (observed:
+        // a SaaS brief delivered hero-only, shipping a 1.5-screen site).
+        // Pad below the delivered sections with reviewed generic briefs so
+        // the sections step still writes a whole page, and record the loss.
+        $out = self::padThinFrontPlan($out, $frontProjection, $actionContext, $warnings);
+
+        // Anchors cannot be judged until every normal, repair, and fallback
+        // path has produced its final page/section set. Recheck the sole
+        // eligible action now and null it atomically when its target vanished.
+        $out = self::validatePrimaryActionAnchors($out, $warnings);
+
+        $project->writeText('logs/' . self::REPORT_FILE, $successfulRepairs === []
+            ? "No semantics-preserving page-plan repairs were needed.\n"
+            : implode("\n", $successfulRepairs) . "\n");
+        if ($successfulRepairs !== []) {
+            Narrator::write('  [page-plan] repaired ' . count($successfulRepairs)
+                . " generated plan field(s) (reported separately from durable warnings).\n");
+        }
+
+        // Only removals, fallback substitutions, and other delivered-value
+        // losses reach the durable queue. Exact recipe projection repairs are
+        // recorded in the report above instead.
+        $project->addWarnings($this->id(), $warnings);
+        $project->writeJson('pages.json', ['pages' => $out]);
+    }
+
+    /**
+     * Normalize model results for a page SUBSET (HTML-first mixed fallback) and
+     * return complete entries in the given order, without writing pages.json or
+     * running the whole-site front/contract finalization. Subset pages are
+     * interior, so front-hero projection never applies; a broken plan degrades
+     * mechanically via recoverSections rather than aborting.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<array-key,array<mixed>> $results
+     * @return array<int,array<string,mixed>>
+     */
+    private function plannedPages(Project $project, array $pages, array $results): array
+    {
+        $siteSpec = $project->readJson('siteSpec.json');
+        $actionContext = self::primaryActionContext($siteSpec, $pages);
+        $warnings = [];
+        $repairs = [];
+        $out = [];
+        foreach ($pages as $page) {
+            $slug = (string) $page['slug'];
+            $front = (bool) $page['front'];
+            $projection = $front
+                ? HeroComposition::planProjection(DesignDirectionStep::heroBlueprintFor($project))
+                : null;
+            $plan = $results[$slug] ?? null;
+            if (!is_array($plan)) {
+                $page['sections'] = self::fallbackAfterGeneratedPlanLoss(
+                    $front,
+                    $warnings,
+                    $slug,
+                    'missing generated page-plan result',
+                    'deterministic fallback substituted for the missing page result',
+                    $projection,
+                    $actionContext,
+                );
+                $out[] = $page;
+                continue;
+            }
+            $rawSections = self::removeTemplateFooterSections($plan['sections'] ?? null, $warnings, $slug);
+            try {
+                $sections = self::normalize($rawSections, $front, $projection, $actionContext, $warnings, $slug, $repairs);
+                if ($sections === []) {
+                    throw new \RuntimeException("page-plan: page '{$slug}' has no sections");
+                }
+            } catch (\RuntimeException $e) {
+                $sections = self::recoverSections($rawSections, $front, $warnings, $slug, $projection, $actionContext, $repairs);
+                if ($sections === []) {
+                    $sections = self::fallbackSections($front, $projection, $actionContext);
+                }
+            }
+            $page['sections'] = $sections;
+            $out[] = $page;
+        }
+        $project->addWarnings($this->id(), $warnings);
         return $out;
+    }
+
+    public function consumeGeneratedJsonFailure(
+        Project $project,
+        array $results,
+        array $failures,
+    ): void {
+        $siteSpec = $project->readJson('siteSpec.json');
+        $pages = self::flattenPages($siteSpec);
+        $frontBySlug = array_column($pages, 'front', 'slug');
+        $frontProjection = HeroComposition::planProjection(
+            DesignDirectionStep::heroBlueprintFor($project)
+        );
+        $actionContext = self::primaryActionContext($siteSpec, $pages);
+        $warnings = [];
+        foreach ($failures as $slug => $diagnostic) {
+            $slug = (string) $slug;
+            if (!array_key_exists($slug, $frontBySlug) || isset($results[$slug])) {
+                throw new \RuntimeException(
+                    "page-plan: inconsistent generated JSON failure routing for page '{$slug}'"
+                );
+            }
+            $results[$slug] = [
+                'sections' => self::fallbackAfterGeneratedPlanLoss(
+                    (bool) $frontBySlug[$slug],
+                    $warnings,
+                    $slug,
+                    'unusable generated JSON (' . $diagnostic . ')',
+                    'deterministic fallback substituted after generated JSON repair failed',
+                    !empty($frontBySlug[$slug]) ? $frontProjection : null,
+                    $actionContext,
+                ),
+            ];
+        }
+        $this->consumeResults($project, $results, $warnings);
     }
 
     /**
@@ -396,7 +704,8 @@ final class PagePlanStep implements ConcurrentStep
             . "\nReturn the corrected full JSON object. Fix EVERY rejection above. "
             . 'For an adjacent-duplicate rejection, change only ONE of the two sections, and re-check the whole '
             . 'corrected list top-to-bottom against every rule before returning — a repair that introduces a NEW '
-            . 'violation is rejected too. '
+            . 'violation is rejected too. If the front-page context locks the FIRST section, preserve it exactly '
+            . 'and change the conflicting following section. '
             . 'If you change a section\'s layout_archetype, background, vertical_density, or position, also update its content_notes, '
             . 'handoff, and any affected neighbor handoffs so the prose matches the corrected assignment. '
             . 'Keep only fields that are still semantically consistent exactly as planned.';
@@ -404,7 +713,11 @@ final class PagePlanStep implements ConcurrentStep
 
     public function run(Project $project): void
     {
-        $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+        try {
+            $this->consume($project, $this->llm->completeJsonBatch($this->requests($project)));
+        } catch (GeneratedJsonException $e) {
+            $this->consumeGeneratedJsonFailure($project, $e->partialResults, $e->failures);
+        }
     }
 
     /**
@@ -499,6 +812,62 @@ final class PagePlanStep implements ConcurrentStep
     }
 
     /**
+     * Remove page-planned site chrome before section generation.
+     *
+     * Every assembled page receives theme/parts/footer.html from its template,
+     * so a model-planned footer would render a second ending. Semantic labels
+     * are open-ended, therefore inspect all three identity fields rather than
+     * relying on one exact type: "footer", "footer-info", "site-footer", and
+     * equivalent word-separated labels all identify template-owned chrome.
+     *
+     * Non-footer siblings are returned unchanged and in their original order.
+     * Re-running the filter is a fixed point: once a footer is absent it
+     * changes neither the list nor the warning accumulator.
+     *
+     * @param mixed $raw
+     * @param list<string> $warnings appended to in place, one per removal
+     * @return array<mixed>
+     */
+    public static function removeTemplateFooterSections(
+        $raw,
+        array &$warnings = [],
+        string $pageSlug = ''
+    ): array {
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $sections = [];
+        foreach ($raw as $index => $section) {
+            if (!is_array($section) || !FooterSectionIdentity::matches($section)) {
+                $sections[] = $section;
+                continue;
+            }
+
+            $pagePath = $pageSlug === ''
+                ? 'pages[].sections[' . $index . ']'
+                : "pages[slug='{$pageSlug}'].sections[{$index}]";
+            $authored = json_encode(
+                [
+                    'slug'  => $section['slug'] ?? null,
+                    'title' => $section['title'] ?? null,
+                    'type'  => $section['type'] ?? null,
+                ],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
+            if (!is_string($authored)) {
+                $authored = get_debug_type($section);
+            }
+
+            $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; authored={$authored}; "
+                . "delivered=removed; disposition=template-owned site-footer section removed because "
+                . 'theme/parts/footer.html is appended by the page template';
+        }
+
+        return $sections;
+    }
+
+    /**
      * Validate one page's section list and force unique, file-safe slugs.
      * The structural role is stamped deterministically from each section's
      * position rather than trusted to model output. Art-direction fields
@@ -512,13 +881,33 @@ final class PagePlanStep implements ConcurrentStep
      * @param mixed $raw
      * @param bool $front whether the page is the front page (interior pages
      *                    must not OPEN with a full-bleed cover)
+     * @param array<string,mixed>|null $frontProjection code-owned homepage
+     *        recipe projection; null on interior pages and focused unit tests
+     * @param array<string,mixed> $actionContext known page/contact targets
+     * @param list<string> $warnings appended only for delivered value loss
+     * @param list<string> $repairs appended for semantics-preserving fixes
      * @return array<int,array<string,mixed>>
      */
-    public static function normalize($raw, bool $front = true): array
-    {
+    public static function normalize(
+        $raw,
+        bool $front = true,
+        ?array $frontProjection = null,
+        array $actionContext = [],
+        array &$warnings = [],
+        string $pageSlug = '',
+        array &$repairs = [],
+    ): array {
         if (!is_array($raw)) {
             return [];
         }
+
+        $raw = self::reconcileFrontHeroProjection(
+            $raw,
+            $front,
+            $frontProjection,
+            $repairs,
+            $pageSlug,
+        );
 
         $out = [];
         $seen = [];
@@ -571,6 +960,15 @@ final class PagePlanStep implements ConcurrentStep
                 $errors[] = "page-plan: section '{$slug}' is missing 'handoff' — describe what sits immediately above and below it";
             }
 
+            $sectionPath = self::sectionPath($pageSlug, count($out)) . '.primary_action';
+            $primaryAction = self::normalizePrimaryAction(
+                $section['primary_action'] ?? null,
+                $front && $out === [],
+                $actionContext,
+                $warnings,
+                $sectionPath,
+            );
+
             $out[] = [
                 'slug'             => $slug,
                 'title'            => $title !== '' ? $title : ucwords(str_replace('-', ' ', $slug)),
@@ -582,6 +980,7 @@ final class PagePlanStep implements ConcurrentStep
                 'background'       => $background,
                 'vertical_density' => $verticalDensity,
                 'handoff'          => $handoff,
+                'primary_action'   => $primaryAction,
             ];
         }
 
@@ -605,6 +1004,665 @@ final class PagePlanStep implements ConcurrentStep
     }
 
     /**
+     * Reconcile the delivered homepage opening with the code-owned recipe
+     * projection before variety validation. The recipe topology is locked;
+     * the plan still chooses among its reviewed compatible surfaces.
+     *
+     * @param array<mixed> $raw
+     * @param array<string,mixed>|null $projection
+     * @param list<string> $repairs
+     * @return array<mixed>
+     */
+    private static function reconcileFrontHeroProjection(
+        array $raw,
+        bool $front,
+        ?array $projection,
+        array &$repairs,
+        string $pageSlug,
+    ): array {
+        if (!$front || $projection === null) {
+            return $raw;
+        }
+
+        [$archetype, $allowedBackgrounds, $defaultBackground] = self::projectionContract($projection);
+        foreach ($raw as $rawIndex => $section) {
+            if (!is_array($section)) {
+                continue;
+            }
+
+            $path = self::sectionPath($pageSlug, 0);
+            $authoredArchetype = trim((string) ($section['layout_archetype'] ?? ''));
+            if ($authoredArchetype !== $archetype) {
+                $raw[$rawIndex]['layout_archetype'] = $archetype;
+                $repairs[] = self::successfulRepair(
+                    "{$path}.layout_archetype",
+                    $authoredArchetype,
+                    $archetype,
+                    'restored the code-assigned hero recipe projection',
+                );
+            }
+
+            $authoredBackground = trim((string) ($section['background'] ?? ''));
+            if (!in_array($authoredBackground, $allowedBackgrounds, true)) {
+                $raw[$rawIndex]['background'] = $defaultBackground;
+                $repairs[] = self::successfulRepair(
+                    "{$path}.background",
+                    $authoredBackground,
+                    $defaultBackground,
+                    'replaced a surface incompatible with the assigned hero recipe',
+                );
+            }
+            break;
+        }
+        return $raw;
+    }
+
+    /**
+     * @param array<string,mixed> $projection
+     * @return array{0:string,1:list<string>,2:string}
+     */
+    private static function projectionContract(array $projection): array
+    {
+        $archetype = trim((string) ($projection['layout_archetype'] ?? ''));
+        $allowed = array_values(array_unique(array_filter(
+            is_array($projection['allowed_backgrounds'] ?? null) ? $projection['allowed_backgrounds'] : [],
+            static fn (mixed $value): bool => is_string($value) && in_array($value, self::BACKGROUNDS, true),
+        )));
+        $default = trim((string) ($projection['default_background'] ?? ''));
+        if (!in_array($archetype, self::ARCHETYPES, true)
+            || $allowed === []
+            || !in_array($default, $allowed, true)
+        ) {
+            throw new \LogicException('page-plan: invalid code-owned hero plan projection');
+        }
+        return [$archetype, $allowed, $default];
+    }
+
+    /**
+     * Validate the one optional plan-owned front-hero action. Invalid or
+     * misplaced generated content degrades as one unit: label, intent, and
+     * destination can only be delivered together.
+     *
+     * @param array<string,mixed> $context
+     * @param list<string> $warnings
+     * @return array{label:string,intent:string,destination:string}|null
+     */
+    public static function normalizePrimaryAction(
+        mixed $raw,
+        bool $eligible,
+        array $context,
+        array &$warnings = [],
+        string $path = 'pages[].sections[].primary_action',
+    ): ?array {
+        if ($raw === null) {
+            return null;
+        }
+
+        $reason = '';
+        if (!$eligible) {
+            $reason = 'primary actions are owned only by the front page first section';
+        } elseif (!is_array($raw) || array_is_list($raw)) {
+            $reason = 'action must be an object or null';
+        } elseif (array_diff(array_keys($raw), ['label', 'intent', 'destination']) !== []
+            || array_diff(['label', 'intent', 'destination'], array_keys($raw)) !== []
+        ) {
+            $reason = 'action must contain exactly label, intent, and destination';
+        }
+
+        $label = is_array($raw) && is_string($raw['label'] ?? null) ? trim($raw['label']) : '';
+        $intent = is_array($raw) && is_string($raw['intent'] ?? null) ? trim($raw['intent']) : '';
+        $destination = is_array($raw) && is_string($raw['destination'] ?? null)
+            ? trim($raw['destination'])
+            : '';
+        if ($reason === '' && (!self::isPlainText($label) || self::graphemeLength($label) > 80)) {
+            $reason = 'label must be 1..80 Unicode grapheme clusters of plain text';
+        }
+        if ($reason === '' && !self::isPlainText($intent)) {
+            $reason = 'intent must be non-empty plain text';
+        }
+        if ($reason === '' && !self::isPlainText($destination)) {
+            $reason = 'destination must be non-empty plain text';
+        }
+        if ($reason === '' && !self::initialDestinationIsKnown($destination, $context)) {
+            // An invented absolute URL (observed: https://atlasfield.io/trial
+            // on a fabricated domain) must never ship — but deleting the
+            // conversion CTA over it is rung 3 when rung 1 exists. Rewrite it
+            // to an anchor named after the URL's last path segment; the later
+            // anchor validation resolves it to a real planned section or
+            // retargets it to the page's closing anchor.
+            if (preg_match('#^https?://#i', $destination) === 1) {
+                $segment = strtolower(trim((string) parse_url($destination, PHP_URL_PATH), '/'));
+                $segment = (string) preg_replace('/[^a-z0-9-]+/', '-', basename($segment));
+                $anchor = '#' . (trim($segment, '-') !== '' ? trim($segment, '-') : 'cta');
+                $warnings[] = self::valueLossWarning(
+                    $path . '.destination',
+                    "'{$destination}'",
+                    "'{$anchor}'",
+                    'invented external URL rewritten to a local anchor for the closing-section retarget '
+                        . 'instead of removing the action',
+                    valuesAlreadyRendered: true,
+                );
+                $destination = $anchor;
+            } else {
+                $reason = 'destination is not a known page, planned anchor, or spec-backed contact target';
+            }
+        }
+
+        if ($reason !== '') {
+            $warnings[] = self::valueLossWarning(
+                $path,
+                self::warningValue($raw),
+                'null',
+                "removed invalid primary action: {$reason}",
+                valuesAlreadyRendered: true,
+            );
+            return null;
+        }
+
+        return [
+            'label' => $label,
+            'intent' => $intent,
+            'destination' => $destination,
+        ];
+    }
+
+    /**
+     * Recheck same-page and cross-page fragments only after all page recovery
+     * paths have settled. A dead fragment on a known page is retargeted to
+     * that page's closing (else last) section anchor — the planner's action
+     * label and intent survive with a resolvable scroll target instead of the
+     * whole conversion control being deleted (rung 1 before rung 3). Only when
+     * no distinct retarget section exists is the action removed. Every sibling
+     * and all non-action section fields remain byte-for-byte unchanged.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function validatePrimaryActionAnchors(array $pages, array &$warnings = []): array
+    {
+        $anchorsByPath = [];
+        foreach ($pages as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $path = self::normalizePagePath((string) ($page['path'] ?? '/'));
+            $anchorsByPath[$path] = [];
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (is_array($section) && trim((string) ($section['slug'] ?? '')) !== '') {
+                    $anchorsByPath[$path][(string) $section['slug']] = true;
+                }
+            }
+        }
+
+        foreach ($pages as $pageIndex => $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            $currentPath = self::normalizePagePath((string) ($page['path'] ?? '/'));
+            foreach ((array) ($page['sections'] ?? []) as $sectionIndex => $section) {
+                if (!is_array($section) || !is_array($section['primary_action'] ?? null)) {
+                    continue;
+                }
+                $destination = (string) ($section['primary_action']['destination'] ?? '');
+                $target = self::anchorTarget($destination, $currentPath);
+                if ($target === null) {
+                    continue;
+                }
+                [$targetPath, $fragment] = $target;
+                if (isset($anchorsByPath[$targetPath][$fragment])) {
+                    continue;
+                }
+
+                $slug = (string) ($page['slug'] ?? '');
+                $path = self::sectionPath($slug, (int) $sectionIndex) . '.primary_action';
+
+                $owningSlug = $targetPath === $currentPath
+                    ? trim((string) ($section['slug'] ?? ''))
+                    : '';
+                $retargetSlug = self::retargetAnchorSlug($pages, $targetPath, $owningSlug);
+                if ($retargetSlug !== null) {
+                    $delivered = ($targetPath === $currentPath ? '' : rtrim($targetPath, '/') . '/')
+                        . '#' . $retargetSlug;
+                    $warnings[] = self::valueLossWarning(
+                        $path . '.destination',
+                        "'{$destination}'",
+                        "'{$delivered}'",
+                        "retargeted primary action: authored target '{$destination}' has no matching "
+                            . 'section anchor; delivered the closing-section anchor instead of removing the action',
+                        valuesAlreadyRendered: true,
+                    );
+                    $pages[$pageIndex]['sections'][$sectionIndex]['primary_action']['destination'] = $delivered;
+                    continue;
+                }
+
+                $warnings[] = self::valueLossWarning(
+                    $path,
+                    self::warningValue($section['primary_action']),
+                    'null',
+                    "removed primary action whose delivered target '{$destination}' has no matching section anchor",
+                    valuesAlreadyRendered: true,
+                );
+                $pages[$pageIndex]['sections'][$sectionIndex]['primary_action'] = null;
+            }
+        }
+
+        return $pages;
+    }
+
+    /**
+     * Build the structured first-pass destination context. Page paths come
+     * from the normalized spec tree; non-page destinations must occur in the
+     * factual spec itself, so the planner cannot invent an external/contact
+     * route merely because its syntax looks plausible.
+     *
+     * @param array<mixed> $siteSpec
+     * @param array<int,array<string,mixed>> $pages
+     * @return array{page_paths:array<string,true>,contact_destinations:array<string,true>,email_domains:array<string,true>}
+     */
+    public static function primaryActionContext(array $siteSpec, array $pages): array
+    {
+        $paths = [];
+        foreach ($pages as $page) {
+            if (is_array($page)) {
+                $paths[self::normalizePagePath((string) ($page['path'] ?? '/'))] = true;
+            }
+        }
+
+        $contacts = [];
+        $walk = function (mixed $value, string $key = '') use (&$walk, &$contacts): void {
+            if (is_array($value)) {
+                foreach ($value as $childKey => $child) {
+                    $walk($child, strtolower((string) $childKey));
+                }
+                return;
+            }
+            if (!is_string($value)) {
+                return;
+            }
+
+            $value = trim($value);
+            if ($value === '') {
+                return;
+            }
+            if (preg_match('#^https?://#i', $value) && filter_var($value, FILTER_VALIDATE_URL)) {
+                $contacts[$value] = true;
+                return;
+            }
+            if (str_starts_with(strtolower($value), 'mailto:')
+                && filter_var(substr($value, 7), FILTER_VALIDATE_EMAIL)
+            ) {
+                $contacts[$value] = true;
+                return;
+            }
+            if (str_starts_with(strtolower($value), 'tel:')
+                && preg_match('/^tel:\+?[0-9][0-9(). -]*$/i', $value)
+            ) {
+                $contacts[$value] = true;
+                return;
+            }
+            if (filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                $contacts['mailto:' . $value] = true;
+                return;
+            }
+            if (preg_match('/(?:phone|telephone|mobile|tel|whatsapp)/', $key)
+                && preg_match('/^\+?[0-9][0-9(). -]*$/', $value)
+            ) {
+                $number = preg_replace('/[(). -]+/', '', $value) ?? '';
+                if ($number !== '') {
+                    $contacts['tel:' . $number] = true;
+                }
+            }
+        };
+        $walk($siteSpec);
+
+        $emailDomains = [];
+        $domain = strtolower(trim((string) ($siteSpec['email_domain'] ?? '')));
+        if (preg_match('/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
+            $emailDomains[$domain] = true;
+        }
+
+        return [
+            'page_paths' => $paths,
+            'contact_destinations' => $contacts,
+            'email_domains' => $emailDomains,
+        ];
+    }
+
+    /** @param array<string,mixed> $context */
+    private static function initialDestinationIsKnown(string $destination, array $context): bool
+    {
+        $contacts = is_array($context['contact_destinations'] ?? null)
+            ? $context['contact_destinations']
+            : [];
+        if (isset($contacts[$destination]) || in_array($destination, $contacts, true)) {
+            return true;
+        }
+
+        if (str_starts_with(strtolower($destination), 'mailto:')) {
+            $address = substr($destination, 7);
+            if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
+                return false;
+            }
+            $at = strrpos($address, '@');
+            $domain = $at === false ? '' : strtolower(substr($address, $at + 1));
+            $domains = is_array($context['email_domains'] ?? null) ? $context['email_domains'] : [];
+            return isset($domains[$domain]) || in_array($domain, $domains, true);
+        }
+
+        if (str_starts_with($destination, '#')) {
+            // Any anchor shape survives the first pass — including the
+            // placeholder "#" the prompt forbids but models still emit.
+            // validatePrimaryActionAnchors() always runs after every
+            // recovery path and retargets an unknown fragment to the
+            // page's closing section (or removes the action when no
+            // distinct target exists), which preserves the conversion CTA
+            // instead of deleting it over a placeholder.
+            return true;
+        }
+        if (!str_starts_with($destination, '/')) {
+            return false;
+        }
+
+        $parts = parse_url($destination);
+        if ($parts === false
+            || isset($parts['scheme'])
+            || isset($parts['host'])
+            || isset($parts['query'])
+        ) {
+            return false;
+        }
+        $fragment = (string) ($parts['fragment'] ?? '');
+        if (str_contains($destination, '#') && $fragment === '') {
+            return false;
+        }
+        if ($fragment !== '' && preg_match('/^[a-z0-9][a-z0-9-]*$/', $fragment) !== 1) {
+            return false;
+        }
+        $path = self::normalizePagePath((string) ($parts['path'] ?? '/'));
+        $paths = is_array($context['page_paths'] ?? null) ? $context['page_paths'] : [];
+        return isset($paths[$path]) || in_array($path, $paths, true);
+    }
+
+    /** @return array{0:string,1:string}|null */
+    /**
+     * Append reviewed generic section briefs below a front page whose
+     * delivered plan has fewer than three sections. The appended briefs are
+     * re-normalized together with the delivered ones so slug uniqueness,
+     * enum, and variety rules hold; positional roles then make the final
+     * appended section the page's closing anchor (which the primary-action
+     * retarget can use). Interior pages are never padded.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param list<string> $warnings
+     * @return array<int,array<string,mixed>>
+     */
+    public static function padThinFrontPlan(
+        array $pages,
+        ?array $frontProjection,
+        array $actionContext,
+        array &$warnings = [],
+    ): array {
+        foreach ($pages as $index => $page) {
+            if (!is_array($page) || empty($page['front'])) {
+                continue;
+            }
+            $sections = array_values(array_filter((array) ($page['sections'] ?? []), 'is_array'));
+            $missing = 3 - count($sections);
+            if ($missing <= 0) {
+                return $pages;
+            }
+
+            // A delivered plan of 2+ sections keeps its own final section in
+            // the closing position; the generic briefs slot in above it. A
+            // hero-only plan appends, so the appended tail takes the role.
+            // Each inserted archetype avoids both neighbors so the adjacency
+            // variety rule holds by construction.
+            $safeArchetypes = ['centered-stack', 'asymmetric-split', 'offset-grid'];
+            $briefs = [
+                [
+                    'slug'          => 'overview',
+                    'title'         => 'Overview',
+                    'type'          => 'content',
+                    'purpose'       => 'Substantiate the hero promise with the core offering, grounded in the site spec.',
+                    'content_notes' => 'Two or three short paragraphs or a compact list; every claim comes from the site spec, nothing invented.',
+                    'background'    => 'contrast',
+                    'handoff'       => 'Sits between the hero above and the closing section below.',
+                ],
+                [
+                    'slug'          => 'closing',
+                    'title'         => 'Next Step',
+                    'type'          => 'cta',
+                    'purpose'       => 'Close the page with the one next step a visitor should take.',
+                    'content_notes' => 'One heading, one short supporting line, and the conversion or contact path stated in the site spec.',
+                    'background'    => 'base',
+                    'handoff'       => 'Sits between the previous section and the site footer.',
+                ],
+            ];
+            $insertAt = count($sections) >= 2 ? count($sections) - 1 : count($sections);
+            $above = $insertAt > 0
+                ? (string) ($sections[$insertAt - 1]['layout_archetype'] ?? '')
+                : '';
+            $below = isset($sections[$insertAt])
+                ? (string) ($sections[$insertAt]['layout_archetype'] ?? '')
+                : '';
+            $inserted = [];
+            foreach (array_slice($briefs, 0, $missing) as $brief) {
+                $archetype = $safeArchetypes[0];
+                foreach ($safeArchetypes as $candidate) {
+                    if ($candidate !== $above && $candidate !== $below) {
+                        $archetype = $candidate;
+                        break;
+                    }
+                }
+                $above = $archetype;
+                $inserted[] = $brief + [
+                    'layout_archetype' => $archetype,
+                    'vertical_density' => 'standard',
+                    'primary_action'   => null,
+                ];
+            }
+            $padded = array_merge(
+                array_slice($sections, 0, $insertAt),
+                $inserted,
+                array_slice($sections, $insertAt),
+            );
+            $repairs = [];
+            try {
+                $pages[$index]['sections'] = self::normalize(
+                    $padded,
+                    true,
+                    $frontProjection,
+                    $actionContext,
+                    $warnings,
+                    (string) ($page['slug'] ?? ''),
+                    $repairs,
+                );
+            } catch (\Throwable) {
+                // Padding must never make a deliverable plan worse: keep the
+                // thin-but-valid delivered sections when the padded list
+                // cannot be normalized.
+                return $pages;
+            }
+            $warnings[] = self::valueLossWarning(
+                "pages[slug='" . (string) ($page['slug'] ?? '') . "'].sections",
+                count($sections) . ' delivered section(s)',
+                count($pages[$index]['sections']) . ' section(s) after padding',
+                'front-page plan was thinner than the contract minimum of a hero plus supporting and closing '
+                    . 'sections; reviewed generic briefs were appended below the delivered ones',
+                valuesAlreadyRendered: true,
+            );
+            return $pages;
+        }
+        return $pages;
+    }
+
+    /**
+     * The anchor a dead primary-action fragment is deterministically
+     * retargeted to on the target page: the last section with the `closing`
+     * role, else the page's last section — where a landing page's terminal
+     * conversion moment lives. The section that owns the action is never a
+     * valid target (a CTA must not scroll to itself), so a page whose only
+     * candidate is the owner yields null and the caller falls back to removal.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     */
+    private static function retargetAnchorSlug(array $pages, string $targetPath, string $owningSlug): ?string
+    {
+        foreach ($pages as $page) {
+            if (!is_array($page) || self::normalizePagePath((string) ($page['path'] ?? '/')) !== $targetPath) {
+                continue;
+            }
+            $closing = null;
+            $last = null;
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                if (!is_array($section)) {
+                    continue;
+                }
+                $slug = trim((string) ($section['slug'] ?? ''));
+                if ($slug === '' || $slug === $owningSlug) {
+                    continue;
+                }
+                $last = $slug;
+                if ((string) ($section['role'] ?? '') === 'closing') {
+                    $closing = $slug;
+                }
+            }
+            return $closing ?? $last;
+        }
+        return null;
+    }
+
+    private static function anchorTarget(string $destination, string $currentPath): ?array
+    {
+        if (str_starts_with($destination, '#')) {
+            return [self::normalizePagePath($currentPath), substr($destination, 1)];
+        }
+        if (!str_starts_with($destination, '/')) {
+            return null;
+        }
+        $parts = parse_url($destination);
+        if ($parts === false || (string) ($parts['fragment'] ?? '') === '') {
+            return null;
+        }
+        return [
+            self::normalizePagePath((string) ($parts['path'] ?? '/')),
+            (string) $parts['fragment'],
+        ];
+    }
+
+    private static function normalizePagePath(string $path): string
+    {
+        $path = '/' . trim($path, '/');
+        return $path === '/' ? '/' : $path . '/';
+    }
+
+    private static function isPlainText(string $value): bool
+    {
+        return $value !== ''
+            && preg_match('//u', $value) === 1
+            && preg_match('/[\x00-\x1F\x7F]/u', $value) !== 1
+            && strip_tags($value) === $value;
+    }
+
+    private static function graphemeLength(string $value): int
+    {
+        if (function_exists('grapheme_strlen')) {
+            $length = grapheme_strlen($value);
+            return is_int($length) ? $length : PHP_INT_MAX;
+        }
+        $matched = preg_match_all('/\X/u', $value, $graphemes);
+        return is_int($matched) ? $matched : PHP_INT_MAX;
+    }
+
+    private static function sectionPath(string $pageSlug, int $sectionIndex): string
+    {
+        return $pageSlug === ''
+            ? "pages[].sections[{$sectionIndex}]"
+            : "pages[slug='{$pageSlug}'].sections[{$sectionIndex}]";
+    }
+
+    private static function warningValue(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : get_debug_type($value);
+    }
+
+    private static function successfulRepair(
+        string $path,
+        mixed $authored,
+        mixed $delivered,
+        string $disposition,
+    ): string {
+        return "page-plan repair: file='pages.json'; path=\"{$path}\"; authored="
+            . self::warningValue($authored) . '; delivered=' . self::warningValue($delivered)
+            . "; disposition=repaired — {$disposition}";
+    }
+
+    private static function valueLossWarning(
+        string $path,
+        mixed $authored,
+        mixed $delivered,
+        string $disposition,
+        bool $valuesAlreadyRendered = false,
+    ): string {
+        $authoredValue = $valuesAlreadyRendered ? (string) $authored : self::warningValue($authored);
+        $deliveredValue = $valuesAlreadyRendered ? (string) $delivered : self::warningValue($delivered);
+        return "page-plan: file='pages.json'; path=\"{$path}\"; authored={$authoredValue}; "
+            . "delivered={$deliveredValue}; disposition={$disposition}";
+    }
+
+    /**
+     * Count actual section objects while ignoring malformed scalar entries in
+     * the same way normalize() does.
+     */
+    private static function sectionArrayCount(mixed $raw): int
+    {
+        return is_array($raw) ? count(array_filter($raw, 'is_array')) : 0;
+    }
+
+    /**
+     * Keep a page buildable when its only authored section was a duplicate
+     * template footer. The loss and delivered fallback both remain explicit
+     * in warnings.json; this generated-content defect must not abort the site.
+     *
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    private static function fallbackAfterFooterRemoval(
+        bool $front,
+        array &$warnings,
+        string $pageSlug,
+        ?array $frontProjection = null,
+        array $actionContext = [],
+    ): array {
+        $pagePath = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
+        $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; "
+            . 'authored=no page-owned section survived footer removal; delivered=one synthesized content section; '
+            . 'disposition=minimal valid page plan substituted so duplicate site chrome cannot abort the build';
+        return self::fallbackSections($front, $frontProjection, $actionContext);
+    }
+
+    /**
+     * @param list<string> $warnings appended to in place
+     * @return array<int,array<string,mixed>>
+     */
+    private static function fallbackAfterGeneratedPlanLoss(
+        bool $front,
+        array &$warnings,
+        string $pageSlug,
+        string $authored,
+        string $disposition,
+        ?array $frontProjection = null,
+        array $actionContext = [],
+    ): array {
+        $pagePath = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
+        $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; authored={$authored}; "
+            . "delivered=one synthesized content section; disposition={$disposition}";
+        return self::fallbackSections($front, $frontProjection, $actionContext);
+    }
+
+    /**
      * Mechanical backstop after the LLM repair round still fails normalize().
      *
      * Runs repairFields() then repairVariety(), then normalize(). Those two
@@ -614,8 +1672,9 @@ final class PagePlanStep implements ConcurrentStep
      * section instead of aborting the build — one thin page is better than no
      * site after the rest of the pipeline has already been paid for.
      *
-     * Empty input still returns [] so the caller can fail that page loud;
-     * inventing sections from nothing is not this method's job.
+     * Empty input still returns [] so the caller can record the loss and
+     * synthesize a page-boundary fallback; inventing sections from nothing is
+     * not this field-repair helper's job.
      *
      * Pure — unit-testable.
      *
@@ -623,13 +1682,45 @@ final class PagePlanStep implements ConcurrentStep
      * @param list<string> $warnings appended to in place
      * @return array<int,array<string,mixed>>
      */
-    public static function recoverSections($raw, bool $front, array &$warnings = [], string $pageSlug = ''): array
-    {
-        $mechanically = self::repairVariety(self::repairFields($raw, $warnings), $front);
+    public static function recoverSections(
+        $raw,
+        bool $front,
+        array &$warnings = [],
+        string $pageSlug = '',
+        ?array $frontProjection = null,
+        array $actionContext = [],
+        array &$repairs = [],
+    ): array {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $prepared = self::reconcileFrontHeroProjection(
+            $raw,
+            $front,
+            $frontProjection,
+            $repairs,
+            $pageSlug,
+        );
+        $mechanically = self::repairVariety(
+            self::repairFields($prepared, $warnings, $pageSlug),
+            $front,
+            $frontProjection,
+            $warnings,
+            $pageSlug,
+            $repairs,
+        );
         if ($mechanically === []) {
             return [];
         }
-        return self::acceptRepairedSections($mechanically, $front, $warnings, $pageSlug);
+        return self::acceptRepairedSections(
+            $mechanically,
+            $front,
+            $warnings,
+            $pageSlug,
+            $frontProjection,
+            $actionContext,
+            $repairs,
+        );
     }
 
     /**
@@ -648,15 +1739,30 @@ final class PagePlanStep implements ConcurrentStep
         array $sections,
         bool $front,
         array &$warnings = [],
-        string $pageSlug = ''
+        string $pageSlug = '',
+        ?array $frontProjection = null,
+        array $actionContext = [],
+        array &$repairs = [],
     ): array {
         try {
-            return self::normalize($sections, $front);
+            return self::normalize(
+                $sections,
+                $front,
+                $frontProjection,
+                $actionContext,
+                $warnings,
+                $pageSlug,
+                $repairs,
+            );
         } catch (\RuntimeException $residual) {
-            $where = $pageSlug !== '' ? "page '{$pageSlug}'" : 'page';
-            $warnings[] = "page-plan: {$where}: mechanical repair left residual validation errors; "
-                . 'delivered a single fallback section — ' . $residual->getMessage();
-            return self::fallbackSections($front);
+            $path = $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections";
+            $warnings[] = self::valueLossWarning(
+                $path,
+                'mechanically repaired plan with residual error: ' . $residual->getMessage(),
+                'one synthesized content section',
+                'replaced the smallest page-plan unit after bounded repair left residual validation errors',
+            );
+            return self::fallbackSections($front, $frontProjection, $actionContext);
         }
     }
 
@@ -669,8 +1775,17 @@ final class PagePlanStep implements ConcurrentStep
      *
      * @return array<int,array<string,mixed>>
      */
-    public static function fallbackSections(bool $front = true): array
-    {
+    public static function fallbackSections(
+        bool $front = true,
+        ?array $frontProjection = null,
+        array $actionContext = [],
+    ): array {
+        $archetype = $front ? 'full-bleed-cover' : 'centered-stack';
+        $background = 'base';
+        if ($front && $frontProjection !== null) {
+            [$archetype, $_allowedBackgrounds, $background] = self::projectionContract($frontProjection);
+        }
+        $warnings = [];
         return self::normalize([
             [
                 'slug'             => 'content',
@@ -678,12 +1793,13 @@ final class PagePlanStep implements ConcurrentStep
                 'type'             => 'content',
                 'purpose'          => '',
                 'content_notes'    => '',
-                'layout_archetype' => $front ? 'full-bleed-cover' : 'centered-stack',
-                'background'       => 'base',
+                'layout_archetype' => $archetype,
+                'background'       => $background,
                 'vertical_density' => 'standard',
                 'handoff'          => 'Sits below the site header and above the site footer.',
+                'primary_action'   => null,
             ],
-        ], $front);
+        ], $front, $frontProjection, $actionContext, $warnings);
     }
 
     /**
@@ -714,7 +1830,7 @@ final class PagePlanStep implements ConcurrentStep
      * @param list<string> $warnings appended to in place, one per coercion
      * @return array<int,array<string,mixed>>
      */
-    public static function repairFields($raw, array &$warnings = []): array
+    public static function repairFields($raw, array &$warnings = [], string $pageSlug = ''): array
     {
         if (!is_array($raw)) {
             return [];
@@ -746,27 +1862,44 @@ final class PagePlanStep implements ConcurrentStep
                 }
                 $archetypes[$i] = $replacement;
                 $sections[$i]['layout_archetype'] = $replacement;
-                $warnings[] = "page-plan: section '{$slug}': unknown layout_archetype '{$was}' "
-                    . "replaced with '{$replacement}'";
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.layout_archetype',
+                    $was,
+                    $replacement,
+                    "replaced unknown layout archetype for section '{$slug}' with a reviewed valid assignment",
+                );
             }
 
             $background = trim((string) ($section['background'] ?? ''));
             if (!in_array($background, self::BACKGROUNDS, true)) {
                 $sections[$i]['background'] = 'base';
-                $warnings[] = "page-plan: section '{$slug}': unknown background '{$background}' "
-                    . "replaced with 'base'";
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.background',
+                    $background,
+                    'base',
+                    "replaced unknown background for section '{$slug}' with the safe base surface",
+                );
             }
 
             $density = trim((string) ($section['vertical_density'] ?? ''));
             if (!in_array($density, self::VERTICAL_DENSITIES, true)) {
                 $sections[$i]['vertical_density'] = 'standard';
-                $warnings[] = "page-plan: section '{$slug}': unknown vertical_density '{$density}' "
-                    . "replaced with 'standard'";
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.vertical_density',
+                    $density,
+                    'standard',
+                    "replaced unknown vertical density for section '{$slug}' with standard",
+                );
             }
 
             if (trim((string) ($section['type'] ?? '')) === '') {
                 $sections[$i]['type'] = 'content';
-                $warnings[] = "page-plan: section '{$slug}': missing type; defaulted to 'content'";
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.type',
+                    $section['type'] ?? null,
+                    'content',
+                    "replaced missing semantic type for section '{$slug}'",
+                );
             }
 
             if (trim((string) ($section['handoff'] ?? '')) === '') {
@@ -777,8 +1910,12 @@ final class PagePlanStep implements ConcurrentStep
                     ? 'the site footer'
                     : '"' . trim((string) ($sections[$i + 1]['title'] ?? 'the next section')) . '"';
                 $sections[$i]['handoff'] = "Sits below {$above} and above {$below}.";
-                $warnings[] = "page-plan: section '{$slug}': missing handoff; "
-                    . 'described from its neighbours in the plan';
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.handoff',
+                    $section['handoff'] ?? null,
+                    $sections[$i]['handoff'],
+                    "replaced missing handoff for section '{$slug}' with neutral delivered-neighbor facts",
+                );
             }
         }
 
@@ -801,18 +1938,35 @@ final class PagePlanStep implements ConcurrentStep
      *
      * @param mixed $raw
      * @param bool $front whether the page is the front page
+     * @param array<string,mixed>|null $frontProjection
+     * @param list<string> $warnings
+     * @param list<string> $repairs
      * @return array<int,array<string,mixed>>
      */
-    public static function repairVariety($raw, bool $front = true): array
-    {
+    public static function repairVariety(
+        $raw,
+        bool $front = true,
+        ?array $frontProjection = null,
+        array &$warnings = [],
+        string $pageSlug = '',
+        array &$repairs = [],
+    ): array {
         if (!is_array($raw)) {
             return [];
         }
+        $raw = self::reconcileFrontHeroProjection(
+            $raw,
+            $front,
+            $frontProjection,
+            $repairs,
+            $pageSlug,
+        );
         $sections = array_values(array_filter($raw, 'is_array'));
         $archetypes = array_map(
             fn (array $s) => trim((string) ($s['layout_archetype'] ?? '')),
             $sections
         );
+        $authoredArchetypes = $archetypes;
 
         $pick = function (int $i, string ...$exclude) use (&$archetypes): string {
             foreach (self::ARCHETYPES as $candidate) {
@@ -855,6 +2009,59 @@ final class PagePlanStep implements ConcurrentStep
 
         foreach ($archetypes as $i => $archetype) {
             $sections[$i]['layout_archetype'] = $archetype;
+            if ($archetype !== ($authoredArchetypes[$i] ?? $archetype)) {
+                $path = self::sectionPath($pageSlug, (int) $i) . '.layout_archetype';
+                $disposition = $front && $frontProjection !== null && $i === 1
+                    ? 'changed the following section to preserve the locked hero projection and adjacency variety'
+                    : 'mechanically repaired page-level composition variety';
+                if ($front && $frontProjection !== null && $i === 1) {
+                    $repairs[] = self::successfulRepair(
+                        $path,
+                        $authoredArchetypes[$i] ?? '',
+                        $archetype,
+                        $disposition,
+                    );
+                } else {
+                    $warnings[] = self::valueLossWarning(
+                        $path,
+                        $authoredArchetypes[$i] ?? '',
+                        $archetype,
+                        $disposition,
+                    );
+                }
+            }
+        }
+
+        // When the recipe-locked hero and its following section collided,
+        // the following section—not the hero—moved. Replace only the now-stale
+        // seam prose with neutral facts derived from the delivered assignment.
+        if ($front && $frontProjection !== null
+            && isset($sections[1])
+            && ($authoredArchetypes[1] ?? null) !== ($archetypes[1] ?? null)
+        ) {
+            $heroTitle = trim((string) ($sections[0]['title'] ?? 'Hero')) ?: 'Hero';
+            $nextTitle = trim((string) ($sections[1]['title'] ?? 'the following section'))
+                ?: 'the following section';
+            $heroHandoff = "Sits below the site header and above the {$sections[1]['background']} "
+                . "{$sections[1]['layout_archetype']} section \"{$nextTitle}\".";
+            $followingHandoff = "Sits below the {$sections[0]['background']} "
+                . "{$sections[0]['layout_archetype']} front-page hero \"{$heroTitle}\""
+                . (isset($sections[2])
+                    ? " and above the {$sections[2]['background']} {$sections[2]['layout_archetype']} section."
+                    : ' and above the site footer.');
+            foreach ([0 => $heroHandoff, 1 => $followingHandoff] as $i => $deliveredHandoff) {
+                $authoredHandoff = (string) ($sections[$i]['handoff'] ?? '');
+                if ($authoredHandoff === $deliveredHandoff) {
+                    continue;
+                }
+                $sections[$i]['handoff'] = $deliveredHandoff;
+                $repairs[] = self::successfulRepair(
+                    self::sectionPath($pageSlug, $i) . '.handoff',
+                    $authoredHandoff,
+                    $deliveredHandoff,
+                    'replaced stale seam prose after following-section variety repair',
+                );
+            }
         }
 
         // Density passes, mirroring the varietyErrors rules: demote a
@@ -865,6 +2072,7 @@ final class PagePlanStep implements ConcurrentStep
             fn (array $s) => trim((string) ($s['vertical_density'] ?? '')),
             $sections
         );
+        $authoredDensities = $densities;
         $spacious = 0;
         foreach ($densities as $i => $density) {
             if ($density !== 'spacious') {
@@ -879,6 +2087,14 @@ final class PagePlanStep implements ConcurrentStep
         }
         foreach ($densities as $i => $density) {
             $sections[$i]['vertical_density'] = $density;
+            if ($density !== ($authoredDensities[$i] ?? $density)) {
+                $warnings[] = self::valueLossWarning(
+                    self::sectionPath($pageSlug, (int) $i) . '.vertical_density',
+                    $authoredDensities[$i] ?? '',
+                    $density,
+                    'mechanically repaired page-level density limits',
+                );
+            }
         }
         return $sections;
     }

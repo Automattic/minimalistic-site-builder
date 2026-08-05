@@ -35,6 +35,7 @@ final class SiteBuilder
         private BlockFixer $blockFixer,
         private array $models = [],
         private array $temperatures = [],
+        private ?FontFetcher $fontFetcher = null,
     ) {}
 
     /**
@@ -54,6 +55,7 @@ final class SiteBuilder
             models: $this->models,
             temperatures: $this->temperatures,
             blockFixer: $this->blockFixer,
+            fontFetcher: $this->fontFetcher,
         );
         $primary = new Pipeline($composition->steps(), $composition->seeds());
 
@@ -67,6 +69,7 @@ final class SiteBuilder
             models: $this->models,
             temperatures: $this->temperatures,
             blockFixer: $this->blockFixer,
+            fontFetcher: $this->fontFetcher,
         );
 
         return new FallbackBuildPipeline(
@@ -85,21 +88,70 @@ final class SiteBuilder
      * adjective-noun name (claimed atomically). Explicit slug is used as-is
      * (re-runs can target the same folder). Merges over any pre-seeded meta.
      *
-     * $multiPage lets the site-spec step plan inner pages; the default builds
-     * ONLY the landing page. Recorded in meta.json as `multi_page` so the
-     * pipeline needs no further wiring.
+     * $multiPage controls whether the site-spec step may retain inner pages.
+     * Null keeps the ordinary generated-spec default (one landing page), but
+     * preserves the full page tree when $siteSpec is supplied. Explicit false
+     * always forces one page; explicit true allows inner pages. The resolved
+     * value is recorded in meta.json as `multi_page` so the pipeline needs no
+     * further wiring.
      *
      * $pages (multi-page builds only) fixes the page list instead of letting
      * the site-spec step invent one via LLM: entries are title strings or page
      * maps ({title, slug, purpose, children}), first entry = the homepage.
      * Recorded in meta.json as `pages`; [] records nothing, so a pre-seeded
-     * `pages` (a host whose site spec already names its pages) survives the
-     * merge and behaves exactly like the argument.
+     * `pages` (a host that already names its pages) survives the merge and
+     * behaves exactly like the argument, including when siteSpec is supplied.
+     *
+     * $siteSpec lets an embedding host provide the factual site specification
+     * it already owns. It is persisted as the `site_spec` input in meta.json;
+     * SiteSpecStep deterministically normalizes it into siteSpec.json instead
+     * of making its own LLM request. The prompt remains required because later
+     * design and content steps consume both it and the normalized spec. See
+     * Package::siteSpecSchemaPath() and Package::siteSpecExamplePath() for the
+     * shipped consumer contract.
+     *
+     * $designConstraints is the optional caller-owned hero capability object;
+     * it is validated before a project directory is claimed. $writingDirection
+     * is the optional explicit logical direction and accepts only ltr|rtl.
      *
      * @param array<int,string|array<string,mixed>> $pages
+     * @param array<string,mixed>|null              $siteSpec
+     * @param array<string,mixed>                   $designConstraints
      */
-    public function createProject(string $prompt, ?string $slug = null, bool $multiPage = false, array $pages = []): Project
-    {
+    public function createProject(
+        string $prompt,
+        ?string $slug = null,
+        ?bool $multiPage = null,
+        array $pages = [],
+        ?array $siteSpec = null,
+        array $designConstraints = [],
+        ?string $writingDirection = null,
+    ): Project {
+        if ($multiPage === false && $pages !== []) {
+            throw new \InvalidArgumentException('A fixed page list requires multiPage to be true or omitted');
+        }
+        if ($siteSpec !== null) {
+            try {
+                json_encode($siteSpec, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                throw new \InvalidArgumentException('siteSpec must be JSON-serializable', previous: $e);
+            }
+        }
+        $designConstraints = HeroComposition::validateConstraints($designConstraints);
+        if (HeroComposition::compatible($designConstraints) === []) {
+            throw new \InvalidArgumentException(
+                'designConstraints leave no compatible hero recipe'
+            );
+        }
+        $writingDirection = $writingDirection === null
+            ? null
+            : WritingDirection::validate($writingDirection);
+
+        // A supplied spec is self-contained by default: unless the caller
+        // explicitly forces one page, retain whatever page tree it carries.
+        // Requested pages likewise imply a multi-page-capable build.
+        $resolvedMultiPage = $multiPage ?? ($siteSpec !== null || $pages !== []);
+
         $store = $this->store();
         $project = $slug === null
             ? $store->claimNew(ProjectStore::randomSlug())
@@ -109,10 +161,19 @@ final class SiteBuilder
             'prompt'           => $prompt,
             'provisional_slug' => $project->slug(),
             'created_at'       => gmdate('c'),
-            'multi_page'       => $multiPage,
+            'multi_page'       => $resolvedMultiPage,
         ];
         if ($pages !== []) {
             $seed['pages'] = array_values($pages);
+        }
+        if ($siteSpec !== null) {
+            $seed['site_spec'] = $siteSpec;
+        }
+        if ($designConstraints !== []) {
+            $seed['design_constraints'] = $designConstraints;
+        }
+        if ($writingDirection !== null) {
+            $seed['writing_direction'] = $writingDirection;
         }
 
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];

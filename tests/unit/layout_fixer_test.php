@@ -454,7 +454,7 @@ test('layout fixer recursively merges split support members and the block fixer 
         assert_contains('"blockGap":{"left":"var:preset|spacing|xs","top":"var:preset|spacing|lg"}', $written);
         assert_contains('padding-bottom:var(--wp--preset--spacing--md)', $written);
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -495,7 +495,7 @@ test('layout fixer leaves explicit non-object style shapes for the gate', functi
         assert_contains("Unsupported comment attribute 'spacing' for core/group", $report);
         assert_eq($markup, file_get_contents($theme . '/parts/invalid-style-shape.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -516,7 +516,7 @@ test('normalize-layout repair lets the PHP block fixer serialize the atlas repro
         assert_contains("Unsupported comment attribute 'spacing' for core/group", $report);
         assert_eq($pre, file_get_contents($theme . '/parts/page-home--trust-builders.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 
     $post = LayoutFixer::fix($pre, LayoutFixer::ROLE_SECTION, 860.0)['markup'];
@@ -528,7 +528,7 @@ test('normalize-layout repair lets the PHP block fixer serialize the atlas repro
         assert_contains('"style":{"border":{"radius":"18px","width":"1px","color":"#dce4de"},"spacing":{"padding":{"left":"var:preset|spacing|md"}}}', $written);
         assert_contains('padding-left:var(--wp--preset--spacing--md)', $written);
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
