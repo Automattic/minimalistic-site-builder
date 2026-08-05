@@ -230,3 +230,77 @@ test('collect-images keeps subject pipes and parses the three trailing fields', 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('collect-images collects an assigned short AI_IMAGE alt from a theme part', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-contact--details.html',
+        '<img src="theme:./assets/plate-iv-abcd1234.jpg" alt="AI_IMAGE: a studio desk"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('plate-iv-abcd1234.jpg', $images[0]['filename']);
+    assert_eq('a studio desk', $images[0]['subject']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images keeps canonical fields for an assigned four-field AI_IMAGE alt', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--hero.html',
+        '<img src="theme:./assets/canonical-hero.jpg" '
+        . 'alt="AI_IMAGE: Dawn over a quiet valley | full-bleed homepage hero | Photorealistic | Landscape"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('Dawn over a quiet valley', $images[0]['subject']);
+    assert_eq('full-bleed homepage hero', $images[0]['pageContext']);
+    assert_eq('photorealistic', $images[0]['style']);
+    assert_eq('landscape', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images keeps plain prose assigned image subjects unchanged', function () {
+    [$project, $tmp] = collect_fixture();
+    $subject = 'Studio flat lay with sketchbooks, pencils, and warm window light';
+    $project->writeText('theme/parts/page-work--gallery.html',
+        '<img src="theme:./assets/studio-flat-lay.jpg" alt="' . $subject . '"/>'
+    );
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq($subject, $images[0]['subject']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images lets canonical fields win when assigned parsing finds the same filename', function () {
+    [$project, $tmp] = collect_fixture();
+    $tag = '<img src="theme:./assets/canonical-wins.jpg" '
+        . 'alt="AI_IMAGE: Coffee | tea | pastries on a table | menu item card | flat-design | square"/>';
+    $project->writeText('theme/parts/page-home--menu.html', $tag);
+
+    $assigned = CollectImagesStep::parseAssignedImages($tag, 'parts/page-home--menu.html');
+    assert_eq(1, count($assigned));
+    assert_eq('Coffee', $assigned[0]['subject']);
+
+    (new CollectImagesStep(true))->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('canonical-wins.jpg', $images[0]['filename']);
+    assert_eq('Coffee | tea | pastries on a table', $images[0]['subject']);
+    assert_eq('menu item card', $images[0]['pageContext']);
+    assert_eq('flat-design', $images[0]['style']);
+    assert_eq('square', $images[0]['aspectRatio']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
