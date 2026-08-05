@@ -365,8 +365,19 @@ CSS;
         }
 
         $error = null;
-        $rewritten = self::rewriteRuleList($css, $sectionRootIds, $error);
+        $removals = [];
+        $rewritten = self::rewriteRuleList($css, $sectionRootIds, $removals, $error);
         if ($rewritten !== null) {
+            foreach ($removals as $removal) {
+                $warnings[] = sprintf(
+                    'source=%s; block_path=section-root CSS declaration; authored_value=%s; '
+                        . 'delivered_value=%s; disposition=%s',
+                    $source,
+                    self::warningValue($removal['authored_value']),
+                    $removal['delivered_value'],
+                    $removal['disposition'],
+                );
+            }
             return $rewritten;
         }
 
@@ -434,10 +445,12 @@ CSS;
      * Returns null on syntax this bounded transformer cannot prove safe.
      *
      * @param array<string,true> $sectionRootIds
+     * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
      */
     private static function rewriteRuleList(
         string $css,
         array $sectionRootIds,
+        array &$removals,
         ?string &$error,
     ): ?string {
         $length = strlen($css);
@@ -479,14 +492,20 @@ CSS;
                         ['media', 'supports', 'container', 'layer', 'scope', 'document', 'starting-style'],
                         true,
                     )) {
-                        $body = self::rewriteRuleList($body, $sectionRootIds, $error);
+                        $body = self::rewriteRuleList($body, $sectionRootIds, $removals, $error);
                         if ($body === null) {
                             return null;
                         }
                     }
                     $out .= $prelude . '{' . $body . '}';
                 } else {
-                    $rule = self::rewriteQualifiedRule($prelude, $body, $sectionRootIds, $error);
+                    $rule = self::rewriteQualifiedRule(
+                        $prelude,
+                        $body,
+                        $sectionRootIds,
+                        $removals,
+                        $error,
+                    );
                     if ($rule === null) {
                         return null;
                     }
@@ -553,11 +572,15 @@ CSS;
         return null;
     }
 
-    /** @param array<string,true> $sectionRootIds */
+    /**
+     * @param array<string,true> $sectionRootIds
+     * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
+     */
     private static function rewriteQualifiedRule(
         string $prelude,
         string $body,
         array $sectionRootIds,
+        array &$removals,
         ?string &$error,
     ): ?string {
         [$leading, $selectorText] = self::leadingTriviaAndRest($prelude);
@@ -584,7 +607,7 @@ CSS;
         }
 
         $changed = false;
-        $rootBody = self::rewriteRootDeclarations($body, $changed, $error);
+        $rootBody = self::rewriteRootDeclarations($body, $changed, $removals, $error);
         if ($rootBody === null) {
             return null;
         }
@@ -672,9 +695,19 @@ CSS;
         array $sectionRootIds,
         ?string &$error,
     ): ?bool {
+        $compound = self::finalSelectorCompound($selector, $error);
+        if ($compound === null) {
+            return null;
+        }
+        return self::compoundTargetsRoot($compound, $sectionRootIds, $error);
+    }
+
+    private static function finalSelectorCompound(string $selector, ?string &$error): ?string
+    {
         $length = strlen($selector);
         $state = CssSyntaxScanner::state();
-        $flat = '';
+        $start = 0;
+        $sawToken = false;
         for ($offset = 0; $offset < $length;) {
             $topLevel = CssSyntaxScanner::isTopLevel($state);
             if ($topLevel && substr($selector, $offset, 2) === '/*') {
@@ -687,19 +720,29 @@ CSS;
                 continue;
             }
             $byte = $selector[$offset];
+            if ($topLevel && CssSyntaxScanner::isCssWhitespace($byte)) {
+                $next = self::skipSelectorTrivia($selector, $offset);
+                if ($sawToken && $next < $length) {
+                    $start = $next;
+                }
+                $offset = $next;
+                continue;
+            }
+            if ($topLevel && ($byte === '>' || $byte === '+' || $byte === '~'
+                || substr($selector, $offset, 2) === '||')) {
+                $offset += substr($selector, $offset, 2) === '||' ? 2 : 1;
+                $offset = self::skipSelectorTrivia($selector, $offset);
+                $start = $offset;
+                $sawToken = false;
+                continue;
+            }
             $next = CssSyntaxScanner::consume($selector, $offset, $state);
             if ($next === null) {
                 $error = "invalid selector escape or delimiter at byte {$offset}";
                 return null;
             }
-            if ($topLevel) {
-                if ($byte === '\\' || $byte === '[' || $byte === '(' || $byte === '"' || $byte === "'") {
-                    $flat .= 'X';
-                } else {
-                    $flat .= substr($selector, $offset, $next - $offset);
-                }
-            } elseif (CssSyntaxScanner::isTopLevel($state) && ($byte === ']' || $byte === ')')) {
-                $flat .= 'X';
+            if ($topLevel && !CssSyntaxScanner::isCssWhitespace($byte)) {
+                $sawToken = true;
             }
             $offset = $next;
         }
@@ -707,28 +750,290 @@ CSS;
             $error = 'unterminated selector string, comment, or function';
             return null;
         }
-
-        $compounds = preg_split('/(?:[ \t\r\n\f]+|[>+~]|\|\|)+/', trim($flat), -1, PREG_SPLIT_NO_EMPTY);
-        $subject = $compounds === false || $compounds === [] ? '' : (string) end($compounds);
-        if ($subject === '' || str_contains($subject, '::')) {
-            return false;
+        $compound = trim(substr($selector, $start));
+        if ($compound === '') {
+            $error = 'selector has no final subject';
+            return null;
         }
-        if (preg_match('/:(?:before|after|first-letter|first-line)\b/i', $subject) === 1) {
-            return false;
-        }
-        if (preg_match_all('/#([A-Za-z0-9_-]+)/', $subject, $matches) !== false) {
-            foreach ($matches[1] as $id) {
-                if (isset($sectionRootIds[$id])) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return $compound;
     }
 
+    /** @param array<string,true> $sectionRootIds */
+    private static function compoundTargetsRoot(
+        string $compound,
+        array $sectionRootIds,
+        ?string &$error,
+    ): ?bool {
+        $length = strlen($compound);
+        $state = CssSyntaxScanner::state();
+        $matchesRoot = false;
+        for ($offset = 0; $offset < $length;) {
+            $topLevel = CssSyntaxScanner::isTopLevel($state);
+            if ($topLevel && substr($compound, $offset, 2) === '/*') {
+                $end = strpos($compound, '*/', $offset + 2);
+                if ($end === false) {
+                    $error = 'unterminated selector comment';
+                    return null;
+                }
+                $offset = $end + 2;
+                continue;
+            }
+            $byte = $compound[$offset];
+            if ($topLevel && $byte === '#') {
+                $identifier = self::cssIdentifierAt($compound, $offset + 1);
+                if ($identifier !== null) {
+                    if (isset($sectionRootIds[$identifier['decoded']])) {
+                        $matchesRoot = true;
+                    }
+                    $offset = $identifier['end'];
+                    continue;
+                }
+            }
+            if ($topLevel && $byte === '[') {
+                $end = self::selectorGroupEnd($compound, $offset, '[', ']', $error);
+                if ($end === null) {
+                    return null;
+                }
+                if (self::idAttributeTargetsRoot(
+                    substr($compound, $offset, $end - $offset),
+                    $sectionRootIds,
+                )) {
+                    $matchesRoot = true;
+                }
+                $offset = $end;
+                continue;
+            }
+            if ($topLevel && $byte === ':') {
+                if (($compound[$offset + 1] ?? '') === ':') {
+                    return false;
+                }
+                $pseudo = self::cssIdentifierAt($compound, $offset + 1);
+                if ($pseudo !== null) {
+                    $name = strtolower($pseudo['decoded']);
+                    if (in_array($name, ['before', 'after', 'first-letter', 'first-line'], true)) {
+                        return false;
+                    }
+                    $functionOpen = self::skipSelectorTrivia($compound, $pseudo['end']);
+                    if (($compound[$functionOpen] ?? '') === '(') {
+                        $end = self::selectorGroupEnd($compound, $functionOpen, '(', ')', $error);
+                        if ($end === null) {
+                            return null;
+                        }
+                        if (in_array($name, ['is', 'where'], true)) {
+                            $arguments = self::splitSelectorList(
+                                substr($compound, $functionOpen + 1, $end - $functionOpen - 2),
+                                $error,
+                            );
+                            if ($arguments === null) {
+                                return null;
+                            }
+                            foreach ($arguments as $argument) {
+                                $argumentTargetsRoot = self::selectorTargetsRoot(
+                                    $argument,
+                                    $sectionRootIds,
+                                    $error,
+                                );
+                                if ($argumentTargetsRoot === null) {
+                                    return null;
+                                }
+                                if ($argumentTargetsRoot) {
+                                    $matchesRoot = true;
+                                }
+                            }
+                        }
+                        // :not() and :has() inspect related elements or negate
+                        // a match; IDs inside them never identify this subject.
+                        $offset = $end;
+                        continue;
+                    }
+                    $offset = $pseudo['end'];
+                    continue;
+                }
+            }
+
+            $next = CssSyntaxScanner::consume($compound, $offset, $state);
+            if ($next === null) {
+                $error = "invalid selector escape or delimiter at byte {$offset}";
+                return null;
+            }
+            $offset = $next;
+        }
+        if (!CssSyntaxScanner::isComplete($state)) {
+            $error = 'unterminated final selector compound';
+            return null;
+        }
+        return $matchesRoot;
+    }
+
+    private static function skipSelectorTrivia(string $selector, int $offset): int
+    {
+        $length = strlen($selector);
+        while ($offset < $length) {
+            if (CssSyntaxScanner::isCssWhitespace($selector[$offset])) {
+                $offset++;
+                continue;
+            }
+            if (substr($selector, $offset, 2) === '/*') {
+                $end = strpos($selector, '*/', $offset + 2);
+                if ($end === false) {
+                    return $length;
+                }
+                $offset = $end + 2;
+                continue;
+            }
+            break;
+        }
+        return $offset;
+    }
+
+    private static function selectorGroupEnd(
+        string $selector,
+        int $open,
+        string $opener,
+        string $closer,
+        ?string &$error,
+    ): ?int {
+        if (($selector[$open] ?? '') !== $opener) {
+            $error = "selector group does not start with {$opener}";
+            return null;
+        }
+        $state = CssSyntaxScanner::state();
+        $length = strlen($selector);
+        for ($offset = $open; $offset < $length;) {
+            $byte = $selector[$offset];
+            $next = CssSyntaxScanner::consume($selector, $offset, $state);
+            if ($next === null) {
+                $error = "invalid selector group at byte {$offset}";
+                return null;
+            }
+            if ($byte === $closer && CssSyntaxScanner::isTopLevel($state)) {
+                return $next;
+            }
+            $offset = $next;
+        }
+        $error = "unterminated selector group {$opener}";
+        return null;
+    }
+
+    /** @param array<string,true> $sectionRootIds */
+    private static function idAttributeTargetsRoot(string $attribute, array $sectionRootIds): bool
+    {
+        $withoutComments = preg_replace('/\/\*.*?\*\//s', '', $attribute);
+        if (!is_string($withoutComments) || strlen($withoutComments) < 2) {
+            return false;
+        }
+        $inside = trim(substr($withoutComments, 1, -1));
+        if (preg_match('/\Aid[ \t\r\n\f]*=[ \t\r\n\f]*(?:"((?:\\.|[^"])*)"|\'((?:\\.|[^\'])*)\'|([^ \t\r\n\f]+))\z/is', $inside, $match) !== 1) {
+            return false;
+        }
+        $raw = $match[1] !== '' ? $match[1] : ($match[2] !== '' ? $match[2] : ($match[3] ?? ''));
+        $decoded = self::decodeCssEscapes($raw);
+        return $decoded !== null && isset($sectionRootIds[$decoded]);
+    }
+
+    /** @return array{decoded:string,end:int}|null */
+    private static function cssIdentifierAt(string $value, int $offset): ?array
+    {
+        $length = strlen($value);
+        $decoded = '';
+        $start = $offset;
+        while ($offset < $length) {
+            $byte = $value[$offset];
+            if ($byte === '\\') {
+                $escape = self::decodedCssEscapeAt($value, $offset);
+                if ($escape === null) {
+                    return null;
+                }
+                $decoded .= $escape['decoded'];
+                $offset = $escape['end'];
+                continue;
+            }
+            if (!self::isCssIdentifierByte($byte)) {
+                break;
+            }
+            $decoded .= $byte;
+            $offset++;
+        }
+        return $offset === $start ? null : ['decoded' => $decoded, 'end' => $offset];
+    }
+
+    private static function decodeCssIdentifierText(string $value): ?string
+    {
+        $value = trim($value);
+        $identifier = self::cssIdentifierAt($value, 0);
+        return $identifier !== null && $identifier['end'] === strlen($value)
+            ? $identifier['decoded']
+            : null;
+    }
+
+    private static function decodeCssEscapes(string $value): ?string
+    {
+        $decoded = '';
+        $length = strlen($value);
+        for ($offset = 0; $offset < $length;) {
+            if ($value[$offset] !== '\\') {
+                $decoded .= $value[$offset++];
+                continue;
+            }
+            $escape = self::decodedCssEscapeAt($value, $offset);
+            if ($escape === null) {
+                return null;
+            }
+            $decoded .= $escape['decoded'];
+            $offset = $escape['end'];
+        }
+        return $decoded;
+    }
+
+    /** @return array{decoded:string,end:int}|null */
+    private static function decodedCssEscapeAt(string $value, int $offset): ?array
+    {
+        $end = CssSyntaxScanner::escapeEnd($value, $offset);
+        if ($end === null) {
+            return null;
+        }
+        $cursor = $offset + 1;
+        if (!isset($value[$cursor])) {
+            return null;
+        }
+        if (!ctype_xdigit($value[$cursor])) {
+            if ($value[$cursor] === "\r" || $value[$cursor] === "\n" || $value[$cursor] === "\f") {
+                return ['decoded' => '', 'end' => $end];
+            }
+            return ['decoded' => $value[$cursor], 'end' => $end];
+        }
+        $hex = '';
+        while ($cursor < strlen($value) && strlen($hex) < 6 && ctype_xdigit($value[$cursor])) {
+            $hex .= $value[$cursor++];
+        }
+        $codepoint = hexdec($hex);
+        if ($codepoint === 0 || $codepoint > 0x10FFFF || ($codepoint >= 0xD800 && $codepoint <= 0xDFFF)) {
+            $decoded = "\u{FFFD}";
+        } elseif ($codepoint <= 0x7F) {
+            $decoded = chr($codepoint);
+        } else {
+            $decoded = html_entity_decode('&#' . $codepoint . ';', ENT_NOQUOTES, 'UTF-8');
+        }
+        return ['decoded' => $decoded, 'end' => $end];
+    }
+
+    private static function isCssIdentifierByte(string $byte): bool
+    {
+        $ord = ord($byte);
+        return ($ord >= ord('0') && $ord <= ord('9'))
+            || ($ord >= ord('A') && $ord <= ord('Z'))
+            || ($ord >= ord('a') && $ord <= ord('z'))
+            || $byte === '-'
+            || $byte === '_'
+            || $ord >= 0x80;
+    }
+    /**
+     * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
+     */
     private static function rewriteRootDeclarations(
         string $body,
         bool &$changed,
+        array &$removals,
         ?string &$error,
     ): ?string {
         $length = strlen($body);
@@ -738,13 +1043,13 @@ CSS;
         for ($offset = 0; $offset < $length;) {
             $topLevel = CssSyntaxScanner::isTopLevel($state);
             $byte = $body[$offset];
-            if ($topLevel && ($byte === '{' || $byte === '}')) {
-                $error = "nested rule in section-root declaration block at byte {$offset}";
+            if ($topLevel && $byte === '}') {
+                $error = "unexpected nested-rule closer at byte {$offset}";
                 return null;
             }
             if ($topLevel && $byte === ';') {
                 $segment = substr($body, $start, $offset - $start);
-                $rewritten = self::rewriteRootDeclaration($segment, $error);
+                $rewritten = self::rewriteRootDeclaration($segment, $removals, $error);
                 if ($rewritten === null) {
                     return null;
                 }
@@ -752,6 +1057,43 @@ CSS;
                 $changed = $changed || $rewritten['changed'];
                 $start = $offset + 1;
                 $offset++;
+                continue;
+            }
+            if ($topLevel && $byte === '{') {
+                $close = self::matchingBrace($body, $offset, $error);
+                if ($close === null) {
+                    return null;
+                }
+                $prelude = substr($body, $start, $offset - $start);
+                if (self::isCssTrivia($prelude)) {
+                    $error = "nested rule has no selector at byte {$offset}";
+                    return null;
+                }
+                $nestedBody = substr($body, $offset + 1, $close - $offset - 1);
+                $nestedAtRule = self::atRuleName($prelude);
+                if ($nestedAtRule !== null && in_array(
+                    $nestedAtRule,
+                    ['media', 'supports', 'container', 'layer', 'scope', 'document', 'starting-style'],
+                    true,
+                )) {
+                    $nestedChanged = false;
+                    $nestedBody = self::rewriteRootDeclarations(
+                        $nestedBody,
+                        $nestedChanged,
+                        $removals,
+                        $error,
+                    );
+                    if ($nestedBody === null) {
+                        return null;
+                    }
+                    $changed = $changed || $nestedChanged;
+                }
+                // Nested qualified selectors target their own final subject,
+                // not the outer root. Preserve those branches byte-for-byte.
+                $out .= $prelude . '{' . $nestedBody . '}';
+                $offset = $close + 1;
+                $start = $offset;
+                $state = CssSyntaxScanner::state();
                 continue;
             }
             $next = CssSyntaxScanner::consume($body, $offset, $state);
@@ -765,7 +1107,7 @@ CSS;
             $error = 'unterminated declaration string, comment, or function';
             return null;
         }
-        $rewritten = self::rewriteRootDeclaration(substr($body, $start), $error);
+        $rewritten = self::rewriteRootDeclaration(substr($body, $start), $removals, $error);
         if ($rewritten === null) {
             return null;
         }
@@ -773,8 +1115,15 @@ CSS;
         return $out . $rewritten['text'];
     }
 
-    /** @return array{text:string,changed:bool}|null */
-    private static function rewriteRootDeclaration(string $segment, ?string &$error): ?array
+    /**
+     * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
+     * @return array{text:string,changed:bool}|null
+     */
+    private static function rewriteRootDeclaration(
+        string $segment,
+        array &$removals,
+        ?string &$error,
+    ): ?array
     {
         $colon = self::topLevelColon($segment, $error);
         if ($colon === null) {
@@ -788,7 +1137,8 @@ CSS;
         }
 
         $property = preg_replace('/\/\*.*?\*\//s', '', substr($segment, 0, $colon));
-        $property = strtolower(trim((string) $property));
+        $property = self::decodeCssIdentifierText((string) $property);
+        $property = $property === null ? '' : strtolower($property);
         if (!in_array($property, ['padding', 'padding-inline', 'padding-left', 'padding-right'], true)) {
             return ['text' => $segment, 'changed' => false];
         }
@@ -798,11 +1148,24 @@ CSS;
             return ['text' => $leading, 'changed' => true];
         }
 
-        $padding = self::paddingBlockValues(substr($segment, $colon + 1), $error);
+        $padding = self::paddingComponents(substr($segment, $colon + 1), $error);
         if ($padding === null) {
             return null;
         }
-        [$top, $bottom, $important] = $padding;
+        if (self::hasOpaquePaddingComponent($padding['values'])) {
+            $removals[] = [
+                'authored_value' => trim($segment) . ';',
+                'delivered_value' => 'removed',
+                'disposition' => 'removed_opaque_padding_shorthand',
+            ];
+            return ['text' => $leading, 'changed' => true];
+        }
+        $top = $padding['values'][0];
+        $bottom = match (count($padding['values'])) {
+            1, 2 => $padding['values'][0],
+            3, 4 => $padding['values'][2],
+        };
+        $important = $padding['important'];
         $indent = '';
         if (preg_match('/\n([ \t]*)\z/', $leading, $match) === 1) {
             $indent = $match[1];
@@ -836,8 +1199,8 @@ CSS;
         return null;
     }
 
-    /** @return array{0:string,1:string,2:string}|null */
-    private static function paddingBlockValues(string $raw, ?string &$error): ?array
+    /** @return array{values:list<string>,important:string}|null */
+    private static function paddingComponents(string $raw, ?string &$error): ?array
     {
         $value = trim($raw);
         $important = '';
@@ -861,12 +1224,18 @@ CSS;
             $error ??= 'padding shorthand must contain one to four values';
             return null;
         }
-        $top = $values[0];
-        $bottom = match (count($values)) {
-            1, 2 => $values[0],
-            3, 4 => $values[2],
-        };
-        return [$top, $bottom, $important];
+        return ['values' => $values, 'important' => $important];
+    }
+
+    /** @param list<string> $values */
+    private static function hasOpaquePaddingComponent(array $values): bool
+    {
+        foreach ($values as $value) {
+            if (preg_match('/\Avar[ \t\r\n\f]*\(/i', $value) === 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function topLevelBang(string $value, ?string &$error): ?int
