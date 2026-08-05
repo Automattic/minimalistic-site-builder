@@ -143,7 +143,53 @@ final class GeneratedMarkup
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
-        return $salvage['markup'];
+        return self::stripTextBlockShadow($salvage['markup'], $key, $repairs);
+    }
+
+    /**
+     * Remove shadow presets from heading and paragraph blocks.
+     *
+     * Shadow presets are surface atmosphere for media, cards, and covers. On
+     * a text block a box-shadow traces the block's bounding box, so an offset
+     * or multi-color preset renders as detached bars flanking the copy
+     * (audited: pulso5's "RGB Misregister" preset on the hero H1 drew a cyan
+     * rule left and an orange rule right of the headline). Attribute-only
+     * edit, per the shared convention: the stale inline box-shadow survives
+     * in the saved HTML until fix-blocks re-serializes it from these
+     * attributes.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function stripTextBlockShadow(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $stripped = 0;
+        foreach ($document->indices() as $index) {
+            if (!in_array($document->name($index), ['heading', 'paragraph'], true)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if (!isset($attrs['style']['shadow'])) {
+                continue;
+            }
+            unset($attrs['style']['shadow']);
+            if (($attrs['style'] ?? []) === []) {
+                unset($attrs['style']);
+            }
+            $document->setAttrs($index, $attrs);
+            $stripped++;
+        }
+        if ($stripped === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'text-block-shadow-stripped',
+            'part' => $part,
+            'authored' => "{$stripped} heading/paragraph block(s) carrying a shadow preset",
+            'delivered' => 'the same text without box-shadow chrome',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
     }
 
     /**

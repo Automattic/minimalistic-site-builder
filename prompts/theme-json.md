@@ -39,7 +39,7 @@ Design intelligence to encode as tokens:
     `base` on `accent` (or `primary` if buttons use it) ≥ 4.5:1 (button labels)
   Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
-- **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
+- **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference. Shadow presets style media, cards, and cover surfaces — never text: do not design presets meant for headings or copy (misregistration/echo offsets, text outlines); on a text block a box-shadow renders as stray bars and the build strips it.
 
 Build-supplied wiring — do not emit it:
 
