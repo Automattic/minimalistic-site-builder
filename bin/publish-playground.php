@@ -110,16 +110,11 @@ try {
 function usage(int $exit): never
 {
     $branch = PlaygroundArtifact::DEFAULT_ARTIFACT_BRANCH;
-    $built = list_built_project_slugs();
-    fwrite($exit === 0 ? STDOUT : STDERR, "Usage:\n");
-    fwrite($exit === 0 ? STDOUT : STDERR, "  php bin/publish-playground.php <slug> [--repo=OWNER/REPO] [--branch={$branch}] [--name=<file.zip>] [--out=<path>] [--dry-run] [--clobber] [--open]\n");
-    fwrite($exit === 0 ? STDOUT : STDERR, "  php bin/publish-playground.php --list [--repo=OWNER/REPO] [--branch={$branch}]\n");
-    if ($built !== []) {
-        fwrite($exit === 0 ? STDOUT : STDERR, "\nAvailable projects:\n");
-        foreach ($built as $builtSlug) {
-            fwrite($exit === 0 ? STDOUT : STDERR, "  - {$builtSlug}\n");
-        }
-    }
+    $out = $exit === 0 ? STDOUT : STDERR;
+    fwrite($out, "Usage:\n");
+    fwrite($out, "  php bin/publish-playground.php <slug> [--repo=OWNER/REPO] [--branch={$branch}] [--name=<file.zip>] [--out=<path>] [--dry-run] [--clobber] [--open]\n");
+    fwrite($out, "  php bin/publish-playground.php --list [--repo=OWNER/REPO] [--branch={$branch}]\n");
+    print_built_projects($out, "\nAvailable projects:");
     exit($exit);
 }
 

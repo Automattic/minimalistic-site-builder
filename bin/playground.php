@@ -47,10 +47,7 @@ if ($workers !== 'auto' && (int) $workers < 1) {
 
 if ($slug === null) {
     fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
-    fwrite(STDERR, "Available themes:\n");
-    foreach (list_built_project_slugs() as $builtSlug) {
-        fwrite(STDERR, "  - {$builtSlug}\n");
-    }
+    print_built_projects(STDERR, 'Available themes:');
     exit(1);
 }
 

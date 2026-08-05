@@ -469,9 +469,7 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
     while ($servers !== []) {
         pump_children($servers, static function (int $idx, int $fd, string $line) use (&$servers): void {
             echo "[{$servers[$idx]['slug']}] " . $line;
-            if ($servers[$idx]['url'] === null) {
-                $servers[$idx]['url'] = playground_ready_url($line);
-            }
+            $servers[$idx]['url'] ??= playground_ready_url($line);
         });
 
         $allReady = $servers !== [];

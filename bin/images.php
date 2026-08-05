@@ -28,10 +28,7 @@ require_once __DIR__ . '/../src/bootstrap.php';
 $slug = $argv[1] ?? null;
 if ($slug === null || trim($slug) === '') {
     fwrite(STDERR, "Usage: php bin/images.php <slug>\n");
-    fwrite(STDERR, "Available projects:\n");
-    foreach (list_built_project_slugs() as $builtSlug) {
-        fwrite(STDERR, "  - {$builtSlug}\n");
-    }
+    print_built_projects(STDERR);
     exit(1);
 }
 

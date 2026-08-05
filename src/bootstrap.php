@@ -146,11 +146,22 @@ function repo_path(string $rel = ''): string
     return $rel === '' ? $root : $root . '/' . ltrim($rel, '/');
 }
 
-/** Resolved path of an executable on PATH, or null when it isn't installed. */
+/**
+ * Resolved path of an executable on PATH, or null when it isn't installed.
+ *
+ * Memoized per process: a single run can ask about the same binary several
+ * times (publish-playground checks `gh` before resolving the repo and again
+ * before pushing), and each miss costs a fork. A CLI process is short-lived,
+ * so PATH changing under us is not a concern.
+ */
 function command_path(string $bin): ?string
 {
-    $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
-    return $path === '' ? null : $path;
+    static $cache = [];
+    if (!array_key_exists($bin, $cache)) {
+        $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
+        $cache[$bin] = $path === '' ? null : $path;
+    }
+    return $cache[$bin];
 }
 
 /** Is this external tool available to shell out to? */
@@ -160,14 +171,22 @@ function command_exists(string $bin): bool
 }
 
 /**
- * Slugs of every project in this repo with a built theme, for the "available
- * projects" list CLI usage messages print.
+ * Print the "available projects" list CLI usage messages end with — every
+ * project in this repo that has a built theme. Prints nothing at all when
+ * there is none, so a fresh checkout does not advertise an empty list.
  *
- * @return list<string>
+ * @param resource $stream
  */
-function list_built_project_slugs(): array
+function print_built_projects($stream, string $header = 'Available projects:'): void
 {
-    return ProjectStore::builtSlugs(repo_path('projects'));
+    $slugs = ProjectStore::builtSlugs(repo_path('projects'));
+    if ($slugs === []) {
+        return;
+    }
+    fwrite($stream, $header . "\n");
+    foreach ($slugs as $slug) {
+        fwrite($stream, "  - {$slug}\n");
+    }
 }
 
 /**
