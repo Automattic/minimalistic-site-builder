@@ -123,8 +123,9 @@ final class GenerateImagesStep implements Step
         // this step directly, logs too.
         ImageLogger::setDir($project->logPath('images'));
 
-        // Site-wide context (name/topic/description) prepended to every image
-        // prompt so the model grounds each image in what the site is about.
+        // Site-wide subject matter (topic/description — never the site name;
+        // see siteContext) woven into every image prompt so the model grounds
+        // each image in what the site is about.
         $siteContext = self::siteContext(
             $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : []
         );
@@ -266,44 +267,38 @@ final class GenerateImagesStep implements Step
     }
 
     /**
-     * A compact, factual site-context phrase built from the site spec's name,
-     * topic and description, fed into every image prompt so the model knows
-     * what the site is about. Returns '' when the spec carries none of those
-     * facts. Public so tools (e.g. the image-prompt debugger) can reproduce
-     * the exact context the step feeds into ImagePromptComposer.
+     * A compact subject-matter sentence built from the site spec, fed into
+     * every image prompt so the model grounds each image in what the site is
+     * about. Returns '' when the spec carries no topic or description. Public
+     * so tools (e.g. the image-prompt debugger) can reproduce the exact
+     * context the step feeds into ImagePromptComposer.
      *
-     * Shaped to read after "…on" in the composer's guidance sentence ("This
-     * image is used as X on {siteContext}"), so it leads with a noun phrase:
-     * `the website “Name”` (or `a website` when the spec has no name),
-     * followed by the description as its own sentence. The topic is included
-     * only when there is NO description — a description restates what the
-     * site is about, and repeating the topic next to it reads like a stutter.
+     * The site NAME is deliberately never included (BIGR-768): telling a
+     * typography-capable image model the site is called “X” is exactly what a
+     * painted-in fake wordmark stands in for — the model typesets a title
+     * block for the name it was told about, in the very region reserved for
+     * the real HTML copy. Only subject-matter steering survives: the
+     * description as its own terminally punctuated sentence (the composer
+     * splices it after its composition sentence and relies on that
+     * punctuation), or the topic when there is NO description — a description
+     * restates what the site is about, and repeating the topic next to it
+     * reads like a stutter.
      *
      * @param array<mixed> $spec
      */
     public static function siteContext(array $spec): string
     {
-        $name        = trim((string) ($spec['name'] ?? ''));
         $topic       = trim((string) ($spec['topic'] ?? ''));
         $description = trim((string) ($spec['description'] ?? ''));
 
-        if ($name === '' && $topic === '' && $description === '') {
-            return '';
+        if ($description === '') {
+            return $topic === '' ? '' : "The subject matter is {$topic}.";
         }
 
-        $lead = $name !== '' ? "the website “{$name}”" : 'a website';
-        if ($topic !== '' && $description === '') {
-            $lead .= ($name !== '' ? ', about ' : ' about ') . $topic;
-        }
-
-        // The composer splices this phrase into its guidance sentence relying
-        // on it being terminally punctuated; the spec doesn't guarantee that
-        // for the description, so close it here.
-        if ($description !== '' && !preg_match('/[.!?…]$/u', $description)) {
+        if (!preg_match('/[.!?…]$/u', $description)) {
             $description .= '.';
         }
-
-        return $description === '' ? "{$lead}." : "{$lead}. {$description}";
+        return $description;
     }
 
     /**

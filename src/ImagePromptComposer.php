@@ -16,6 +16,20 @@ namespace Automattic\SiteBuild;
  * "portfolio gallery card") and the SITE CONTEXT (what the whole site is about)
  * are NOT things to draw: they only steer subject choice, mood and composition.
  *
+ * Both context clauses are recast into purely PHOTOGRAPHIC language before
+ * they reach the model (BIGR-768). Describing the image as part of a website —
+ * "hero cover background on the website X, left third kept calm for overlaid
+ * copy" — reads like a design-comp brief, and a typography-capable image model
+ * "helpfully" completes the comp by typesetting a fake title block (wordmark,
+ * tagline, gibberish URL) into the very region reserved for the site's real
+ * HTML copy. So web-layout vocabulary is rewritten into photographic
+ * vocabulary (PAGE_CONTEXT_RECASTS), the site is described only by its subject
+ * matter — its name never appears (GenerateImagesStep::siteContext) — and the
+ * no-text guard states what a reserved region IS (continuous empty scenery)
+ * instead of enumerating forbidden text artifacts, which image models follow
+ * unreliably as negations while the enumeration plants those very concepts
+ * into the prompt.
+ *
  * The IMAGE GRADE — the design direction's one-sentence photographic treatment
  * shared by ALL of the site's imagery (color vs B&W, grain, light) — IS render
  * instruction: it is appended to every prompt so independently generated images
@@ -43,12 +57,46 @@ namespace Automattic\SiteBuild;
 final class ImagePromptComposer
 {
     /**
+     * Web-design placement vocabulary → photographic vocabulary, applied to
+     * the page context before it reaches the image model. A page context that
+     * reads like a design comp ("full-bleed hero cover background with the
+     * left third kept as a calm low-detail area" for overlaid copy) is the
+     * audited trigger for the model typesetting a fake title block into the
+     * reserved region (BIGR-768). Ordered: compound idioms rewrite before
+     * their parts, and no replacement contains a term a later pattern
+     * matches, so a single sequential pass is stable.
+     */
+    private const PAGE_CONTEXT_RECASTS = [
+        // Design-comp slot idioms → photographic framing.
+        '/\bhero(?:[- ](?:cover|banner|image|section))?(?:[- ]background)?\b/i' => 'wide editorial photograph',
+        '/\b(?:cover|banner)[- ]background\b/i' => 'wide editorial photograph',
+        '/\bbanner\b/i'                         => 'wide photograph',
+        '/\bfull[- ]bleed\b/i'                  => 'full-frame',
+        // Overlay/copy machinery names text; what the region it points at IS,
+        // photographically, is open negative space.
+        '/\bwith (?:an? |the )?text overlay\b/i'      => 'with open, low-detail negative space',
+        '/\bwith (?:the )?overlaid (?:copy|text)\b/i' => 'with open, low-detail negative space',
+        '/\b(?:text|copy) overlay\b/i'                => 'open, low-detail negative space',
+        '/\boverlaid (?:copy|text)\b/i'               => 'open, low-detail negative space',
+        // "the <site/photographer/brand> name and tagline overlaid …" — the
+        // authoring rules forbid naming overlay copy, but an LLM slip here is
+        // exactly the painted-wordmark trigger, so catch it too.
+        '/\b(?:the |a |its )?(?:\w+ )?(?:name|headline|title|tagline|subtitle|caption|wordmark)s?'
+        . '(?: and (?:the |its )?(?:\w+ )?(?:name|headline|title|tagline|subtitle|caption|wordmark)s?)?'
+        . ' overlaid\b/i' => 'open, low-detail negative space kept',
+        // "kept as a calm low-detail area" and variants.
+        '/\b(?:an? )?calm,? low-detail area\b/i' => 'open, low-detail negative space',
+    ];
+
+    /**
      * @param string             $subject     what the image shows and from what POV
      * @param string             $pageContext where/how the image is used on the page
      * @param string             $style       one of the AI_IMAGE style keywords
-     * @param string             $siteContext a factual site-context phrase that
-     *        leads with a noun ("the website “X”. Description…" — see
-     *        GenerateImagesStep::siteContext), so it reads after "used as … on"
+     * @param string             $siteContext a terminally punctuated
+     *        subject-matter sentence ("A neighborhood bakery selling sourdough
+     *        and pastries." — see GenerateImagesStep::siteContext). It never
+     *        names the site: a name in the prompt is what painted-in fake
+     *        wordmarks stand in for (BIGR-768)
      * @param string             $imageGrade  the project-wide photographic grade
      *        from the design direction, applied to every image
      * @param bool               $transparent whether the asset needs a transparent
@@ -100,35 +148,33 @@ final class ImagePromptComposer
                 . ' no glow, no shadows, no scenery and no backdrop of any kind.'
             : '';
 
-        // Page and site context only steer mood/composition — they are NOT drawn,
-        // so they are framed as guidance and omitted entirely when there is none.
-        // The two fold into ONE sentence ("used as X on the website Y") — the
-        // site context leads with a noun phrase (GenerateImagesStep::siteContext)
-        // precisely so it reads after "on".
-        //
-        // A page context that mentions overlaid copy ("hero with the headline
-        // overlaid on the left") is the audited trigger for the model painting
-        // ghost headlines, URLs and UI chrome into that exact region, so the
-        // guidance spells out that overlay text arrives later as HTML and any
-        // region described as carrying it must stay empty.
+        // Page and site context only steer mood/composition — they are NOT
+        // drawn, so they are framed as guidance and omitted entirely when
+        // there is none. Nothing here may describe the image as part of a
+        // WEBSITE (BIGR-768): the page context arrives in web-design terms
+        // and is recast into photographic language (PAGE_CONTEXT_RECASTS),
+        // and the site context is already a subject-matter sentence with the
+        // site name deliberately withheld (GenerateImagesStep::siteContext).
+        $pageContext = rtrim(self::photographicPageContext($pageContext), '.');
         if ($pageContext !== '' && $siteContext !== '') {
-            $where = "This image is used as {$pageContext} on {$siteContext}";
+            $where = "Composition: {$pageContext}. {$siteContext}";
         } elseif ($pageContext !== '') {
-            $where = "This image is used as {$pageContext}.";
-        } elseif ($siteContext !== '') {
-            $where = "This image appears on {$siteContext}";
+            $where = "Composition: {$pageContext}.";
         } else {
-            $where = '';
+            $where = $siteContext;
         }
-        // The no-text rule precedes the context sentence so end-trimming under
-        // token pressure sheds the trigger (the context) before the guard.
-        $guidance = $where === '' ? '' : 'The website\'s own text is added later as real'
-            . ' HTML on top of the image — never paint it in: render no website text,'
-            . ' lettering, headlines, captions, watermarks, logos or user-interface'
-            . ' elements, and leave any region described below as carrying overlaid'
-            . ' copy as clean, low-detail empty space. Context to guide the subject,'
-            . ' mood and composition only — do not render any of it as text or literal'
-            . ' objects: '
+        // The no-text guard precedes the context sentence so end-trimming
+        // under token pressure sheds the trigger (the context) before the
+        // guard. It is phrased POSITIVELY — what a reserved region IS,
+        // continuous empty scenery — because image models follow negations
+        // unreliably, and an enumeration of forbidden artifacts ("headlines,
+        // watermarks, logos") plants those very concepts into the prompt.
+        $guidance = $where === '' ? '' : 'Purely pictorial imagery: every part of'
+            . ' the frame is the scene itself, and any region described below as'
+            . ' open, calm or low-detail is continuous unbroken scenery — open'
+            . ' sky, plain wall, still water, bare ground or soft-focus depth —'
+            . ' left completely empty. The notes below steer subject, mood and'
+            . ' composition only and are never depicted literally: '
             . $where;
 
         $prompt = $renderer->render('image-prompt.md', [
@@ -144,5 +190,21 @@ final class ImagePromptComposer
         // limit (sheds trailing context first — see class doc).
         $prompt = (string) preg_replace("/\n{3,}/", "\n\n", trim($prompt));
         return GeminiImage::fitToTokens($prompt, GeminiImage::MAX_PROMPT_TOKENS);
+    }
+
+    /**
+     * Recast one page context from web-design vocabulary into photographic
+     * vocabulary (PAGE_CONTEXT_RECASTS): "full-bleed hero cover background
+     * with the left third kept as a calm low-detail area" becomes "full-frame
+     * wide editorial photograph with the left third kept as open, low-detail
+     * negative space".
+     */
+    private static function photographicPageContext(string $pageContext): string
+    {
+        return trim((string) preg_replace(
+            array_keys(self::PAGE_CONTEXT_RECASTS),
+            array_values(self::PAGE_CONTEXT_RECASTS),
+            $pageContext
+        ));
     }
 }

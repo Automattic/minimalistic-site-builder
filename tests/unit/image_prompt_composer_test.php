@@ -21,16 +21,15 @@ test('compose includes the page context and site context as labelled guidance', 
         'A sourdough loaf on a board',
         'menu item card in a 3-column grid',
         'photorealistic',
-        'the website “Hearth & Crumb”. A neighborhood bakery selling sourdough and pastries.'
+        'A neighborhood bakery selling sourdough and pastries.'
     );
-    // Page and site context fold into one grammatical sentence.
+    // Page and site context read as adjacent guidance sentences.
     assert_contains(
-        'This image is used as menu item card in a 3-column grid on the website “Hearth & Crumb”.',
+        'Composition: menu item card in a 3-column grid. A neighborhood bakery selling sourdough and pastries.',
         $out
     );
-    assert_contains('A neighborhood bakery selling sourdough and pastries.', $out);
     // The guidance is explicitly framed as non-literal so the model doesn't draw it.
-    assert_contains('do not render', $out);
+    assert_contains('never depicted literally', $out);
     // Subject is still present in full.
     assert_contains('A sourdough loaf on a board. Style: photorealistic', $out);
 });
@@ -40,10 +39,69 @@ test('compose frames a site context without page context as its own sentence', f
         'A sourdough loaf on a board',
         '',
         'photorealistic',
-        'the website “Hearth & Crumb”.'
+        'A neighborhood bakery selling sourdough and pastries.'
     );
-    assert_contains('This image appears on the website “Hearth & Crumb”.', $out);
-    assert_true(!str_contains($out, 'used as'), 'no page-context clause without a page context');
+    assert_contains('never depicted literally: A neighborhood bakery selling sourdough and pastries.', $out);
+    assert_true(!str_contains($out, 'Composition:'), 'no composition clause without a page context');
+});
+
+test('compose recasts web-layout page context into photographic language', function () {
+    $out = ImagePromptComposer::compose(
+        'A dense crowd filling Plaza de Mayo at golden hour',
+        'full-bleed hero cover background with the left third kept as a calm low-detail area',
+        'photorealistic',
+        'A minimalist portfolio of twenty years of photojournalism.'
+    );
+
+    // The design-comp idiom that triggers painted-in title blocks (BIGR-768)
+    // becomes a purely photographic brief before it reaches the model.
+    assert_contains(
+        'Composition: full-frame wide editorial photograph with the left third kept as open, low-detail negative space.',
+        $out
+    );
+    foreach (['hero', 'cover', 'bleed', 'website', 'used as'] as $webTerm) {
+        assert_true(
+            !str_contains(strtolower($out), $webTerm),
+            "web-design term “{$webTerm}” never reaches the image model"
+        );
+    }
+});
+
+test('compose recasts named overlay copy as reserved negative space', function () {
+    // The authoring rules forbid naming overlay copy in the page context, but
+    // an LLM slip here is exactly the painted-wordmark trigger — catch it.
+    $out = ImagePromptComposer::compose(
+        'A lone figure facing a dusk demonstration crowd',
+        'full-bleed hero section with the photographer name and tagline overlaid on the left',
+        'photorealistic',
+        ''
+    );
+
+    assert_contains(
+        'Composition: full-frame wide editorial photograph with open, low-detail negative space kept on the left.',
+        $out
+    );
+    foreach (['name and tagline', 'overlaid', 'hero'] as $trigger) {
+        assert_true(!str_contains(strtolower($out), $trigger), "overlay-copy trigger “{$trigger}” recast away");
+    }
+});
+
+test('compose phrases the no-text guard positively', function () {
+    $out = ImagePromptComposer::compose(
+        'A misty mountain range at dawn',
+        'full-bleed hero with text overlay',
+        'photorealistic',
+        'A travel journal.'
+    );
+
+    assert_contains('Purely pictorial imagery', $out);
+    // The overlay slot is described as what the region IS…
+    assert_contains('full-frame wide editorial photograph with open, low-detail negative space', $out);
+    // …and the guard never enumerates the forbidden text artifacts, which
+    // would plant those very concepts into the prompt context (BIGR-768).
+    foreach (['headline', 'watermark', 'logo', 'lettering', 'caption', 'render no', 'website'] as $artifact) {
+        assert_true(!str_contains(strtolower($out), $artifact), "guard does not name “{$artifact}”");
+    }
 });
 
 test('compose with no page or site context is just the subject + style', function () {
@@ -70,14 +128,14 @@ test('compose injects the image grade as its own art-direction clause', function
         'A sourdough loaf on a board',
         'menu item card',
         'photorealistic',
-        'the website “Hearth & Crumb”.',
+        'A neighborhood bakery selling sourdough and pastries.',
         $grade
     );
 
     assert_contains("Art direction for all site imagery: {$grade}.", $out);
     // The grade sits BEFORE the sheddable guidance so end-trimming keeps it.
     assert_true(
-        strpos($out, 'Art direction for all site imagery') < strpos($out, 'Context to guide'),
+        strpos($out, 'Art direction for all site imagery') < strpos($out, 'Purely pictorial'),
         'grade clause precedes the guidance'
     );
 });
@@ -103,7 +161,7 @@ test('compose asks for a flat white background for transparent assets', function
     // Like the grade, this is a render instruction — it precedes the sheddable
     // guidance so end-trimming keeps it.
     assert_true(
-        strpos($out, 'solid pure white background') < strpos($out, 'Context to guide'),
+        strpos($out, 'solid pure white background') < strpos($out, 'Purely pictorial'),
         'isolation clause precedes the guidance'
     );
 });

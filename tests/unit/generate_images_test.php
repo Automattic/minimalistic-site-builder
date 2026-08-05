@@ -190,36 +190,44 @@ test('generate-images weaves the site context into each prompt as one sentence',
     (new GenerateImagesStep($images))->run($project);
 
     $sent = $images->calls[0]['prompt'];
-    // Page context and site name read as one grammatical sentence, with the
-    // description following — and the topic NOT repeated beside it.
+    // The recast page context and the site description read as adjacent
+    // guidance sentences — with the topic NOT repeated beside the description.
     assert_contains(
-        'This image is used as full-bleed hero with text overlay on the website “Hearth & Crumb”.',
+        'Composition: full-frame wide editorial photograph with open, low-detail negative space.'
+        . ' A neighborhood bakery selling sourdough and pastries.',
         $sent
     );
-    assert_contains('A neighborhood bakery selling sourdough and pastries.', $sent);
+    // The site NAME never reaches the image model: it is what painted-in fake
+    // wordmarks stand in for (BIGR-768), and nothing in the prompt may
+    // describe the image as part of a website.
+    assert_true(!str_contains($sent, 'Hearth & Crumb'), 'site name withheld from the image prompt');
+    assert_true(!str_contains(strtolower($sent), 'website'), 'the prompt never mentions a website');
     assert_true(!str_contains($sent, 'artisan sourdough'), 'topic not repeated when the description covers it');
     assert_contains('A bakery at dawn', $sent);               // the image subject is still there
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('siteContext leads with a noun phrase and never stutters the topic', function () {
+test('siteContext carries only subject matter and never the site name', function () {
     // Empty spec → no context at all.
     assert_eq('', GenerateImagesStep::siteContext([]));
 
-    // Name only.
-    assert_eq('the website “Hearth & Crumb”.', GenerateImagesStep::siteContext([
+    // The name alone contributes nothing: it is deliberately withheld from
+    // image prompts (BIGR-768 — a painted-in fake wordmark is the model
+    // typesetting the name the prompt told it about).
+    assert_eq('', GenerateImagesStep::siteContext([
         'name' => 'Hearth & Crumb',
     ]));
 
     // The topic is included only while there is no description to cover it…
-    assert_eq('the website “Hearth & Crumb”, about artisan sourdough.', GenerateImagesStep::siteContext([
+    assert_eq('The subject matter is artisan sourdough.', GenerateImagesStep::siteContext([
         'name' => 'Hearth & Crumb', 'topic' => 'artisan sourdough',
     ]));
 
-    // …and folds away once a description exists (it restates the topic).
+    // …and folds away once a description exists (it restates the topic) —
+    // and the name still never appears.
     assert_eq(
-        'the website “Hearth & Crumb”. A neighborhood bakery selling sourdough and pastries.',
+        'A neighborhood bakery selling sourdough and pastries.',
         GenerateImagesStep::siteContext([
             'name'        => 'Hearth & Crumb',
             'topic'       => 'artisan sourdough',
@@ -227,23 +235,12 @@ test('siteContext leads with a noun phrase and never stutters the topic', functi
         ])
     );
 
-    // Specs without a name still read after "on".
-    assert_eq('a website about artisan sourdough.', GenerateImagesStep::siteContext([
-        'topic' => 'artisan sourdough',
-    ]));
-    assert_eq('a website. A neighborhood bakery.', GenerateImagesStep::siteContext([
-        'description' => 'A neighborhood bakery.',
-    ]));
-
     // A description without terminal punctuation is closed, so the composer's
     // guidance sentence (which relies on this phrase ending one) never runs on.
-    assert_eq(
-        'the website “Hearth & Crumb”. Fresh bread daily.',
-        GenerateImagesStep::siteContext([
-            'name' => 'Hearth & Crumb', 'description' => 'Fresh bread daily',
-        ])
-    );
-    assert_eq('a website. Fresh bread daily!', GenerateImagesStep::siteContext([
+    assert_eq('Fresh bread daily.', GenerateImagesStep::siteContext([
+        'name' => 'Hearth & Crumb', 'description' => 'Fresh bread daily',
+    ]));
+    assert_eq('Fresh bread daily!', GenerateImagesStep::siteContext([
         'description' => 'Fresh bread daily!', // already punctuated: untouched
     ]));
 });
@@ -256,7 +253,8 @@ test('generate-images leads with the subject + style and adds the page context',
 
     $sent = $images->calls[0]['prompt'];
     assert_contains('A bakery at dawn. Style: photorealistic', $sent);   // subject leads, style appended
-    assert_contains('full-bleed hero with text overlay', $sent);         // page context is included as guidance
+    // The page context is included as guidance, recast photographically.
+    assert_contains('full-frame wide editorial photograph with open, low-detail negative space', $sent);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
