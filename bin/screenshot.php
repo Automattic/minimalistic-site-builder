@@ -42,8 +42,7 @@ $args = parse_cli_args($argv, [
 ], maxPositionals: 1);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
-    exit(1);
+    usage();
 }
 $flags = $args['flags'];
 $slug = $args['positionals'][0] ?? null;
@@ -54,8 +53,7 @@ $keepAlive = $flags['--keep-alive'] ?? false;
 $workers = $flags['--workers'] ?? null;
 
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
-    exit(1);
+    usage();
 }
 
 $store = new ProjectStore(repo_path('projects'));
@@ -172,6 +170,13 @@ if ($keepAlive && is_resource($proc) && $baseUrl !== null) {
 }
 
 exit($exit);
+
+/** The one invocation summary, shared by every path that rejects the line. */
+function usage(): never
+{
+    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
+    exit(1);
+}
 
 function command_exists(string $bin): bool
 {

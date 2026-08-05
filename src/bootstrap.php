@@ -164,8 +164,9 @@ function repo_path(string $rel = ''): string
  * as 'unknown' so the caller can print ITS OWN usage text and exit: the shape
  * of the line is this function's business, what to say about a bad one is the
  * script's. Parsing STOPS at that argument rather than running to the end, so
- * a script that acts on a flag before reporting the bad one (`--help` in
- * publish-playground.php) still answers it strictly left to right.
+ * the results describe exactly what was understood BEFORE it and nothing
+ * after: a script that acts on a flag before reporting the bad one still reads
+ * the line strictly left to right.
  *
  * @param list<string>                          $argv Raw $argv; element 0, the script path, is skipped.
  * @param array<string,'value'|'bool'|'toggle'> $spec
@@ -183,19 +184,22 @@ function parse_cli_args(array $argv, array $spec, int $maxPositionals = 0): arra
             continue;
         }
 
-        $negated = str_starts_with($arg, '--no-') ? '--' . substr($arg, 5) : null;
-        if ($negated !== null && ($spec[$negated] ?? null) === 'toggle') {
-            $flags[$negated] = false;
-            continue;
+        if (str_starts_with($arg, '--no-')) {
+            $positive = '--' . substr($arg, 5);
+            if (($spec[$positive] ?? null) === 'toggle') {
+                $flags[$positive] = false;
+                continue;
+            }
         }
 
-        // strstr() splits on the FIRST '=', so the value keeps any of its own
-        // (--out=/tmp/a=b.png) and the name comes back ready to look up — no
-        // per-flag offset to keep in sync with the flag's spelling.
-        $name = strstr($arg, '=', true);
-        if ($name !== false && ($spec[$name] ?? null) === 'value') {
-            $flags[$name] = substr($arg, strlen($name) + 1);
-            continue;
+        if (str_contains($arg, '=')) {
+            // The limit of 2 splits on the first '=' only, so the value keeps
+            // any of its own (--out=/tmp/a=b.png).
+            [$name, $value] = explode('=', $arg, 2);
+            if (($spec[$name] ?? null) === 'value') {
+                $flags[$name] = $value;
+                continue;
+            }
         }
 
         if (!str_starts_with($arg, '--') && count($positionals) < $maxPositionals) {

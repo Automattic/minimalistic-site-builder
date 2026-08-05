@@ -36,8 +36,9 @@ $args = parse_cli_args($argv, [
     '--out'     => 'value',
 ], maxPositionals: 1);
 $flags = $args['flags'];
-// Answer --help before reporting a bad argument. Parsing stops at the bad one,
-// so a --help set here always came before it: `--bogus --help` stays an error.
+// Answer --help before reporting a bad argument. parse_cli_args stops at the
+// argument it cannot place, so a --help recorded here was typed before it:
+// `--bogus --help` stays an error.
 if (isset($flags['--help']) || isset($flags['-h'])) {
     usage(0);
 }

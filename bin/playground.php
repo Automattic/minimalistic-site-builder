@@ -29,8 +29,7 @@ $args = parse_cli_args($argv, [
 ], maxPositionals: 1);
 if ($args['unknown'] !== null) {
     fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
-    fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
-    exit(1);
+    usage();
 }
 $flags = $args['flags'];
 $slug = $args['positionals'][0] ?? null;
@@ -43,12 +42,7 @@ if ($workers !== 'auto' && (int) $workers < 1) {
 }
 
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
-    fwrite(STDERR, "Available themes:\n");
-    foreach (glob(repo_path('projects/*/theme/style.css')) ?: [] as $f) {
-        fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
-    }
-    exit(1);
+    usage();
 }
 
 $slug = ProjectStore::slugify($slug);
@@ -154,6 +148,20 @@ echo "  (first run downloads WordPress; Ctrl-C to stop)\n\n";
 
 passthru($cmd, $exit);
 exit($exit);
+
+/** The one invocation summary, shared by every path that rejects the line. */
+function usage(): never
+{
+    fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
+    $themes = glob(repo_path('projects/*/theme/style.css')) ?: [];
+    if ($themes !== []) {
+        fwrite(STDERR, "Available themes:\n");
+        foreach ($themes as $f) {
+            fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
+        }
+    }
+    exit(1);
+}
 
 function command_exists(string $bin): bool
 {

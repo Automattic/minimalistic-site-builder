@@ -43,7 +43,7 @@ test('parse_cli_args records bool flags as true and absent ones not at all', fun
     $args = cli_args(['--multi-page'], ['--multi-page' => 'bool', '--with-images' => 'bool']);
 
     assert_eq(true, $args['flags']['--multi-page']);
-    assert_eq(false, isset($args['flags']['--with-images']));
+    assert_true(!isset($args['flags']['--with-images']), 'an absent bool flag is not recorded');
 });
 
 test('parse_cli_args rejects a bool flag given a value', function () {
@@ -68,8 +68,9 @@ test('parse_cli_args lets the last spelling of a toggle win', function () {
 });
 
 test('parse_cli_args negates only what the spec declares a toggle', function () {
-    // build.php accepts --no-serve alone: the positive spelling stays unknown,
-    // and the flag is recorded under the name it was declared with.
+    // A spec is free to declare a '--no-…' name as a plain bool: it is then
+    // recorded under the name it was declared with, and the positive spelling
+    // is not a flag at all. Only 'toggle' makes the pair.
     $args = cli_args(['--no-serve'], ['--no-serve' => 'bool']);
     assert_eq(true, $args['flags']['--no-serve']);
 
@@ -130,8 +131,9 @@ test('parse_cli_args gives a bare -- no special meaning', function () {
 });
 
 test('parse_cli_args stops at the first unknown argument', function () {
-    // publish-playground.php answers --help before reporting an unknown flag,
-    // so only stopping here keeps `--bogus --help` an error.
+    // The results describe what was understood BEFORE the bad argument and
+    // nothing after it, so a caller that acts on a flag before reporting the
+    // bad one still reads the line strictly left to right.
     $spec = ['--help' => 'bool', '--open' => 'bool'];
 
     $helpFirst = cli_args(['--help', '--bogus'], $spec);
