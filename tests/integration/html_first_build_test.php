@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Tests\FakeLlm;
 use Automattic\SiteBuild\ThemeValidator;
@@ -123,6 +124,27 @@ function html_first_queue_success(FakeLlm $llm, array $siteSpec, string $homeBod
     $llm->queueJson(html_first_theme_payload());
 }
 
+function assert_html_first_page_sections_constrained(Project $project, string $slug): int
+{
+    $doc = BlockMarkup::parse($project->readText("plugin/pages/{$slug}.html"));
+    $count = 0;
+    foreach ($doc->indices() as $i) {
+        if ($doc->parent($i) !== null) {
+            continue;
+        }
+        $count++;
+        assert_eq('group', $doc->name($i), "{$slug} section root is wp:group");
+        assert_eq(['type' => 'constrained'], ($doc->attrs($i) ?? [])['layout'] ?? null);
+        assert_contains(
+            'is-layout-constrained',
+            $doc->ownHtml($i),
+            "{$slug} section root carries the serialized constrained-layout class",
+        );
+    }
+    assert_true($count > 0, "{$slug} has transformed sections");
+    return $count;
+}
+
 test('HTML-first default builds and validates every single-page artifact', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_' . uniqid();
     $previous = getenv('SITE_BUILD_LEGACY');
@@ -194,11 +216,7 @@ test('HTML-first default builds and validates every single-page artifact', funct
         assert_contains('theme:./assets/', $images[0]['src']);
         assert_contains($images[0]['src'], $home);
 
-        // Section width belongs to the carried design CSS, not the theme.
-        assert_true(
-            !str_contains($home, '"type":"constrained"'),
-            'no constrained layout is stamped onto HTML-first page sections',
-        );
+        assert_true(assert_html_first_page_sections_constrained($project, 'home') > 0);
         $style = $project->readText('theme/style.css');
         assert_contains('hyphens: none;', $style);
         assert_eq(1, substr_count($style, 'Wrap at spaces only'), 'the wrap policy is merged exactly once');

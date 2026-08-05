@@ -41,7 +41,7 @@ test('StepComposition default matches CLI step order and validates', function ()
     $steps = $c->steps();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'section-rhythm',
+        'design-preview', 'theme-json', 'inner-pages-design', 'splice-home-design', 'assign-image-sources', 'transform-site', 'section-rhythm', 'section-layout',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
         'assemble-pages', 'fix-pages', 'page-styles', 'custom-motion', 'fonts-php', 'finalize-theme', 'validate-theme',
     ], array_map(static fn (Step $s) => $s->id(), $steps));
@@ -63,6 +63,8 @@ test('StepComposition default matches CLI step order and validates', function ()
     assert_true($byId['inner-pages-design']['index'] < $byId['splice-home-design']['index']);
     assert_true($byId['splice-home-design']['index'] < $byId['assign-image-sources']['index']);
     assert_true($byId['splice-home-design']['index'] < $byId['transform-site']['index']);
+    assert_eq($byId['section-rhythm']['index'] + 1, $byId['section-layout']['index']);
+    assert_eq($byId['section-layout']['index'] + 1, $byId['collect-images']['index']);
 });
 
 test('StepComposition legacy env preserves the full legacy graph byte-for-byte', function () {

@@ -64,6 +64,11 @@ test('one failed inner design uses legacy sections while sibling pages stay tran
             $project->readJson('plugin/pages.json')['pages'],
             'slug',
         ));
+        $sectionCount = 0;
+        foreach (['home', 'about', 'contact'] as $slug) {
+            $sectionCount += assert_html_first_page_sections_constrained($project, $slug);
+        }
+        assert_true($sectionCount >= 3, 'multi-page HTML-first build constrains every delivered section');
         assert_eq(2, $llm->completeBatchCalls, 'page-generation and scoped legacy section batches only');
     } finally {
         $previous === false
