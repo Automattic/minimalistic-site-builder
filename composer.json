@@ -1,6 +1,6 @@
 {
     "name": "automattic/site-build",
-    "description": "Portable, dependency-free pipeline that generates a complete WordPress block theme and companion content plugin from a one-line prompt.",
+    "description": "Portable pipeline that generates a complete WordPress block theme and companion content plugin from a one-line prompt.",
     "type": "library",
     "keywords": [
         "wordpress",
@@ -11,6 +11,7 @@
     ],
     "license": "GPL-2.0-or-later",
     "require": {
+        "automattic/blocks-engine-php-transformer": "^0.4.11",
         "php": ">=8.1",
         "ext-curl": "*",
         "ext-json": "*",
