@@ -150,6 +150,7 @@ test('header override preflight rejects only incompatibility proven by caller-ow
     AboveFoldContract::validateHeaderArchetypePreflight('split-nav', [], 2);
 
     assert_throws(fn () => AboveFoldContract::validateHeaderArchetypePreflight('invented-header'));
+    assert_throws(fn () => AboveFoldContract::validateHeaderArchetypePreflight('double-decker'));
     assert_throws(fn () => AboveFoldContract::validateHeaderArchetypePreflight('minimal-overlay', [
         'hero_canvas' => 'framed',
     ]));
@@ -193,48 +194,34 @@ test('above-fold assignment is stable and honors one exact compatible forced arc
     assert_throws(fn () => above_fold_resolve($pages, forced: 'invented-header'));
 });
 
-test('catalog header_archetype_excludes removes the pairing from the pool and binds overrides', function () {
+test('double-decker is removed from the catalog: never assigned, rejected as an override', function () {
     $pages = above_fold_pages(null, 'base', 'base');
-    $resolve = static fn (string $stableId, ?string $forced = null): array => AboveFoldContract::resolve(
-        $pages,
-        HeroBlueprint::defaultFor('focal-subject-stage'),
-        'full-bleed',
-        ['base' => '#FFFFFF', 'contrast' => '#111111'],
-        ['stable_id' => $stableId, 'writing_direction' => 'ltr', 'page_count' => count($pages)],
-        ['archetype' => 'minimal-columns', 'surface' => 'base'],
-        $forced,
-    );
-
-    // The recipe opens with its own eyebrow strip; double-decker's caption
-    // topbar must never stack a second one above it, for any stable id.
-    foreach (range(1, 40) as $seed) {
-        assert_true(
-            $resolve("exclusion-seed-{$seed}")['header']['archetype'] !== 'double-decker',
-            'focal-subject-stage never pairs with double-decker',
-        );
-    }
-
-    $forced = $resolve('exclusion-forced', 'double-decker');
-    assert_eq('standard-row', $forced['header']['archetype']);
-    assert_eq('forced-header-degraded', $forced['degradations'][0]['code']);
-
-    // A recipe without exclusions keeps double-decker reachable in the pool.
-    $reachable = false;
-    foreach (range(1, 40) as $seed) {
-        $contract = AboveFoldContract::resolve(
-            $pages,
-            HeroBlueprint::defaultFor('editorial-split'),
-            'full-bleed',
-            ['base' => '#FFFFFF', 'contrast' => '#111111'],
-            ['stable_id' => "reachable-seed-{$seed}", 'writing_direction' => 'ltr', 'page_count' => count($pages)],
-            ['archetype' => 'minimal-columns', 'surface' => 'base'],
-        );
-        if ($contract['header']['archetype'] === 'double-decker') {
-            $reachable = true;
-            break;
+    foreach (['focal-subject-stage', 'editorial-split'] as $recipe) {
+        foreach (range(1, 40) as $seed) {
+            $contract = AboveFoldContract::resolve(
+                $pages,
+                HeroBlueprint::defaultFor($recipe),
+                'full-bleed',
+                ['base' => '#FFFFFF', 'contrast' => '#111111'],
+                ['stable_id' => "retired-seed-{$seed}", 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+                ['archetype' => 'minimal-columns', 'surface' => 'base'],
+            );
+            assert_true(
+                $contract['header']['archetype'] !== 'double-decker',
+                'double-decker is never assigned',
+            );
         }
     }
-    assert_true($reachable, 'double-decker stays in the pool for recipes without the exclusion');
+
+    assert_throws(fn () => AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('editorial-split'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'retired-forced', 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'double-decker',
+    ));
 });
 
 test('overlay requires an image-led recipe, every protected opening, an unframed canvas, and contrast', function () {

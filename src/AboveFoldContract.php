@@ -27,7 +27,6 @@ final class AboveFoldContract
         'minimal-overlay',
         'oversized-wordmark',
         'branded-lockup',
-        'double-decker',
         'split-nav',
     ];
 
@@ -173,12 +172,8 @@ final class AboveFoldContract
             );
         }
 
-        $recipeExcludes = array_values(array_filter(
-            (array) ($recipeMeta['header_archetype_excludes'] ?? []),
-            'is_string',
-        ));
-        $pool = self::headerPool($mode, count($pages), $imageLed, $recipeExcludes);
-        if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed, $recipeExcludes)) {
+        $pool = self::headerPool($mode, count($pages), $imageLed);
+        if ($forced !== '' && self::forcedHeaderCompatible($forced, $overlaySupported, count($pages), $imageLed)) {
             $archetype = $forced;
             $mode = $forced === 'minimal-overlay' ? self::MODE_OVERLAY : self::MODE_STACKED;
         } elseif ($forced !== '') {
@@ -518,17 +513,16 @@ final class AboveFoldContract
         return $pages[0];
     }
 
-    /** @param list<string> $recipeExcludes @return list<string> */
+    /** @return list<string> */
     private static function headerPool(
         string $mode,
         int $pageCount,
         bool $imageLed,
-        array $recipeExcludes = [],
     ): array {
         if ($mode === self::MODE_OVERLAY) {
             return ['minimal-overlay'];
         }
-        $excluded = ['minimal-overlay', 'oversized-wordmark', ...$recipeExcludes];
+        $excluded = ['minimal-overlay', 'oversized-wordmark'];
         if ($pageCount <= 1) {
             $excluded[] = 'split-nav';
         }
@@ -538,13 +532,11 @@ final class AboveFoldContract
         return array_values(array_diff(self::HEADER_ARCHETYPES, $excluded));
     }
 
-    /** @param list<string> $recipeExcludes */
     private static function forcedHeaderCompatible(
         string $archetype,
         bool $overlaySupported,
         int $pageCount,
         bool $imageLed,
-        array $recipeExcludes = [],
     ): bool
     {
         if ($archetype === 'minimal-overlay') {
@@ -554,11 +546,6 @@ final class AboveFoldContract
             return false;
         }
         if ($archetype === 'centered-masthead' && $imageLed) {
-            return false;
-        }
-        // Catalog-owned pairing exclusions (e.g. an eyebrow-led copy recipe
-        // rejecting double-decker's caption topbar) bind overrides too.
-        if (in_array($archetype, $recipeExcludes, true)) {
             return false;
         }
         // The initial production catalog conservatively excludes this when a
