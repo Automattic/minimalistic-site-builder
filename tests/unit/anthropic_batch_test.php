@@ -126,6 +126,34 @@ test('retryTextBatch reports a permanent failure to onFailure before aborting', 
     assert_eq([['b', 'HTTP 400', 1.5]], $reported, 'the failing call is handed to onFailure with key, error, and time');
 });
 
+test('retryTextBatch reports successful siblings before a permanent failure aborts the batch', function () {
+    $bodies = ['bad' => [], 'good' => []];
+    $transport = static fn (array $subset): array => [
+        // Keep the failure first: accounting must not depend on response order.
+        'bad' => ['ok' => false, 'transient' => false, 'error' => 'HTTP 400', 'time' => 1.5],
+        'good' => ['ok' => true, 'text' => 'kept', 'input' => 11, 'output' => 7, 'time' => 0.5],
+    ];
+
+    $succeeded = [];
+    $failed = [];
+    assert_throws(function () use ($bodies, $transport, &$succeeded, &$failed): void {
+        AnthropicClient::retryTextBatch(
+            $bodies,
+            $transport,
+            [0],
+            onFailure: function (string|int $key) use (&$failed): void {
+                $failed[] = $key;
+            },
+            onSuccess: function (string|int $key, array $result) use (&$succeeded): void {
+                $succeeded[] = [$key, $result['input'], $result['output']];
+            },
+        );
+    });
+
+    assert_eq([['good', 11, 7]], $succeeded, 'the billed successful sibling is exposed exactly once');
+    assert_eq(['bad'], $failed, 'the terminal sibling is still reported and aborts the batch');
+});
+
 test('retryTextBatch also reports a transient failure that exhausts its retries', function () {
     $bodies = ['a' => []];
     $transport = fn (array $subset) => ['a' => ['ok' => false, 'transient' => true, 'error' => 'always down']];
