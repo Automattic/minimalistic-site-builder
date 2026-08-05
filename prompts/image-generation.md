@@ -6,7 +6,7 @@ Use ONLY the native `src` and `alt` attributes on `img` elements. Do NOT use any
 
 - **src**: The image path using the `theme:./assets/` prefix followed by the filename. The filename must only contain lowercase letters (a-z), numbers (0-9), and hyphens (-) — no spaces or special characters — and must be descriptive of the image. ALWAYS use the `.jpg` extension — every generated image is an opaque content image; never use `.png` (see "No decorative or transparent images" below). Give every image a UNIQUE filename. Example: `theme:./assets/hero-mountain-dawn.jpg`
 
-- **alt**: A structured string containing all image generation parameters, e.g. `AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | wide destination feature with overlaid copy | photorealistic | landscape`
+- **alt**: A structured string containing all image generation parameters, e.g. `AI_IMAGE: A misty mountain range at dawn seen from a low valley vantage, the peaks off-center to the right with a calm low-detail sky on the left | wide destination feature with the left side kept as open, low-detail negative space | photorealistic | landscape`
 
 ### Alt Attribute Format
 
@@ -66,7 +66,9 @@ Decoration, when a section needs any at all, comes from theme primitives — the
 
 **Page-context guidelines:**
 - A short phrase naming where and how the image is used (e.g. `wide feature band in a portfolio grid`, `portfolio item card in a 3-column gallery`, `menu item thumbnail`). The generator uses this to fit the image to its slot — it is not drawn into the image.
-- Describe copy-overlay placement as reserved empty space, never as text: write `full-bleed hero cover with the left third kept as a calm low-detail area` — NOT `hero with the headline and subtitle overlaid on the left`. Naming a headline, subtitle, caption or menu in the page-context is the audited trigger for the model painting ghost text and fake UI into that exact region of the image.
+- Write this machine-guidance field in English even when the site's visitor-facing copy uses another language. It is normalized through a fixed pictorial vocabulary before image generation; it is not visible site copy.
+- Treat the structured `aspectRatio` field as authoritative for canvas orientation. Page-context prose may describe placement but must not contradict that field.
+- Describe copy-overlay placement as reserved empty space in photographic terms, never as text: write `full-frame editorial photograph with the left third kept as open, low-detail negative space` — NOT `hero with the headline and subtitle overlaid on the left`. Naming a headline, subtitle, caption or menu in the page-context is the audited trigger for the model painting ghost text and fake UI into that exact region of the image — and so is design-comp vocabulary like `hero cover background`: a typography-capable image model reads a design brief as an invitation to typeset the missing title block, so prefer photographic slot language (`editorial photograph`, `full-frame backdrop`) over web-layout language (`hero`, `banner`, `cover background`).
 
 **Cover backgrounds:**
 For `wp:cover` backgrounds, set the same `theme:./assets/<name>.jpg` path on BOTH the block's `url` attribute and the inner `<img class="wp-block-cover__image-background">` src, and put the `AI_IMAGE` spec in that img's alt. The `url` and `src` are asset PATHS only — never write the `AI_IMAGE:` spec into a `url` or `src`; it belongs solely in the `alt`. A cover whose `url` is an `AI_IMAGE:` string ships the raw prompt text as the image and renders no picture.
