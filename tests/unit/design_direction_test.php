@@ -478,6 +478,33 @@ test('format renders the canvas commitment with its executable meaning', functio
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize commits a shape: the fixed corner languages pass through, everything else is sharp', function () {
+    assert_eq('soft', DesignDirectionStep::normalize(['description' => 'x', 'shape' => ' Soft '])['shape']);
+    assert_eq('round', DesignDirectionStep::normalize(['description' => 'x', 'shape' => 'round'])['shape']);
+    assert_eq('sharp', DesignDirectionStep::normalize(['description' => 'x'])['shape']);
+    assert_eq('sharp', DesignDirectionStep::normalize(['description' => 'x', 'shape' => 'wavy'])['shape']);
+    assert_eq('sharp', DesignDirectionStep::normalize(['description' => 'x', 'shape' => ['round']])['shape']);
+});
+
+test('format renders the shape commitment with its executable meaning', function () {
+    $sharp = DesignDirectionStep::format(['description' => 'x', 'shape' => 'sharp']);
+    assert_contains('**Shape**: sharp', $sharp);
+    assert_contains('square corners', $sharp);
+
+    $soft = DesignDirectionStep::format(['description' => 'x', 'shape' => 'soft']);
+    assert_contains('**Shape**: soft', $soft);
+    assert_contains('subtle corner radius', $soft);
+
+    $round = DesignDirectionStep::format(['description' => 'x', 'shape' => 'round']);
+    assert_contains('**Shape**: round', $round);
+    assert_contains('decisive corner radius', $round);
+
+    // Directions persisted before the field existed carry no shape fact,
+    // and an unrecognized value renders none rather than guessing.
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.', 'shape' => 'wavy']));
+});
+
 test('design-direction delivers the deterministic fallback when the model returns no usable direction', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
     $llm->queueJson(['seeds' => designdir_seeds()]);
@@ -915,6 +942,21 @@ test('every cataloged hero recipe bears an image (the image-free poster is retir
         assert_true((int) Automattic\SiteBuild\HeroComposition::metadata($recipe)['min_images'] >= 1);
         assert_eq([], $w);
     }
+});
+
+test('shapeFor fails closed to sharp', function () {
+    $tmp = sys_get_temp_dir() . '/builder_ddshape_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+
+    assert_eq('sharp', DesignDirectionStep::shapeFor($project), 'no direction file');
+
+    $project->writeJson('designDirection.json', ['description' => 'x']);
+    assert_eq('sharp', DesignDirectionStep::shapeFor($project), 'direction predates the field');
+
+    $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => ' Round ']);
+    assert_eq('round', DesignDirectionStep::shapeFor($project));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
 });
 
 test('directionFor returns nothing when no direction was committed', function () {

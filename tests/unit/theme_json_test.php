@@ -12,6 +12,70 @@ use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
+test('repairShapeWiring executes the committed corner language and lets a model radius win', function () {
+    // soft/round fill the core/image radius the direction committed.
+    [$soft, $warnings] = ThemeJsonStep::repairShapeWiring([], 'soft');
+    assert_eq('0.5rem', $soft['styles']['blocks']['core/image']['border']['radius']);
+    assert_eq([], $warnings);
+    [$round] = ThemeJsonStep::repairShapeWiring([], 'round');
+    assert_eq('1.25rem', $round['styles']['blocks']['core/image']['border']['radius']);
+
+    // sharp — and a direction that predates the field — wires nothing.
+    [$sharp] = ThemeJsonStep::repairShapeWiring([], 'sharp');
+    assert_eq([], $sharp);
+    [$none] = ThemeJsonStep::repairShapeWiring([], '');
+    assert_eq([], $none);
+
+    // A well-shaped model-authored radius wins at the leaf, same as every
+    // scaffold fill; siblings survive.
+    $authored = ['styles' => ['blocks' => ['core/image' => [
+        'border' => ['radius' => '2px'],
+        'typography' => ['fontSize' => 'var:preset|font-size|caption'],
+    ]]]];
+    [$kept] = ThemeJsonStep::repairShapeWiring($authored, 'round');
+    assert_eq('2px', $kept['styles']['blocks']['core/image']['border']['radius']);
+    assert_eq('var:preset|font-size|caption', $kept['styles']['blocks']['core/image']['typography']['fontSize']);
+
+    // A malformed border container is replaced with the wiring, durably recorded.
+    $malformed = ['styles' => ['blocks' => ['core/image' => ['border' => 'rounded']]]];
+    [$repaired, $repairWarnings] = ThemeJsonStep::repairShapeWiring($malformed, 'soft');
+    assert_eq('0.5rem', $repaired['styles']['blocks']['core/image']['border']['radius']);
+    assert_eq(1, count($repairWarnings));
+    assert_contains('styles.blocks.core/image.border', $repairWarnings[0]);
+});
+
+test('theme-json wires the direction-committed shape into the written theme', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjshape_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project, 'cinematic-safe-zone', ['shape' => 'round']);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_eq('1.25rem', $theme['styles']['blocks']['core/image']['border']['radius']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json wires no image radius without a shape commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tjnoshape_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload());
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    assert_true(!isset($theme['styles']['blocks']['core/image']['border']), 'direction predates the field, no radius');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('theme-json writes valid theme.json and forces version 3', function () {
     $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');

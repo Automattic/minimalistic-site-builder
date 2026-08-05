@@ -100,6 +100,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * roles and makes zero aesthetic choices — every value is a var:preset
      * token whose actual color, family and size the model chose, so sites stay
      * visually distinct. No borders, radii, shadows or decorative treatment.
+     * (The direction-committed shape wiring in repairShapeWiring() is the one
+     * deliberate exception, and it executes an explicit design commitment
+     * rather than making a choice here.)
      *
      * Context-free block/caption text colors are deliberately absent:
      * ContrastFixStep evaluates rendered backgrounds but cannot see
@@ -207,6 +210,20 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ],
         ],
     ];
+    /**
+     * The image-corner radius each committed corner language wires onto
+     * core/image (WordPress applies the block's border support to the inner
+     * img, so contained figures, card crops and gallery items all pick it up
+     * while covers and media-text halves — deliberately — do not). `sharp`
+     * is absent: it wires nothing, which is the pre-existing default.
+     *
+     * @var array<string,string>
+     */
+    private const SHAPE_RADII = [
+        'soft'  => '0.5rem',
+        'round' => '1.25rem',
+    ];
+
     private const REQ = 'theme-json';
 
     public function __construct(
@@ -329,6 +346,10 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         // Last: the scaffold references the preset slugs repaired above, and
         // every well-shaped model-authored leaf wins over the wiring it fills in.
         [$theme, $scaffoldWarnings] = self::repairScaffold($theme);
+        [$theme, $shapeWarnings] = self::repairShapeWiring(
+            $theme,
+            strtolower(trim((string) ($direction['shape'] ?? ''))),
+        );
         [$theme, $groupPaddingWarnings] = self::repairGroupBlockPadding($theme);
         $warnings = array_merge(
             $warnings,
@@ -336,6 +357,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $fontWarnings,
             $sizeWarnings,
             $scaffoldWarnings,
+            $shapeWarnings,
             $groupPaddingWarnings,
         );
 
@@ -823,6 +845,36 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
         return [$theme, array_merge($warnings, $shapeWarnings)];
+    }
+
+    /**
+     * Execute the design direction's committed corner language as build
+     * wiring: `soft`/`round` fill styles.blocks.core/image.border.radius so
+     * every contained image (card crops and gallery items included) carries
+     * the committed radius, while `sharp` — and any direction persisted
+     * before the field existed — wires nothing. A well-shaped model-authored
+     * radius wins, same as every scaffold fill; covers and media-text halves
+     * are untouched, so full-bleed media always stays square.
+     *
+     * Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairShapeWiring(array $theme, string $shape): array
+    {
+        $radius = self::SHAPE_RADII[$shape] ?? null;
+        if ($radius === null) {
+            return [$theme, []];
+        }
+        $warnings = [];
+        $theme = self::mergeScaffoldDefaultsAtPath(
+            ['styles' => ['blocks' => ['core/image' => ['border' => ['radius' => $radius]]]]],
+            $theme,
+            '',
+            $warnings,
+        );
+        return [$theme, $warnings];
     }
 
     /**

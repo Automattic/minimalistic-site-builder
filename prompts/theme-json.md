@@ -39,6 +39,7 @@ Design intelligence to encode as tokens:
     `base` on `accent` (or `primary` if buttons use it) ≥ 4.5:1 (button labels)
   Mid-tone `secondary`/`accent` hexes (relative luminance ~0.2–0.4) fail against BOTH light and dark backgrounds — push each palette color decisively light or decisively dark.
 - **Layout widths.** `contentSize` 800–900px (comfortable reading — NOT 640), `wideSize` 1200–1400px.
+- **Shape.** When the DESIGN DIRECTION carries a **Shape** fact, execute it as one corner language. The build wires the committed image-corner radius itself — never restate radius on `core/image` — so your part is button alignment: a `soft` direction gets a modest button borderRadius, a `round` one may go up to pill, and a `sharp` one leaves button radius your call but never pill — a pill button in a square-cornered world reads as a leftover template default. Without a Shape fact, make no image-radius choice at all.
 - **Atmosphere.** Where it fits the direction, prefer gradient meshes, layered transparencies and dramatic shadows over flat solids; decorative borders are NOT an atmosphere tool — lines belong only to a direction whose signature device explicitly commits to them. Expose these so sections can use them: define a few `settings.color.gradients` (give slugs derived from your palette) and a couple of `settings.shadow.presets` the sections can reference.
 
 Build-supplied wiring — do not emit it:

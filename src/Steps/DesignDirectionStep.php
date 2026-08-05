@@ -77,6 +77,14 @@ final class DesignDirectionStep implements Step
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
     public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
 
+    /**
+     * The corner languages a direction may commit to. `sharp` is the default
+     * and wires nothing; `soft`/`round` make ThemeJsonStep wire a corner
+     * radius onto contained imagery, and the theme-json prompt aligns button
+     * radius with the same commitment.
+     */
+    public const SHAPES = ['sharp', 'soft', 'round'];
+
     /** Env var forcing seed N (1-based) — the reproducible-evals escape hatch. */
     public const CHOICE_ENV = 'DESIGN_DIRECTION_CHOICE';
 
@@ -270,6 +278,7 @@ final class DesignDirectionStep implements Step
             ],
             'image_grade'      => '',
             'canvas'           => $canvas,
+            'shape'            => 'sharp',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
             'signature_device' => '',
@@ -582,6 +591,19 @@ final class DesignDirectionStep implements Step
                 . '; disposition repaired invalid profile';
         }
 
+        // The corner language is a fixed list; anything unrecognized falls
+        // back to sharp — an accidental radius reads as template styling, so
+        // rounding only ships on an explicit commitment.
+        $shape = self::shape($raw['shape'] ?? null);
+        $rawShape = is_string($raw['shape'] ?? null)
+            ? strtolower(trim($raw['shape']))
+            : '';
+        if ($rawShape !== '' && $rawShape !== $shape) {
+            $repairs[] = 'designDirection.json: field shape authored '
+                . self::describe($raw['shape']) . ' delivered ' . self::describe($shape)
+                . '; disposition repaired invalid corner language';
+        }
+
         return [
             'title'            => trim((string) ($raw['title'] ?? '')),
             'description'      => $description,
@@ -594,6 +616,7 @@ final class DesignDirectionStep implements Step
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
             'canvas'           => $canvas,
+            'shape'            => $shape,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
@@ -826,6 +849,19 @@ final class DesignDirectionStep implements Step
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }
 
+        // Render the shape commitment with its executable meaning. The build
+        // wires the image-corner radius itself; this line exists so theme-json
+        // aligns button radius with it and no prompt re-interprets a bare
+        // keyword. Directions persisted before the field existed carry none.
+        $shape = strtolower(trim((string) ($direction['shape'] ?? '')));
+        if (in_array($shape, self::SHAPES, true)) {
+            $facts[] = match ($shape) {
+                'sharp' => '- **Shape**: sharp — contained imagery and cards keep square corners; do not add border radius to images.',
+                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained images; give buttons a modest matching borderRadius. Full-bleed media stays square.',
+                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained images; buttons follow the same language, up to pill. Full-bleed media stays square.',
+            };
+        }
+
         // Render the motion commitment with its executable meaning: the
         // section prompts gate their motion-class placement on this line.
         $motion = strtolower(trim((string) ($direction['motion'] ?? '')));
@@ -1005,6 +1041,27 @@ final class DesignDirectionStep implements Step
         }
         $motion = strtolower(trim((string) ($project->readJson(self::FILE)['motion'] ?? '')));
         return in_array($motion, Motion::PROFILES, true) ? $motion : 'none';
+    }
+
+    /**
+     * The committed corner language ("sharp", "soft" or "round") ThemeJsonStep
+     * executes as image-corner wiring. Fails closed: no direction, or one that
+     * predates/garbled the field, means `sharp` — a step run in isolation must
+     * not surprise-round a site whose direction never committed to it.
+     */
+    public static function shapeFor(Project $project): string
+    {
+        if (!$project->exists(self::FILE)) {
+            return 'sharp';
+        }
+        return self::shape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /** Coerce a raw shape value onto the fixed corner-language list. */
+    private static function shape(mixed $raw): string
+    {
+        $shape = strtolower(trim((string) (is_string($raw) ? $raw : '')));
+        return in_array($shape, self::SHAPES, true) ? $shape : 'sharp';
     }
 
     /**
