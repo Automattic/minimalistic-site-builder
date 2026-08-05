@@ -5,29 +5,39 @@ namespace Automattic\SiteBuild;
 
 /**
  * Accumulates the per-step accounting of a build (wall time, token spend and
- * the model each step ran on) plus the image-generation tally, and renders it
- * two ways: the run overview printed on the console AND written to
- * projects/<slug>/logs/project.log (render), and the machine-readable
+ * the configured model(s) attributable to that spend) plus the image-generation
+ * tally, and renders it two ways: the run overview printed on the console AND
+ * written to projects/<slug>/logs/project.log (render), and the machine-readable
  * projects/<slug>/build-stats.json (stats).
  *
- * It is a passive ledger: bin/build.php feeds it one row per step as the
- * pipeline reports them (diffing the LLM client's cumulative token totals to
- * attribute spend to the step that just ran), then asks it to render. Pure apart
- * from holding state — no I/O — so the rendering is unit-testable.
+ * It is a passive ledger: bin/build.php feeds it the LLM client's cumulative
+ * token totals after each step, and it attributes the delta to the step that
+ * just ran. Pure apart from holding state — no I/O — so both accounting and
+ * rendering are unit-testable.
  *
  * The console prints rows live as they complete (formatRow), so the same row
- * formatter is reused here to keep the file and the terminal byte-for-byte
- * consistent — the log is exactly "what we showed in the terminal", in full.
+ * formatter is reused here to keep those rows byte-identical to the final recap.
  */
 final class BuildReport
 {
     /** Width of the step-id column, shared by every row formatter below. */
     private const ID_WIDTH = 24;
+    private const REPORT_WIDTH = 96;
+
+    /** @var array<string,list<string>> report row id => configured model keys */
+    private const MODEL_KEYS_BY_STEP = [
+        'design-direction' => ['design-direction-seeds', 'design-direction'],
+        'generate-images'  => ['image-prompt-repair'],
+    ];
 
     /** @var array<int,array{id:string,secs:float,in:int,out:int,model:?string}> */
     private array $rows = [];
     private float $totalSecs = 0.0;
     private float $wallSecs = 0.0;
+    private int $lastInputTokens = 0;
+    private int $lastOutputTokens = 0;
+    private ?int $llmInputTokens = null;
+    private ?int $llmOutputTokens = null;
 
     private bool $hasImages = false;
     private int $imagesGenerated = 0;
@@ -43,18 +53,38 @@ final class BuildReport
         private string $prompt,
         private string $slug,
         private string $outputPath,
-        private string $generatedAt,
+        private string $builtAt,
     ) {}
 
     /**
-     * Record one completed step: its wall time, the LLM tokens it spent (0/0
-     * for the deterministic steps, which make no model calls) and the model it
-     * ran on (null for those same steps — see formatRow).
+     * Record one completed step from the LLM client's cumulative usage totals.
+     * The shared cursor keeps pipeline and out-of-pipeline steps on the same
+     * accounting path, so conditional calls cannot disappear from the report.
+     * A zero-token step records no model even if it had one configured.
+     *
+     * @return array{id:string,secs:float,in:int,out:int,model:?string}
      */
-    public function addStep(string $id, float $secs, int $inTokens, int $outTokens, ?string $model = null): void
+    public function recordStep(
+        string $id,
+        float $secs,
+        int $inputTokensTotal,
+        int $outputTokensTotal,
+        ?string $configuredModels = null,
+    ): array
     {
-        $this->rows[] = ['id' => $id, 'secs' => $secs, 'in' => $inTokens, 'out' => $outTokens, 'model' => $model];
+        if ($inputTokensTotal < $this->lastInputTokens || $outputTokensTotal < $this->lastOutputTokens) {
+            throw new \LogicException('LLM usage totals cannot decrease between build steps');
+        }
+
+        $inTokens = $inputTokensTotal - $this->lastInputTokens;
+        $outTokens = $outputTokensTotal - $this->lastOutputTokens;
+        $this->lastInputTokens = $inputTokensTotal;
+        $this->lastOutputTokens = $outputTokensTotal;
+        $model = $inTokens + $outTokens > 0 ? $configuredModels : null;
+        $row = ['id' => $id, 'secs' => $secs, 'in' => $inTokens, 'out' => $outTokens, 'model' => $model];
+        $this->rows[] = $row;
         $this->totalSecs += $secs;
+        return $row;
     }
 
     /**
@@ -66,6 +96,12 @@ final class BuildReport
         $this->wallSecs = $secs;
     }
 
+    /** Record the completion timestamp used by both the report and build-stats.json. */
+    public function setBuiltAt(string $builtAt): void
+    {
+        $this->builtAt = $builtAt;
+    }
+
     /** Record the image-generation tally (only when --with-images ran). */
     public function setImages(int $generated, int $failed, int $total): void
     {
@@ -75,10 +111,19 @@ final class BuildReport
         $this->imagesTotal = $total;
     }
 
-    /** Total LLM requests made across the run (from the client's usage totals). */
-    public function setRequestCount(int $requests): void
+    /**
+     * Preserve the client's authoritative final totals for aggregate reporting.
+     * Rows remain the per-step breakdown; these totals also cover any future
+     * call that cannot be attributed to a row.
+     */
+    public function setLlmTotals(int $requests, int $inputTokens, int $outputTokens): void
     {
+        if ($inputTokens < $this->lastInputTokens || $outputTokens < $this->lastOutputTokens) {
+            throw new \LogicException('Final LLM usage totals cannot be smaller than recorded step totals');
+        }
         $this->requests = $requests;
+        $this->llmInputTokens = $inputTokens;
+        $this->llmOutputTokens = $outputTokens;
     }
 
     /**
@@ -106,12 +151,12 @@ final class BuildReport
 
     public function totalInputTokens(): int
     {
-        return array_sum(array_column($this->rows, 'in'));
+        return $this->llmInputTokens ?? array_sum(array_column($this->rows, 'in'));
     }
 
     public function totalOutputTokens(): int
     {
-        return array_sum(array_column($this->rows, 'out'));
+        return $this->llmOutputTokens ?? array_sum(array_column($this->rows, 'out'));
     }
 
     public function totalTokens(): int
@@ -125,15 +170,18 @@ final class BuildReport
      * A ConcurrentGroup's id is its members joined together and never appears
      * in the map itself, so resolve each member and collapse the distinct
      * models (usually one — a group's members tend to share a tier). Without
-     * this a group would report no model despite having spent tokens. Null when
-     * no member ran on a model, i.e. a deterministic step. Pure.
+     * this a group would report no configured model despite having spent
+     * tokens. Rows that aggregate differently named phases (design direction,
+     * conditional image-prompt repair) resolve their explicit config keys too.
+     * Null when none of the resolved keys has a configured model. Pure.
      *
      * @param array<string,string> $stepModels step id => model id
      */
     public static function modelLabel(string $stepId, array $stepModels): ?string
     {
         $used = [];
-        foreach (ConcurrentGroup::memberIds($stepId) as $member) {
+        $members = self::MODEL_KEYS_BY_STEP[$stepId] ?? ConcurrentGroup::memberIds($stepId);
+        foreach ($members as $member) {
             if (isset($stepModels[$member])) {
                 $used[$stepModels[$member]] = true;
             }
@@ -142,16 +190,34 @@ final class BuildReport
     }
 
     /**
-     * One formatted table row: id, wall time, total tokens, and the model the
-     * step ran on ("—" for a deterministic step, which ran on none). Shared by
-     * the live console output and the log file so they never drift. Pure.
+     * The per-step table header. Shared by live output and the final report.
+     */
+    public static function formatHeader(): string
+    {
+        return sprintf(
+            '  %-' . self::ID_WIDTH . 's %8s %10s %10s %10s  %s',
+            'step',
+            'time',
+            'in-tok',
+            'out-tok',
+            'total',
+            'configured LLM model(s)',
+        );
+    }
+
+    /**
+     * One formatted table row: id, wall time, input/output/total tokens, and
+     * the configured model(s) attributable to non-zero LLM spend. Shared by the
+     * live console output and the log file so they never drift. Pure.
      */
     public static function formatRow(string $id, float $secs, int $inTokens, int $outTokens, ?string $model = null): string
     {
         return sprintf(
-            '  %-' . self::ID_WIDTH . 's %7.1fs  %11s tok  %s',
+            '  %-' . self::ID_WIDTH . 's %7.1fs %10s %10s %10s  %s',
             $id,
             $secs,
+            number_format($inTokens),
+            number_format($outTokens),
             number_format($inTokens + $outTokens),
             $model ?? '—'
         );
@@ -172,13 +238,19 @@ final class BuildReport
     public function totalLine(): string
     {
         return sprintf(
-            '  %-24s %7.1fs  %11s tok  (%s in + %s out)',
+            '  %-' . self::ID_WIDTH . 's %7.1fs %10s %10s %10s',
             'TOTAL',
             $this->totalSecs,
-            number_format($this->totalTokens()),
             number_format($this->totalInputTokens()),
-            number_format($this->totalOutputTokens())
+            number_format($this->totalOutputTokens()),
+            number_format($this->totalTokens()),
         );
+    }
+
+    /** The measured wall-clock duration, including work between step callbacks. */
+    public function wallLine(): string
+    {
+        return sprintf('Wall time    : %.1fs', $this->wallSecs);
     }
 
     /**
@@ -221,19 +293,20 @@ final class BuildReport
      */
     public function render(): string
     {
-        $rule = str_repeat('=', 80);
-        $sub = str_repeat('-', 80);
+        $rule = str_repeat('=', self::REPORT_WIDTH);
+        $sub = str_repeat('-', self::REPORT_WIDTH);
 
         $lines = [
             $rule,
             'BUILD REPORT — ' . $this->slug,
             $rule,
             'Prompt       : ' . $this->prompt,
-            'Generated at : ' . $this->generatedAt,
+            'Built at     : ' . $this->builtAt,
             'Output       : ' . $this->outputPath,
             '',
             'Steps',
             $sub,
+            self::formatHeader(),
         ];
 
         foreach ($this->rows as $r) {
@@ -242,6 +315,7 @@ final class BuildReport
 
         $lines[] = $sub;
         $lines[] = $this->totalLine();
+        $lines[] = $this->wallLine();
         $lines[] = '';
         $lines[] = 'LLM requests : ' . $this->requests;
         if (($img = $this->imagesLine()) !== null) {
@@ -277,7 +351,7 @@ final class BuildReport
             'total_tokens'  => $this->totalTokens(),
             'model'         => $defaultModel,
             'step_models'   => $stepModels,
-            'built_at'      => $this->generatedAt,
+            'built_at'      => $this->builtAt,
             'steps'         => array_map(
                 static fn (array $r): array => [
                     'id'            => $r['id'],

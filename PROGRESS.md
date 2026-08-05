@@ -211,7 +211,8 @@ php bin/playground.php my-bakery   # boot a local WP with the theme activated
 php bin/eval.php                   # regenerate the 5 eval sites
 ```
 
-`bin/build.php` reports per-step time + tokens + model and totals, writes
+`bin/build.php` reports per-step time + input/output/total tokens + configured
+LLM model(s), authoritative totals, and measured wall time; writes
 `projects/<slug>/logs/project.log` and `projects/<slug>/build-stats.json`, then
 launches Playground. Example run ("tea house" → "Steeped & Still"): **241.9s
 wall, 5 LLM requests, 19,068 in + 24,505 out = 43,573 tokens** on
