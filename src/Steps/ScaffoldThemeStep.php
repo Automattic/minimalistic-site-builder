@@ -130,18 +130,19 @@ final class ScaffoldThemeStep implements Step
             flex-direction: column;
             flex-grow: 1;
         }
-        /* Flush and overlap cards keep all text in a nested body group. Make
-           that body another growing flex column so a nested .cta-bottom can
-           consume its remaining height and align with CTAs in sibling cards.
-           Core's constrained layout gives direct children auto side margins
-           with !important; once the card is a flex column those margins defeat
-           cross-axis stretch. Reset them here, and do the same for the body's
-           own constrained-layout children, so this works identically in the
-           editor and front end. */
+        /* A nested card body becomes another growing flex column only in an
+           equal-height row, so a nested .cta-bottom can consume its remaining
+           height and align with CTAs in sibling cards. */
         .equal-cards .wp-block-group.card-body {
             display: flex;
             flex-direction: column;
             flex-grow: 1;
+        }
+        /* Core's constrained layout gives direct children auto side margins
+           with !important. Reset that geometry for any marked card's optional
+           text wrapper, not only equal-grid cards: staggered and editorial
+           overlap cards need the same side reveal in both editor and front end. */
+        .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body {
             box-sizing: border-box;
             width: 100%;
             max-width: none;
@@ -151,12 +152,12 @@ final class ScaffoldThemeStep implements Step
         }
         /* The overlap panel deliberately retains a one-rem reveal on each side.
            Its explicit width keeps the fixed margins inside the card box. */
-        .equal-cards .wp-block-group.card-body.overlap-up {
+        .wp-block-group.card-style--overlap > .wp-block-group.card-body.overlap-up {
             width: calc(100% - 2rem);
             margin-left: 1rem !important;
             margin-right: 1rem !important;
         }
-        .equal-cards .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {
+        .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {
             box-sizing: border-box;
             width: 100%;
             max-width: none;

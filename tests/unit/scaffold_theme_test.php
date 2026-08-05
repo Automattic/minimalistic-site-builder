@@ -43,14 +43,23 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         $css,
     );
 
-    // Flush/overlap copy lives inside a nested body group. That body must grow
-    // as a flex column, otherwise its nested CTA has no remaining height for
-    // margin-top:auto to consume and sibling card buttons do not align.
+    // Any nested card text wrapper carries card-body. It grows as a flex column
+    // only in an equal-height row, so its nested CTA can consume the remaining
+    // height and align with sibling card buttons across all four treatments.
     assert_contains(
         ".equal-cards .wp-block-group.card-body {\n"
             . "    display: flex;\n"
             . "    flex-direction: column;\n"
             . "    flex-grow: 1;\n"
+            . '}',
+        $css,
+    );
+
+    // Width and constrained-layout margin resets apply to every marked card,
+    // including ordinary staggered/editorial cards outside .equal-cards. The
+    // overlap treatment then restores its deliberate one-rem side reveal.
+    assert_contains(
+        ".wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body {\n"
             . "    box-sizing: border-box;\n"
             . "    width: 100%;\n"
             . "    max-width: none;\n"
@@ -61,7 +70,7 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         $css,
     );
     assert_contains(
-        ".equal-cards .wp-block-group.card-body.overlap-up {\n"
+        ".wp-block-group.card-style--overlap > .wp-block-group.card-body.overlap-up {\n"
             . "    width: calc(100% - 2rem);\n"
             . "    margin-left: 1rem !important;\n"
             . "    margin-right: 1rem !important;\n"
@@ -69,7 +78,7 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         $css,
     );
     assert_contains(
-        ".equal-cards .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {\n"
+        ".wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {\n"
             . "    box-sizing: border-box;\n"
             . "    width: 100%;\n"
             . "    max-width: none;\n"
@@ -82,6 +91,10 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_true(
         !str_contains($css, '.wp-site-blocks .equal-cards'),
         'card layout rules remain available in both the editor and front end',
+    );
+    assert_true(
+        !str_contains($css, '.equal-cards .wp-block-group.card-body.overlap-up'),
+        'overlap side-inset geometry is not limited to the equal-grid recipe',
     );
     assert_contains(
         ".equal-cards .cta-bottom {\n"
