@@ -765,6 +765,216 @@ test('site CSS path removes opaque variable padding shorthand with an actionable
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path resolves nested selector parent context before neutralizing section roots', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_nested_parent_context_');
+    $siteCss = <<<'CSS'
+#hero {
+    & {
+        padding: 1rem 2rem 3rem;
+    }
+    &.variant {
+        padding-left: 4rem;
+        padding-top: 5rem;
+    }
+    & .child {
+        padding: 6rem 7rem;
+    }
+}
+body {
+    & #hero {
+        padding: 8rem 9rem 10rem;
+    }
+    & #hero .child {
+        padding-right: 11rem;
+    }
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section id="hero"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="hero" class="variant"><div class="child">Child</div></section>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    foreach (
+        [
+            'padding: 1rem 2rem 3rem;' => '#hero { & targets the section root',
+            'padding-left: 4rem;' => '#hero { &.variant targets the section root',
+            'padding: 8rem 9rem 10rem;' => 'body { & #hero targets the section root',
+        ] as $declaration => $message
+    ) {
+        assert_true(!str_contains($style, $declaration), $message);
+    }
+    assert_contains('padding-top: 1rem;', $style);
+    assert_contains('padding-bottom: 3rem;', $style);
+    assert_contains('padding-top: 5rem;', $style, 'non-inline sibling declaration survives');
+    assert_contains('padding-top: 8rem;', $style);
+    assert_contains('padding-bottom: 10rem;', $style);
+    assert_contains('padding: 6rem 7rem;', $style, '#hero { & .child keeps descendant padding');
+    assert_contains('padding-right: 11rem;', $style, 'body { & #hero .child keeps descendant padding');
+    assert_true(
+        !str_contains(implode("\n", ps_warning_rows($project, 'page-styles')), 'retained malformed CSS'),
+        'valid nested selectors do not degrade as malformed',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path splits mixed functional selector alternatives without changing specificity', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_mixed_is_selector_');
+    $siteCss = <<<'CSS'
+:is(#hero, .shared) {
+    padding: 12rem 13rem 14rem 15rem;
+    color: var(--wp--preset--color--contrast);
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section id="hero"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="hero">Hero</section><div class="shared">Shared</div>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(
+        preg_match(
+            '/:is\(#hero,\s*\.shared\):where\(#hero\)\s*\{([^{}]*)\}/s',
+            $style,
+            $rootMatch,
+        ) === 1,
+        'root alternative is isolated with zero-specificity filtering',
+    );
+    assert_true(
+        !str_contains($rootMatch[1] ?? '', 'padding: 12rem 13rem 14rem 15rem;'),
+        'root alternative loses inline padding',
+    );
+    assert_contains('padding-top: 12rem;', $rootMatch[1] ?? '');
+    assert_contains('padding-bottom: 14rem;', $rootMatch[1] ?? '');
+    assert_true(
+        preg_match(
+            '/:is\(#hero,\s*\.shared\):not\(:where\(#hero\)\)\s*\{([^{}]*)\}/s',
+            $style,
+            $sharedMatch,
+        ) === 1,
+        'non-root alternative keeps the original ID specificity through :not(:where()) filtering',
+    );
+    assert_contains(
+        'padding: 12rem 13rem 14rem 15rem;',
+        $sharedMatch[1] ?? '',
+        '.shared keeps exact authored padding',
+    );
+    assert_contains(
+        'color: var(--wp--preset--color--contrast);',
+        $sharedMatch[1] ?? '',
+        'unrelated declaration survives the selector split',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path recognizes advanced final-subject root selector forms only', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_advanced_root_selectors_');
+    $siteCss = <<<'CSS'
+section[id="HERO" i] {
+    padding-left: 1rem;
+    padding-top: 2rem;
+}
+section[id="hero" s] {
+    padding-right: 3rem;
+    padding-bottom: 4rem;
+}
+:nth-child(1 of #hero) {
+    padding-inline: 5rem;
+}
+:not(:not(#hero)) {
+    padding: 6rem 7rem 8rem;
+}
+section[data-id="hero"] {
+    padding-left: 9rem;
+}
+:nth-child(1 of #hero .child) {
+    padding-right: 10rem;
+}
+:not(#hero) {
+    padding-inline: 11rem;
+}
+:has(#hero) {
+    padding: 12rem 13rem;
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section id="hero"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="hero"><div class="child">Child</div></section>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    foreach (
+        [
+            'padding-left: 1rem;' => 'case-insensitive exact id attribute targets root',
+            'padding-right: 3rem;' => 'case-sensitive exact id attribute targets root',
+            'padding-inline: 5rem;' => ':nth-child of-list targets its final subject',
+            'padding: 6rem 7rem 8rem;' => 'double negation targets root',
+        ] as $declaration => $message
+    ) {
+        assert_true(!str_contains($style, $declaration), $message);
+    }
+    assert_contains('padding-top: 2rem;', $style);
+    assert_contains('padding-bottom: 4rem;', $style);
+    assert_contains('padding-top: 6rem;', $style);
+    assert_contains('padding-bottom: 8rem;', $style);
+    foreach (
+        [
+            'padding-left: 9rem;' => 'non-id attribute selector survives',
+            'padding-right: 10rem;' => 'nth-child descendant final subject survives',
+            'padding-inline: 11rem;' => 'single negation survives',
+            'padding: 12rem 13rem;' => ':has related-element selector survives',
+        ] as $declaration => $message
+    ) {
+        assert_contains($declaration, $style, $message);
+    }
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path removes every opaque substitution padding shorthand with actionable warnings', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_opaque_substitution_padding_');
+    $envPadding = 'padding: env(safe-area-inset-top, 1rem 2rem 3rem 4rem);';
+    $escapedVarPadding = 'padding: v\\61 r(--section-padding, 5rem 6rem 7rem 8rem);';
+    $siteCss = '#hero{' . $envPadding . $escapedVarPadding
+        . 'color:var(--wp--preset--color--contrast);}';
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section id="hero"></section></main>');
+    $project->writeText('plugin/pages/home.html', '<section id="hero"><p>Hero</p></section>');
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    assert_true(!str_contains($style, $envPadding), 'env shorthand removed at declaration scope');
+    assert_true(!str_contains($style, $escapedVarPadding), 'escaped var shorthand removed at declaration scope');
+    foreach (['padding-top: env(', 'padding-bottom: env(', 'padding-top: v\\61 r(', 'padding-bottom: v\\61 r('] as $invalid) {
+        assert_true(!str_contains($style, $invalid), "opaque shorthand not copied into {$invalid}");
+    }
+    assert_contains('color:var(--wp--preset--color--contrast);', $style, 'safe sibling survives');
+    $warnings = implode("\n", ps_warning_rows($project, 'page-styles'));
+    assert_contains('source=design/site.css', $warnings);
+    assert_contains('authored_value=', $warnings);
+    assert_contains('env(safe-area-inset-top, 1rem 2rem 3rem 4rem)', $warnings);
+    assert_contains('v\\61 r(--section-padding, 5rem 6rem 7rem 8rem)', $warnings);
+    assert_contains('delivered_value=removed', $warnings);
+    assert_contains('disposition=', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path ignores inert page-style text inside an HTML comment', function () {
     [$project, $tmp] = ps_project('builder_ps_inert_comment_');
     $base = $project->readText('theme/style.css') . ps_wrap();
