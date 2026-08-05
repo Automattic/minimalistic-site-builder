@@ -923,6 +923,69 @@ CSS;
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('site CSS path neutralizes mixed-parent declarations inside nested grouping at-rules', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_parent_list_grouping_at_rule_');
+    $siteCss = <<<'CSS'
+#hero, .shared {
+    @media (min-width: 1px) {
+        padding: 1rem 2rem;
+        & .child {
+            padding: 3rem 4rem;
+        }
+    }
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [['slug' => 'home', 'front' => true]]]);
+    $project->writeText('design/home.html', '<main><section id="hero"></section></main>');
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="hero"><div class="child">Root child</div></section>'
+            . '<div class="shared"><div class="child">Shared child</div></div>',
+    );
+
+    ps_html_first_step(new FakeLlm())->run($project);
+
+    $style = $project->readText('theme/style.css');
+    $compact = preg_replace('/\s+/', '', $style);
+    assert_true(is_string($compact));
+    $transposedDirectBranches = str_contains(
+        $compact,
+        '@media(min-width:1px){#hero{padding-top:1rem;padding-bottom:1rem;}'
+            . '.shared{padding:1rem2rem;}}',
+    );
+    $nestedDirectBranches = str_contains(
+        $compact,
+        '#hero{@media(min-width:1px){padding-top:1rem;padding-bottom:1rem;}}',
+    ) && str_contains(
+        $compact,
+        '.shared{@media(min-width:1px){padding:1rem2rem;}}',
+    );
+    assert_true(
+        $transposedDirectBranches || $nestedDirectBranches,
+        'media-scoped root direct padding is vertical-only while .shared keeps exact padding and specificity',
+    );
+    assert_eq(
+        1,
+        substr_count($compact, 'padding:1rem2rem;'),
+        'only the non-root media branch keeps authored horizontal padding',
+    );
+    assert_contains(
+        '#hero,.shared{@media(min-width:1px){&.child{padding:3rem4rem;}}}',
+        $compact,
+        'nested child stays once under the original parent list and media query',
+    );
+    assert_true(
+        !str_contains($compact, '.shared{@media(min-width:1px){&.child{'),
+        'nested child is not moved under a class-only parent',
+    );
+    assert_true(
+        !str_contains(implode("\n", ps_warning_rows($project, 'page-styles')), 'retained malformed CSS'),
+        'valid nested grouping at-rule does not degrade as malformed',
+    );
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('site CSS path recognizes advanced final-subject root selector forms only', function () {
     [$project, $tmp] = ps_project('builder_ps_foundation_advanced_root_selectors_');
     $siteCss = <<<'CSS'
