@@ -163,7 +163,7 @@ test('home-body accepts a nested attribution footer plus one page footer without
         inner_page('home', 'Home', 'One-page site'),
     ]);
     $homeBody = '<main><section id="testimonials"><blockquote><p>Exceptional work.</p>'
-        . '<footer class="quote-attribution"><cite>Casey Rivera</cite></footer>'
+        . '<footer class="quote-attribution">Casey Rivera</footer>'
         . '</blockquote></section></main>'
         . '<footer><p>Northstar Studio</p></footer>';
     $llm->queueText($homeBody);
