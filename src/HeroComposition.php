@@ -155,10 +155,6 @@ final class HeroComposition
             'default_background' => 'base',
             'fallback_background' => 'base',
             'header_modes' => ['stacked'],
-            // The recipe opens with its own uppercase eyebrow directly under
-            // the header; double-decker's caption topbar stacks a second
-            // caption strip right above it (audited: naturaleza22/23).
-            'header_archetype_excludes' => ['double-decker'],
             'copy_capacity' => 'compact',
             'mobile_transformations' => ['stack-media-first', 'stack-copy-first'],
             'layout_archetype' => 'asymmetric-split',
