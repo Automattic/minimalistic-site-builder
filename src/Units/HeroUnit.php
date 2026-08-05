@@ -139,18 +139,11 @@ final class HeroUnit extends AbstractPageSectionUnit
             throw new \InvalidArgumentException("unit input 'hero_blueprint.recipe' must be a non-empty string");
         }
         HeroComposition::assertKnown($recipe);
-        $signatureUse = is_string($blueprint['signature_device_use'] ?? null)
-            ? trim($blueprint['signature_device_use'])
-            : '';
         $blueprintRepairs = [];
         $blueprintWarnings = [];
         $normalizedBlueprint = HeroBlueprint::normalize(
             $blueprint,
             $recipe,
-            $signatureUse === '' ? [] : [
-                'signature_device' => 'portable assigned signature device',
-                'signature_device_slots' => ['hero'],
-            ],
             $blueprintRepairs,
             $blueprintWarnings,
         );
@@ -210,10 +203,6 @@ final class HeroUnit extends AbstractPageSectionUnit
             (array) ($contract['viewport'] ?? []),
             $expectedViewport,
         );
-        $expectedSignature = [
-            'use' => $signatureUse,
-            'budget' => $signatureUse === '' ? 0 : 1,
-        ];
         $projection = HeroComposition::planProjection($blueprint);
         if (($contract['recipe'] ?? null) !== $recipe
             || ($contract['mobile_transformation'] ?? null) !== $mobileTransformation
@@ -223,7 +212,6 @@ final class HeroUnit extends AbstractPageSectionUnit
             || $contractAction !== $expectedAction
             || $contractViewport !== $expectedViewport
             || ($contract['regions'] ?? null) !== $expectedRegions
-            || ($contract['signature_device'] ?? null) !== $expectedSignature
             || ($section['layout_archetype'] ?? null) !== $projection['layout_archetype']
             || !in_array($section['background'] ?? null, $projection['allowed_backgrounds'], true)
         ) {

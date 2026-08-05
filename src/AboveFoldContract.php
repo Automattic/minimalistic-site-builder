@@ -263,10 +263,6 @@ final class AboveFoldContract
                 'footer_archetype' => $footerArchetype,
                 'footer_surface' => $footerSurface,
             ],
-            'signature_device' => [
-                'use' => (string) ($blueprint['signature_device_use'] ?? ''),
-                'budget' => trim((string) ($blueprint['signature_device_use'] ?? '')) === '' ? 0 : 1,
-            ],
             'ownership' => [
                 'header' => ['identity', 'navigation'],
                 'hero' => $action === null

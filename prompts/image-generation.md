@@ -54,7 +54,7 @@ Generated imagery is for CONTENT — covers, feature/gallery/card images, photog
 
 Decoration, when a section needs any at all, comes from theme primitives — they inherit the palette exactly and stay crisp at any size:
 - Rules, hairlines, underlines, tick strips and dividers: `wp:separator`, border styles, or spacing — never imagery.
-- A typographic glyph mark (a Unicode character in a small paragraph styled with a palette `textColor`) is allowed ONLY when the DESIGN DIRECTION's signature device explicitly commits to a specific character — then use exactly that character and color, only at the moments the direction names. Never add decorative glyph characters on your own initiative — no marks before headings or eyebrows, no glyph list bullets or metadata separators; whitespace, type scale and color already carry the hierarchy.
+- Never add decorative glyph characters — no marks before headings or eyebrows, no glyph list bullets or metadata separators; whitespace, type scale and color already carry the hierarchy.
 - Feature icons: use none — let type and layout carry the hierarchy; never an AI-generated icon image.
 
 **Subject guidelines:**

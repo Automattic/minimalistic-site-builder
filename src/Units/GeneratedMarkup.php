@@ -1497,7 +1497,7 @@ final class GeneratedMarkup
     /**
      * Remove text blocks that verbatim repeat the hero H1's reading text.
      *
-     * Models render "echo"/"misregistration" signature devices as a second
+     * Models render decorative "echo"/"misregistration" treatments as a second
      * heading or paragraph carrying the exact headline text pulled over the
      * H1 with negative margins — duplicated reading copy that renders as
      * garble and reads twice to assistive tech. Removing an exact duplicate
