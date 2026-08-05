@@ -13,7 +13,8 @@ use Automattic\SiteBuild\Warnings;
  *
  * The prompt gives every image card a `card-style--*` marker. Older or
  * imperfect responses can omit it, so a deliberately narrow legacy detector
- * also recognizes the unambiguous card wrapper inside an `equal-cards` grid.
+ * also recognizes unambiguous wrappers in the documented equal, staggered,
+ * and editorial column-card recipes.
  * A detected card is changed only when its existing anatomy already matches the assigned style:
  * then marker/behavior class normalization is semantics-safe. Structural
  * drift is delivered byte-for-byte and reported for the later repair pass.
@@ -231,17 +232,34 @@ final class CardStyleContract
                 continue;
             }
             // Inference never promotes the section root itself into a card.
-            // A nested group needs the explicit equal-grid card position.
-            // `card-media*` is also used for generic and masonry crops, so it
-            // is deliberately not an inference signal.
+            // Equal grids have an explicit structural card position. The two
+            // other column-card recipes are recognizable only when a column
+            // consists of one group whose primary image carries a card crop;
+            // this keeps generic and masonry media groups out of the domain.
             if ($document->parent($index) === null || $directImage === null) {
                 continue;
             }
-            if (self::isInEqualCardsColumn($document, $index)) {
+            if (self::isInEqualCardsColumn($document, $index)
+                || self::isInOrdinaryCardColumn($document, $index, $directImage)
+            ) {
                 $candidates[] = $index;
             }
         }
-        return array_values(array_unique($candidates));
+        $candidates = array_values(array_unique($candidates));
+        $candidateSet = array_fill_keys($candidates, true);
+
+        // A misplaced outer-card marker on the text body is owned by the
+        // surrounding card repair. Treating that body as a second card emits a
+        // stale warning before its parent removes the marker, and can make two
+        // candidate transactions contend for the same opening bytes.
+        return array_values(array_filter(
+            $candidates,
+            static fn (int $index): bool => !self::isBodyOwnedByCandidate(
+                $document,
+                $index,
+                $candidateSet,
+            ),
+        ));
     }
 
     /**
@@ -384,6 +402,52 @@ final class CardStyleContract
             }
         }
 
+        if (in_array($style, ['flush', 'overlap', 'framed', 'borderless'], true)
+            && $inspection['body'] !== null
+        ) {
+            $bodyMargin = self::nested($inspection['bodyAttrs'], ['style', 'spacing', 'margin']);
+            $hasBodyTop = is_array($bodyMargin)
+                && array_key_exists('top', $bodyMargin)
+                && !self::isAbsent($bodyMargin['top']);
+            $bodyTop = $hasBodyTop ? $bodyMargin['top'] : null;
+            $topConflicts = $style === 'overlap'
+                ? $hasBodyTop
+                : !self::isZeroOrAbsent($bodyTop);
+            if ($topConflicts) {
+                $issues[] = self::issue(
+                    'body_top_margin',
+                    $bodyTop,
+                    $style === 'overlap'
+                        ? 'absent; overlap position is supplied only by the overlap-up hook'
+                        : '0 or absent',
+                    $style === 'overlap'
+                        ? 'the authored top margin would override the overlap-up behavior hook'
+                        : 'the text body carries a stale authored top margin that would imitate overlap',
+                );
+            }
+
+            if ($style !== 'overlap') {
+                if (self::hasBackground($inspection['bodyAttrs'])) {
+                    $issues[] = self::issue(
+                        'body_background',
+                        self::boxEvidence($inspection['bodyAttrs']),
+                        'removed; only overlap uses its own text-panel background',
+                        "the {$style} text body retains a stale overlap-panel background",
+                    );
+                }
+                $left = is_array($bodyMargin) ? ($bodyMargin['left'] ?? null) : null;
+                $right = is_array($bodyMargin) ? ($bodyMargin['right'] ?? null) : null;
+                if (!self::isZeroOrAbsent($left) || !self::isZeroOrAbsent($right)) {
+                    $issues[] = self::issue(
+                        'body_side_margins',
+                        ['left' => $left, 'right' => $right],
+                        ['left' => '0', 'right' => '0'],
+                        "the {$style} text body retains stale overlap-panel side margins",
+                    );
+                }
+            }
+        }
+
         if ($style === 'framed') {
             if (!$inspection['box']) {
                 $issues[] = self::issue(
@@ -416,7 +480,21 @@ final class CardStyleContract
                         $inspection['padding'],
                         $inspection['imageRadius'],
                     );
-                    if ($comparable !== null && !$comparable['matches']) {
+                    if ($comparable === null) {
+                        $issues[] = self::issue(
+                            'framed_radii',
+                            [
+                                'card' => $cardRadius,
+                                'padding' => $inspection['padding'],
+                                'image' => $inspection['imageRadius'],
+                            ],
+                            [
+                                'units' => 'uniform px values',
+                                'formula' => 'max(card radius - uniform padding, 2px)',
+                            ],
+                            'the framed card uses non-pixel, per-corner, or non-uniform values whose concentric radius cannot be verified safely',
+                        );
+                    } elseif (!$comparable['matches']) {
                         $issues[] = self::issue(
                             'framed_radii',
                             [
@@ -429,13 +507,6 @@ final class CardStyleContract
                                 'formula' => 'max(card radius - uniform padding, 2px)',
                             ],
                             'the framed card image radius does not satisfy the concentric pixel formula',
-                        );
-                    } elseif ($comparable === null && self::sameValue($cardRadius, $inspection['imageRadius'])) {
-                        $issues[] = self::issue(
-                            'framed_radii',
-                            ['card' => $cardRadius, 'image' => $inspection['imageRadius']],
-                            'a smaller concentric image radius',
-                            'the framed card and image use equal rather than concentric radii',
                         );
                     }
                 }
@@ -536,11 +607,11 @@ final class CardStyleContract
         }
         array_push($operations, ...$cardOps);
 
-        if (in_array($style, ['flush', 'overlap'], true)) {
-            $body = $inspection['body'];
-            if (!is_int($body)) {
-                return null;
-            }
+        $body = $inspection['body'];
+        if (in_array($style, ['flush', 'overlap'], true) && !is_int($body)) {
+            return null;
+        }
+        if (is_int($body)) {
             $bodyHtmlClasses = self::htmlClasses($document, $body);
             if ($bodyHtmlClasses === null) {
                 return null;
@@ -719,18 +790,17 @@ final class CardStyleContract
             );
         }
 
-        if (!$needsFlush) {
-            return $issues;
-        }
         $inspection = self::inspect($document, $index);
         $body = $inspection['body'];
         if (!is_int($body)) {
-            $issues[] = self::issue(
-                'body_hooks',
-                null,
-                $style === 'overlap' ? ['card-body', 'overlap-up'] : ['card-body'],
-                'the repaired card has no uniquely identifiable body group',
-            );
+            if ($needsFlush) {
+                $issues[] = self::issue(
+                    'body_hooks',
+                    null,
+                    $style === 'overlap' ? ['card-body', 'overlap-up'] : ['card-body'],
+                    'the repaired card has no uniquely identifiable body group',
+                );
+            }
             return $issues;
         }
         $bodyAttributeClasses = self::attributeClasses($document->attrs($body) ?? []);
@@ -744,7 +814,11 @@ final class CardStyleContract
             );
             return $issues;
         }
-        $expectedHooks = $style === 'overlap' ? ['card-body', 'overlap-up'] : ['card-body'];
+        $expectedHooks = match ($style) {
+            'flush' => ['card-body'],
+            'overlap' => ['card-body', 'overlap-up'],
+            default => [],
+        };
         foreach (['attribute' => $bodyAttributeClasses, 'html' => $bodyHtmlClasses] as $source => $classes) {
             $deliveredHooks = array_values(array_intersect($classes, ['card-body', 'overlap-up']));
             if ($deliveredHooks !== $expectedHooks) {
@@ -762,6 +836,14 @@ final class CardStyleContract
                     $bodyMarkers,
                     'removed; the treatment marker belongs on the outer card only',
                     "the {$source} body retains an outer-card treatment marker",
+                );
+            }
+            if (in_array('card-flush', $classes, true)) {
+                $issues[] = self::issue(
+                    "body_card_flush_{$source}",
+                    true,
+                    false,
+                    "the {$source} body retains the outer-only card-flush behavior hook",
                 );
             }
         }
@@ -848,11 +930,14 @@ final class CardStyleContract
             $classes,
             static fn (string $class): bool => $class !== 'card-body'
                 && $class !== 'overlap-up'
+                && $class !== 'card-flush'
                 && !str_starts_with($class, self::MARKER_PREFIX),
         ));
-        $out[] = 'card-body';
-        if ($style === 'overlap') {
-            $out[] = 'overlap-up';
+        if (in_array($style, ['flush', 'overlap'], true)) {
+            $out[] = 'card-body';
+            if ($style === 'overlap') {
+                $out[] = 'overlap-up';
+            }
         }
         return array_values(array_unique($out));
     }
@@ -1004,6 +1089,104 @@ final class CardStyleContract
             && in_array('equal-cards', self::nodeClasses($document, $columns), true);
     }
 
+    private static function isInOrdinaryCardColumn(
+        BlockMarkup $document,
+        int $group,
+        int $image,
+    ): bool {
+        $column = $document->parent($group);
+        if ($column === null || $document->name($column) !== 'column') {
+            return false;
+        }
+        $columns = $document->parent($column);
+        if ($columns === null
+            || $document->name($columns) !== 'columns'
+            || in_array('equal-cards', self::nodeClasses($document, $columns), true)
+            || self::hasAncestorClass($document, $group, 'masonry-3')
+        ) {
+            return false;
+        }
+
+        $columnChildren = $document->children($column);
+        $columnsChildren = array_values(array_filter(
+            $document->children($columns),
+            static fn (int $child): bool => $document->name($child) === 'column',
+        ));
+        $imageClasses = self::nodeClasses($document, $image);
+        $hasCardCrop = in_array('card-media', $imageClasses, true)
+            || in_array('card-media-tall', $imageClasses, true);
+
+        if (count($columnsChildren) < 2
+            || $columnChildren !== [$group]
+            || count($document->children($group)) < 2
+            || !$hasCardCrop
+        ) {
+            return false;
+        }
+
+        // Staggered/editorial recipes are repeated card compositions: every
+        // sibling column owns one image-plus-content group. Requiring the whole
+        // row shape avoids promoting a generic image-and-copy half of an
+        // ordinary split layout merely because it reused a crop class.
+        foreach ($columnsChildren as $siblingColumn) {
+            $children = $document->children($siblingColumn);
+            if (count($children) !== 1 || $document->name($children[0]) !== 'group') {
+                return false;
+            }
+            $siblingGroup = $children[0];
+            $siblingImage = self::firstDirectImage($document, $siblingGroup);
+            if ($siblingImage === null
+                || ($document->children($siblingGroup)[0] ?? null) !== $siblingImage
+                || count($document->children($siblingGroup)) < 2
+                || self::hasAncestorClass($document, $siblingGroup, 'masonry-3')
+            ) {
+                return false;
+            }
+            $cropClasses = self::nodeClasses($document, $siblingImage);
+            if (!in_array('card-media', $cropClasses, true)
+                && !in_array('card-media-tall', $cropClasses, true)
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static function hasAncestorClass(
+        BlockMarkup $document,
+        int $index,
+        string $class,
+    ): bool {
+        $cursor = $index;
+        while ($cursor !== null) {
+            if (in_array($class, self::nodeClasses($document, $cursor), true)) {
+                return true;
+            }
+            $cursor = $document->parent($cursor);
+        }
+        return false;
+    }
+
+    /** @param array<int,true> $candidateSet */
+    private static function isBodyOwnedByCandidate(
+        BlockMarkup $document,
+        int $index,
+        array $candidateSet,
+    ): bool {
+        $parent = $document->parent($index);
+        if ($parent === null
+            || !isset($candidateSet[$parent])
+            || $document->name($parent) !== 'group'
+        ) {
+            return false;
+        }
+        $groups = array_values(array_filter(
+            $document->children($parent),
+            static fn (int $child): bool => $document->name($child) === 'group',
+        ));
+        return $groups === [$index] && self::firstDirectImage($document, $parent) !== null;
+    }
+
     /** @param array<mixed> $attrs */
     private static function hasVisualBox(array $attrs): bool
     {
@@ -1111,7 +1294,7 @@ final class CardStyleContract
 
     private static function isZeroOrAbsent(mixed $value): bool
     {
-        if ($value === null || $value === '' || $value === []) {
+        if (self::isAbsent($value)) {
             return true;
         }
         if (is_array($value)) {
@@ -1123,6 +1306,11 @@ final class CardStyleContract
             return true;
         }
         return self::isZero($value);
+    }
+
+    private static function isAbsent(mixed $value): bool
+    {
+        return $value === null || $value === '' || $value === [];
     }
 
     private static function isZero(mixed $value): bool
@@ -1143,12 +1331,6 @@ final class CardStyleContract
             $value = $value[$key];
         }
         return $value;
-    }
-
-    private static function sameValue(mixed $left, mixed $right): bool
-    {
-        return json_encode($left, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-            === json_encode($right, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
     private static function blockPath(BlockMarkup $document, int $index): string

@@ -161,6 +161,11 @@ test('SectionUnit documents the nested flush-card body contract', function () {
         $prompt,
         'overlap cards carry the universal marker and flush behavior hook together',
     );
+    assert_contains(
+        'ONE uniform literal pixel value for all four padding sides',
+        $prompt,
+        'framed geometry remains deterministic enough for the delivery contract to verify',
+    );
 });
 
 test('SectionUnit gives standalone requests the authoritative machine card style', function () {
