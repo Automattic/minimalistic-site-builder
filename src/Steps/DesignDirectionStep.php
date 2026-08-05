@@ -78,6 +78,13 @@ final class DesignDirectionStep implements Step
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
     public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
 
+    /**
+     * The corner languages a direction may commit to. `sharp` is the default
+     * and wires square corners; `soft`/`round` make downstream repair wire a
+     * corner radius onto contained core/image media and buttons.
+     */
+    public const SHAPES = ['sharp', 'soft', 'round'];
+
     /** Env var forcing seed N (1-based) — the reproducible-evals escape hatch. */
     public const CHOICE_ENV = 'DESIGN_DIRECTION_CHOICE';
 
@@ -275,6 +282,7 @@ final class DesignDirectionStep implements Step
             'image_grade'      => '',
             'canvas'           => $canvas,
             'card_style'       => 'flush',
+            'shape'            => 'sharp',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
             'concept_seed'     => $seed,
@@ -576,6 +584,21 @@ final class DesignDirectionStep implements Step
                 . '; disposition repaired invalid profile';
         }
 
+        // The corner language is a fixed list; anything unrecognized falls
+        // back to sharp — an accidental radius reads as template styling, so
+        // rounding only ships on an explicit commitment.
+        $rawShape = $raw['shape'] ?? null;
+        $explicitShape = self::explicitShape($rawShape);
+        $shape = $explicitShape ?? 'sharp';
+        if (
+            array_key_exists('shape', $raw)
+            && $explicitShape === null
+        ) {
+            $warnings[] = "file='designDirection.json'; path=\"shape\"; authored="
+                . Warnings::value($rawShape)
+                . '; delivered="sharp"; disposition=invalid corner language replaced by deterministic sharp fallback';
+        }
+
         return [
             'title'            => trim((string) ($raw['title'] ?? '')),
             'description'      => $description,
@@ -592,6 +615,7 @@ final class DesignDirectionStep implements Step
             // flush default — inset media must be an explicit opt-in, never
             // the accidental look every site gets.
             'card_style'       => $cardStyle,
+            'shape'            => $shape,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
@@ -861,6 +885,20 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Card treatment**: {$cardStyle} — {$meaning}.";
         }
 
+        // Render the shape commitment with its executable meaning. The build
+        // wires contained media (core/image, core/cover, the media half of
+        // core/media-text) and button radii itself; this line keeps prompts
+        // from re-interpreting a bare keyword. Directions persisted before
+        // the field existed carry none.
+        $shape = self::explicitShape($direction['shape'] ?? null);
+        if ($shape !== null) {
+            $facts[] = match ($shape) {
+                'sharp' => '- **Shape**: sharp — the build keeps contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons square. Full-bleed media stays square.',
+                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and a modest radius onto buttons. Full-bleed media stays square.',
+                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and pill-shaped buttons. Full-bleed media stays square.',
+            };
+        }
+
         // Render the motion commitment with its executable meaning: the
         // section prompts gate their motion-class placement on this line.
         $motion = strtolower(trim((string) ($direction['motion'] ?? '')));
@@ -1037,6 +1075,32 @@ final class DesignDirectionStep implements Step
         $motion = strtolower(trim((string) ($project->readJson(self::FILE)['motion'] ?? '')));
         return in_array($motion, Motion::PROFILES, true) ? $motion : 'none';
     }
+
+    /**
+     * The explicit committed corner language ("sharp", "soft" or "round"),
+     * or null when no direction was persisted or its shape field is absent or
+     * garbled. The producing step normalizes every generated direction onto a
+     * valid value; null lets isolated downstream steps preserve pre-field
+     * artifacts instead of silently rewriting them as sharp.
+     */
+    public static function shapeFor(Project $project): ?string
+    {
+        if (!$project->exists(self::FILE)) {
+            return null;
+        }
+        return self::explicitShape($project->readJson(self::FILE)['shape'] ?? null);
+    }
+
+    /** Parse only an explicit valid corner-language commitment. */
+    private static function explicitShape(mixed $raw): ?string
+    {
+        if (!is_string($raw)) {
+            return null;
+        }
+        $shape = strtolower(trim($raw));
+        return in_array($shape, self::SHAPES, true) ? $shape : null;
+    }
+
 
     /** Coerce a raw motion value onto the fixed profile list. */
     private static function motionProfile(mixed $raw): string
