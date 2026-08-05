@@ -32,8 +32,16 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // Card media fills the card's content box even though the equal-cards card
     // is a flex column (core's constrained-layout auto margins would otherwise
     // shrink-wrap the figure to the image's intrinsic width, BIGR-771).
-    assert_contains('.equal-cards .wp-block-group > figure.wp-block-image', $css);
-    assert_contains('align-self: stretch;', $css);
+    assert_contains(
+        ".equal-cards .wp-block-group > figure.wp-block-image {\n"
+            . "    width: 100%;\n"
+            . "    max-width: none;\n"
+            . "    margin-left: 0 !important;\n"
+            . "    margin-right: 0 !important;\n"
+            . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
 
     // Flush/overlap copy lives inside a nested body group. That body must grow
     // as a flex column, otherwise its nested CTA has no remaining height for
@@ -43,8 +51,37 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
             . "    display: flex;\n"
             . "    flex-direction: column;\n"
             . "    flex-grow: 1;\n"
+            . "    box-sizing: border-box;\n"
+            . "    width: 100%;\n"
+            . "    max-width: none;\n"
+            . "    margin-left: 0 !important;\n"
+            . "    margin-right: 0 !important;\n"
+            . "    align-self: stretch;\n"
             . '}',
         $css,
+    );
+    assert_contains(
+        ".equal-cards .wp-block-group.card-body.overlap-up {\n"
+            . "    width: calc(100% - 2rem);\n"
+            . "    margin-left: 1rem !important;\n"
+            . "    margin-right: 1rem !important;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".equal-cards .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {\n"
+            . "    box-sizing: border-box;\n"
+            . "    width: 100%;\n"
+            . "    max-width: none;\n"
+            . "    margin-left: 0 !important;\n"
+            . "    margin-right: 0 !important;\n"
+            . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
+    assert_true(
+        !str_contains($css, '.wp-site-blocks .equal-cards'),
+        'card layout rules remain available in both the editor and front end',
     );
     assert_contains(
         ".equal-cards .cta-bottom {\n"

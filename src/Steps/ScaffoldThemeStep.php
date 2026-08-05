@@ -132,11 +132,37 @@ final class ScaffoldThemeStep implements Step
         }
         /* Flush and overlap cards keep all text in a nested body group. Make
            that body another growing flex column so a nested .cta-bottom can
-           consume its remaining height and align with CTAs in sibling cards. */
+           consume its remaining height and align with CTAs in sibling cards.
+           Core's constrained layout gives direct children auto side margins
+           with !important; once the card is a flex column those margins defeat
+           cross-axis stretch. Reset them here, and do the same for the body's
+           own constrained-layout children, so this works identically in the
+           editor and front end. */
         .equal-cards .wp-block-group.card-body {
             display: flex;
             flex-direction: column;
             flex-grow: 1;
+            box-sizing: border-box;
+            width: 100%;
+            max-width: none;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            align-self: stretch;
+        }
+        /* The overlap panel deliberately retains a one-rem reveal on each side.
+           Its explicit width keeps the fixed margins inside the card box. */
+        .equal-cards .wp-block-group.card-body.overlap-up {
+            width: calc(100% - 2rem);
+            margin-left: 1rem !important;
+            margin-right: 1rem !important;
+        }
+        .equal-cards .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: none;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            align-self: stretch;
         }
         /* The flex-column card above defeats core's constrained layout on its
            media: `.is-layout-constrained > *` gives the figure auto side
@@ -146,8 +172,9 @@ final class ScaffoldThemeStep implements Step
            content box regardless of the source image's aspect ratio. */
         .equal-cards .wp-block-group > figure.wp-block-image {
             width: 100%;
-            margin-left: 0;
-            margin-right: 0;
+            max-width: none;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
             align-self: stretch;
         }
         .equal-cards .cta-bottom {
