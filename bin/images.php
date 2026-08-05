@@ -29,8 +29,8 @@ $slug = $argv[1] ?? null;
 if ($slug === null || trim($slug) === '') {
     fwrite(STDERR, "Usage: php bin/images.php <slug>\n");
     fwrite(STDERR, "Available projects:\n");
-    foreach (glob(repo_path('projects/*/theme/style.css')) ?: [] as $f) {
-        fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
+    foreach (list_built_project_slugs() as $builtSlug) {
+        fwrite(STDERR, "  - {$builtSlug}\n");
     }
     exit(1);
 }

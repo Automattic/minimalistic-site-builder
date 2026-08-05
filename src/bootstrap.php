@@ -14,6 +14,7 @@ use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
 use Automattic\SiteBuild\WpcomImageClient;
@@ -145,6 +146,30 @@ function repo_path(string $rel = ''): string
     return $rel === '' ? $root : $root . '/' . ltrim($rel, '/');
 }
 
+/** Resolved path of an executable on PATH, or null when it isn't installed. */
+function command_path(string $bin): ?string
+{
+    $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
+    return $path === '' ? null : $path;
+}
+
+/** Is this external tool available to shell out to? */
+function command_exists(string $bin): bool
+{
+    return command_path($bin) !== null;
+}
+
+/**
+ * Slugs of every project in this repo with a built theme, for the "available
+ * projects" list CLI usage messages print.
+ *
+ * @return list<string>
+ */
+function list_built_project_slugs(): array
+{
+    return ProjectStore::builtSlugs(repo_path('projects'));
+}
+
 /**
  * Build a shell command for a PHP child with this executable and temp dir.
  *
@@ -182,6 +207,26 @@ function php_child_command(string $script, array $args = []): string
 function playground_blueprint_path(string $slug, int $pid): string
 {
     return sys_get_temp_dir() . "/playground-blueprint-{$slug}.{$pid}.json";
+}
+
+/**
+ * The site URL from Playground's readiness line, or null until it appears.
+ *
+ * Playground prints this exact line once it is actually serving, and it carries
+ * the real port (playground.php auto-bumps a busy one). Spawners rely on it
+ * because the site's `/` answers 302, not 200 — polling for a 200 would never
+ * succeed. Colour escapes are stripped first: the CLI wraps "Ready!" and the
+ * URL in them when stdout is a TTY (and some envs force colour even when it
+ * isn't, e.g. FORCE_COLOR), and they sit between the two, breaking the \s+
+ * match. $log may be the whole log or a single streamed line.
+ */
+function playground_ready_url(string $log): ?string
+{
+    $plain = preg_replace('~\x1b\[[0-9;]*m~', '', $log) ?? $log;
+    if (!preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $plain, $m)) {
+        return null;
+    }
+    return $m[1] . '/';
 }
 
 /**

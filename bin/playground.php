@@ -48,8 +48,8 @@ if ($workers !== 'auto' && (int) $workers < 1) {
 if ($slug === null) {
     fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
     fwrite(STDERR, "Available themes:\n");
-    foreach (glob(repo_path('projects/*/theme/style.css')) ?: [] as $f) {
-        fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
+    foreach (list_built_project_slugs() as $builtSlug) {
+        fwrite(STDERR, "  - {$builtSlug}\n");
     }
     exit(1);
 }
@@ -157,11 +157,6 @@ echo "  (first run downloads WordPress; Ctrl-C to stop)\n\n";
 
 passthru($cmd, $exit);
 exit($exit);
-
-function command_exists(string $bin): bool
-{
-    return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
-}
 
 /** Return the first free TCP port at or after $start (fails after 50 tries). */
 function find_free_port(int $start): int

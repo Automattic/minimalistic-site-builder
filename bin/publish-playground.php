@@ -110,14 +110,14 @@ try {
 function usage(int $exit): never
 {
     $branch = PlaygroundArtifact::DEFAULT_ARTIFACT_BRANCH;
-    $themes = glob(repo_path('projects/*/theme/style.css')) ?: [];
+    $built = list_built_project_slugs();
     fwrite($exit === 0 ? STDOUT : STDERR, "Usage:\n");
     fwrite($exit === 0 ? STDOUT : STDERR, "  php bin/publish-playground.php <slug> [--repo=OWNER/REPO] [--branch={$branch}] [--name=<file.zip>] [--out=<path>] [--dry-run] [--clobber] [--open]\n");
     fwrite($exit === 0 ? STDOUT : STDERR, "  php bin/publish-playground.php --list [--repo=OWNER/REPO] [--branch={$branch}]\n");
-    if ($themes !== []) {
+    if ($built !== []) {
         fwrite($exit === 0 ? STDOUT : STDERR, "\nAvailable projects:\n");
-        foreach ($themes as $f) {
-            fwrite($exit === 0 ? STDOUT : STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
+        foreach ($built as $builtSlug) {
+            fwrite($exit === 0 ? STDOUT : STDERR, "  - {$builtSlug}\n");
         }
     }
     exit($exit);
@@ -125,14 +125,14 @@ function usage(int $exit): never
 
 function ensure_gh(): void
 {
-    if (trim((string) shell_exec('command -v gh 2>/dev/null')) === '') {
+    if (!command_exists('gh')) {
         throw new RuntimeException('gh is required to resolve GitHub repository metadata.');
     }
 }
 
 function ensure_git(): void
 {
-    if (trim((string) shell_exec('command -v git 2>/dev/null')) === '') {
+    if (!command_exists('git')) {
         throw new RuntimeException('git is required to publish Playground artifacts.');
     }
 }
@@ -329,11 +329,8 @@ function mkdir_or_fail(string $dir): void
 
 function open_url(string $url): void
 {
-    $opener = trim((string) shell_exec('command -v open 2>/dev/null'));
-    if ($opener === '') {
-        $opener = trim((string) shell_exec('command -v xdg-open 2>/dev/null'));
-    }
-    if ($opener === '') {
+    $opener = command_path('open') ?? command_path('xdg-open');
+    if ($opener === null) {
         fwrite(STDERR, "No open or xdg-open found; open this URL manually:\n{$url}\n");
         return;
     }
