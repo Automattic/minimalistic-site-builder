@@ -112,16 +112,76 @@ function html_first_preview_document(string $marker = 'DESIGN-PREVIEW'): string
         . '</section></main></body></html>';
 }
 
-function html_first_queue_success(FakeLlm $llm, array $siteSpec, string $homeBody): void
+function html_first_queue_success(
+    FakeLlm $llm,
+    array $siteSpec,
+    string $homeBody,
+    ?string $previewDocument = null,
+    ?array $themePayload = null,
+): void
 {
     $llm->queueText('A warm neighborhood bakery site with a clear visit path.');
-    $llm->queueText(html_first_preview_document());
+    $llm->queueText($previewDocument ?? html_first_preview_document());
     $llm->queueText($homeBody);
 
     $llm->queueJson($siteSpec);
     $llm->queueJson(['seeds' => ['Flour Archive', 'Bread Ledger', 'Oven Journal', 'Grain Index']]);
     $llm->queueJson(html_first_direction());
-    $llm->queueJson(html_first_theme_payload());
+    $llm->queueJson($themePayload ?? html_first_theme_payload());
+}
+
+function html_first_foundation_preview_document(): string
+{
+    return '<!doctype html>'
+        . '<html lang="en"><head><meta charset="utf-8">'
+        . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        . '<style>'
+        . ':root{--content-size:800px;--wide-size:1280px;}'
+        . 'body{margin:0;font-family:system-ui,sans-serif}'
+        . '#hero{padding:4rem clamp(1.25rem,5vw,4.5rem) 6rem}'
+        . '#story{padding-inline:3rem}'
+        . '#about-intro{padding-left:4rem;padding-right:4rem;padding-top:2rem;padding-bottom:3rem}'
+        . '#about-values{padding:2rem 5rem}'
+        . '#about-intro .about-copy{padding:0 1.75rem}'
+        . '</style></head>'
+        . '<body><header><nav aria-label="Primary"><a href="/">Home</a></nav></header>'
+        . '<main><section id="hero"><h1 class="has-display-font-size">FOUNDATION-HERO</h1>'
+        . '<img alt="AI_IMAGE: A baker sliding a sourdough loaf into a stone oven, viewed from counter height | homepage hero beside the primary headline | photorealistic | landscape">'
+        . '</section></main></body></html>';
+}
+
+/** @return array<string,mixed> */
+function html_first_foundation_theme_payload(): array
+{
+    $theme = html_first_theme_payload();
+    $theme['settings']['layout'] = [
+        'contentSize' => '48rem',
+        'wideSize' => '80rem',
+    ];
+    $theme['styles']['spacing']['padding'] = [
+        'left' => 'clamp(1.25rem, 5vw, 4.5rem)',
+        'right' => 'clamp(1.25rem, 5vw, 4.5rem)',
+    ];
+    return $theme;
+}
+
+/** @return list<string> */
+function html_first_css_bodies_for_selector(string $css, string $wanted): array
+{
+    preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $css, $matches, PREG_SET_ORDER);
+    $bodies = [];
+    foreach ($matches as $match) {
+        $selectorList = preg_replace('/\/\*.*?\*\//s', '', $match[1]);
+        if (!is_string($selectorList)) {
+            continue;
+        }
+        foreach (explode(',', $selectorList) as $selector) {
+            if (trim($selector) === $wanted) {
+                $bodies[] = $match[2];
+            }
+        }
+    }
+    return $bodies;
 }
 
 function assert_html_first_page_sections_constrained(Project $project, string $slug): int
@@ -226,6 +286,98 @@ test('HTML-first default builds and validates every single-page artifact', funct
         assert_eq([], ThemeValidator::layoutWarnings($project, true));
         assert_eq("Final theme validation passed.\n", $project->readText('logs/validate-theme.log'));
         assert_true(!$project->exists('theme/parts/page-home--hero.html'), 'assemble removes transient section parts');
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_LEGACY')
+            : putenv('SITE_BUILD_LEGACY=' . $previous);
+        if (is_dir($tmp)) {
+            exec('rm -rf ' . escapeshellarg($tmp));
+        }
+    }
+});
+
+test('HTML-first multi-page build adopts one declared inset system in markup and delivered CSS', function () {
+    $tmp = sys_get_temp_dir() . '/builder_html_first_foundation_insets_' . uniqid();
+    $previous = getenv('SITE_BUILD_LEGACY');
+    putenv('SITE_BUILD_LEGACY');
+    try {
+        $pages = [
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+            ['title' => 'About', 'slug' => 'about', 'purpose' => 'Explain the bakery', 'children' => []],
+        ];
+        $llm = new FakeLlm();
+        html_first_queue_success(
+            $llm,
+            html_first_site_spec($pages),
+            html_first_home_body(),
+            html_first_foundation_preview_document(),
+            html_first_foundation_theme_payload(),
+        );
+        $llm->queueText(
+            '<main><section id="about-intro"><h1>About</h1>'
+                . '<p class="about-copy">HTML-FIRST-ABOUT</p></section>'
+                . '<section id="about-values"><h2>Values</h2><p>Local grain.</p></section></main>',
+        );
+
+        $builder = html_first_integration_builder($llm, $tmp);
+        $project = $builder->createProject(
+            'A neighborhood bakery',
+            'demo',
+            multiPage: true,
+            pages: $pages,
+        );
+        $meta = $project->readJson('meta.json');
+        $meta['design_candidates'] = 1;
+        $meta['critique_rounds'] = 1;
+        $project->writeJson('meta.json', $meta);
+
+        $builder->pipeline()->runThrough($project);
+
+        $theme = $project->readJson('theme/theme.json');
+        assert_eq('48rem', $theme['settings']['layout']['contentSize'] ?? null);
+        assert_eq('80rem', $theme['settings']['layout']['wideSize'] ?? null);
+        assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments'] ?? null);
+        assert_eq(
+            'clamp(1.25rem, 5vw, 4.5rem)',
+            $theme['styles']['spacing']['padding']['left'] ?? null,
+        );
+        assert_eq(
+            'clamp(1.25rem, 5vw, 4.5rem)',
+            $theme['styles']['spacing']['padding']['right'] ?? null,
+        );
+        assert_true(
+            $project->exists('design/about.html'),
+            'inner page design survives: ' . implode(
+                ' | ',
+                $project->readJson('warnings.json')['inner-pages-design'] ?? [],
+            ),
+        );
+
+        $sectionCount = 0;
+        foreach (['home', 'about'] as $slug) {
+            $sectionCount += assert_html_first_page_sections_constrained($project, $slug);
+        }
+        assert_eq(4, $sectionCount, 'home and inner-page sections share constrained root layout');
+
+        $style = $project->readText('theme/style.css');
+        foreach (['#hero', '#story', '#about-intro', '#about-values'] as $selector) {
+            foreach (html_first_css_bodies_for_selector($style, $selector) as $body) {
+                assert_true(
+                    preg_match(
+                        '/(?:^|;)\s*(?:padding|padding-inline|padding-left|padding-right)\s*:/i',
+                        $body,
+                    ) !== 1,
+                    "{$selector} retains competing horizontal padding in delivered CSS",
+                );
+            }
+        }
+        assert_contains(
+            'padding:0 1.75rem',
+            implode("\n", html_first_css_bodies_for_selector($style, '#about-intro .about-copy')),
+            'inner-element padding survives root neutralization',
+        );
+        assert_eq([], ThemeValidator::validate($project));
+        assert_eq([], ThemeValidator::layoutWarnings($project, true));
     } finally {
         $previous === false
             ? putenv('SITE_BUILD_LEGACY')

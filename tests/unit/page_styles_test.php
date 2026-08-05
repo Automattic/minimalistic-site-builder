@@ -74,6 +74,35 @@ function ps_warning_rows(Project $project, string $stepId): array
     return $project->readJson('warnings.json')[$stepId] ?? [];
 }
 
+/** @return list<string> */
+function ps_css_bodies_for_selector(string $css, string $wanted): array
+{
+    preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $css, $matches, PREG_SET_ORDER);
+    $bodies = [];
+    foreach ($matches as $match) {
+        $selectorList = preg_replace('/\/\*.*?\*\//s', '', $match[1]);
+        if (!is_string($selectorList)) {
+            continue;
+        }
+        foreach (explode(',', $selectorList) as $selector) {
+            if (trim($selector) === $wanted) {
+                $bodies[] = $match[2];
+            }
+        }
+    }
+    return $bodies;
+}
+
+function ps_assert_no_root_inline_padding(string $css, string $selector): void
+{
+    foreach (ps_css_bodies_for_selector($css, $selector) as $body) {
+        assert_true(
+            preg_match('/(?:^|;)\s*(?:padding|padding-inline|padding-left|padding-right)\s*:/i', $body) !== 1,
+            "{$selector} retains root-owned inline padding in {$body}",
+        );
+    }
+}
+
 function ps_html_first_step(FakeLlm $llm): PageStylesStep
 {
     return new PageStylesStep(
@@ -462,6 +491,95 @@ test('site CSS path merges exact safe bytes in deterministic source and document
 
     assert_eq($once, $project->readText('theme/style.css'), 'second run is byte-identical');
     assert_eq([], $llm->calls, 'second deterministic run still makes zero LLM calls');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('site CSS path removes section-root inline padding and preserves nested selector branches', function () {
+    [$project, $tmp] = ps_project('builder_ps_foundation_insets_');
+    $siteCss = <<<'CSS'
+#hero {
+    padding: 4rem clamp(1.25rem, 5vw, 4.5rem) 6rem;
+    padding-left: 2rem;
+    color: var(--wp--preset--color--contrast);
+}
+#story {
+    padding-inline: 3rem;
+    padding-left: 2rem;
+    padding-right: 4rem;
+    padding-top: 5rem;
+    padding-bottom: 6rem;
+}
+#hero .child {
+    padding: 1rem 2rem 3rem;
+    padding-left: 0.75rem;
+}
+#hero, #hero .badge, .shared {
+    padding: 7rem 8rem 9rem 10rem;
+    margin: 0;
+}
+#card {
+    padding-inline: 11rem;
+}
+#source-only {
+    padding: 12rem 13rem;
+}
+CSS;
+    $project->writeText(TransformArtifacts::SITE_CSS, $siteCss);
+    $project->writeJson('pages.json', ['pages' => [[
+        'slug' => 'home',
+        'front' => true,
+    ]]]);
+    $project->writeText(
+        'design/home.html',
+        '<main><section id="source-only"><p>Not delivered</p></section></main>',
+    );
+    $project->writeText(
+        'plugin/pages/home.html',
+        '<section id="hero"><div class="child badge">Hero</div></section>'
+            . '<section id="story"><p>Story</p><div id="card">Card</div></section>',
+    );
+    $step = ps_html_first_step(new FakeLlm());
+
+    $step->run($project);
+
+    $style = $project->readText('theme/style.css');
+    ps_assert_no_root_inline_padding($style, '#hero');
+    ps_assert_no_root_inline_padding($style, '#story');
+    assert_contains('padding-top: 4rem', implode("\n", ps_css_bodies_for_selector($style, '#hero')));
+    assert_contains('padding-bottom: 6rem', implode("\n", ps_css_bodies_for_selector($style, '#hero')));
+    assert_contains('padding-top: 5rem', implode("\n", ps_css_bodies_for_selector($style, '#story')));
+    assert_contains('padding-bottom: 6rem', implode("\n", ps_css_bodies_for_selector($style, '#story')));
+    assert_contains(
+        'padding: 1rem 2rem 3rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '#hero .child')),
+        'nested shorthand survives',
+    );
+    assert_contains(
+        'padding-left: 0.75rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '#hero .child')),
+        'nested physical padding survives',
+    );
+    assert_contains(
+        'padding: 7rem 8rem 9rem 10rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '#hero .badge')),
+        'nested mixed-selector branch keeps its padding',
+    );
+    assert_contains(
+        'padding: 7rem 8rem 9rem 10rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '.shared')),
+        'unrelated mixed-selector branch keeps its padding',
+    );
+    assert_contains('padding-inline: 11rem;', implode("\n", ps_css_bodies_for_selector($style, '#card')));
+    assert_contains(
+        'padding: 12rem 13rem;',
+        implode("\n", ps_css_bodies_for_selector($style, '#source-only')),
+        'source-only section id does not expand final delivered root scope',
+    );
+    assert_eq($siteCss, $project->readText(TransformArtifacts::SITE_CSS), 'source CSS stays byte-identical');
+
+    $step->run($project);
+
+    assert_eq($style, $project->readText('theme/style.css'), 'neutralized merge reaches a fixed point');
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

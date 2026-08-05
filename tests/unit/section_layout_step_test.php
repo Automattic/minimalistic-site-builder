@@ -156,7 +156,11 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
         ],
     ]]);
     try {
-        $cover = '<!-- wp:cover {"dimRatio":40} --><div class="wp-block-cover"><div class="wp-block-cover__inner-container">Visual</div></div><!-- /wp:cover -->';
+        $coverInner = '<!-- wp:paragraph {"className":"cover-copy"} --><p class="cover-copy">Visual</p><!-- /wp:paragraph -->';
+        $cover = '<!-- wp:cover {"dimRatio":40,"className":"authored-cover"} -->'
+            . '<div class="wp-block-cover authored-cover"><div class="wp-block-cover__inner-container">'
+            . $coverInner
+            . '</div></div><!-- /wp:cover -->';
         $image = '<!-- wp:image {"id":7} --><figure class="wp-block-image"><img src="visual.jpg" alt=""></figure><!-- /wp:image -->';
         $paragraph = '<!-- wp:paragraph --><p>Sibling text</p><!-- /wp:paragraph -->';
         $project->writeText('theme/parts/page-home--visual.html', section_layout_group([], $cover . $paragraph . $image));
@@ -170,7 +174,25 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
         (new SectionLayoutStep())->run($project);
 
         $visual = $project->readText('theme/parts/page-home--visual.html');
-        assert_eq('full', section_layout_first_attrs($visual, 'cover')['align'] ?? null);
+        $visualCoverAttrs = section_layout_first_attrs($visual, 'cover');
+        assert_eq('full', $visualCoverAttrs['align'] ?? null);
+        assert_eq(
+            ['type' => 'constrained'],
+            $visualCoverAttrs['layout'] ?? null,
+            'full-bleed cover inner content uses the theme content column',
+        );
+        assert_eq(
+            'authored-cover is-layout-constrained',
+            $visualCoverAttrs['className'] ?? null,
+            'cover carries the serializer class bridge for its existing inner container',
+        );
+        assert_contains(
+            '<div class="wp-block-cover__inner-container">' . $coverInner . '</div>',
+            $visual,
+            'cover inner content stays byte-for-byte authored',
+        );
+        assert_contains($paragraph, $visual, 'sibling paragraph stays byte-for-byte authored');
+        assert_contains($image, $visual, 'sibling image stays byte-for-byte authored');
         assert_true(!isset(section_layout_first_attrs($visual, 'paragraph')['align']), 'sibling text stays constrained');
         assert_true(!isset(section_layout_first_attrs($visual, 'image')['align']), 'ordinary direct image stays inset');
 
@@ -191,6 +213,7 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
 
         $nested = $project->readText('theme/parts/page-home--nested.html');
         assert_true(!isset(section_layout_first_attrs($nested, 'cover')['align']), 'nested cover is not a section-root visual');
+        assert_contains($cover, $nested, 'nested cover stays byte-for-byte authored');
         assert_true(
             !str_contains($project->readText('theme/parts/page-home--text.html'), '"align":"full"'),
             'text-only section has no full-bleed opt-in',
