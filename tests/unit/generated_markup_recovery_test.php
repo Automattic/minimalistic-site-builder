@@ -849,3 +849,35 @@ test('an attrs-less delimiter that dropped its terminator is closed', function (
     assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($out, $again));
     assert_eq([], $again);
 });
+
+test('stripTextBlockShadow removes shadow presets from text blocks but not media', function () {
+    // Regression: pulso5's theme shipped an "RGB Misregister" shadow preset
+    // and the hero applied it to the H1 — the offset box-shadow rendered as
+    // a cyan bar left and an orange bar right of the headline.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="hero">'
+        . '<!-- wp:heading {"level":1,"style":{"typography":{"letterSpacing":"-0.01em"},"shadow":"var:preset|shadow|misregister"}} -->'
+        . '<h1 class="wp-block-heading" style="letter-spacing:-0.01em;box-shadow:var(--wp--preset--shadow--misregister)">Dance the ruin awake</h1>'
+        . '<!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"style":{"shadow":"var:preset|shadow|offset-plate"}} -->'
+        . '<p style="box-shadow:var(--wp--preset--shadow--offset-plate)">Two nights of sound.</p>'
+        . '<!-- /wp:paragraph -->'
+        . '<!-- wp:image {"sizeSlug":"large","style":{"shadow":"var:preset|shadow|offset-plate"}} -->'
+        . '<figure class="wp-block-image size-large"><img src="/a.jpg" alt="" style="box-shadow:var(--wp--preset--shadow--offset-plate)"/></figure>'
+        . '<!-- /wp:image -->'
+        . '</section>'
+        . '<!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripTextBlockShadow($doc, 'p', $repairs);
+    assert_true(!str_contains($out, 'wp:heading {"level":1,"style":{"typography":{"letterSpacing":"-0.01em"},"shadow"'), 'heading shadow attr removed');
+    assert_true(!str_contains($out, 'wp:paragraph {"style":{"shadow"'), 'paragraph shadow attr removed');
+    assert_contains('wp:image {"sizeSlug":"large","style":{"shadow":"var:preset|shadow|offset-plate"}}', $out);
+    assert_contains('Dance the ruin awake', $out);
+    assert_true(in_array('text-block-shadow-stripped', array_column($repairs, 'code'), true));
+
+    // Idempotent + attribute-empty style objects are dropped, not left as {}.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripTextBlockShadow($out, 'p', $again));
+    assert_eq([], $again);
+    assert_true(!str_contains($out, '"style":[]') && !str_contains($out, '"style":{}'), 'no empty style attr left behind');
+});

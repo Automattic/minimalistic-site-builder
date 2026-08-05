@@ -202,7 +202,7 @@ test('SectionUnit keeps front-page hero topology out of the general prompt', fun
     $input['section']['type'] = 'feature';
     $input['hero_blueprint'] = [
         'recipe' => 'typographic-poster',
-        'signature_device_use' => 'SECTION-HERO-BLUEPRINT-LEAK-SENTINEL',
+        'media_mode' => 'SECTION-HERO-BLUEPRINT-LEAK-SENTINEL',
     ];
     $input['above_fold_contract'] = 'SECTION-ABOVE-FOLD-LEAK-SENTINEL';
 

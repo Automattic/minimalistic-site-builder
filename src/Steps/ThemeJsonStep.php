@@ -34,6 +34,18 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     private const REQUIRED_COLORS = ['base', 'contrast', 'primary', 'secondary', 'accent'];
     private const REQUIRED_FONTS = ['heading', 'body'];
 
+    /** Element selectors whose box is the text itself, never a visual surface. */
+    private const TEXT_SHADOW_ELEMENTS = [
+        'caption', 'cite', 'heading', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'link',
+    ];
+
+    /** Block selectors whose root box is authored copy rather than a card/media surface. */
+    private const TEXT_SHADOW_BLOCKS = [
+        'core/heading', 'core/list', 'core/list-item', 'core/paragraph',
+        'core/post-title', 'core/pullquote', 'core/quote', 'core/site-tagline',
+        'core/site-title', 'core/verse',
+    ];
+
     /**
      * Readable neutral defaults for palette slugs the model omitted, used only
      * when the design direction committed no hex for the role either. base and
@@ -819,10 +831,220 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      */
     public static function repairScaffold(array $theme): array
     {
-        [$theme, $warnings] = self::removeUnverifiedContextColors($theme);
+        [$theme, $colorWarnings] = self::removeUnverifiedContextColors($theme);
+        [$theme, $shadowWarnings] = self::repairTextTargetShadows($theme);
         $shapeWarnings = [];
         $theme = self::mergeScaffoldDefaultsAtPath(self::SCAFFOLD, $theme, '', $shapeWarnings);
-        return [$theme, array_merge($warnings, $shapeWarnings)];
+        return [$theme, array_merge($colorWarnings, $shadowWarnings, $shapeWarnings)];
+    }
+
+    /**
+     * Remove generated shadows whose selector paints text rather than a
+     * surface. A direct `shadow` is retained on buttons, groups/cards, media,
+     * covers, navigation and the global canvas. `typography.textShadow` is
+     * always text-directed, so it is removed from every root, block, element,
+     * variation and pseudo-state style node.
+     *
+     * Every removed declaration gets its own actionable warning. Shadow
+     * presets remain available in settings for safe surface use. Pure and
+     * idempotent — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array{0:array<mixed>,1:list<string>} theme, warnings
+     */
+    public static function repairTextTargetShadows(array $theme): array
+    {
+        $styles = $theme['styles'] ?? null;
+        if (!is_array($styles) || ($styles !== [] && array_is_list($styles))) {
+            return [$theme, []];
+        }
+
+        $warnings = [];
+        self::repairTextShadowsAtStyleNode($styles, 'styles', false, $warnings);
+        $theme['styles'] = $styles;
+        return [$theme, $warnings];
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param list<string> $warnings
+     */
+    private static function repairTextShadowsAtStyleNode(
+        array &$node,
+        string $path,
+        bool $boxShadowTargetsText,
+        array &$warnings,
+    ): bool {
+        $changed = false;
+
+        if ($boxShadowTargetsText
+            && array_key_exists('shadow', $node)
+            && self::shadowValueCanPaint($node['shadow'])) {
+            $warnings[] = "theme/theme.json {$path}.shadow: authored "
+                . Warnings::value($node['shadow'])
+                . '; delivered removed'
+                . '; disposition removed text-targeted box shadow; shadows are reserved for media, card,'
+                . ' and cover surfaces';
+            unset($node['shadow']);
+            $changed = true;
+        }
+
+        $typography = $node['typography'] ?? null;
+        if (is_array($typography)
+            && ($typography === [] || !array_is_list($typography))
+            && array_key_exists('textShadow', $typography)
+            && self::shadowValueCanPaint($typography['textShadow'])) {
+            $warnings[] = "theme/theme.json {$path}.typography.textShadow: authored "
+                . Warnings::value($typography['textShadow'])
+                . '; delivered removed'
+                . '; disposition removed glyph shadow; shadow atmosphere is reserved for media, card,'
+                . ' and cover surfaces';
+            unset($typography['textShadow']);
+            if ($typography === []) {
+                unset($node['typography']);
+            } else {
+                $node['typography'] = $typography;
+            }
+            $changed = true;
+        }
+
+        $changed = self::repairTextShadowStyleMap(
+            $node,
+            'elements',
+            $path,
+            self::TEXT_SHADOW_ELEMENTS,
+            $warnings,
+        ) || $changed;
+        $changed = self::repairTextShadowStyleMap(
+            $node,
+            'blocks',
+            $path,
+            self::TEXT_SHADOW_BLOCKS,
+            $warnings,
+        ) || $changed;
+
+        $variations = $node['variations'] ?? null;
+        if (is_array($variations) && ($variations === [] || !array_is_list($variations))) {
+            $variationChanged = false;
+            foreach (array_keys($variations) as $name) {
+                if (!is_string($name)
+                    || !is_array($variations[$name])
+                    || ($variations[$name] !== [] && array_is_list($variations[$name]))) {
+                    continue;
+                }
+                $childChanged = self::repairTextShadowsAtStyleNode(
+                    $variations[$name],
+                    "{$path}.variations.{$name}",
+                    $boxShadowTargetsText,
+                    $warnings,
+                );
+                if ($childChanged && $variations[$name] === []) {
+                    unset($variations[$name]);
+                }
+                $variationChanged = $childChanged || $variationChanged;
+            }
+            if ($variationChanged) {
+                if ($variations === []) {
+                    unset($node['variations']);
+                } else {
+                    $node['variations'] = $variations;
+                }
+                $changed = true;
+            }
+        }
+
+        foreach (array_keys($node) as $key) {
+            if (!is_string($key)
+                || !str_starts_with($key, ':')
+                || !is_array($node[$key])
+                || ($node[$key] !== [] && array_is_list($node[$key]))) {
+                continue;
+            }
+            $childChanged = self::repairTextShadowsAtStyleNode(
+                $node[$key],
+                "{$path}.{$key}",
+                $boxShadowTargetsText,
+                $warnings,
+            );
+            if ($childChanged && $node[$key] === []) {
+                unset($node[$key]);
+            }
+            $changed = $childChanged || $changed;
+        }
+
+        return $changed;
+    }
+
+    /**
+     * Explicit resets and falsey malformed values cannot paint a shadow. They
+     * are harmless, and `none` can intentionally suppress an inherited text
+     * shadow, so retain their exact authored representation without warning.
+     */
+    private static function shadowValueCanPaint(mixed $value): bool
+    {
+        if (is_string($value)) {
+            $withoutComments = preg_replace('~/\*.*?\*/~s', '', $value) ?? $value;
+            $withoutImportant = preg_replace('/\s*!important\s*\z/i', '', $withoutComments)
+                ?? $withoutComments;
+            return !in_array(
+                strtolower(trim($withoutImportant)),
+                ['', 'none', 'initial', 'unset', 'revert', 'revert-layer'],
+                true,
+            );
+        }
+        if ($value === null || $value === false || $value === []) {
+            return false;
+        }
+        if ((is_int($value) || is_float($value)) && (float) $value === 0.0) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param list<string> $textTargets
+     * @param list<string> $warnings
+     */
+    private static function repairTextShadowStyleMap(
+        array &$node,
+        string $mapKey,
+        string $path,
+        array $textTargets,
+        array &$warnings,
+    ): bool {
+        $map = $node[$mapKey] ?? null;
+        if (!is_array($map) || ($map !== [] && array_is_list($map))) {
+            return false;
+        }
+
+        $changed = false;
+        foreach (array_keys($map) as $name) {
+            if (!is_string($name)
+                || !is_array($map[$name])
+                || ($map[$name] !== [] && array_is_list($map[$name]))) {
+                continue;
+            }
+            $childChanged = self::repairTextShadowsAtStyleNode(
+                $map[$name],
+                "{$path}.{$mapKey}.{$name}",
+                in_array($name, $textTargets, true),
+                $warnings,
+            );
+            if ($childChanged && $map[$name] === []) {
+                unset($map[$name]);
+            }
+            $changed = $childChanged || $changed;
+        }
+        if (!$changed) {
+            return false;
+        }
+        if ($map === []) {
+            unset($node[$mapKey]);
+        } else {
+            $node[$mapKey] = $map;
+        }
+        return true;
     }
 
     /**

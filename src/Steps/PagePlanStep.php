@@ -78,7 +78,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     private const FRONT_EMPHASIS = "This page is the site's front page and centerpiece — give it the most creative"
         . ' energy: a strong hero, at least 3 unique, image-rich content sections, and a compelling closing CTA.'
         . " Use the spec's \"sections\" list as a starting point, but improve it: add, reorder, split, or rename"
-        . " sections so the page is richer and flows well. Let the design direction's signature device and mood"
+        . " sections so the page is richer and flows well. Let the design direction's mood"
         . " inform which sections you choose and how they're framed. Aim for 5 to 8 sections.";
 
     private const INTERIOR_EMPHASIS = 'This is one interior page of a multi-page site. Aim for 3 to 6 sections.'
@@ -90,7 +90,7 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         . " spec's \"sections\" list): where this page's subject matter overlaps one of those teasers, plan the"
         . ' DEEPER destination the teaser links to — different framing, more specific copy points, and imagery'
         . ' subjects the homepage band would not have used — never a re-plan of the teaser itself. Let the'
-        . " design direction's signature device and mood inform the section choices here too, and remember the"
+        . " design direction's mood inform the section choices here too, and remember the"
         . " site header renders above — sometimes floating over — this page's FIRST section: open with a"
         . ' background the site chrome can sit on.';
 

@@ -13,9 +13,7 @@ The complete reviewed default is:
 
 Preserve those defaults unless the selected recipe fragment explicitly permits
 another bounded value and the site-specific creative direction benefits from
-it. `signature_device_use` may place only the already chosen global signature
-device, and only when `signature_device_slots` includes `hero`; otherwise use
-an empty string.
+it.
 
 SELECTED RECIPE FRAGMENT (the only recipe visible in this request):
 

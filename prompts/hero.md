@@ -6,7 +6,7 @@ SITE SPEC (JSON):
 THEME TOKENS (theme.json):
 {{theme_json}}
 
-DESIGN DIRECTION (global visual language and bounded signature-device placement; it does not override the assigned hero topology):
+DESIGN DIRECTION (global visual language; it does not override the assigned hero topology):
 {{design_direction}}
 
 FRONT PAGE: "{{page_title}}" ({{page_path}})
@@ -52,9 +52,9 @@ Rules:
 - The main headline is one level-1 `wp:heading`. Follow the blueprint's headline register and line target with theme font-size presets; never hardcode `font-size`, `clamp()`, or rotated reading text.
 - The contract's ownership split gives identity to the header and the proposition to the hero: when the header already displays the site name or tagline, NO hero text — headline, eyebrow, or standfirst — may repeat either verbatim; the same words twice within one viewport read as a mistake, not a brand gesture. Lead with the proposition; the name may appear inside a longer sentence only when it still works without the header's copy.
 - The supporting line adds information the headline does not carry — audience, offer, place, proof. Never restate or paraphrase the H1 as the standfirst; if the support line could replace the headline without losing anything, write a different support line.
-- The eyebrow/kicker above the headline is plain tracked text — type, tracking and color only. Never box it: no `backgroundColor`, gradient, border, outline, chip, badge, or translucent panel on the eyebrow or on any group whose only content is that line. The DESIGN DIRECTION's signature devices decorate surfaces and media, never reading copy; a deterministic finish pass strips chip chrome from eyebrow-position text.
+- The eyebrow/kicker above the headline is plain tracked text — type, tracking and color only. Never box it: no `backgroundColor`, gradient, border, outline, chip, badge, or translucent panel on the eyebrow or on any group whose only content is that line. Decoration belongs on surfaces and media, never on reading copy; a deterministic finish pass strips chip chrome from eyebrow-position text.
 - Use valid core blocks only: group, cover, columns/column, heading, paragraph, buttons/button, image, media-text, separator, spacer. Use only blocks the assigned recipe needs.
-- Reference theme presets by slug. Mirror every saved HTML class/style in supported block attributes. Keep text readable against its actual surface and the exact protection tokens in the contract.
+- Reference theme presets by slug. Mirror every saved HTML class/style in supported block attributes. Keep text readable against its actual surface and the exact protection tokens in the contract. Shadow presets go on media, cards, and cover surfaces ONLY — never on a heading or paragraph block: a box-shadow on a text block renders as stray bars around the copy, and a deterministic build step strips it.
 - Internal links use SITE PAGES paths or valid planned anchors exactly. No `href="#"`, invented route, form markup, script-capable markup, emoji, or placeholder UI.
 - Write all visitor-facing copy in {{language}} while preserving proper nouns and exact identity/action values.
 - Hard facts — dates, times, prices, street addresses, phone numbers, capacities — come only from the SITE SPEC, verbatim. Sections are authored independently, so an invented specific WILL contradict a sibling section. When the spec lacks the value, write copy that does not need it instead of inventing one.

@@ -249,12 +249,11 @@ test('footer composition is stable, varied, and shared with the closing-section 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('footer prompt renders only its selected high-impact recipe without overriding signature placement', function () {
+test('footer prompt renders only its selected high-impact recipe', function () {
     [$project, $tmp] = sections_fixture();
     $project->writeJson('designDirection.json', [
         'title' => 'Restricted device',
         'description' => 'A graphic editorial system.',
-        'signature_device' => 'Use the stepped accent only in the hero and nowhere else.',
         'canvas' => 'full-bleed',
         'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]);
@@ -287,8 +286,6 @@ test('footer prompt renders only its selected high-impact recipe without overrid
     assert_contains('ONE dominant focal gesture and low content density', $footer);
     assert_contains('FIT-TEXT IDENTITY LINE', $footer);
     assert_contains('"fitText":true', $footer);
-    assert_contains('signature-device PLACEMENT restrictions are binding', $footer);
-    assert_contains('ONLY when the direction explicitly makes it site-wide', $footer);
     assert_contains('NEVER set `"tagName":"footer"`', $footer);
     assert_contains('External/social links use only an exact URL present in the SITE SPEC', $footer);
     assert_contains('NEVER invent `is-style-none`, `is-style-plain`', $footer);

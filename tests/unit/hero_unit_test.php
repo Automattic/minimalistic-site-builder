@@ -230,10 +230,6 @@ test('HeroUnit rejects partial blueprints and contradictory portable contract pr
             $input['above_fold_contract']['regions']['text_safe'] = ['logical' => 'start', 'physical' => 'left'];
             return $input;
         },
-        'signature-drift' => static function (array $input): array {
-            $input['above_fold_contract']['signature_device'] = ['use' => 'invented', 'budget' => 1];
-            return $input;
-        },
         'action-treatment-drift' => static function (array $input): array {
             $input['above_fold_contract']['primary_action']['treatment'] = 'quiet';
             return $input;
