@@ -61,8 +61,6 @@ function designdir_direction(): array
         ],
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
-        'signature_device' => 'hairline rules with small caps folios',
-        'signature_device_slots' => ['hero', 'body'],
         'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
     ];
 }
@@ -82,8 +80,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Fraunces', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
-    assert_eq('hairline rules with small caps folios', $written['signature_device']);
-    assert_eq(['hero', 'body'], $written['signature_device_slots']);
+    assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
     assert_contains('Seed ', $written['concept_seed']);
     assert_true(!array_key_exists('hero_composition', $written), 'old prose field is gone');
@@ -99,7 +96,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'signature_device', 'signature_device_slots', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     $assigned = $written['hero_blueprint']['recipe'];
@@ -416,16 +413,12 @@ test('format renders the narrative plus the structured fact list', function () {
             ],
         ],
         'image_grade'      => 'monochrome documentary',
-        'signature_device' => 'hairline rules with folios',
-        'signature_device_slots' => ['hero'],
         'concept_seed' => 'must stay hidden',
         'hero_blueprint' => HeroBlueprint::defaultFor('editorial-split'),
     ]);
     assert_contains('# Archivo Silencioso', $text);
     assert_contains('base #F4F1EA', $text);
     assert_contains('heading — Fraunces; weights 900; body — Source Sans 3; weights 400', $text);
-    assert_contains('Signature device', $text);
-    assert_contains('placement slots', strtolower($text));
     assert_contains('monochrome documentary', $text);
     assert_true(!str_contains($text, 'editorial-split'), 'general format excludes hero recipe');
     assert_true(!str_contains($text, 'must stay hidden'), 'general format excludes concept seed');
@@ -999,21 +992,20 @@ test('hero blueprint accessors keep front-page topology out of the general brief
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('invalid signature-device slots degrade to empty and clear hero placement with warnings', function () {
+test('legacy signature-device fields are dropped from the normalized direction', function () {
     $repairs = [];
     $warnings = [];
     $direction = DesignDirectionStep::normalize([
         'description' => 'A complete visual direction.',
         'signature_device' => 'One notched color block.',
-        'signature_device_slots' => ['hero', 'hero', 'somewhere'],
+        'signature_device_slots' => ['hero'],
         'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('editorial-split'), [
             'signature_device_use' => 'Place the notch beside the headline.',
         ]),
     ], 'editorial-split', 'Seed bytes', $repairs, $warnings);
-    assert_eq([], $direction['signature_device_slots']);
-    assert_eq('', $direction['hero_blueprint']['signature_device_use']);
-    assert_true(count($warnings) >= 2);
-    assert_contains('signature_device_slots', implode(' ', $warnings));
+    assert_true(!array_key_exists('signature_device', $direction));
+    assert_true(!array_key_exists('signature_device_slots', $direction));
+    assert_true(!array_key_exists('signature_device_use', $direction['hero_blueprint']));
 });
 
 test('every cataloged hero recipe bears an image (the image-free poster is retired)', function () {

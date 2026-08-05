@@ -26,8 +26,8 @@ use Automattic\SiteBuild\Warnings;
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, signature device placement, and a separately consumed
- *         structured front-page hero blueprint).
+ *         image grade, and a separately consumed structured front-page hero
+ *         blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
  * THREE concept seeds — each one string: an evocative title plus one vivid
@@ -89,9 +89,6 @@ final class DesignDirectionStep implements Step
 
     /** Exact operator/evaluation override for the code-owned hero catalog. */
     public const HERO_RECIPE_ENV = 'HERO_RECIPE';
-
-    /** Slots in which the one global signature device may appear. */
-    public const SIGNATURE_DEVICE_SLOTS = ['header', 'hero', 'body', 'closing', 'footer'];
 
     public function __construct(
         private Llm $llm,
@@ -280,8 +277,6 @@ final class DesignDirectionStep implements Step
             'shape'            => 'sharp',
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
-            'signature_device' => '',
-            'signature_device_slots' => [],
             'concept_seed'     => $seed,
             'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
@@ -555,20 +550,9 @@ final class DesignDirectionStep implements Step
 
         HeroComposition::assertKnown($assignedRecipe);
 
-        $signatureDevice = trim((string) ($raw['signature_device'] ?? ''));
-        $signatureSlots = self::normalizeSignatureDeviceSlots(
-            $raw['signature_device_slots'] ?? null,
-            $signatureDevice,
-            $repairs,
-            $warnings,
-        );
         $blueprint = HeroBlueprint::normalize(
             $raw['hero_blueprint'] ?? null,
             $assignedRecipe,
-            [
-                'signature_device' => $signatureDevice,
-                'signature_device_slots' => $signatureSlots,
-            ],
             $repairs,
             $warnings,
         );
@@ -623,8 +607,6 @@ final class DesignDirectionStep implements Step
             // commits to ONE profile the downstream steps can gate on.
             'motion'           => $motion,
             'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
-            'signature_device' => $signatureDevice,
-            'signature_device_slots' => $signatureSlots,
             'concept_seed'     => $conceptSeed,
             'hero_blueprint'   => $blueprint,
         ];
@@ -881,23 +863,9 @@ final class DesignDirectionStep implements Step
             $facts[] = "- **Motion**: {$motion} — {$meaning}." . ($note !== '' ? " Motion note: {$note}" : '');
         }
 
-        foreach ([
-            'signature_device' => 'Signature device',
-            'image_grade'      => 'Image grade (all imagery)',
-        ] as $key => $label) {
-            $value = trim((string) ($direction[$key] ?? ''));
-            if ($value !== '') {
-                $facts[] = "- **{$label}**: {$value}";
-            }
-        }
-
-        $signatureDevice = trim((string) ($direction['signature_device'] ?? ''));
-        if ($signatureDevice !== '') {
-            $slots = is_array($direction['signature_device_slots'] ?? null)
-                ? array_values(array_map('strval', $direction['signature_device_slots']))
-                : [];
-            $facts[] = '- **Signature device placement slots**: '
-                . ($slots === [] ? 'none — do not place the device' : implode(', ', $slots));
+        $imageGrade = trim((string) ($direction['image_grade'] ?? ''));
+        if ($imageGrade !== '') {
+            $facts[] = "- **Image grade (all imagery)**: {$imageGrade}";
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
@@ -944,10 +912,7 @@ final class DesignDirectionStep implements Step
         }
         $repairs = [];
         $warnings = [];
-        $normalized = HeroBlueprint::normalize($blueprint, $recipe, [
-            'signature_device' => $direction['signature_device'] ?? '',
-            'signature_device_slots' => $direction['signature_device_slots'] ?? [],
-        ], $repairs, $warnings);
+        $normalized = HeroBlueprint::normalize($blueprint, $recipe, $repairs, $warnings);
         if ($normalized !== $blueprint) {
             throw new \RuntimeException(
                 'designDirection.json hero_blueprint is not normalized (the producing step must persist its fixed point)'
@@ -1070,67 +1035,6 @@ final class DesignDirectionStep implements Step
         return in_array($shape, self::SHAPES, true) ? $shape : null;
     }
 
-    /**
-     * Normalize the explicit placement budget without parsing motif prose.
-     * Any invalid list for a real device degrades as a whole to [] so a
-     * partially trusted list cannot accidentally duplicate the global motif.
-     *
-     * @param mixed        $raw
-     * @param list<string> $repairs
-     * @param list<string> $warnings
-     * @return list<string>
-     */
-    private static function normalizeSignatureDeviceSlots(
-        mixed $raw,
-        string $signatureDevice,
-        array &$repairs,
-        array &$warnings,
-    ): array {
-        if ($signatureDevice === '') {
-            if ($raw !== null && $raw !== []) {
-                $repairs[] = 'designDirection.json: field signature_device_slots authored '
-                    . self::describe($raw)
-                    . ' delivered []; disposition cleared because signature_device is empty';
-            }
-            return [];
-        }
-
-        if (!is_array($raw) || !array_is_list($raw)) {
-            $warnings[] = 'designDirection.json: field signature_device_slots authored '
-                . self::describe($raw)
-                . ' delivered []; disposition removed invalid/missing placement budget without inferring from prose';
-            return [];
-        }
-
-        $slots = [];
-        $valid = count($raw) <= 2;
-        foreach ($raw as $slot) {
-            if (!is_string($slot)) {
-                $valid = false;
-                continue;
-            }
-            $normalized = strtolower(trim($slot));
-            if (!in_array($normalized, self::SIGNATURE_DEVICE_SLOTS, true)
-                || in_array($normalized, $slots, true)) {
-                $valid = false;
-                continue;
-            }
-            $slots[] = $normalized;
-            if ($slot !== $normalized) {
-                $repairs[] = 'designDirection.json: field signature_device_slots authored '
-                    . self::describe($slot) . ' delivered ' . self::describe($normalized)
-                    . '; disposition canonicalized';
-            }
-        }
-
-        if (!$valid) {
-            $warnings[] = 'designDirection.json: field signature_device_slots authored '
-                . self::describe($raw)
-                . ' delivered []; disposition removed invalid placement budget without inferring from prose';
-            return [];
-        }
-        return $slots;
-    }
 
     /** Coerce a raw motion value onto the fixed profile list. */
     private static function motionProfile(mixed $raw): string

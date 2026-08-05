@@ -82,11 +82,7 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'image_grade' => 'warm kodachrome color, soft golden light, gentle film grain',
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
-        'signature_device' => 'hairline rules with small caps folios',
-        'signature_device_slots' => ['hero', 'footer'],
-        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('cinematic-safe-zone'), [
-            'signature_device_use' => 'Use one hairline folio beside the proposition.',
-        ]),
+        'hero_blueprint' => HeroBlueprint::defaultFor('cinematic-safe-zone'),
     ]]);
     // Concurrent group, request order is [theme-json, page-plan(home), page-plan(menu)]:
     // theme-json (json) — translates the committed design direction into tokens

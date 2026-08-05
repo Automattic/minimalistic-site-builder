@@ -5,14 +5,25 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\BlockDocumentRecovery;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonDecoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 use Automattic\SiteBuild\CodeFences;
 use Automattic\SiteBuild\MarkupSalvage;
 use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\Warnings;
 
 /** Project-free normalization shared by every generated markup unit. */
 final class GeneratedMarkup
 {
+    /** Generated blocks whose primary rendered purpose is copy, not a surface. */
+    private const COPY_BLOCKS = [
+        'heading', 'paragraph', 'list', 'list-item', 'quote', 'pullquote', 'verse',
+        'site-title', 'site-tagline', 'post-title',
+    ];
+
     /**
      * Strip an accidental code fence, require block markup, repair common
      * malformed preset references, strip script-capable markup, and salvage a
@@ -143,7 +154,424 @@ final class GeneratedMarkup
         } catch (\RuntimeException $e) {
             throw new \RuntimeException("part '{$key}': {$e->getMessage()}");
         }
-        return $salvage['markup'];
+        return self::stripTextBlockShadow($salvage['markup'], $key, $repairs, $warnings);
+    }
+
+    /**
+     * Remove box and text shadows from generated copy blocks.
+     *
+     * Shadow presets are surface atmosphere for media, cards, and covers. On
+     * a text block a box-shadow traces the block's bounding box, so an offset
+     * or multi-color preset renders as detached bars flanking the copy
+     * (audited: pulso5's "RGB Misregister" preset on the hero H1 drew a cyan
+     * rule left and an orange rule right of the headline). Typography
+     * textShadow is the same visual defect through a second executable style
+     * path. Remove both paths from headings, paragraphs, lists, and editorial
+     * quote blocks while retaining shadows on media and surface blocks.
+     *
+     * Comment JSON is decoded into typed objects and duplicate object keys are
+     * deep-merged before mutation. This keeps `{}` distinct from `[]` and
+     * prevents a later LayoutFixer duplicate-key merge from resurrecting a
+     * shadow that ordinary last-key-wins decoding hid. The corresponding
+     * inline declaration is removed in the same block transaction, so a later
+     * fix-blocks failure cannot leave the visible shadow behind.
+     *
+     * @param list<array<string,mixed>> $repairs
+     * @param list<string>              $warnings
+     */
+    public static function stripTextBlockShadow(
+        string $markup,
+        string $part,
+        array &$repairs = [],
+        array &$warnings = [],
+    ): string {
+        $document = BlockMarkup::parse($markup);
+        $ops = [];
+        $pendingWarnings = [];
+        $pendingRepairs = [];
+        $strippedBlocks = 0;
+        $strippedDeclarations = 0;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            $copyName = str_starts_with($name, 'core/') ? substr($name, strlen('core/')) : $name;
+            if (!in_array($copyName, self::COPY_BLOCKS, true)) {
+                continue;
+            }
+            $block = "wp:{$name}[{$index}]";
+            $blockOps = [];
+            $blockWarnings = [];
+            $blockRepairs = [];
+
+            try {
+                $decoded = self::typedBlockAttributes($document->openingComment($index));
+                $attrs = $decoded['attrs'] ?? null;
+
+                /** @var list<array{path:string,property:string,value:JsonValue}> $removed */
+                $removed = [];
+                $style = $attrs?->get('style');
+                if ($style instanceof JsonObject) {
+                    $shadow = $style->get('shadow');
+                    if (
+                        $style->has('shadow')
+                        && $shadow instanceof JsonValue
+                        && self::isHarmfulShadowValue($shadow)
+                    ) {
+                        $removed[] = ['path' => 'style.shadow', 'property' => 'box-shadow', 'value' => $shadow];
+                        $style->remove('shadow');
+                    }
+                    $typography = $style->get('typography');
+                    if ($typography instanceof JsonObject) {
+                        $textShadow = $typography->get('textShadow');
+                        if (
+                            $typography->has('textShadow')
+                            && $textShadow instanceof JsonValue
+                            && self::isHarmfulShadowValue($textShadow)
+                        ) {
+                            $removed[] = [
+                                'path' => 'style.typography.textShadow',
+                                'property' => 'text-shadow',
+                                'value' => $textShadow,
+                            ];
+                            $typography->remove('textShadow');
+                            if (count($typography) === 0) {
+                                $style->remove('typography');
+                            }
+                        }
+                    }
+                    if (count($style) === 0) {
+                        $attrs?->remove('style');
+                    }
+                }
+
+                // Inspect both visible properties even when comment attributes
+                // omit them. Inline-only shadows otherwise survive whenever a
+                // later block-fixer transaction abandons this file.
+                $ownHtml = $document->ownHtml($index);
+                $inline = self::withoutOwnInlineShadowDeclarations(
+                    $ownHtml,
+                    ['box-shadow', 'text-shadow'],
+                );
+                if ($removed === [] && $inline['html'] === $ownHtml) {
+                    continue;
+                }
+
+                // Stage the whole unit before publishing any op or warning.
+                // An exception below abandons only this block and retains its
+                // pre-transformation bytes.
+                if ($removed !== [] && $attrs instanceof JsonObject) {
+                    $opening = self::serializeTypedOpeningComment($name, $attrs, $document->isVoid($index));
+                    $blockOps[] = [
+                        'start' => $document->openingOffset($index),
+                        'length' => $document->openingLength($index),
+                        'content' => $opening,
+                    ];
+                    $mergedPaths = $decoded['mergedPaths'] ?? [];
+                    if ($mergedPaths !== []) {
+                        $blockRepairs[] = [
+                            'code' => 'duplicate-block-attribute-keys-merged',
+                            'part' => $part,
+                            'block' => $block,
+                            'paths' => $mergedPaths,
+                            'authored' => 'duplicate object keys in the generated block comment',
+                            'delivered' => 'one deep-merged typed JSON object retaining non-conflicting members',
+                            'disposition' => 'repaired',
+                        ];
+                    }
+                }
+                if ($inline['html'] !== $ownHtml) {
+                    $blockOps[] = [
+                        'start' => $document->openingOffset($index) + $document->openingLength($index),
+                        'length' => strlen($ownHtml),
+                        'content' => $inline['html'],
+                    ];
+                }
+
+                foreach ($removed as $declaration) {
+                    $blockWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored "
+                        . $declaration['path'] . '=' . Warnings::value($declaration['value']->toNative())
+                        . '; delivered=removed; disposition=shadow styling was removed from generated copy while '
+                        . 'the block content and non-shadow styling were retained';
+                }
+                foreach ($inline['removedDeclarations'] as $declaration) {
+                    $blockWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored saved HTML style."
+                        . $declaration['property'] . '=' . Warnings::value($declaration['value'])
+                        . '; delivered=removed; disposition=the visible inline shadow declaration was removed at '
+                        . 'intake so the delivered copy stays shadow-free even if later serialization stops';
+                }
+                foreach ($inline['removedMalformedStyles'] as $authoredStyle) {
+                    $blockWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored saved HTML style="
+                        . Warnings::value($authoredStyle)
+                        . '; delivered=removed; disposition=the malformed inline style could not safely isolate its '
+                        . 'shadow declaration, so the smallest safe style attribute was removed with the copy retained';
+                }
+
+                array_push($ops, ...$blockOps);
+                array_push($pendingWarnings, ...$blockWarnings);
+                array_push($pendingRepairs, ...$blockRepairs);
+                $strippedBlocks++;
+                $strippedDeclarations += count($removed)
+                    + count($inline['removedDeclarations'])
+                    + count($inline['removedMalformedStyles']);
+            } catch (\InvalidArgumentException|\RuntimeException $error) {
+                $pendingWarnings[] = "file='theme/parts/{$part}.html'; block='{$block}'; authored shadow repair failure="
+                    . Warnings::value($error->getMessage())
+                    . '; delivered="original block bytes"; disposition=the block-local shadow transaction was '
+                    . 'abandoned without partial edits and the residual block was queued for later repair';
+            }
+        }
+        if ($ops === []) {
+            array_push($warnings, ...$pendingWarnings);
+            return $markup;
+        }
+
+        usort($ops, static fn (array $left, array $right): int => $right['start'] <=> $left['start']);
+        $out = $markup;
+        foreach ($ops as $op) {
+            $out = substr_replace($out, $op['content'], $op['start'], $op['length']);
+        }
+        array_push($warnings, ...$pendingWarnings);
+        array_push($repairs, ...$pendingRepairs);
+        $repairs[] = [
+            'code' => 'text-block-shadow-stripped',
+            'part' => $part,
+            'authored' => "{$strippedDeclarations} shadow declaration(s) across {$strippedBlocks} generated copy block(s)",
+            'delivered' => 'the same copy without box-shadow or text-shadow chrome',
+            'disposition' => 'repaired',
+        ];
+        return $out;
+    }
+
+    /**
+     * Decode one block opener without collapsing duplicate keys or JSON object
+     * shapes. Invalid authored JSON throws into the caller's block-local
+     * transaction; an attrs-less opener is the normal null case.
+     *
+     * @return array{attrs:JsonObject,mergedPaths:list<string>}|null
+     */
+    private static function typedBlockAttributes(string $opening): ?array
+    {
+        if (preg_match('/\s(?<attrs>\{.*\})\s+\/?-->\z/s', $opening, $match) !== 1) {
+            return null;
+        }
+        $decoder = new JsonDecoder($match['attrs'], mergeDuplicateObjectKeys: true);
+        $attrs = $decoder->decode();
+        if (!$attrs instanceof JsonObject) {
+            throw new \InvalidArgumentException('block comment attributes must decode to an object');
+        }
+        return ['attrs' => $attrs, 'mergedPaths' => $decoder->mergedDuplicateKeyPaths()];
+    }
+
+    private static function serializeTypedOpeningComment(string $name, JsonObject $attrs, bool $void): string
+    {
+        $json = count($attrs) === 0 ? '' : ' ' . JsJsonEncoder::serializeAttributes($attrs);
+        return '<!-- wp:' . $name . $json . ' ' . ($void ? '/' : '') . '-->';
+    }
+
+    /** Falsey/reset values cannot draw a shadow and need no repair or warning. */
+    private static function isHarmfulShadowValue(JsonValue $value): bool
+    {
+        $native = $value->toNative();
+        if (is_string($native) && self::isInertCssShadowValue($native)) {
+            return false;
+        }
+        return $native !== null && $native !== false && $native !== 0.0 && $native !== '';
+    }
+
+    private static function isInertCssShadowValue(string $value): bool
+    {
+        $withoutComments = preg_replace('~/\*.*?\*/~s', '', $value) ?? $value;
+        $withoutImportant = preg_replace('/\s*!important\s*\z/i', '', $withoutComments) ?? $withoutComments;
+        return in_array(
+            strtolower(trim($withoutImportant)),
+            ['', 'none', 'initial', 'unset', 'revert', 'revert-layer'],
+            true,
+        );
+    }
+
+    /**
+     * Remove selected declarations from the first saved-HTML tag owned by a
+     * block. A malformed style containing a target property is removed as one
+     * attribute; unrelated malformed attributes are left byte-identical.
+     *
+     * @param list<string> $properties
+     * @return array{
+     *   html:string,
+     *   removedDeclarations:list<array{property:string,value:string}>,
+     *   removedMalformedStyles:list<string>
+     * }
+     */
+    private static function withoutOwnInlineShadowDeclarations(string $ownHtml, array $properties): array
+    {
+        if (preg_match(
+            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            $ownHtml,
+            $opening,
+            PREG_OFFSET_CAPTURE,
+        ) !== 1) {
+            if (preg_match('/(?:box-shadow|text-shadow)\s*:/i', $ownHtml) === 1) {
+                throw new \RuntimeException('saved HTML shadow declaration has no safely isolated opening tag');
+            }
+            return ['html' => $ownHtml, 'removedDeclarations' => [], 'removedMalformedStyles' => []];
+        }
+
+        $tag = $opening['tag'][0];
+        $removedDeclarations = [];
+        $removedMalformedStyles = [];
+        $styles = self::htmlAttributes($tag, 'style');
+        for ($index = count($styles) - 1; $index >= 0; $index--) {
+            $style = $styles[$index];
+            $filtered = self::withoutInlineStyleProperties($style['value'], $properties);
+            if ($filtered === null) {
+                if (!self::containsInlineStyleProperty($style['value'], $properties)) {
+                    continue;
+                }
+                $removedMalformedStyles[] = $style['value'];
+                $replacement = '';
+            } elseif ($filtered['removed'] === []) {
+                continue;
+            } elseif (trim($filtered['style']) === '') {
+                array_push($removedDeclarations, ...$filtered['removed']);
+                $replacement = '';
+            } else {
+                array_push($removedDeclarations, ...$filtered['removed']);
+                $replacement = substr_replace(
+                    $style['attribute'],
+                    $filtered['style'],
+                    $style['valueOffset'] - $style['attributeOffset'],
+                    strlen($style['value']),
+                );
+            }
+            $tag = substr_replace(
+                $tag,
+                $replacement,
+                $style['attributeOffset'],
+                strlen($style['attribute']),
+            );
+        }
+
+        if ($tag === $opening['tag'][0]) {
+            return ['html' => $ownHtml, 'removedDeclarations' => [], 'removedMalformedStyles' => []];
+        }
+        return [
+            'html' => substr_replace($ownHtml, $tag, $opening['tag'][1], strlen($opening['tag'][0])),
+            'removedDeclarations' => $removedDeclarations,
+            'removedMalformedStyles' => $removedMalformedStyles,
+        ];
+    }
+
+    /**
+     * Remove CSS properties without splitting inside strings, comments, or
+     * function arguments. Null means the declaration list was malformed.
+     *
+     * @param list<string> $properties
+     * @return array{style:string,removed:list<array{property:string,value:string}>}|null
+     */
+    private static function withoutInlineStyleProperties(string $style, array $properties): ?array
+    {
+        $properties = array_fill_keys(array_map('strtolower', $properties), true);
+        $segments = [];
+        $start = 0;
+        $quote = null;
+        $parentheses = 0;
+        $inComment = false;
+        $length = strlen($style);
+        for ($index = 0; $index < $length; $index++) {
+            $character = $style[$index];
+            if ($inComment) {
+                if ($character === '*' && ($style[$index + 1] ?? '') === '/') {
+                    $inComment = false;
+                    $index++;
+                }
+                continue;
+            }
+            if ($quote !== null) {
+                if ($character === '\\') {
+                    if ($index + 1 >= $length) {
+                        return null;
+                    }
+                    $index++;
+                } elseif ($character === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($character === '/' && ($style[$index + 1] ?? '') === '*') {
+                $inComment = true;
+                $index++;
+            } elseif ($character === '"' || $character === "'") {
+                $quote = $character;
+            } elseif ($character === '\\') {
+                if ($index + 1 >= $length) {
+                    return null;
+                }
+                $index++;
+            } elseif ($character === '(') {
+                $parentheses++;
+            } elseif ($character === ')') {
+                if ($parentheses === 0) {
+                    return null;
+                }
+                $parentheses--;
+            } elseif ($character === ';' && $parentheses === 0) {
+                $segments[] = ['declaration' => substr($style, $start, $index - $start), 'separator' => ';'];
+                $start = $index + 1;
+            }
+        }
+        if ($quote !== null || $inComment || $parentheses !== 0) {
+            return null;
+        }
+        $segments[] = ['declaration' => substr($style, $start), 'separator' => ''];
+
+        $out = '';
+        $removed = [];
+        foreach ($segments as $segment) {
+            $declaration = trim($segment['declaration']);
+            if ($declaration === '') {
+                $out .= $segment['declaration'] . $segment['separator'];
+                continue;
+            }
+            if (
+                preg_match(
+                    '/^(?:\/\*.*?\*\/\s*)*([\-\w]+)(?:\s|\/\*.*?\*\/)*:(.*)\z/s',
+                    $declaration,
+                    $property,
+                ) !== 1
+            ) {
+                return null;
+            }
+            if (
+                isset($properties[strtolower($property[1])])
+                && !self::isInertCssShadowValue($property[2])
+            ) {
+                $removed[] = [
+                    'property' => strtolower($property[1]),
+                    'value' => trim($property[2]),
+                ];
+                continue;
+            }
+            $out .= $segment['declaration'] . $segment['separator'];
+        }
+        return ['style' => $removed === [] ? $style : $out, 'removed' => $removed];
+    }
+
+    /** @param list<string> $properties */
+    private static function containsInlineStyleProperty(string $style, array $properties): bool
+    {
+        $pattern = implode('|', array_map(static fn (string $property): string => preg_quote($property, '~'), $properties));
+        if ($pattern === '' || preg_match_all(
+            '~(?:\A|;)\s*(?:/\*.*?\*/\s*)*(?:' . $pattern . ')(?:\s|/\*.*?\*/)*:(?<value>[^;]*)~is',
+            $style,
+            $matches,
+        ) === false) {
+            return false;
+        }
+        foreach ($matches['value'] as $value) {
+            if (is_string($value) && !self::isInertCssShadowValue($value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1497,7 +1925,7 @@ final class GeneratedMarkup
     /**
      * Remove text blocks that verbatim repeat the hero H1's reading text.
      *
-     * Models render "echo"/"misregistration" signature devices as a second
+     * Models render decorative "echo"/"misregistration" treatments as a second
      * heading or paragraph carrying the exact headline text pulled over the
      * H1 with negative margins — duplicated reading copy that renders as
      * garble and reads twice to assistive tech. Removing an exact duplicate
