@@ -59,7 +59,8 @@ test('SectionUnit generates normalized markup from self-contained input', functi
         0.42,
     );
 
-    $markup = $unit->generate(section_unit_input());
+    $result = $unit->generate(section_unit_input());
+    $markup = $result->markup;
 
     assert_eq(1, $llm->completeCalls, 'one direct unit execution uses one single completion');
     assert_eq(0, $llm->completeBatchCalls, 'the single-unit wrapper does not create a batch');
@@ -91,6 +92,12 @@ test('SectionUnit generates normalized markup from self-contained input', functi
 
     assert_true(!str_contains($markup, '```'), 'code fence removed');
     assert_contains('var:preset|spacing|xl', $markup, 'preset reference normalized');
+    assert_eq([], $result->warnings, 'semantics-preserving normalization is not a durable warning');
+    assert_eq(
+        ['response-fence-removed', 'preset-reference-canonicalized'],
+        array_column($result->repairs, 'code')
+    );
+    assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
 });
 
 test('SectionUnit rejects a response without block markup', function () {
@@ -116,6 +123,37 @@ test('SectionUnit request preparation does not call the LLM', function () {
     assert_contains('decoded-theme-sentinel', $prompt);
     assert_eq(0, $llm->completeCalls);
     assert_eq(0, $llm->completeBatchCalls);
+});
+
+test('SectionUnit keeps front-page hero topology out of the general prompt', function () {
+    $input = section_unit_input();
+    $input['outline'] = '1. UNIT-OUTLINE-SENTINEL (content)';
+    $input['section']['role'] = 'content';
+    $input['section']['type'] = 'feature';
+    $input['hero_blueprint'] = [
+        'recipe' => 'typographic-poster',
+        'signature_device_use' => 'SECTION-HERO-BLUEPRINT-LEAK-SENTINEL',
+    ];
+    $input['above_fold_contract'] = 'SECTION-ABOVE-FOLD-LEAK-SENTINEL';
+
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request($input);
+    $prompt = section_unit_request_text($request);
+
+    foreach ([
+        'SECTION-HERO-BLUEPRINT-LEAK-SENTINEL',
+        'SECTION-ABOVE-FOLD-LEAK-SENTINEL',
+        'ASSIGNED HERO COMPOSITION',
+        'NORMALIZED HERO BLUEPRINT',
+        'hero-composition--',
+        'Hero notes',
+        'hero-entrance',
+    ] as $heroOnly) {
+        assert_true(!str_contains($prompt, $heroOnly), "general section prompt excludes {$heroOnly}");
+    }
+    assert_contains('UNIT-HEADER-CONTRACT-SENTINEL', $prompt, 'recipe-free opening relation remains supported');
 });
 
 test('SectionUnit layered request loses only cache marker separators', function () {

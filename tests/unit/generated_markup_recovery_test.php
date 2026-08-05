@@ -537,3 +537,315 @@ test('recovery stays linear on a run of unclosed opaque elements', function () {
     assert_eq(GM_ROOT, GeneratedMarkup::normalize($text, 'p'));
     assert_true(microtime(true) - $start < 1.0, 'scans 24 KB of unclosed <code> in under a second');
 });
+
+test('recovery closes a delimiter attrs object missing one closing brace', function () {
+    // Regression: tbilisi2 lost its whole contact-hours section (and, in
+    // cascade, the hero CTA) because one nested group's attrs JSON was one
+    // `}` short. The repair closes the object; the misplaced key is inert.
+    $brokenAttrs = '{"style":{"spacing":{"padding":{"top":"var:preset|spacing|lg"},'
+        . '"elements":{"link":{"color":{"text":"var:preset|color|base"}}}},'
+        . '"layout":{"type":"constrained"}';  // <- one closing brace short
+    $inner = '<!-- wp:group ' . $brokenAttrs . ' -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>Reserve a table</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $text = '<!-- wp:group {"tagName":"section","anchor":"contact","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="contact">' . $inner . '</section>'
+        . '<!-- /wp:group -->';
+
+    $warnings = [];
+    $repairs = [];
+    $out = GeneratedMarkup::normalize($text, 'p', $warnings, $repairs);
+    assert_contains('Reserve a table', $out);
+    assert_contains($brokenAttrs . '}', $out, 'attrs object is closed in place');
+    $codes = array_column($repairs, 'code');
+    assert_true(in_array('delimiter-attrs-braces-closed', $codes, true), 'repair row recorded');
+
+    // Idempotent: the repaired document passes through unchanged.
+    $w2 = [];
+    $again = [];
+    assert_eq($out, GeneratedMarkup::normalize($out, 'p', $w2, $again));
+    assert_true(!in_array('delimiter-attrs-braces-closed', array_column($again, 'code'), true));
+});
+
+test('attrs brace repair leaves other malformed attrs alone', function () {
+    $notes = [];
+    $text = '<!-- wp:group {"style":"unterminated string} --><div></div><!-- /wp:group -->';
+    assert_eq($text, GeneratedMarkup::closeUnbalancedDelimiterAttrs($text, $notes));
+    assert_eq([], $notes);
+});
+
+test('dedupeHeadlineEcho removes a text block repeating the H1 verbatim', function () {
+    // Regression: pulso3 executed a "misregistered echo" signature device as
+    // a second paragraph carrying the exact headline text pulled over the H1
+    // with a negative margin — duplicated reading copy rendering as garble.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="hero">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Two nights the room drops into neon</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"textColor":"accent","style":{"spacing":{"margin":{"top":"-1.6rem"}}}} -->'
+        . '<p class="has-accent-color has-text-color" style="margin-top:-1.6rem">Two nights the room drops into neon</p>'
+        . '<!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph --><p>DJ sets until dawn.</p><!-- /wp:paragraph -->'
+        . '</section>'
+        . '<!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($doc, 'p', $repairs);
+    assert_eq(1, substr_count($out, 'Two nights the room drops into neon'), 'echo removed, H1 kept');
+    assert_contains('DJ sets until dawn.', $out);
+    assert_true(in_array('headline-echo-removed', array_column($repairs, 'code'), true));
+
+    // Idempotent + leaves distinct copy alone.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($out, 'p', $again));
+    assert_eq([], $again);
+});
+
+test('dedupeHeadlineEcho never matches short repeated labels or parts without an H1', function () {
+    $short = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Menu</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Menu</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $r = [];
+    assert_eq($short, Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($short, 'p', $r));
+    $noH1 = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:heading --><h2 class="wp-block-heading">A heading of some length</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>A heading of some length</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq($noH1, Automattic\SiteBuild\Units\GeneratedMarkup::dedupeHeadlineEcho($noH1, 'p', $r));
+    assert_eq([], $r);
+});
+
+test('stripEyebrowChipChrome unboxes a filled/bordered eyebrow but not the copy container', function () {
+    // Regression: pulso22 executed a "translucent veil" signature device as
+    // two nested filled+bordered groups boxing the eyebrow line above the H1
+    // — a caption chip that reads as UI, not typography.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","backgroundColor":"contrast","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group has-contrast-background-color has-background" id="hero">'
+        . '<!-- wp:group {"style":{"color":{"background":"#8ff3d626"},"border":{"radius":"2px","width":"1px","color":"#8ff3d63d"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color has-background" style="border-color:#8ff3d63d;border-width:1px;background-color:#8ff3d626">'
+        . '<!-- wp:group {"backgroundColor":"secondary","style":{"border":{"width":"1px","color":"#c9a7ff33"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color has-secondary-background-color has-background" style="border-color:#c9a7ff33;border-width:1px">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Two nights · Stockholm Art District</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:group -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Neon Pulse Festival</h1><!-- /wp:heading -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($doc, 'p', $repairs);
+    assert_true(!str_contains($out, '"border"'), 'chip borders stripped from attrs');
+    assert_true(!str_contains($out, '"background":"#8ff3d626"'), 'chip custom background stripped from attrs');
+    assert_true(!str_contains($out, '"backgroundColor":"secondary"'), 'chip preset background stripped');
+    // The stale inline style survives until fix-blocks re-serializes (shared
+    // convention), but the class hooks that keep the chrome visible are gone.
+    assert_true(!str_contains($out, 'has-border-color'), 'border class hooks removed');
+    assert_true(!str_contains($out, 'has-secondary-background-color'), 'preset background class hook removed');
+    assert_contains('Two nights · Stockholm Art District', $out, 'eyebrow text untouched');
+    assert_contains('"backgroundColor":"contrast"', $out, 'root surface (wraps the H1) untouched');
+    assert_contains('has-contrast-background-color', $out, 'root surface classes untouched');
+    assert_true(in_array('eyebrow-chip-chrome-stripped', array_column($repairs, 'code'), true));
+
+    // Idempotent once unboxed.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($out, 'p', $again));
+    assert_eq([], $again);
+});
+
+test('stripEyebrowChipChrome ignores media/action wrappers, long text, and heroes without an H1', function () {
+    // A pre-H1 group holding a button is an action cluster, not an eyebrow
+    // chip; a bordered block after the H1 is composition, not an eyebrow.
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:group {"backgroundColor":"accent","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-accent-background-color has-background">'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/tickets/">Get Tickets</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons --></div><!-- /wp:group -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Neon Pulse Festival</h1><!-- /wp:heading -->'
+        . '<!-- wp:group {"style":{"border":{"width":"1px","color":"#ffffff"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-border-color" style="border-width:1px;border-color:#ffffff">'
+        . '<!-- wp:paragraph --><p>Warehouse sets after dark.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $r = [];
+    assert_eq($doc, Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($doc, 'p', $r));
+    assert_eq([], $r);
+
+    $noH1 = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:paragraph {"backgroundColor":"accent"} --><p class="has-accent-background-color has-background">Label</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq($noH1, Automattic\SiteBuild\Units\GeneratedMarkup::stripEyebrowChipChrome($noH1, 'p', $r));
+    assert_eq([], $r);
+});
+
+test('fullBleedCoverAlignment upgrades a wide-capped cover-band hero to align:full', function () {
+    // Regression: portfolio26's framed canvas capped the layered-poster cover
+    // at alignwide, insetting the hero band from both viewport edges. The
+    // page-opening hero is exempt from the framed mat.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--layered-poster","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group hero-composition--layered-poster" id="hero">'
+        . '<!-- wp:cover {"url":"x.jpg","dimRatio":40,"minHeight":80,"minHeightUnit":"vh","align":"wide","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-cover alignwide hero-composition__media" style="min-height:80vh">'
+        . '<div class="wp-block-cover__inner-container">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Twenty Years of Witness</h1><!-- /wp:heading -->'
+        . '</div></div><!-- /wp:cover -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::fullBleedCoverAlignment($doc, 'p', $repairs);
+    assert_eq(2, substr_count($out, '"align":"full"'), 'root group and cover both upgraded');
+    assert_true(!str_contains($out, '"align":"wide"'), 'wide cap removed from attrs');
+    assert_true(!str_contains($out, 'alignwide'), 'stale alignwide class token removed');
+    assert_true(in_array('hero-full-bleed-alignment', array_column($repairs, 'code'), true));
+
+    // Idempotent: an already-full hero is untouched byte-for-byte.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::fullBleedCoverAlignment($out, 'p', $again));
+    assert_eq([], $again);
+});
+
+test('wrapper repair synthesizes closers for container frames crossed at a closer', function () {
+    // Regression: pulso4 lost its whole 24KB schedule section because a
+    // day-grid's wp:columns/wp:column never closed and the root closer
+    // crossed both frames (leaving the saved HTML two </div>s short).
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"schedule","layout":{"type":"constrained"}} -->' . "\n"
+        . '<section class="wp-block-group" id="schedule">' . "\n"
+        . '<!-- wp:columns -->' . "\n"
+        . '<div class="wp-block-columns"><!-- wp:column -->' . "\n"
+        . '<div class="wp-block-column"><!-- wp:paragraph --><p>Friday sets.</p><!-- /wp:paragraph -->' . "\n"
+        . '</section>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($doc, $notes);
+    assert_true($out !== $doc, 'crossed frames were repaired');
+    assert_contains('<!-- /wp:column -->', $out);
+    assert_contains('<!-- /wp:columns -->', $out);
+    assert_eq(1, count($notes));
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // Idempotent: the repaired document passes through untouched.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($out, $again));
+    assert_eq([], $again);
+});
+
+test('wrapper repair closes a container suffix missing its wrapper tag', function () {
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph --><p>Copy.</p><!-- /wp:paragraph -->' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($doc, $notes);
+    assert_contains('</div><!-- /wp:group -->', $out);
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+    assert_eq(1, count($notes));
+});
+
+test('wrapper repair leaves stray closers and content-bearing shells alone', function () {
+    $stray = '<!-- wp:paragraph --><p>Text.</p><!-- /wp:paragraph --><!-- /wp:group -->';
+    $n = [];
+    assert_eq($stray, Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedWrapperClosers($stray, $n));
+    assert_eq([], $n);
+});
+
+test('clampHeroTopPadding lowers xl to sm on media-led and to md on copy-led hero roots', function () {
+    // Regression: lumen4's panorama-rail root carried padding-top:xl, opening
+    // a dead band under the header that pushed the whole rail below the fold.
+    $mediaLed = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--panorama-rail","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
+        . '<section id="hero" class="wp-block-group hero-composition--panorama-rail" style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)">'
+        . '<!-- wp:image {"className":"hero-composition__media"} --><figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt="AI_IMAGE: a | b | c | landscape"/></figure><!-- /wp:image -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::clampHeroTopPadding($mediaLed, 'p', $repairs);
+    assert_contains('"top":"var:preset|spacing|sm"', $out);
+    assert_contains('padding-top:var(--wp--preset--spacing--sm)', $out);
+    assert_contains('padding-bottom:var(--wp--preset--spacing--xl)', $out, 'bottom padding untouched');
+    assert_true(in_array('hero-top-padding-clamped', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::clampHeroTopPadding($out, 'p', $again));
+    assert_eq([], $again);
+
+    // Copy-led root keeps its padding.
+    $copyLed = str_replace(
+        ['<!-- wp:image {"className":"hero-composition__media"} --><figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt="AI_IMAGE: a | b | c | landscape"/></figure><!-- /wp:image -->'
+            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'],
+        ['<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'],
+        $mediaLed
+    );
+    $r2 = [];
+    $copyOut = Automattic\SiteBuild\Units\GeneratedMarkup::clampHeroTopPadding($copyLed, 'p', $r2);
+    assert_contains('"top":"var:preset|spacing|md"', $copyOut, 'copy-led xl clamps to md');
+    assert_contains('padding-top:var(--wp--preset--spacing--md)', $copyOut);
+    assert_true(in_array('hero-top-padding-clamped', array_column($r2, 'code'), true));
+
+    // A copy-led root already at md keeps its padding.
+    $atMd = str_replace(
+        ['var:preset|spacing|xl', 'var(--wp--preset--spacing--xl)'],
+        ['var:preset|spacing|md', 'var(--wp--preset--spacing--md)'],
+        $copyLed
+    );
+    $r3 = [];
+    assert_eq($atMd, Automattic\SiteBuild\Units\GeneratedMarkup::clampHeroTopPadding($atMd, 'p', $r3));
+    assert_eq([], $r3);
+});
+
+test('a `>`-truncated delimiter comment is closed when its attrs fragment parses', function () {
+    // Regression: pulso11 lost its workshops section to
+    // `<!-- wp:paragraph {"align":"center"> <p …` — attrs lost `"}` and the
+    // comment its ` -->`, swallowing real content at the HTML layer.
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph {"align":"center">' . "\n"
+        . '<p class="has-text-align-center">A practical session.</p>' . "\n"
+        . '<!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($doc, $notes);
+    assert_contains('<!-- wp:paragraph {"align":"center"} -->', $out);
+    assert_contains('A practical session.', $out);
+    assert_eq(1, count($notes));
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // A `>` inside a legitimate attribute string never matches.
+    $legit = '<!-- wp:paragraph {"metadata":{"name":"a > b"}} --><p>x</p><!-- /wp:paragraph -->';
+    $n2 = [];
+    assert_eq($legit, Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($legit, $n2));
+    assert_eq([], $n2);
+});
+
+test('a surplus closing brace inside a delimiter attrs run is removed', function () {
+    // Regression: atlas11 lost its generated header to
+    // `"blockGap":"0"}}},"layout"` — one extra brace closed the style object
+    // early and made the root opener unparseable.
+    $doc = '<!-- wp:group {"className":"site-header","style":{"spacing":{"blockGap":"0"}}},"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group site-header"><!-- wp:paragraph --><p>Nav</p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedDelimiterAttrs($doc, $notes);
+    assert_contains('"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}', $out);
+    assert_eq(1, count($notes));
+    assert_contains('surplus', $notes[0]);
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeUnbalancedDelimiterAttrs($out, $again));
+    assert_eq([], $again);
+});
+
+test('an attrs-less delimiter that dropped its terminator is closed', function () {
+    // Regression: pulso12 lost its ticketing section to `<!-- wp:paragraph>`
+    // — the ` -->` terminator dropped entirely on an attrs-less delimiter.
+    $doc = '<!-- wp:group {"layout":{"type":"constrained"}} -->' . "\n"
+        . '<div class="wp-block-group"><!-- wp:paragraph> <!-- /wp:paragraph -->' . "\n"
+        . '<!-- wp:paragraph --><p>790 SEK</p><!-- /wp:paragraph --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $notes = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($doc, $notes);
+    assert_contains('<!-- wp:paragraph --> <!-- /wp:paragraph -->', $out);
+    assert_contains('790 SEK', $out);
+    assert_eq(1, count($notes));
+    Automattic\SiteBuild\BlockDocumentRecovery::assertComplete($out);
+
+    // Idempotent; a legit closer never matches.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::closeTruncatedDelimiterComment($out, $again));
+    assert_eq([], $again);
+});

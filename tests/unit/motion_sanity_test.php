@@ -242,11 +242,13 @@ test('motion-sanity step visits sections in plan order so the hero wins page bud
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('motion vocabulary agrees between the static kit and section prompt', function () {
+test('motion vocabulary agrees between the static kit and its isolated authoring prompts', function () {
     $sectionPrompt = file_get_contents(repo_path('prompts/section.md'));
+    $heroPrompt = file_get_contents(repo_path('prompts/hero.md'));
     $kitCss = file_get_contents(repo_path('assets/motion/motion.css'));
     foreach (Motion::kitClasses() as $class) {
-        assert_contains("`{$class}`", $sectionPrompt, "{$class} documented for sections");
+        $authoringPrompt = $class === 'hero-entrance' ? $heroPrompt : $sectionPrompt;
+        assert_contains("`{$class}`", $authoringPrompt, "{$class} documented at its authoring boundary");
         assert_contains(".{$class}", $kitCss, "{$class} implemented by the kit");
     }
     foreach (['`calm`:', '`energetic`:', '`dramatic`:'] as $profileGuidance) {
@@ -254,8 +256,8 @@ test('motion vocabulary agrees between the static kit and section prompt', funct
     }
     assert_contains(
         'Do NOT automatically pair `hero-entrance` with `ken-burns`',
-        $sectionPrompt,
-        'prompt rejects the repeated hero recipe seen in live builds'
+        $heroPrompt,
+        'dedicated hero prompt rejects the repeated motion pairing seen in live builds'
     );
     assert_contains(
         '`ambient-drift` + `hover-lift`',

@@ -12,7 +12,7 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * One-shot: build a site from a prompt, report tokens + wall time, then boot it
  * in WordPress Playground and print the URL.
  *
- *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--multi-page] [--pages="Home, Menu, About"] [--with-images]
+ *   php bin/create.php "A cozy neighborhood bakery" [--slug=my-bakery] [--port=9400] [--no-serve] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images]
  *
  * --no-serve builds and reports metrics without launching Playground.
  * --multi-page lets the site plan inner pages beyond the homepage (off by
@@ -33,6 +33,12 @@ $serve = true;
 $withImages = false;
 $multiPage = false;
 $pagesArg = null;
+$writingDirection = null;
+$heroCanvas = null;
+$heroMediaModesArg = null;
+$maxHeroImagesArg = null;
+$heroCopyCapacity = null;
+$usage = "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images]\n";
 foreach (array_slice($argv, 1) as $a) {
     if (str_starts_with($a, '--slug=')) {
         $slug = substr($a, 7);
@@ -40,6 +46,16 @@ foreach (array_slice($argv, 1) as $a) {
         $port = (int) substr($a, 7);
     } elseif (str_starts_with($a, '--pages=')) {
         $pagesArg = substr($a, 8);
+    } elseif (str_starts_with($a, '--writing-direction=')) {
+        $writingDirection = substr($a, 20);
+    } elseif (str_starts_with($a, '--hero-canvas=')) {
+        $heroCanvas = substr($a, 14);
+    } elseif (str_starts_with($a, '--hero-media-modes=')) {
+        $heroMediaModesArg = substr($a, 19);
+    } elseif (str_starts_with($a, '--max-hero-images=')) {
+        $maxHeroImagesArg = substr($a, 18);
+    } elseif (str_starts_with($a, '--hero-copy-capacity=')) {
+        $heroCopyCapacity = substr($a, 21);
     } elseif ($a === '--no-serve') {
         $serve = false;
     } elseif ($a === '--with-images') {
@@ -50,13 +66,13 @@ foreach (array_slice($argv, 1) as $a) {
         $prompt = $a;
     } else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images]\n");
+        fwrite(STDERR, $usage);
         exit(1);
     }
 }
 
 if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/create.php \"<prompt>\" [--slug=...] [--port=9400] [--no-serve] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images]\n");
+    fwrite(STDERR, $usage);
     exit(1);
 }
 
@@ -70,6 +86,27 @@ if ($pagesArg !== null && !$multiPage) {
 $pages = $pagesArg === null ? []
     : array_values(array_filter(array_map('trim', explode(',', $pagesArg)), static fn (string $t): bool => $t !== ''));
 
+$designConstraints = [];
+if ($heroCanvas !== null) {
+    $designConstraints['hero_canvas'] = $heroCanvas;
+}
+if ($heroMediaModesArg !== null) {
+    $designConstraints['allowed_hero_media_modes'] = array_values(array_filter(
+        array_map('trim', explode(',', $heroMediaModesArg)),
+        static fn (string $mode): bool => $mode !== '',
+    ));
+}
+if ($maxHeroImagesArg !== null) {
+    if (preg_match('/^\d+$/', $maxHeroImagesArg) !== 1) {
+        fwrite(STDERR, "--max-hero-images must be an integer from 1 through 2.\n");
+        exit(1);
+    }
+    $designConstraints['max_hero_images'] = (int) $maxHeroImagesArg;
+}
+if ($heroCopyCapacity !== null) {
+    $designConstraints['hero_copy_capacity'] = $heroCopyCapacity;
+}
+
 $llm = make_llm();
 $builder = new SiteBuilder(
     llm: $llm,
@@ -80,7 +117,19 @@ $builder = new SiteBuilder(
 );
 // Without an explicit --slug, createProject picks a free random adjective-noun
 // name rather than echoing the whole prompt.
-$project = $builder->createProject($prompt, $slug, $multiPage, $pages);
+try {
+    $project = $builder->createProject(
+        prompt: $prompt,
+        slug: $slug,
+        multiPage: $multiPage,
+        pages: $pages,
+        designConstraints: $designConstraints,
+        writingDirection: $writingDirection,
+    );
+} catch (InvalidArgumentException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    exit(1);
+}
 $pipeline = $builder->pipeline();
 
 // step id => model, so the report can show which model each LLM step ran on.

@@ -14,10 +14,12 @@
         "area",
         "audience",
         "language",
+        "writing_direction",
         "persona_name",
         "email_domain",
         "invented",
         "visual_vibe",
+        "subject_is_visual_work",
         "animation_request",
         "sections",
         "pages"
@@ -68,6 +70,14 @@
                 "es-AR"
             ]
         },
+        "writing_direction": {
+            "type": "string",
+            "enum": [
+                "ltr",
+                "rtl"
+            ],
+            "description": "Normalized logical writing direction derived from a caller override or the site language."
+        },
         "persona_name": {
             "type": "string",
             "description": "Full name for the person represented by a personal site; empty for non-personal sites."
@@ -93,6 +103,10 @@
         "visual_vibe": {
             "type": "string",
             "description": "Brief overall mood phrase, without concrete colors, fonts, spacing, or layout choices."
+        },
+        "subject_is_visual_work": {
+            "type": "boolean",
+            "description": "Whether the site's core offering is itself visual imagery, used to require an image-bearing hero composition."
         },
         "animation_request": {
             "type": "string",

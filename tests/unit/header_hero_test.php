@@ -1,16 +1,42 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Steps\HeaderHeroStep;
-use Automattic\SiteBuild\Steps\SectionsStep;
 
 /**
  * Unit tests for HeaderHeroStep: the deterministic backstop for the
- * header/hero composition contract (BIGR-735).
+ * header/hero composition contract (BIGR-735) and the resolved header
+ * behavior artifact (BIGR-762).
  */
+
+/**
+ * Resolve and persist a delivery-phase contract for a step fixture, so the
+ * step exercises the same two-phase flow the pipeline runs.
+ *
+ * @param array<int,array<string,mixed>> $pages
+ * @param array<string,mixed>|null $theme themeContext for token verification
+ */
+function hh_above_fold($project, array $pages, string $recipe = 'focal-subject-stage', ?array $theme = null, ?string $forced = null): array
+{
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor($recipe),
+        'full-bleed',
+        $theme ?? hh_theme_json(),
+        ['stable_id' => 'hh-step-fixture', 'writing_direction' => 'ltr', 'page_count' => count($pages)],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        $forced,
+    );
+    $project->writeJson('aboveFold.json', $delivery);
+    return $delivery;
+}
+
 
 /** A minimal stacked-style header part with the given top-level attrs JSON. */
 function hh_header(string $topAttrs, string $inner = '<!-- wp:site-title /-->'): string
@@ -52,6 +78,7 @@ function hh_theme_json(): array
     return ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]];
 }
 
+
 test('overlay-to-solid removes legacy inner positioning and wires closed state classes', function () {
     $markup = hh_header('{"backgroundColor":"base","style":{"position":{"type":"sticky","top":"0px"},"spacing":{"padding":{"top":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}}');
     $behavior = [
@@ -64,7 +91,7 @@ test('overlay-to-solid removes legacy inner positioning and wires closed state c
         'topTreatment' => HeaderBehavior::TREATMENT_TRANSPARENT,
         'scrolledTreatment' => HeaderBehavior::TREATMENT_SOLID,
     ];
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_OVERLAY, 'Demo', [], false, $behavior);
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_OVERLAY, 'Demo', [], false, behavior: $behavior);
 
     assert_contains('header-behavior-overlay-to-solid', $result['markup']);
     assert_contains('header-start-transparent', $result['markup']);
@@ -77,7 +104,7 @@ test('overlay-to-solid removes legacy inner positioning and wires closed state c
     assert_contains('"spacing"', $result['markup'], 'unrelated style survives');
 
     // Idempotent: a compliant overlay header is untouched.
-    $again = HeaderHeroStep::fixHeader($result['markup'], SectionsStep::MODE_OVERLAY, 'Demo', [], false, $behavior);
+    $again = HeaderHeroStep::fixHeader($result['markup'], AboveFoldContract::MODE_OVERLAY, 'Demo', [], false, behavior: $behavior);
     assert_eq($result['markup'], $again['markup']);
     assert_eq([], $again['notes']);
 });
@@ -98,13 +125,10 @@ test('nested header Groups neutralize Atlas-style global vertical padding', func
 
     $result = HeaderHeroStep::fixHeader(
         $markup,
-        SectionsStep::MODE_STACKED,
+        AboveFoldContract::MODE_STACKED,
         'Atlas Field',
         [],
-        false,
-        null,
-        $theme,
-    );
+        false, behavior: null, theme: $theme);
     $doc = BlockMarkup::parse($result['markup']);
     $groups = array_values(array_filter($doc->indices(), static fn (int $i): bool => $doc->name($i) === 'group'));
     assert_eq(3, count($groups));
@@ -121,13 +145,10 @@ test('nested header Groups neutralize Atlas-style global vertical padding', func
 
     $again = HeaderHeroStep::fixHeader(
         $result['markup'],
-        SectionsStep::MODE_STACKED,
+        AboveFoldContract::MODE_STACKED,
         'Atlas Field',
         [],
-        false,
-        null,
-        $theme,
-    );
+        false, behavior: null, theme: $theme);
     assert_eq($result['markup'], $again['markup'], 'repair reaches a fixed point');
     assert_eq([], $again['notes']);
 });
@@ -145,7 +166,7 @@ test('nested Group repair preserves explicit double-decker and partial-side padd
         . '<div class="wp-block-group"><!-- wp:site-title /--><!-- wp:navigation /--></div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->';
 
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', [], false, null, $theme);
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', [], false, behavior: null, theme: $theme);
     $doc = BlockMarkup::parse($result['markup']);
     $groups = array_values(array_filter($doc->indices(), static fn (int $i): bool => $doc->name($i) === 'group'));
     $strip = $doc->attrs($groups[1]) ?? [];
@@ -170,7 +191,7 @@ test('nested Group repair skips malformed containers and continues with healthy 
         . '<!-- wp:site-title /--></div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->';
 
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', [], false, null, $theme);
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', [], false, behavior: null, theme: $theme);
     $doc = BlockMarkup::parse($result['markup']);
     $groups = array_values(array_filter($doc->indices(), static fn (int $i): bool => $doc->name($i) === 'group'));
     assert_eq('bad', ($doc->attrs($groups[1]) ?? [])['style']);
@@ -186,7 +207,7 @@ test('stacked mode removes a stray header-overlay class from attrs and saved HTM
     $markup = '<!-- wp:group {"className":"header-overlay","layout":{"type":"constrained"}} -->' . "\n"
         . '<div class="wp-block-group header-overlay"><!-- wp:site-title /--></div>' . "\n"
         . '<!-- /wp:group -->';
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo');
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
 
     assert_true(!str_contains($result['markup'], 'header-overlay'), 'class gone from attrs AND html');
     assert_eq(1, count($result['notes']));
@@ -209,7 +230,7 @@ test('position cleanup moves root persistence but preserves descendant relative 
         . '<div class="wp-block-group" style="position:relative"><!-- wp:site-title /--></div>'
         . '<!-- /wp:group --></div><!-- /wp:group -->';
 
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', [], false, $behavior);
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', [], false, behavior: $behavior);
     assert_true(!str_contains($result['markup'], 'position:sticky'), 'root inline persistence moved to the shell');
     assert_true(!str_contains($result['markup'], '"type":"sticky"'), 'root block position removed');
     assert_contains('position:relative', $result['markup'], 'descendant inline layout survives');
@@ -230,7 +251,7 @@ test('inline position cleanup never rewrites visible text content', function () 
         . '</div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->';
 
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo');
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
     assert_contains($copy, $result['markup'], 'visible copy survives verbatim');
     assert_true(
         !str_contains($result['markup'], 'style="position:sticky'),
@@ -249,7 +270,7 @@ test('a leading non-block comment does not shield the real root from position cl
         . '<!-- wp:site-title /--></div>'
         . '<!-- /wp:group -->';
 
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo');
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
     assert_contains('<!-- generated note -->', $result['markup'], 'leading comment survives');
     assert_true(
         !str_contains($result['markup'], 'position:absolute'),
@@ -267,12 +288,12 @@ test('a display-scale site title is lowered to heading, syncing the saved HTML',
         '{"backgroundColor":"base","layout":{"type":"constrained"}}',
         '<!-- wp:site-title {"fontSize":"section-title"} /-->'
     );
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo');
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo');
     assert_contains('"fontSize":"heading"', $result['markup']);
     assert_contains("lowered to 'heading'", implode(' ', $result['notes']));
 
     // The one sanctioned exception: a forced oversized-wordmark build.
-    $forced = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', [], true);
+    $forced = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', [], true);
     assert_contains('"fontSize":"section-title"', $forced['markup']);
     assert_eq([], $forced['notes']);
 });
@@ -289,7 +310,7 @@ test('an over-wide nav row collapses to overlayMenu:always instead of wrapping',
         . '<div class="wp-block-button"><a class="wp-block-button__link">Entradas</a></div>'
         . '<!-- /wp:button --></div><!-- /wp:buttons -->';
     $markup = hh_header('{"backgroundColor":"base","layout":{"type":"constrained"}}', '<!-- wp:site-title /-->' . $nav);
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Pulso Sur Centro Cultural');
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Pulso Sur Centro Cultural');
 
     assert_contains('"overlayMenu":"always"', $result['markup']);
     assert_contains('overlayMenu:always', implode(' ', $result['notes']));
@@ -301,7 +322,7 @@ test('an over-wide nav row collapses to overlayMenu:always instead of wrapping',
         . '<!-- wp:navigation-link {"label":"Menu"} /--><!-- wp:navigation-link {"label":"Visit"} /-->'
         . '<!-- /wp:navigation -->'
     );
-    $fits = HeaderHeroStep::fixHeader($short, SectionsStep::MODE_STACKED, 'Demo');
+    $fits = HeaderHeroStep::fixHeader($short, AboveFoldContract::MODE_STACKED, 'Demo');
     assert_eq($short, $fits['markup']);
 });
 
@@ -311,10 +332,10 @@ test('a page-list nav is measured by the site page titles', function () {
         '<!-- wp:site-title /--><!-- wp:navigation --><!-- wp:page-list /--><!-- /wp:navigation -->'
     );
     $longTitles = ['Our Seasonal Tasting Menu', 'Private Dining and Events', 'Reservations and Contact', 'The Story of the House'];
-    $result = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', $longTitles);
+    $result = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', $longTitles);
     assert_contains('"overlayMenu":"always"', $result['markup']);
 
-    $fits = HeaderHeroStep::fixHeader($markup, SectionsStep::MODE_STACKED, 'Demo', ['Menu', 'Visit']);
+    $fits = HeaderHeroStep::fixHeader($markup, AboveFoldContract::MODE_STACKED, 'Demo', ['Menu', 'Visit']);
     assert_eq($markup, $fits['markup']);
 });
 
@@ -343,22 +364,6 @@ test('capCovers lowers a viewport-scale cover to 80vh and leaves the rest alone'
     assert_eq($ok, HeaderHeroStep::capCovers($ok)['markup']);
     $px = str_replace('"minHeightUnit":"vh"', '"minHeightUnit":"px"', hh_cover('600'));
     assert_eq($px, HeaderHeroStep::capCovers($px)['markup']);
-});
-
-test('expectedMode follows the plan and lets a forced archetype override it', function () {
-    $overlayPages = [['slug' => 'home', 'front' => true, 'sections' => [
-        ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image'],
-    ]]];
-    putenv(SectionsStep::ARCHETYPE_ENV);
-    assert_eq(SectionsStep::MODE_OVERLAY, HeaderHeroStep::expectedMode($overlayPages, ''));
-    try {
-        putenv(SectionsStep::ARCHETYPE_ENV . '=standard-row');
-        assert_eq(SectionsStep::MODE_STACKED, HeaderHeroStep::expectedMode($overlayPages, ''));
-        putenv(SectionsStep::ARCHETYPE_ENV . '=minimal-overlay');
-        assert_eq(SectionsStep::MODE_OVERLAY, HeaderHeroStep::expectedMode([], ''));
-    } finally {
-        putenv(SectionsStep::ARCHETYPE_ENV);
-    }
 });
 
 test('header behavior selection uses site depth and excludes forced tall chrome', function () {
@@ -566,10 +571,14 @@ test('the step repairs parts, writes the behavior artifact, and keeps successful
             'slug' => 'home', 'title' => 'Home', 'front' => true,
             'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
         ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]], 'focal-subject-stage');
         $project->writeText('theme/parts/header.html', hh_header('{"className":"header-overlay","layout":{"type":"constrained"}}') . "\n");
         $project->writeText('theme/parts/page-home--hero.html', hh_cover('92') . "\n");
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         assert_true(!str_contains($project->readText('theme/parts/header.html'), 'header-overlay'), 'stacked mode strips the stray overlay hook');
@@ -594,6 +603,10 @@ test('the step protects a resumed legacy theme with global Group padding', funct
             'slug' => 'home', 'title' => 'Home', 'front' => true,
             'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
         ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]], 'focal-subject-stage');
         $project->writeText(
             'theme/parts/header.html',
             '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}} -->'
@@ -602,8 +615,14 @@ test('the step protects a resumed legacy theme with global Group padding', funct
                 . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
                 . '<!-- wp:navigation /--></div><!-- /wp:group --></div><!-- /wp:group -->',
         );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
@@ -630,12 +649,22 @@ test('removing authored sticky behavior from a resolved static header warns acti
             'slug' => 'home', 'title' => 'Home', 'front' => true,
             'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
         ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]], 'focal-subject-stage');
         $project->writeText(
             'theme/parts/header.html',
             hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
         );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         $warnings = $project->readText('warnings.json');
@@ -671,9 +700,19 @@ test('the step warns actionably when an unreadable palette downgrades sticky-sof
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
         ]]);
+        hh_above_fold($project, [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ], 'focal-subject-stage');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         $artifact = $project->readJson(HeaderBehavior::FILE);
@@ -700,12 +739,22 @@ test('moving authored root sticky behavior to a sticky outer shell is a warning-
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
         ]]);
+        hh_above_fold($project, [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ], 'focal-subject-stage');
         $project->writeText(
             'theme/parts/header.html',
             hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
         );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         assert_eq(HeaderBehavior::STICKY_SOFT, $project->readJson(HeaderBehavior::FILE)['behavior']);
@@ -728,6 +777,15 @@ test('the step downgrades a planned overlay when generated opening markup loses 
                 'background' => 'image',
             ]],
         ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]], 'cinematic-safe-zone');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
         $project->writeText(
             'theme/parts/page-home--hero.html',
@@ -736,7 +794,7 @@ test('the step downgrades a planned overlay when generated opening markup loses 
                 . '</div><!-- /wp:group -->',
         );
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         $artifact = $project->readJson(HeaderBehavior::FILE);
@@ -765,16 +823,26 @@ test('the step keeps overlay when generated opening markup begins with a real co
                 'background' => 'image',
             ]],
         ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]], 'cinematic-safe-zone');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
         $project->writeText(
             'theme/parts/page-home--hero.html',
-            '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
-                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":40} -->'
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":50,"overlayColor":"contrast"} -->'
                 . '<div class="wp-block-cover alignfull"></div><!-- /wp:cover -->'
                 . '</div><!-- /wp:group -->',
         );
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         $artifact = $project->readJson(HeaderBehavior::FILE);
@@ -804,7 +872,7 @@ test('the step rejects opening markup whose image does not actually meet the vie
             . $cover . '</div><!-- /wp:group -->',
     ];
 
-    putenv(SectionsStep::ARCHETYPE_ENV);
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
     foreach ($cases as $label => $openingMarkup) {
         with_project('builder_hh_opening_edge_', function ($project) use ($label, $openingMarkup) {
             $project->writeJson('siteSpec.json', ['name' => 'Demo']);
@@ -819,6 +887,15 @@ test('the step rejects opening markup whose image does not actually meet the vie
                     'background' => 'image',
                 ]],
             ]]]);
+        hh_above_fold($project, [[
+                'slug' => 'home', 'title' => 'Home', 'front' => true,
+                'sections' => [[
+                    'slug' => 'hero',
+                    'role' => 'hero',
+                    'layout_archetype' => 'full-bleed-cover',
+                    'background' => 'image',
+                ]],
+            ]], 'cinematic-safe-zone');
             $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
             $project->writeText('theme/parts/page-home--hero.html', $openingMarkup);
 
@@ -848,9 +925,19 @@ test('the step writes earned sticky treatments into both the header part and the
             ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
             ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
         ]]);
+        hh_above_fold($project, [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ], 'focal-subject-stage');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-        putenv(SectionsStep::ARCHETYPE_ENV);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
         $artifact = $project->readJson(HeaderBehavior::FILE);
@@ -886,8 +973,18 @@ test('theme.json page background feeds the transparent-start contrast contract i
                 ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
                 ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
             ]]);
+        hh_above_fold($project, [
+                ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+                ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+            ], 'focal-subject-stage');
             $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
-            putenv(SectionsStep::ARCHETYPE_ENV);
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
+            putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
             (new HeaderHeroStep())->run($project);
             return $project->readJson(HeaderBehavior::FILE);
         });
@@ -913,4 +1010,204 @@ test('theme.json page background feeds the transparent-start contrast contract i
             "{$spelling}: the revealed dark page background must deny the transparent start",
         );
     }
+});
+test('dedupeAgainstHero strips echoed caption lines and the duplicate-label CTA', function () {
+    $hero = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p>SAN TELMO · BUENOS AIRES</p><!-- /wp:paragraph -->'
+        . '<!-- wp:heading {"level":1} --><h1>Vegetarian Argentine Cuisine</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>A long standfirst that runs well past twelve words so it can never'
+        . ' participate in echo matching against header chrome at all.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Reserve a Table</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->';
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:paragraph {"fontSize":"caption"} --><p>San Telmo, Buenos Aires</p><!-- /wp:paragraph -->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p>Open Tuesday to Sunday</p><!-- /wp:paragraph -->'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/visit/">Reserve a Table</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->'
+    );
+    $action = ['label' => 'Reserve a Table', 'intent' => 'Invite a booking', 'destination' => '/visit/'];
+    $result = HeaderHeroStep::dedupeAgainstHero($header, $hero, $action);
+
+    assert_true(!str_contains($result['markup'], 'San Telmo'), 'echoed location line removed');
+    assert_contains('Open Tuesday to Sunday', $result['markup'], 'non-echoed chrome line survives');
+    assert_true(!str_contains($result['markup'], 'Reserve a Table'), 'duplicate CTA removed');
+    assert_true(!str_contains($result['markup'], 'wp:buttons'), 'empty buttons wrapper removed with its only button');
+    assert_contains('wp:site-title', $result['markup'], 'identity chrome untouched');
+    assert_eq(2, count($result['notes']));
+
+    // Idempotent, and a header with nothing duplicated is untouched.
+    $again = HeaderHeroStep::dedupeAgainstHero($result['markup'], $hero, $action);
+    assert_eq($result['markup'], $again['markup']);
+    assert_eq([], $again['notes']);
+});
+
+test('dedupeAgainstHero leaves distinct chrome, partial overlap, and other-label buttons alone', function () {
+    $hero = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>Bienvenidos — San Telmo, Buenos Aires</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    // Shares only the place name with the hero eyebrow — different information.
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:paragraph {"fontSize":"caption"} --><p>Vegetarian kitchen · Calle Defensa, San Telmo</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="/menu/">See the Menu</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->'
+    );
+    $action = ['label' => 'Reserve a Table', 'intent' => 'Invite a booking', 'destination' => '/visit/'];
+    $result = HeaderHeroStep::dedupeAgainstHero($header, $hero, $action);
+    assert_eq($header, $result['markup']);
+    assert_eq([], $result['notes']);
+
+    // No contract action: buttons are never candidates.
+    $none = HeaderHeroStep::dedupeAgainstHero($header, $hero, null);
+    assert_eq($header, $none['markup']);
+});
+
+test('the step repairs header and hero parts without promoting successful repairs to warnings', function () {
+    $tmp = sys_get_temp_dir() . '/builder_hh_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'front' => true,
+        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base', 'primary_action' => null]],
+    ]];
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', AboveFoldContract::resolve(
+        pages: $pages,
+        blueprint: HeroBlueprint::defaultFor('focal-subject-stage'),
+        canvas: 'full-bleed',
+        themeContext: ['version' => 3],
+        siteContext: ['stable_id' => 'demo', 'writing_direction' => 'ltr', 'page_count' => 1],
+        footerContext: ['archetype' => 'typographic-billboard', 'surface' => 'base'],
+    ));
+    $project->writeText('theme/parts/header.html', hh_header('{"className":"header-overlay","layout":{"type":"constrained"}}') . "\n");
+    $project->writeText('theme/parts/page-home--hero.html', hh_cover('92') . "\n");
+
+    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+    (new HeaderHeroStep())->run($project);
+
+    assert_true(!str_contains($project->readText('theme/parts/header.html'), 'header-overlay'), 'stacked mode strips the stray overlay hook');
+    assert_contains('"minHeight":80', $project->readText('theme/parts/page-home--hero.html'));
+    assert_true(!$project->exists('warnings.json'), 'successful contract repairs stay in the step report only');
+    assert_true($project->exists('logs/header-hero.txt'));
+    $report = $project->readText('logs/header-hero.txt');
+    assert_contains("removed the legacy 'header-overlay' class", $report);
+    assert_contains('cover minHeight 92vh lowered to 80vh', $report);
+    assert_eq('final', $project->readJson('aboveFold.json')['phase'] ?? null);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the step removes an exact hero action when its delivered target is dead', function () {
+    $tmp = sys_get_temp_dir() . '/builder_hh_dead_action_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $action = ['label' => 'Missing work', 'intent' => 'Reach missing work.', 'destination' => '/missing/'];
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'sections' => [[
+            'slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'mixed-width-editorial',
+            'background' => 'contrast', 'primary_action' => $action,
+        ]],
+    ]];
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('focal-subject-stage'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'dead-action', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'standard-row',
+    );
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $delivery);
+    $project->writeText('theme/parts/header.html', hh_header('{"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}}'));
+    $sibling = '<!-- wp:paragraph --><p>Sibling proposition remains.</p><!-- /wp:paragraph -->';
+    $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/missing/">Missing work</a></div><!-- /wp:button -->';
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+        . $sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group -->';
+    $project->writeText('theme/parts/page-home--hero.html', $hero);
+
+    (new HeaderHeroStep())->run($project);
+
+    $deliveredHero = $project->readText('theme/parts/page-home--hero.html');
+    assert_contains($sibling, $deliveredHero);
+    assert_true(!str_contains($deliveredHero, $button));
+    assert_eq(null, $project->readJson('pages.json')['pages'][0]['sections'][0]['primary_action']);
+    $final = $project->readJson('aboveFold.json');
+    assert_eq('final', $final['phase']);
+    assert_eq(null, $final['primary_action']);
+    assert_eq('primary-action-target-lost', $final['degradations'][0]['code']);
+    $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+    assert_contains('code="primary-action-target-lost"', $warnings);
+    assert_contains('/missing/', $warnings);
+    assert_contains('delivered=removed', $warnings);
+    assert_contains('dead control', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('late overlay protection loss produces matching stacked bytes and the 80vh cover cap', function () {
+    $tmp = sys_get_temp_dir() . '/builder_hh_overlay_loss_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    $pages = [[
+        'slug' => 'home', 'title' => 'Home', 'path' => '/', 'front' => true,
+        'sections' => [[
+            'slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'full-bleed-cover',
+            'background' => 'image', 'primary_action' => null,
+        ]],
+    ]];
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('cinematic-safe-zone'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'overlay-loss', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'minimal-overlay',
+    );
+    assert_eq('overlay', $delivery['header']['mode']);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $delivery);
+    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+    $hero = str_replace(
+        '<!-- wp:group {"layout":{"type":"constrained"}} -->',
+        '<!-- wp:group {"className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->',
+        hh_cover('92'),
+    );
+    $hero = str_replace(
+        'class="wp-block-group"',
+        'class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first"',
+        $hero,
+    );
+    $project->writeText('theme/parts/page-home--hero.html', $hero);
+
+    (new HeaderHeroStep())->run($project);
+
+    $final = $project->readJson('aboveFold.json');
+    assert_eq('stacked', $final['header']['mode']);
+    assert_eq('standard-row', $final['header']['archetype']);
+    assert_eq('overlay-support-lost', $final['degradations'][0]['code']);
+    $header = $project->readText('theme/parts/header.html');
+    assert_true(!str_contains($header, 'header-overlay'));
+    assert_contains('header-archetype--standard-row', $header);
+    assert_contains('"backgroundColor":"base"', $header);
+    assert_contains('has-base-background-color', $header);
+    assert_contains('has-background', $header);
+    assert_contains('has-contrast-color', $header);
+    assert_contains('has-text-color', $header);
+    assert_contains('"minHeight":80', $project->readText('theme/parts/page-home--hero.html'));
+    $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+    assert_contains('code="overlay-support-lost"', $warnings);
+    assert_contains('top-edge protection', $warnings);
+    assert_contains('delivered="stacked"', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
 });

@@ -78,3 +78,29 @@ test('refine-prompt keeps the original when the model returns empty', function (
         assert_true(!isset($meta['original_prompt']), 'empty refinement must not rewrite meta');
     });
 });
+
+test('refine-prompt preserves caller-owned hero constraints and writing direction', function () {
+    with_project('builder_refine_', function (Project $project) {
+        seed_refine_meta($project, prompt: 'An Arabic architecture archive');
+        $meta = $project->readJson('meta.json');
+        $meta['writing_direction'] = 'rtl';
+        $meta['design_constraints'] = [
+            'hero_canvas' => 'framed',
+            'allowed_hero_media_modes' => ['cover-image', 'foreground-image'],
+            'max_hero_images' => 1,
+            'hero_copy_capacity' => 'standard',
+        ];
+        $meta['hero_assignment'] = ['source' => 'batch', 'requested_recipe' => 'framed-portrait'];
+        $project->writeJson('meta.json', $meta);
+        $llm = new FakeLlm();
+        $llm->queueText('A refined Arabic architecture archive brief.');
+
+        (new RefinePromptStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        $delivered = $project->readJson('meta.json');
+        assert_eq('rtl', $delivered['writing_direction']);
+        assert_eq($meta['design_constraints'], $delivered['design_constraints']);
+        assert_eq($meta['hero_assignment'], $delivered['hero_assignment']);
+        assert_eq('An Arabic architecture archive', $delivered['original_prompt']);
+    });
+});

@@ -4,8 +4,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/../FakeFontFetcher.php';
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\AboveFoldPartFacts;
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\ContrastMath;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Steps\SectionRhythmStep;
@@ -81,7 +83,10 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         'motion' => 'calm',
         'motion_note' => 'Let the hero settle gently and keep card hover restrained.',
         'signature_device' => 'hairline rules with small caps folios',
-        'hero_composition' => 'full-bleed bakery photo, headline pinned lower-left',
+        'signature_device_slots' => ['hero', 'footer'],
+        'hero_blueprint' => array_merge(HeroBlueprint::defaultFor('cinematic-safe-zone'), [
+            'signature_device_use' => 'Use one hairline folio beside the proposition.',
+        ]),
     ]]);
     // Concurrent group, request order is [theme-json, page-plan(home), page-plan(menu)]:
     // theme-json (json) — translates the committed design direction into tokens
@@ -102,13 +107,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]);
     // page-plan home (json) — ordered list of the front page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.'],
-        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.'],
+        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the contrast overview split below.', 'primary_action' => null],
+        // A third planned section keeps the front plan above the deterministic
+        // thin-plan padding threshold, so parts map 1:1 to the queued texts.
+        ['slug' => 'overview', 'title' => 'Overview', 'role' => 'content', 'type' => 'bakery-story', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast', 'vertical_density' => 'standard', 'handoff' => 'Between the image hero above and the base specials grid below.', 'primary_action' => null],
+        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the contrast overview split above and the footer below.', 'primary_action' => null],
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.'],
-        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.'],
+        ['slug' => 'menu-hero', 'title' => 'Our Menu', 'role' => 'hero', 'type' => 'menu-introduction', 'layout_archetype' => 'centered-stack', 'background' => 'tinted', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base bread list below.', 'primary_action' => null],
+        ['slug' => 'breads', 'title' => 'Breads', 'role' => 'closing', 'type' => 'bread-catalog', 'layout_archetype' => 'list-with-thumbnails', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the tinted page hero above and the footer below.', 'primary_action' => null],
     ]]);
     // sections (raw markup) — disposable cache probe, then header, footer,
     // home's parts, and menu's parts in requests() order
@@ -129,6 +137,13 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         . '<!-- wp:heading {"level":1,"textColor":"base"} --><h1 class="wp-block-heading has-base-color has-text-color">Hero</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
         . '</div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->'
+    );
+    $llm->queueText(
+        '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-contrast-background-color has-base-color has-text-color has-background">'
+        . '<!-- wp:heading --><h2>Our Story</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Artisan bread baked daily.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->'
     );
     // The specials section opts into one generated layout utility (overlap-up)
@@ -170,7 +185,16 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         ".overlap-up {\n    margin-top: -4rem;\n    position: relative;\n    z-index: 2;\n}"
     );
     $builder = make_integration_builder($llm, $tmp);
-    $project = $builder->createProject('A cozy neighborhood bakery', 'demo', multiPage: true);
+    $project = $builder->createProject(
+        'A cozy neighborhood bakery',
+        'demo',
+        multiPage: true,
+        designConstraints: [
+            'allowed_hero_media_modes' => ['cover-image'],
+            'max_hero_images' => 1,
+            'hero_copy_capacity' => 'compact',
+        ],
+    );
     $builder->pipeline()->runThrough($project);
 
     $problems = ThemeValidator::validate($project);
@@ -274,12 +298,31 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // Structural role is constrained independently while semantic section
     // types remain open-ended and survive the complete pipeline.
     $plannedPages = $project->readJson('pages.json')['pages'];
-    assert_eq(['hero', 'closing'], array_column($plannedPages[0]['sections'], 'role'));
-    assert_eq(['immersive-welcome', 'seasonal-specials'], array_column($plannedPages[0]['sections'], 'type'));
+    assert_eq(['hero', 'content', 'closing'], array_column($plannedPages[0]['sections'], 'role'));
+    assert_eq(['immersive-welcome', 'bakery-story', 'seasonal-specials'], array_column($plannedPages[0]['sections'], 'type'));
 
     // Every page's content was inlined into the plugin in plan order, and the
     // transient page parts left the theme.
     $home = $project->readText('plugin/pages/home.html');
+    $direction = $project->readJson('designDirection.json');
+    assert_eq('cinematic-safe-zone', $direction['hero_blueprint']['recipe']);
+    $aboveFold = $project->readJson('aboveFold.json');
+    assert_eq('final', $aboveFold['phase']);
+    assert_eq('cinematic-safe-zone', $aboveFold['recipe']);
+    assert_eq('stacked', $aboveFold['header']['mode'], 'the tinted interior opening rules out one global overlay');
+    assert_eq(null, $aboveFold['primary_action']);
+    assert_contains('hero-composition--cinematic-safe-zone', $home);
+    assert_contains('hero-mobile--stack-media-first', $home);
+    $headerFacts = AboveFoldPartFacts::headerFacts($project->readText('theme/parts/header.html'));
+    assert_eq($aboveFold['header']['mode'], $headerFacts['mode']);
+    assert_eq($aboveFold['header']['archetype'], $headerFacts['archetype']);
+    assert_true(
+        !str_contains(
+            implode("\n", $project->readJson('warnings.json')['validate-theme'] ?? []),
+            'above-fold final validation',
+        ),
+        'downstream serialization preserves the final above-fold contract',
+    );
     assert_contains('>Hero<', $home);
     assert_true(strpos($home, 'Hero') < strpos($home, 'Specials'), 'home sections in plan order');
     assert_contains('>Breads<', $project->readText('plugin/pages/menu.html'));
@@ -310,7 +353,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     // The rhythm pass owned each section root's vertical spacing before the
     // markup moved into the plugin: judge the assembled home page's chunks.
-    [$heroHtml, $specialsHtml] = SectionRhythmStep::splitTopLevel($home);
+    [$heroHtml, $overviewHtml, $specialsHtml] = SectionRhythmStep::splitTopLevel($home);
+    assert_contains('Our Story', $overviewHtml, 'the planned middle section survives assembly in order');
     assert_contains('hero-entrance', $heroHtml, 'first section keeps its page-load entrance');
     assert_contains('ken-burns', $heroHtml, 'first section keeps the page ambient effect');
     $heroBlocks = BlockMarkup::parse($heroHtml);

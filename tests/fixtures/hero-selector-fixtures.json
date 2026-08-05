@@ -1,0 +1,146 @@
+{
+  "fixtures": [
+    {
+      "id": "unrestricted-one",
+      "stable_identifier": "alder-studio",
+      "concept_seed": "Offset paper planes and a measured cobalt edge.",
+      "constraints": {}
+    },
+    {
+      "id": "unrestricted-two",
+      "stable_identifier": "night-market",
+      "concept_seed": "A narrow lantern rhythm opening into quiet space.",
+      "constraints": {
+        "hero_canvas": "full-bleed"
+      }
+    },
+    {
+      "id": "compact-cover",
+      "stable_identifier": "field-notes",
+      "concept_seed": "A landscape field leaves one deliberate quiet edge.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "cover-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "compact"
+      },
+      "eligible": [
+        "cinematic-safe-zone"
+      ]
+    },
+    {
+      "id": "standard-cover",
+      "stable_identifier": "layer-house",
+      "concept_seed": "Controlled paper layers frame one image and bold type.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "cover-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "standard"
+      },
+      "eligible": [
+        "layered-poster"
+      ]
+    },
+    {
+      "id": "standard-foreground-one",
+      "stable_identifier": "portrait-room",
+      "concept_seed": "One contained object sits beside an offset text field.",
+      "constraints": {
+        "hero_canvas": "framed",
+        "allowed_hero_media_modes": [
+          "foreground-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "standard"
+      },
+      "eligible": [
+        "editorial-split",
+        "framed-portrait"
+      ]
+    },
+    {
+      "id": "standard-foreground-two",
+      "stable_identifier": "unequal-columns",
+      "concept_seed": "A wide visual counterweight meets a narrow proposition.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "foreground-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "standard"
+      },
+      "eligible": [
+        "editorial-split",
+        "framed-portrait"
+      ]
+    },
+    {
+      "id": "compact-foreground-one",
+      "stable_identifier": "panorama-ledger",
+      "concept_seed": "A long horizon is indexed by one compact rail.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "foreground-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "compact"
+      },
+      "eligible": [
+        "panorama-rail",
+        "focal-subject-stage"
+      ]
+    },
+    {
+      "id": "compact-foreground-two",
+      "stable_identifier": "single-exhibit",
+      "concept_seed": "One subject carries the stage with deliberate breathing room.",
+      "constraints": {
+        "hero_canvas": "full-bleed",
+        "allowed_hero_media_modes": [
+          "foreground-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "compact"
+      },
+      "eligible": [
+        "panorama-rail",
+        "focal-subject-stage"
+      ]
+    },
+    {
+      "id": "portrait-frame",
+      "stable_identifier": "corpus-seed-2",
+      "concept_seed": "A contained vertical subject.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "foreground-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "standard"
+      },
+      "eligible": [
+        "editorial-split",
+        "framed-portrait"
+      ]
+    },
+    {
+      "id": "horizon-rail",
+      "stable_identifier": "corpus-seed-1",
+      "concept_seed": "A contained vertical subject.",
+      "constraints": {
+        "allowed_hero_media_modes": [
+          "foreground-image"
+        ],
+        "max_hero_images": 1,
+        "hero_copy_capacity": "compact"
+      },
+      "eligible": [
+        "panorama-rail",
+        "focal-subject-stage"
+      ]
+    }
+  ]
+}

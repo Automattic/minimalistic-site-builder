@@ -110,11 +110,12 @@ final class StepComposition
             // declarations), and those must exist when the policies run or
             // repaired markup would bypass them unchecked.
             new NormalizeLayoutStep(),
-            // Deterministic backstop for the header/hero composition contract
-            // the sections step injected into both prompts (BIGR-735). BEFORE
-            // contrast-fix, so its overlay-header lint judges the header's
-            // final overlay/stacked wiring; and BEFORE fix-blocks like every
-            // attribute-editing pass, so the re-serialization syncs the HTML.
+            // Deterministic markup finalizer for the delivery-phase
+            // aboveFold.json contract shared by header, hero, openings, and
+            // the following seam. It runs after section rhythm/layout, writes
+            // the final phase atomically with any objective repairs, and stays
+            // before contrast/fix-blocks so later serialization can mirror its
+            // attributes into saved HTML.
             new HeaderHeroStep(),
             // Deterministic WCAG contrast lint + repair. BEFORE fix-blocks:
             // repairs rewrite only the block-comment JSON attributes, and the

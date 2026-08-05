@@ -12,6 +12,7 @@ use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\WritingDirection;
 
 /**
  * Step 2: produce the canonical site spec from either a host-supplied
@@ -111,6 +112,11 @@ final class SiteSpecStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
+        // Validate an explicit caller value before spending the site-spec LLM
+        // call. The generated spec never owns this field.
+        $callerWritingDirection = array_key_exists('writing_direction', $meta)
+            ? WritingDirection::validate($meta['writing_direction'])
+            : null;
 
         // Inner pages are opt-in: runners record --multi-page, while the facade
         // resolves an omitted scope to true for a supplied spec. Without either,
@@ -150,6 +156,8 @@ final class SiteSpecStep implements Step
         }
 
         $spec = self::normalize($spec, $multiPage, $requested, $warnings, self::nameFromPrompt($prompt));
+        $spec['writing_direction'] = $callerWritingDirection
+            ?? WritingDirection::fromLanguage((string) ($spec['language'] ?? ''));
         if ($warnings !== []) {
             $project->addWarnings($this->id(), $warnings);
             Narrator::write('  [site-spec] warning: ' . count($warnings)
@@ -188,6 +196,15 @@ final class SiteSpecStep implements Step
     {
         $language = trim((string) ($project->readJson('siteSpec.json')['language'] ?? ''));
         return $language !== '' ? $language : 'the language the user prompt is written in';
+    }
+
+    /** The normalized logical writing direction persisted in siteSpec.json. */
+    public static function writingDirectionOf(Project $project): string
+    {
+        $direction = strtolower(trim((string) (
+            $project->readJson('siteSpec.json')['writing_direction'] ?? ''
+        )));
+        return in_array($direction, WritingDirection::VALUES, true) ? $direction : 'ltr';
     }
 
     /**
@@ -284,6 +301,11 @@ final class SiteSpecStep implements Step
         // what arms the optional custom-motion step; everything else in the
         // motion feature is preset-driven and must not be triggered here.
         $spec['animation_request'] = trim((string) ($spec['animation_request'] ?? ''));
+
+        // Whether the site's core offering IS visual imagery. Anything but an
+        // explicit boolean true degrades to false: the field only ever narrows
+        // the hero recipe pool, so absence must never change behavior.
+        $spec['subject_is_visual_work'] = ($spec['subject_is_visual_work'] ?? null) === true;
 
         // Contact emails are minted from this domain; when the model returned
         // none (or something that is not a domain), derive it from the slug so

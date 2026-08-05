@@ -2,7 +2,10 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\Pipeline;
+use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\HeroBlueprint;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\SectionRhythm;
 use Automattic\SiteBuild\Steps\ScaffoldThemeStep;
 use Automattic\SiteBuild\Steps\ThemeJsonStep;
 use Automattic\SiteBuild\Steps\ValidateThemeStep;
@@ -42,17 +45,57 @@ function final_validation_project(): array
     $project->writeText('theme/templates/page.html', $template);
     $project->writeText(
         'theme/parts/header.html',
-        '<!-- wp:group {"backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}} -->'
-            . '<div class="wp-block-group has-contrast-color has-base-background-color has-text-color has-background">'
+        '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","textColor":"contrast","layout":{"type":"constrained"}} -->'
+            . '<div class="wp-block-group header-archetype--standard-row has-contrast-color has-base-background-color has-text-color has-background">'
             . '<!-- wp:site-title /--></div><!-- /wp:group -->',
     );
     $project->writeText('theme/parts/footer.html', '<!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph -->');
+    $pages = [[
+        'slug' => 'home',
+        'title' => 'Home',
+        'path' => '/',
+        'front' => true,
+        'sections' => [[
+            'slug' => 'hero',
+            'title' => 'Home',
+            'layout_archetype' => 'mixed-width-editorial',
+            'background' => 'contrast',
+            'vertical_density' => 'standard',
+            'primary_action' => null,
+        ]],
+    ]];
+    $hero = '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage"></div><!-- /wp:group -->';
+    $hero = SectionRhythm::rewrite([[
+        'slug' => 'hero',
+        'markup' => $hero,
+        'density' => 'standard',
+        'background' => 'contrast',
+    ]])['markups'][0];
+    $delivery = AboveFoldContract::resolve(
+        $pages,
+        HeroBlueprint::defaultFor('focal-subject-stage'),
+        'full-bleed',
+        ['base' => '#FFFFFF', 'contrast' => '#111111'],
+        ['stable_id' => 'validate-step', 'writing_direction' => 'ltr', 'page_count' => 1],
+        ['archetype' => 'minimal-columns', 'surface' => 'base'],
+        'standard-row',
+    );
+    $final = AboveFoldContract::finalizeMarkup($delivery, $pages, [
+        'part_keys' => ['header', 'page-home--hero'],
+        'opening_overlay_support' => ['page-home--hero' => false],
+        'primary_action_delivered' => true,
+    ]);
+    $project->writeJson('pages.json', ['pages' => $pages]);
+    $project->writeJson('aboveFold.json', $final);
+    $project->writeText('plugin/pages/home.html', $hero . "\n");
     return [$project, $tmp];
 }
 
 test('validate-theme declaration rejects an incomplete theme graph', function () {
     assert_eq([
         'pages.json',
+        'aboveFold.json',
         'headerBehavior.json',
         'theme/style.css',
         'theme/theme.json',
@@ -180,7 +223,7 @@ test('validate-theme records footer interaction residuals and still delivers', f
 
 test('validate-theme accepts a fully wired sticky header behavior contract', function () {
     [$project, $tmp] = final_validation_project();
-    $classes = 'header-behavior-sticky-soft header-start-base header-scrolled-base header-foreground-contrast';
+    $classes = 'header-archetype--standard-row header-behavior-sticky-soft header-start-base header-scrolled-base header-foreground-contrast';
     $project->writeJson('headerBehavior.json', [
         'behavior' => 'sticky-soft',
         'mode' => 'stacked',

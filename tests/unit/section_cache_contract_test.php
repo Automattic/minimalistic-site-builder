@@ -33,6 +33,7 @@ function section_cache_input(string $slug = 'hero', string $title = 'Hero'): arr
             'background'       => 'image',
             'vertical_density' => 'standard',
             'handoff'          => 'Between the header and the next section.',
+            'primary_action'   => null,
         ],
         'neighbors' => 'Above: the site header. Below: the next section.',
         'header_contract' => 'HEADER CONTRACT (this is a page-opening section): test contract.',
@@ -43,6 +44,7 @@ function seed_section_cache_project(Project $project): void
 {
     $project->writeJson('siteSpec.json', ['name' => 'Cache Demo']);
     $project->writeJson('theme/theme.json', ['version' => 3]);
+    seed_test_design_direction($project);
     $project->writeJson('pages.json', ['pages' => [[
         'slug'       => 'home',
         'title'      => 'Home',
@@ -57,12 +59,14 @@ function seed_section_cache_project(Project $project): void
                 'purpose' => 'Open', 'content_notes' => 'Lead strongly.',
                 'layout_archetype' => 'full-bleed-cover', 'background' => 'image',
                 'vertical_density' => 'standard', 'handoff' => 'Between header and about.',
+                'primary_action' => null,
             ],
             [
                 'slug' => 'about', 'title' => 'About', 'role' => 'closing', 'type' => 'about',
                 'purpose' => 'Explain', 'content_notes' => 'Tell the story.',
                 'layout_archetype' => 'asymmetric-split', 'background' => 'base',
                 'vertical_density' => 'standard', 'handoff' => 'Between hero and footer.',
+                'primary_action' => null,
             ],
         ],
     ]]]);
@@ -161,7 +165,7 @@ test('section cached prefixes assemble byte-equally across Anthropic and OpenAI'
     assert_eq($anthropicText, $openAiText, 'providers receive byte-identical assembled user prompts');
 });
 
-test('sections warms the exact first section prefixes before the concurrent fan-out', function () {
+test('sections skips the uncached hero and warms the first ordinary section prefixes', function () {
     with_project('builder_section_cache_', function ($project) {
         seed_section_cache_project($project);
         $llm = new FakeLlm();
@@ -179,9 +183,9 @@ test('sections warms the exact first section prefixes before the concurrent fan-
         assert_eq('section-cache-warm', $llm->calls[0]['opts']['log_label'] ?? null);
         assert_eq('cache-model', $llm->calls[0]['opts']['model'] ?? null);
         assert_eq(
-            $requests['page-home--hero']['cached_prefixes'],
+            $requests['page-home--about']['cached_prefixes'],
             $llm->calls[0]['opts']['cached_prefixes'] ?? null,
-            'probe reuses the first section request prefixes byte-for-byte',
+            'probe reuses the first ordinary section request prefixes byte-for-byte',
         );
         assert_eq('Warm the cached section context.', $llm->calls[0]['prompt'], 'probe is first in call history');
     });
@@ -200,5 +204,25 @@ test('section cache warm-up failure is non-fatal', function () {
         assert_eq(1, $llm->completeBatchCalls);
         assert_true($project->exists('theme/parts/page-home--hero.html'));
         assert_true($project->exists('theme/parts/page-home--about.html'));
+    });
+});
+
+test('section cache warm-up is skipped when the front hero is the only section', function () {
+    with_project('builder_section_cache_', function ($project) {
+        seed_section_cache_project($project);
+        $plan = $project->readJson('pages.json');
+        $plan['pages'][0]['sections'] = [$plan['pages'][0]['sections'][0]];
+        $project->writeJson('pages.json', $plan);
+
+        $llm = new FakeLlm();
+        $llm->queueText('<!-- wp:group --><!-- wp:site-title /--><!-- /wp:group -->');
+        $llm->queueText('<!-- wp:group --><!-- wp:paragraph --><p>Footer</p><!-- /wp:paragraph --><!-- /wp:group -->');
+        $llm->queueText('<!-- wp:group --><!-- wp:heading --><h1>Hero</h1><!-- /wp:heading --><!-- /wp:group -->');
+
+        (new SectionsStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+        assert_eq(0, $llm->completeCalls, 'no cache probe is sent without an ordinary SectionUnit request');
+        assert_eq(1, $llm->completeBatchCalls);
+        assert_true($project->exists('theme/parts/page-home--hero.html'));
     });
 });

@@ -226,6 +226,65 @@ test('SiteBuilder accepts partial model overrides without fatalling', function (
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('SiteBuilder validates and seeds caller-owned hero constraints and writing direction', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    $project = $builder->createProject(
+        'a test cafe',
+        'structured-inputs',
+        designConstraints: [
+            'hero_canvas' => 'FRAMED',
+            'allowed_hero_media_modes' => ['cover-image', 'foreground-image', 'cover-image'],
+            'max_hero_images' => 1,
+            'hero_copy_capacity' => 'standard',
+        ],
+        writingDirection: 'RTL',
+    );
+    $meta = $project->readJson('meta.json');
+    assert_eq([
+        'hero_canvas' => 'framed',
+        'allowed_hero_media_modes' => ['cover-image', 'foreground-image'],
+        'max_hero_images' => 1,
+        'hero_copy_capacity' => 'standard',
+    ], $meta['design_constraints']);
+    assert_eq('rtl', $meta['writing_direction']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder invalid structured inputs fail before creating a project directory', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    assert_throws(fn () => $builder->createProject(
+        'a test cafe',
+        'invalid-inputs',
+        designConstraints: ['allowed_hero_media_modes' => ['none'], 'hero_copy_capacity' => 'standard'],
+    ));
+    assert_true(!is_dir($tmp . '/invalid-inputs'));
+
+    assert_throws(fn () => $builder->createProject(
+        'a test cafe',
+        'invalid-direction',
+        writingDirection: 'auto',
+    ));
+    assert_true(!is_dir($tmp . '/invalid-direction'));
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('SiteBuilder leaves pre-seeded structured inputs untouched when optional arguments are absent', function () {
+    $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
+    $builder = make_test_builder(new FakeLlm(), $tmp);
+    $pre = $builder->store()->create('pre-seeded-hero');
+    $pre->writeJson('meta.json', [
+        'design_constraints' => ['max_hero_images' => 0],
+        'writing_direction' => 'rtl',
+    ]);
+    $project = $builder->createProject('a test cafe', 'pre-seeded-hero');
+    $meta = $project->readJson('meta.json');
+    assert_eq(['max_hero_images' => 0], $meta['design_constraints']);
+    assert_eq('rtl', $meta['writing_direction']);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('createProject rejects pages when multiPage is explicitly false', function () {
     $tmp = sys_get_temp_dir() . '/builder_guard_' . uniqid();
     $builder = make_test_builder(new FakeLlm(), $tmp);

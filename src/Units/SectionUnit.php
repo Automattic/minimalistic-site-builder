@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Units;
 
-use Automattic\SiteBuild\SectionRole;
-
 /**
  * Generate one page section from a self-contained input.
  *
@@ -22,34 +20,11 @@ use Automattic\SiteBuild\SectionRole;
  * Static authoring rules come from the package's prompt templates; no Project
  * or project artifact is read or written here.
  */
-final class SectionUnit extends AbstractMarkupUnit
+final class SectionUnit extends AbstractPageSectionUnit
 {
     private const BUILD_LAYER_MARKER = '<!-- section-cache-layer:build -->';
     private const PAGE_LAYER_MARKER = '<!-- section-cache-layer:page -->';
     private const BRIEF_LAYER_MARKER = '<!-- section-cache-layer:brief -->';
-
-    /** Prefix for a page section part's request key and filename. */
-    public const KEY_PREFIX = 'page-';
-
-    /** The part key (request key and file basename) for one page's section. */
-    public static function partKey(string $pageSlug, string $sectionSlug): string
-    {
-        return self::KEY_PREFIX . $pageSlug . '--' . $sectionSlug;
-    }
-
-    public function key(array $input): string
-    {
-        $section = $this->section($input);
-        $slug = trim($this->sectionString($section, 'slug'));
-        if ($slug === '') {
-            throw new \InvalidArgumentException("unit input 'section.slug' must be a non-empty string");
-        }
-        $pageSlug = trim($this->pageString($input, 'slug'));
-        if ($pageSlug === '') {
-            throw new \InvalidArgumentException("unit input 'page.slug' must be a non-empty string");
-        }
-        return self::partKey($pageSlug, $slug);
-    }
 
     /**
      * @param array{
@@ -111,45 +86,12 @@ final class SectionUnit extends AbstractMarkupUnit
         return $request;
     }
 
-    public function finish(string $raw, array $input, array &$notes = []): string
+    public function finish(string $raw, array $input): MarkupResult
     {
-        return GeneratedMarkup::normalize($raw, $this->key($input), $notes);
-    }
-
-    /** @return array<string,mixed> */
-    private function section(array $input): array
-    {
-        if (!isset($input['section']) || !is_array($input['section'])) {
-            throw new \InvalidArgumentException("unit input 'section' must be an array");
-        }
-        return $input['section'];
-    }
-
-    /** Require a string-valued page field when present. */
-    private function pageString(array $input, string $key, string $default = ''): string
-    {
-        if (!isset($input['page']) || !is_array($input['page'])) {
-            throw new \InvalidArgumentException("unit input 'page' must be an array");
-        }
-        if (!array_key_exists($key, $input['page'])) {
-            return $default;
-        }
-        if (!is_string($input['page'][$key])) {
-            throw new \InvalidArgumentException("unit input 'page.{$key}' must be a string");
-        }
-        return $input['page'][$key];
-    }
-
-    /** Require a string-valued section field when present. */
-    private function sectionString(array $section, string $key, string $default = ''): string
-    {
-        if (!array_key_exists($key, $section)) {
-            return $default;
-        }
-        if (!is_string($section[$key])) {
-            throw new \InvalidArgumentException("unit input 'section.{$key}' must be a string");
-        }
-        return $section[$key];
+        $warnings = [];
+        $repairs = [];
+        $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
+        return new MarkupResult($markup, $repairs, $warnings);
     }
 
     /**
@@ -195,22 +137,4 @@ final class SectionUnit extends AbstractMarkupUnit
         return [$buildLayer . "\n\n", $pageLayer . "\n\n", $brief];
     }
 
-    /** Require a supported structural role for this section. */
-    private function sectionRole(array $section): string
-    {
-        if (!array_key_exists('role', $section)) {
-            throw new \InvalidArgumentException("unit input 'section.role' is required");
-        }
-        if (!is_string($section['role'])) {
-            throw new \InvalidArgumentException("unit input 'section.role' must be a string");
-        }
-
-        $role = trim($section['role']);
-        if (!in_array($role, SectionRole::ALL, true)) {
-            throw new \InvalidArgumentException(
-                "unit input 'section.role' must be one of: " . implode(', ', SectionRole::ALL)
-            );
-        }
-        return $role;
-    }
 }

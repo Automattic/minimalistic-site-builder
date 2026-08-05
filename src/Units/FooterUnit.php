@@ -49,23 +49,43 @@ final class FooterUnit extends AbstractMarkupUnit
         ]);
     }
 
-    public function finish(string $raw, array $input, array &$notes = []): string
+    public function finish(string $raw, array $input): MarkupResult
     {
-        $markup = GeneratedMarkup::normalize($raw, $this->key($input), $notes);
+        $warnings = [];
+        $repairs = [];
+        $key = $this->key($input);
+        $markup = GeneratedMarkup::normalize($raw, $key, $warnings, $repairs);
+        $before = $markup;
         $markup = GeneratedMarkup::withoutRedundantLandmark($markup, 'footer');
+        if ($markup !== $before) {
+            $repairs[] = self::repair('redundant-footer-landmark-removed', $key);
+        }
         GeneratedMarkup::assertNoRedundantLandmark($markup, 'footer');
         $archetype = $this->inputString($input, 'composition_archetype');
         FooterComposition::assertKnown($archetype);
         if ($this->pageCount($input) === 1) {
+            $before = $markup;
             $markup = FooterMarkup::withoutSiteTitleLinks($markup);
+            if ($markup !== $before) {
+                $repairs[] = self::repair('one-page-site-title-link-disabled', $key);
+            }
         }
-        $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $notes);
+        $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $warnings);
+        $before = $markup;
         $markup = FooterMarkup::withRootBackgroundColor(
             $markup,
             FooterComposition::surface($archetype),
-            $notes
+            $warnings
         );
-        return GeneratedMarkup::constrainedPart($markup);
+        if ($markup !== $before) {
+            $repairs[] = self::repair('footer-surface-enforced', $key);
+        }
+        $before = $markup;
+        $markup = GeneratedMarkup::constrainedPart($markup);
+        if ($markup !== $before) {
+            $repairs[] = self::repair('root-layout-constrained', $key);
+        }
+        return new MarkupResult($markup, $repairs, $warnings);
     }
 
     private function pageCount(array $input): int
@@ -78,5 +98,11 @@ final class FooterUnit extends AbstractMarkupUnit
             throw new \InvalidArgumentException('footer page_count must be at least 1');
         }
         return $pageCount;
+    }
+
+    /** @return array{code:string,part:string,disposition:string} */
+    private static function repair(string $code, string $part): array
+    {
+        return ['code' => $code, 'part' => $part, 'disposition' => 'repaired'];
     }
 }

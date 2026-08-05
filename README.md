@@ -50,7 +50,16 @@ php bin/build.php "A cozy neighborhood bakery" --with-images   # also generate i
 php bin/build.php "A cozy neighborhood bakery" --provider=openai   # build on GPT-5.x instead of Claude
 php bin/build.php "A cozy neighborhood bakery" --multi-page    # let the site plan inner pages beyond the homepage
 php bin/build.php "A cozy neighborhood bakery" --multi-page --pages="Home, Menu, About, Visit"   # fix the page list yourself (first = homepage)
+php bin/build.php "A Persian poetry archive" --writing-direction=rtl --hero-canvas=framed --hero-media-modes=none,foreground-image --max-hero-images=1
 ```
+
+Hero composition is selected from a reviewed code-owned catalog after filtering
+the optional caller constraints `--hero-canvas`, `--hero-media-modes`,
+`--max-hero-images`, and `--hero-copy-capacity`. `--writing-direction=ltr|rtl`
+is an explicit caller override; otherwise the site language determines logical
+direction. The selected recipe and normalized blueprint are persisted in
+`designDirection.json`, while `aboveFold.json` records the two-phase shared
+header/hero/page-opening contract.
 
 ### Embedding with an existing site spec
 

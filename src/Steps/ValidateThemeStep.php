@@ -49,6 +49,7 @@ final class ValidateThemeStep implements Step
             label: $this->label(),
             reads: [
                 'pages.json',
+                'aboveFold.json',
                 'headerBehavior.json',
                 'theme/style.css',
                 'theme/theme.json',
@@ -77,6 +78,7 @@ final class ValidateThemeStep implements Step
             ThemeValidator::spacingWarnings($project),
             ThemeValidator::typographyWarnings($project),
             ThemeValidator::planWarnings($project),
+            ThemeValidator::aboveFoldWarnings($project),
             PresetReferences::problems($project),
             self::styleElementProblems($project),
             self::headerBehaviorProblems($project),

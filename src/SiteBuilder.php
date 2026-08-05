@@ -87,8 +87,13 @@ final class SiteBuilder
      * Package::siteSpecSchemaPath() and Package::siteSpecExamplePath() for the
      * shipped consumer contract.
      *
+     * $designConstraints is the optional caller-owned hero capability object;
+     * it is validated before a project directory is claimed. $writingDirection
+     * is the optional explicit logical direction and accepts only ltr|rtl.
+     *
      * @param array<int,string|array<string,mixed>> $pages
      * @param array<string,mixed>|null              $siteSpec
+     * @param array<string,mixed>                   $designConstraints
      */
     public function createProject(
         string $prompt,
@@ -96,6 +101,8 @@ final class SiteBuilder
         ?bool $multiPage = null,
         array $pages = [],
         ?array $siteSpec = null,
+        array $designConstraints = [],
+        ?string $writingDirection = null,
     ): Project {
         if ($multiPage === false && $pages !== []) {
             throw new \InvalidArgumentException('A fixed page list requires multiPage to be true or omitted');
@@ -107,6 +114,15 @@ final class SiteBuilder
                 throw new \InvalidArgumentException('siteSpec must be JSON-serializable', previous: $e);
             }
         }
+        $designConstraints = HeroComposition::validateConstraints($designConstraints);
+        if (HeroComposition::compatible($designConstraints) === []) {
+            throw new \InvalidArgumentException(
+                'designConstraints leave no compatible hero recipe'
+            );
+        }
+        $writingDirection = $writingDirection === null
+            ? null
+            : WritingDirection::validate($writingDirection);
 
         // A supplied spec is self-contained by default: unless the caller
         // explicitly forces one page, retain whatever page tree it carries.
@@ -129,6 +145,12 @@ final class SiteBuilder
         }
         if ($siteSpec !== null) {
             $seed['site_spec'] = $siteSpec;
+        }
+        if ($designConstraints !== []) {
+            $seed['design_constraints'] = $designConstraints;
+        }
+        if ($writingDirection !== null) {
+            $seed['writing_direction'] = $writingDirection;
         }
 
         $meta = $project->exists('meta.json') ? $project->readJson('meta.json') : [];

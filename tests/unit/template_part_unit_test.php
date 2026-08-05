@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\FooterComposition;
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -35,15 +36,16 @@ test('HeaderUnit generates a constrained header from self-contained input', func
     );
     $unit = new HeaderUnit($llm, new PromptRenderer(repo_path('prompts')));
 
-    $markup = $unit->generate(array_merge(template_part_unit_input(), [
+    $result = $unit->generate(array_merge(template_part_unit_input(), [
         'hero_brief' => 'PART-HERO-SENTINEL',
         'nav_rule'   => '- PART-NAV-SENTINEL',
-        'archetype_assignment' => 'PART-ARCHETYPE-SENTINEL',
+        'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'branded-lockup'),
         'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
     ]));
+    $markup = $result->markup;
 
     $prompt = $llm->calls[0]['prompt'];
-    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL', 'PART-ARCHETYPE-SENTINEL', 'PART-BEHAVIOR-SENTINEL'] as $sentinel) {
+    foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-HERO-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-NAV-SENTINEL', 'ABOVE-FOLD CONTRACT', 'branded-lockup', 'PART-BEHAVIOR-SENTINEL'] as $sentinel) {
         assert_contains($sentinel, $prompt);
     }
     assert_eq('header', $llm->calls[0]['opts']['log_label'] ?? null);
@@ -53,6 +55,13 @@ test('HeaderUnit generates a constrained header from self-contained input', func
     assert_true(!str_contains($markup, '<header'), 'literal root header is rewritten');
     assert_true(!str_contains($markup, '</header>'), 'literal root header closer is rewritten');
     assert_contains('<div class="wp-block-group', $markup);
+    assert_contains('header-archetype--branded-lockup', $markup);
+    assert_eq([], $result->warnings);
+    assert_eq(
+        ['redundant-header-landmark-removed', 'root-marker-normalized', 'root-layout-constrained'],
+        array_column($result->repairs, 'code'),
+        'objective header repairs stay out of durable warnings',
+    );
 });
 
 test('FooterUnit generates a constrained footer from self-contained input', function () {
@@ -66,7 +75,8 @@ test('FooterUnit generates a constrained footer from self-contained input', func
     );
     $unit = new FooterUnit($llm, new PromptRenderer(repo_path('prompts')));
 
-    $markup = $unit->generate(template_part_unit_input());
+    $result = $unit->generate(template_part_unit_input());
+    $markup = $result->markup;
 
     $prompt = $llm->calls[0]['prompt'];
     foreach (['PART-SPEC-SENTINEL', 'part-language-sentinel', 'part-theme-sentinel', 'PART-DIRECTION-SENTINEL', 'PART-OUTLINE-SENTINEL', 'PART-PAGES-SENTINEL', 'PART-FINAL-SECTION-SENTINEL', 'photographic-split'] as $sentinel) {
@@ -83,6 +93,73 @@ test('FooterUnit generates a constrained footer from self-contained input', func
     assert_contains('"backgroundColor":"contrast"', $markup);
     assert_contains('has-contrast-background-color', $markup);
     assert_contains('"layout":{"type":"constrained"}', $markup);
+    assert_eq([], $result->warnings);
+    assert_eq(
+        ['redundant-footer-landmark-removed', 'footer-surface-enforced', 'root-layout-constrained'],
+        array_column($result->repairs, 'code'),
+        'objective footer repairs stay out of durable warnings',
+    );
+});
+
+test('FooterUnit ignores hero-only blueprint and above-fold context', function () {
+    $input = template_part_unit_input();
+    $input['hero_blueprint'] = [
+        'recipe' => 'typographic-poster',
+        'signature_device_use' => 'FOOTER-HERO-BLUEPRINT-LEAK-SENTINEL',
+    ];
+    $input['above_fold_contract'] = 'FOOTER-ABOVE-FOLD-LEAK-SENTINEL';
+    $input['neighbors'] = 'FOOTER-HERO-NEIGHBOR-LEAK-SENTINEL';
+
+    $prompt = (new FooterUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts'))
+    ))->request($input)['prompt'];
+
+    foreach ([
+        'FOOTER-HERO-BLUEPRINT-LEAK-SENTINEL',
+        'FOOTER-ABOVE-FOLD-LEAK-SENTINEL',
+        'FOOTER-HERO-NEIGHBOR-LEAK-SENTINEL',
+        'hero-composition--typographic-poster',
+    ] as $sentinel) {
+        assert_true(!str_contains($prompt, $sentinel), "footer excludes hero-only context {$sentinel}");
+    }
+    assert_contains('PART-FINAL-SECTION-SENTINEL', $prompt, 'footer-specific seam context remains present');
+});
+
+test('HeaderUnit normalizes exactly one assigned root archetype marker idempotently', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'branded-lockup'),
+    ]);
+    $raw = '<!-- wp:group {"className":"keep header-archetype--old header-archetype--stale","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group keep header-archetype--old header-archetype--old">Header</div>'
+        . '<!-- /wp:group -->';
+
+    $first = $unit->finish($raw, $input);
+
+    $document = BlockMarkup::parse($first->markup);
+    $root = $document->topLevel();
+    assert_true(is_int($root));
+    $attrs = $document->attrs($root);
+    assert_true(is_array($attrs));
+    $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? ''))) ?: [];
+    assert_eq(1, count(array_filter(
+        $tokens,
+        static fn (string $token): bool => $token === 'header-archetype--branded-lockup'
+    )));
+    assert_eq(1, substr_count($document->ownHtml($root), 'header-archetype--branded-lockup'));
+    assert_true(!str_contains($first->markup, 'header-archetype--old'));
+    assert_true(!str_contains($first->markup, 'header-archetype--stale'));
+    assert_eq(2, substr_count($first->markup, 'keep'), 'unrelated comment and saved-HTML classes survive');
+    assert_eq(['root-marker-normalized'], array_column($first->repairs, 'code'));
+    assert_eq([], $first->warnings);
+
+    $second = $unit->finish($first->markup, $input);
+    assert_eq($first->markup, $second->markup);
+    assert_eq([], $second->repairs, 'marker repair reaches a clean fixed point');
+    assert_eq([], $second->warnings);
 });
 
 test('FooterUnit renders exactly one reviewed recipe and image instructions only when needed', function () {
@@ -148,8 +225,9 @@ test('FooterUnit caps portrait image placeholders to square in alt and mirrored 
         . '</figure><!-- /wp:image --></div><!-- /wp:group -->';
     $input = array_merge(template_part_unit_input(), ['composition_archetype' => 'image-plinth']);
 
-    $notes = [];
-    $once = $unit->finish($raw, $input, $notes);
+    $result = $unit->finish($raw, $input);
+    $once = $result->markup;
+    $notes = $result->warnings;
 
     assert_true(!str_contains($once, 'portrait'), 'no portrait placeholder survives');
     assert_eq(2, substr_count($once, 'photorealistic | square"'), 'HTML alt and mirrored JSON alt are both capped');
@@ -159,7 +237,11 @@ test('FooterUnit caps portrait image placeholders to square in alt and mirrored 
     assert_contains('delivered=square', $joined);
     assert_contains('disposition=', $joined);
     assert_eq(2, count(array_filter($notes, fn ($n) => str_contains($n, 'AI_IMAGE placeholder'))), 'alt and mirrored JSON each record their rewrite');
-    assert_eq($once, $unit->finish($once, $input), 'portrait capping reaches a fixed point');
+    assert_true(
+        !in_array('AI_IMAGE placeholder', array_column($result->repairs, 'code'), true),
+        'authored portrait loss remains a warning rather than a successful repair',
+    );
+    assert_eq($once, $unit->finish($once, $input)->markup, 'portrait capping reaches a fixed point');
 });
 
 test('portrait cap covers card-portrait and tall numeric ratios, leaves wide ones alone', function () {
@@ -195,8 +277,9 @@ test('portrait cap covers recovered AI_IMAGE source forms before collection', fu
         . '</div><!-- /wp:group -->';
     $input = array_merge(template_part_unit_input(), ['composition_archetype' => 'image-plinth']);
 
-    $notes = [];
-    $once = $unit->finish($raw, $input, $notes);
+    $result = $unit->finish($raw, $input);
+    $once = $result->markup;
+    $notes = $result->warnings;
 
     assert_contains('AI_IMAGE:A potter|ratio:square|role:footer', $once);
     assert_contains('AI_IMAGE:A kiln|role:footer|ratio:square', $once);
@@ -213,7 +296,7 @@ test('portrait cap covers recovered AI_IMAGE source forms before collection', fu
         $notes,
         static fn (string $note): bool => str_contains($note, 'AI_IMAGE placeholder'),
     )), 'each recovered portrait source records one actionable rewrite');
-    assert_eq($once, $unit->finish($once, $input), 'source-form capping reaches a fixed point');
+    assert_eq($once, $unit->finish($once, $input)->markup, 'source-form capping reaches a fixed point');
 });
 
 test('FooterUnit rejects an unknown composition before generation', function () {
@@ -253,8 +336,9 @@ test('FooterUnit repairs a wrong root surface and stale saved classes to the ass
         . '<!-- /wp:group -->';
     $input = template_part_unit_input(); // photographic-split maps to contrast.
 
-    $notes = [];
-    $once = $unit->finish($raw, $input, $notes);
+    $result = $unit->finish($raw, $input);
+    $once = $result->markup;
+    $notes = $result->warnings;
     assert_contains('"backgroundColor":"contrast"', $once);
     assert_contains('"tagName":"section"', $once);
     assert_contains('"className":"keep"', $once);
@@ -276,7 +360,12 @@ test('FooterUnit repairs a wrong root surface and stale saved classes to the ass
     assert_contains("authored style.variation=", implode("\n", $notes));
     assert_contains('delivered=removed', implode("\n", $notes));
     assert_contains('disposition=', implode("\n", $notes));
-    assert_eq($once, $unit->finish($once, $input), 'surface repair reaches a fixed point');
+    assert_eq(
+        ['footer-surface-enforced', 'root-layout-constrained'],
+        array_column($result->repairs, 'code'),
+        'enforcing the assigned surface/layout remains separate from opaque style loss',
+    );
+    assert_eq($once, $unit->finish($once, $input)->markup, 'surface repair reaches a fixed point');
 
     $tmp = sys_get_temp_dir() . '/builder_footer_surface_' . bin2hex(random_bytes(6));
     $project = (new ProjectStore($tmp))->create('demo');
@@ -297,7 +386,7 @@ test('FooterUnit repairs a wrong root surface and stale saved classes to the ass
     $base = $unit->finish(
         '<!-- wp:group --><div class="wp-block-group">Footer</div><!-- /wp:group -->',
         array_merge($input, ['composition_archetype' => 'typographic-billboard'])
-    );
+    )->markup;
     assert_contains('"backgroundColor":"base"', $base);
     assert_contains('has-base-background-color', $base);
 });
@@ -310,13 +399,19 @@ test('FooterUnit wraps multiple generated roots in one assigned-surface group wi
         . '<!-- wp:paragraph --><p>Credit survives.</p><!-- /wp:paragraph -->';
     $input = template_part_unit_input();
 
-    $once = $unit->finish($raw, $input);
+    $result = $unit->finish($raw, $input);
+    $once = $result->markup;
 
     assert_true(str_starts_with($once, '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}} -->'));
     assert_contains('class="wp-block-group has-contrast-background-color has-background"', $once);
     assert_contains('Identity', $once);
     assert_contains('Credit survives.', $once);
-    assert_eq($once, $unit->finish($once, $input), 'multiple-root repair reaches a fixed point');
+    assert_eq([], $result->warnings, 'safe root wrapping preserves every authored byte');
+    assert_eq(
+        ['footer-surface-enforced', 'root-layout-constrained'],
+        array_column($result->repairs, 'code'),
+    );
+    assert_eq($once, $unit->finish($once, $input)->markup, 'multiple-root repair reaches a fixed point');
 });
 
 test('FooterUnit wraps a single non-group root instead of discarding it for the fallback', function () {
@@ -324,12 +419,12 @@ test('FooterUnit wraps a single non-group root instead of discarding it for the 
     $raw = '<!-- wp:paragraph --><p>Credit survives.</p><!-- /wp:paragraph -->';
     $input = template_part_unit_input(); // photographic-split maps to contrast.
 
-    $once = $unit->finish($raw, $input);
+    $once = $unit->finish($raw, $input)->markup;
 
     assert_true(str_starts_with($once, '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}} -->'));
     assert_contains('class="wp-block-group has-contrast-background-color has-background"', $once);
     assert_contains('Credit survives.', $once);
-    assert_eq($once, $unit->finish($once, $input), 'single non-group-root repair reaches a fixed point');
+    assert_eq($once, $unit->finish($once, $input)->markup, 'single non-group-root repair reaches a fixed point');
 });
 
 test('FooterUnit preserves a fit-text billboard heading through finish and block re-serialization', function () {
@@ -341,12 +436,12 @@ test('FooterUnit preserves a fit-text billboard heading through finish and block
         . '<!-- /wp:heading --></div><!-- /wp:group -->';
     $input = array_merge(template_part_unit_input(), ['composition_archetype' => 'typographic-billboard']);
 
-    $once = $unit->finish($raw, $input);
+    $once = $unit->finish($raw, $input)->markup;
 
     assert_contains('"fitText":true', $once);
     assert_contains('has-fit-text', $once);
     assert_contains('"backgroundColor":"base"', $once);
-    assert_eq($once, $unit->finish($once, $input), 'fit-text footer reaches a fixed point');
+    assert_eq($once, $unit->finish($once, $input)->markup, 'fit-text footer reaches a fixed point');
 
     $tmp = sys_get_temp_dir() . '/builder_footer_fit_text_' . bin2hex(random_bytes(6));
     $project = (new ProjectStore($tmp))->create('demo');
@@ -366,9 +461,9 @@ test('FooterUnit removes a malformed root style attribute instead of discarding 
     $raw = '<!-- wp:group -->'
         . '<div class="wp-block-group" style="color:red;background:url(theme:./asset.jpg">Footer stays.</div>'
         . '<!-- /wp:group -->';
-    $notes = [];
-
-    $out = $unit->finish($raw, template_part_unit_input(), $notes);
+    $result = $unit->finish($raw, template_part_unit_input());
+    $out = $result->markup;
+    $notes = $result->warnings;
 
     assert_contains('Footer stays.', $out);
     assert_true(!str_contains($out, 'style='));
@@ -384,7 +479,7 @@ test('FooterUnit cleans a root wrapper after an HTML comment and handles unquote
         . 'style=background:red style="background:blue;padding-top:1px">'
         . 'Footer stays.</div><!-- /wp:group -->';
 
-    $out = $unit->finish($raw, template_part_unit_input());
+    $out = $unit->finish($raw, template_part_unit_input())->markup;
 
     assert_contains('<!--keep-note-->', $out);
     assert_contains('data-note=\' class="decoy" style="color:blue"\'', $out);
@@ -408,14 +503,14 @@ test('FooterUnit disables dynamic site-title self-links only for one-page footer
         . '<!-- wp:group --><div class="wp-block-group"><!-- wp:site-title {"isLink":true} /--></div><!-- /wp:group -->'
         . '</div><!-- /wp:group -->';
 
-    $single = $unit->finish($raw, template_part_unit_input());
+    $single = $unit->finish($raw, template_part_unit_input())->markup;
     assert_eq(2, substr_count($single, '"isLink":false'), 'every one-page footer identity is non-linked');
     assert_true(!str_contains($single, '"isLink":true'));
 
     $multi = $unit->finish(
         $raw,
         array_merge(template_part_unit_input(), ['page_count' => 2])
-    );
+    )->markup;
     assert_true(!str_contains($multi, '"isLink":false'));
     assert_contains('"isLink":true', $multi, 'an authored multi-page home link is preserved');
 });

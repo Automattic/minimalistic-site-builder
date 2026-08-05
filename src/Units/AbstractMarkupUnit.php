@@ -22,7 +22,7 @@ abstract class AbstractMarkupUnit implements MarkupUnit
      * Execute one rendered request, forwarding all request metadata (including
      * cached_prefixes) to the single-completion path.
      */
-    final public function generate(array $input): string
+    final public function generate(array $input): MarkupResult
     {
         $request = $this->request($input);
         $prompt = $request['prompt'];
@@ -86,6 +86,29 @@ abstract class AbstractMarkupUnit implements MarkupUnit
             throw new \InvalidArgumentException("unit input '{$key}' could not be encoded as JSON");
         }
         return $json;
+    }
+
+    /** Accept a decoded object or decode one JSON object from a portable input. */
+    final protected function inputArrayOrJson(array $input, string $key): array
+    {
+        if (!array_key_exists($key, $input)) {
+            throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
+        }
+        if (is_array($input[$key])) {
+            return $input[$key];
+        }
+        if (!is_string($input[$key])) {
+            throw new \InvalidArgumentException("unit input '{$key}' must be JSON text or an array");
+        }
+        try {
+            $decoded = json_decode($input[$key], true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new \InvalidArgumentException("unit input '{$key}' must contain valid JSON", 0, $e);
+        }
+        if (!is_array($decoded)) {
+            throw new \InvalidArgumentException("unit input '{$key}' must decode to an object");
+        }
+        return $decoded;
     }
 
     /**

@@ -134,6 +134,7 @@ final class SectionRhythm
         $degradations = [];
         foreach ($normalized as $i => $entry) {
             $preset = self::DENSITY_PRESETS[$entry['density']];
+            $topPreset = $i === 0 ? self::openingTopPreset($entry['markup'], $preset) : $preset;
             $next = $normalized[$i + 1] ?? null;
             $nextBackground = $next['background'] ?? ($i === count($normalized) - 1 ? $followingBackground : null);
             $sharedSeam = is_string($nextBackground)
@@ -145,6 +146,7 @@ final class SectionRhythm
                 $sharedSeam,
                 $entry['background'],
                 $entry['label'],
+                $topPreset,
             );
             $markups[] = $markup;
 
@@ -169,8 +171,11 @@ final class SectionRhythm
                     $degradationRecord !== null => $degradationRecord['message'],
                     $entry['background'] === 'image' =>
                         "{$entry['label']}: set root padding=0 and image-cover padding top={$preset}, bottom={$preset}; outer margins=0",
-                    default => "{$entry['label']}: set outer padding top={$preset}, bottom={$bottom}; outer margins=0",
+                    default => "{$entry['label']}: set outer padding top={$topPreset}, bottom={$bottom}; outer margins=0",
                 };
+                if ($topPreset !== $preset) {
+                    $note .= " (opening hero top capped from {$preset})";
+                }
                 if ($sharedSeam) {
                     $owner = $next['label'] ?? 'the footer';
                     $note .= " (shared {$entry['background']} seam is owned by {$owner})";
@@ -186,6 +191,43 @@ final class SectionRhythm
     private static function sharesContinuousSurface(string $current, string $next): bool
     {
         return $current === $next && in_array($current, self::COLLAPSIBLE_SURFACES, true);
+    }
+
+    /**
+     * The top preset for a page's OPENING section. A hero that leads with its
+     * media sits tight under the header (hero.md caps it at `sm`; audited
+     * density-mapped `xl` tops opened a dead band that pushed the rail or
+     * copy below the fold), and a copy-led hero keeps breathing room but
+     * never more than `md`. Non-hero openers keep the plain density map.
+     * The bottom edge and every later section are untouched, so the page's
+     * internal rhythm stays exactly as planned.
+     */
+    private static function openingTopPreset(string $markup, string $preset): string
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+        } catch (\Throwable) {
+            return $preset;
+        }
+        $root = $document->topLevel();
+        if ($root === null) {
+            return $preset;
+        }
+        $rootClass = (string) (($document->attrs($root) ?? [])['className'] ?? '');
+        if (!str_contains($rootClass, 'hero-composition--')) {
+            return $preset;
+        }
+        $children = $document->children($root);
+        $mediaLed = $children !== []
+            && in_array($document->name($children[0]), ['image', 'cover'], true)
+            && str_contains(
+                (string) (($document->attrs($children[0]) ?? [])['className'] ?? ''),
+                'hero-composition__media'
+            );
+        if ($mediaLed) {
+            return 'sm';
+        }
+        return in_array($preset, ['lg', 'xl', 'xxl'], true) ? 'md' : $preset;
     }
 
     /**
@@ -212,7 +254,9 @@ final class SectionRhythm
         bool $sharedSeam,
         string $background,
         string $label,
+        ?string $topPreset = null,
     ): array {
+        $topPreset ??= $preset;
         $originalMarkup = $markup;
         [$attrs, $openingOffset, $openingLength] = self::rootGroup($markup, $label);
         $degradation = $background === 'image' && self::hasClassToken($attrs, self::DEGRADED_IMAGE_CLASS)
@@ -223,13 +267,16 @@ final class SectionRhythm
             ]
             : null;
         $spacingBackground = $degradation === null ? $background : 'base';
+        // $topPreset diverges from $preset only for the page-opening hero
+        // (BIGR-755's top cap: sm media-led / md copy-led) — the shared
+        // wrapper rewrite must honor it on the top edge.
         $rewritten = self::rewriteWrapperBlock(
             $markup,
             $attrs,
             $openingOffset,
             $openingLength,
             'wp:group',
-            $spacingBackground === 'image' ? '0' : self::presetRef($preset),
+            $spacingBackground === 'image' ? '0' : self::presetRef($topPreset),
             $spacingBackground === 'image' || $sharedSeam ? '0' : self::presetRef($preset),
             $label,
             $label,

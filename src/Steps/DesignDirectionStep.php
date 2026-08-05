@@ -3,11 +3,15 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\GeneratedJsonException;
+use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroComposition;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Motion;
 use Automattic\SiteBuild\LlmOptions;
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
@@ -22,10 +26,11 @@ use Automattic\SiteBuild\Warnings;
  * Output: designDirection.json — the chosen direction as structured data:
  *         title + vivid description plus the explicit fields downstream steps
  *         execute instead of re-interpreting (palette hexes, type pairing,
- *         image grade, signature device, hero composition).
+ *         image grade, signature device placement, and a separately consumed
+ *         structured front-page hero blueprint).
  *
  * Two calls. First, a cheap seed call (small model, hot sampling) brainstorms
- * FOUR concept seeds — each one string: an evocative title plus one vivid
+ * THREE concept seeds — each one string: an evocative title plus one vivid
  * sentence committing the seed's visual world (palette family, typography
  * character, imagery treatment, mood) — with divergence across the set
  * enforced in the prompt. One seed is picked uniformly at random, then the
@@ -66,11 +71,20 @@ final class DesignDirectionStep implements Step
     /** Where the chosen direction is persisted, and read back from by readFor(). */
     private const FILE = 'designDirection.json';
 
+    /** Successful deterministic repair evidence (kept out of warnings.json). */
+    private const REPORT_FILE = 'design-direction.txt';
+
     /** Palette roles a direction commits to — the same slugs theme.json requires. */
     public const PALETTE_ROLES = ['base', 'contrast', 'primary', 'secondary', 'accent'];
 
     /** Env var forcing seed N (1-based) — the reproducible-evals escape hatch. */
     public const CHOICE_ENV = 'DESIGN_DIRECTION_CHOICE';
+
+    /** Exact operator/evaluation override for the code-owned hero catalog. */
+    public const HERO_RECIPE_ENV = 'HERO_RECIPE';
+
+    /** Slots in which the one global signature device may appear. */
+    public const SIGNATURE_DEVICE_SLOTS = ['header', 'hero', 'body', 'closing', 'footer'];
 
     public function __construct(
         private Llm $llm,
@@ -108,16 +122,49 @@ final class DesignDirectionStep implements Step
         if (trim($prompt) === '') {
             throw new \RuntimeException('meta.json has no "prompt"');
         }
+        $constraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
+        if (HeroComposition::compatible($constraints) === []) {
+            throw new \InvalidArgumentException(
+                'meta.json design_constraints leave no compatible hero recipe'
+            );
+        }
+        self::validateOperatorRecipe($constraints);
+        AboveFoldContract::validateHeaderArchetypePreflight(
+            Env::get(AboveFoldContract::HEADER_ARCHETYPE_ENV),
+            $constraints,
+            self::definitiveRequestedPageCount($meta),
+        );
+
         $spec = $project->readText('siteSpec.json');
+        $specData = $project->readJson('siteSpec.json');
 
         $seed = $this->chooseSeed($prompt, $spec);
+        $warnings = [];
+        $recipe = self::selectHeroRecipe(
+            $meta,
+            (string) ($specData['slug'] ?? $project->slug()),
+            $seed,
+            $warnings,
+        );
+        $blueprintDefaults = HeroBlueprint::defaultFor($recipe, $constraints);
+        $heroComposition = $this->renderer->render('hero-composition.md', [
+            'recipe' => $recipe,
+            'blueprint_defaults' => json_encode(
+                $blueprintDefaults,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            ),
+            'composition_recipe' => $this->renderer->render(
+                HeroComposition::recipeTemplate($recipe),
+                [],
+            ),
+        ]);
 
         $rendered = $this->renderer->render('design-direction.md', [
             'user_prompt' => $prompt,
             'site_spec'   => $spec,
             'seed'        => $seed,
+            'hero_composition' => $heroComposition,
         ]);
-        $warnings = [];
         try {
             $payload = $this->llm->completeJson($rendered, $this->withOptions(['log_label' => $this->id()]));
         } catch (GeneratedJsonException $e) {
@@ -126,22 +173,63 @@ final class DesignDirectionStep implements Step
             // propagate so transport and programming failures stay visible.
             $payload = [];
             $warnings[] = 'designDirection.json: generated JSON remained unusable after its repair attempt ('
-                . $e->getMessage() . '); deterministic seed-derived direction delivered';
+                . $e->getMessage() . '); deterministic seed-derived direction delivered for field direction; '
+                . 'disposition fallback';
         }
 
-        $normalizationWarnings = [];
-        $direction = self::normalizeDirection($payload['direction'] ?? null, $normalizationWarnings);
-        $warnings = array_merge($warnings, $normalizationWarnings);
+        $repairs = [];
+        $direction = self::normalize(
+            $payload['direction'] ?? null,
+            $recipe,
+            $seed,
+            $repairs,
+            $warnings,
+        );
         if ($direction === null) {
             // A build without a committed direction still works — every
             // downstream step tolerates empty fields — so deliver the
             // deterministic fallback (built on the chosen seed when one
             // exists) rather than abort. Recorded durably: the site loses
             // the concept-variety this step exists to inject.
-            $direction = self::fallbackDirection($seed);
-            $warnings[] = 'model returned no usable design direction; deterministic fallback direction delivered';
-            echo "  [design-direction] warning: no usable direction from the model; fallback delivered (recorded in warnings.json)\n";
+            $direction = self::fallbackDirection(
+                $seed,
+                $recipe,
+                (string) ($constraints['hero_canvas'] ?? 'full-bleed'),
+            );
+            $warnings[] = 'designDirection.json: model returned no usable design direction; field direction '
+                . 'authored unusable generated value delivered deterministic assigned-recipe direction; '
+                . 'disposition fallback';
         }
+
+        if (isset($constraints['hero_canvas']) && $direction['canvas'] !== $constraints['hero_canvas']) {
+            $repairs[] = 'designDirection.json: field canvas authored '
+                . self::describe($direction['canvas']) . ' delivered '
+                . self::describe($constraints['hero_canvas'])
+                . '; disposition repaired to caller-owned design_constraints.hero_canvas';
+            $direction['canvas'] = $constraints['hero_canvas'];
+        }
+
+        if ($repairs !== []) {
+            Narrator::write('  [design-direction] repaired ' . count($repairs)
+                . " generated direction field(s) (reported separately from durable warnings).\n");
+        }
+        if ($warnings !== []) {
+            Narrator::write('  [design-direction] warning: delivered through ' . count($warnings)
+                . " generated-content degradation(s) (recorded in warnings.json)\n");
+        }
+
+        $report = [
+            "Assigned hero recipe: {$recipe}",
+            'Successful deterministic repairs: ' . count($repairs),
+        ];
+        foreach ($repairs as $repair) {
+            $report[] = '- ' . $repair;
+        }
+        $report[] = 'Durable degradations: ' . count($warnings);
+        foreach ($warnings as $warning) {
+            $report[] = '- ' . $warning;
+        }
+        $project->writeText('logs/' . self::REPORT_FILE, implode("\n", $report) . "\n");
 
         $project->addWarnings($this->id(), $warnings);
         $project->writeJson(self::FILE, $direction);
@@ -156,8 +244,16 @@ final class DesignDirectionStep implements Step
      *
      * @return array<string,mixed>
      */
-    public static function fallbackDirection(string $seed = ''): array
+    public static function fallbackDirection(
+        string $seed,
+        string $recipe,
+        string $canvas = 'full-bleed',
+    ): array
     {
+        HeroComposition::assertKnown($recipe);
+        if (!in_array($canvas, HeroComposition::CANVASES, true)) {
+            throw new \InvalidArgumentException('fallback direction canvas must be full-bleed or framed');
+        }
         $seed = trim($seed);
         $description = $seed !== '' && $seed !== self::SEED_FALLBACK
             ? $seed
@@ -173,16 +269,18 @@ final class DesignDirectionStep implements Step
                 'body'    => self::emptyTypeSlot(),
             ],
             'image_grade'      => '',
-            'canvas'           => 'full-bleed',
+            'canvas'           => $canvas,
             'motion'           => Motion::DEFAULT_PROFILE,
             'motion_note'      => '',
             'signature_device' => '',
-            'hero_composition' => '',
+            'signature_device_slots' => [],
+            'concept_seed'     => $seed,
+            'hero_blueprint'   => HeroBlueprint::defaultFor($recipe),
         ];
     }
 
     /**
-     * Brainstorm four concept titles on the cheap model and pick ONE, rendered
+     * Brainstorm three concept titles on the cheap model and pick ONE, rendered
      * as the text block the expansion prompt consumes.
      *
      * Precedence: the DESIGN_DIRECTION_CHOICE env var forces seed N (1-based;
@@ -266,28 +364,164 @@ final class DesignDirectionStep implements Step
     }
 
     /**
+     * Resolve one authoritative recipe from caller controls and the pure
+     * compatibility-filtered selector. HERO_RECIPE is exact/fatal; the batch
+     * assignment in meta.json is fallible and remaps with a durable warning.
+     *
+     * @param array<mixed> $meta
+     * @param list<string> $warnings
+     */
+    public static function selectHeroRecipe(
+        array $meta,
+        string $stableIdentifier,
+        string $conceptSeed,
+        array &$warnings = [],
+    ): string {
+        $callerConstraints = HeroComposition::validateConstraints($meta['design_constraints'] ?? []);
+        if (HeroComposition::compatible($callerConstraints) === []) {
+            throw new \InvalidArgumentException('design_constraints leave no compatible hero recipe');
+        }
+        $constraints = $callerConstraints;
+        $pool = HeroComposition::compatible($constraints);
+
+        $forced = trim((string) (Env::get(self::HERO_RECIPE_ENV) ?? ''));
+        if ($forced !== '') {
+            HeroComposition::assertKnown($forced);
+            if (!HeroComposition::isCompatible($forced, $callerConstraints)) {
+                throw new \InvalidArgumentException(
+                    self::HERO_RECIPE_ENV . "='{$forced}' is incompatible with caller-owned design_constraints"
+                );
+            }
+            return $forced;
+        }
+
+        if (!array_key_exists('hero_assignment', $meta)) {
+            return HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+        }
+        $assignment = $meta['hero_assignment'];
+        if (is_array($assignment)) {
+            $source = is_string($assignment['source'] ?? null)
+                ? strtolower(trim($assignment['source']))
+                : '';
+            $requested = is_string($assignment['requested_recipe'] ?? null)
+                ? trim($assignment['requested_recipe'])
+                : '';
+            if ($source === 'batch'
+                && $requested !== ''
+                && in_array($requested, HeroComposition::RECIPES, true)
+                && in_array($requested, $pool, true)) {
+                return $requested;
+            }
+
+            $delivered = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+            $reason = $source !== 'batch'
+                ? 'assignment source was not the supported fallible batch channel'
+                : ($requested === ''
+                ? 'batch assignment had no usable requested_recipe'
+                : (!in_array($requested, HeroComposition::RECIPES, true)
+                    ? 'batch requested an unknown recipe'
+                    : 'batch request was outside the caller design_constraints pool'));
+            $warnings[] = "file='meta.json'; path=\"hero_assignment.requested_recipe\"; authored="
+                . self::describe($assignment['requested_recipe'] ?? null)
+                . '; delivered=' . self::describe($delivered)
+                . "; disposition=remapped by stable compatible-pool selector because {$reason}";
+            return $delivered;
+        }
+
+        $delivered = HeroComposition::select($stableIdentifier, $conceptSeed, $constraints);
+        $warnings[] = "file='meta.json'; path=\"hero_assignment\"; authored="
+            . self::describe($assignment)
+            . '; delivered=' . self::describe($delivered)
+            . '; disposition=malformed fallible batch assignment was remapped by the stable compatible-pool selector';
+        return $delivered;
+    }
+
+    /** Validate the exact operator override before the seed LLM call. */
+    private static function validateOperatorRecipe(array $constraints): void
+    {
+        $forced = trim((string) (Env::get(self::HERO_RECIPE_ENV) ?? ''));
+        if ($forced === '') {
+            return;
+        }
+        HeroComposition::assertKnown($forced);
+        if (!HeroComposition::isCompatible($forced, $constraints)) {
+            throw new \InvalidArgumentException(
+                self::HERO_RECIPE_ENV . "='{$forced}' is incompatible with caller-owned design_constraints"
+            );
+        }
+    }
+
+    /**
+     * Count a caller-fixed page tree for header preflight. A model-owned or
+     * malformed tree stays unknown; SiteSpecStep will normalize it later.
+     *
+     * @param array<mixed> $meta
+     */
+    private static function definitiveRequestedPageCount(array $meta): ?int
+    {
+        if (($meta['multi_page'] ?? false) !== true) {
+            return 1;
+        }
+        $requested = $meta['pages'] ?? null;
+        if (!is_array($requested) || !array_is_list($requested) || $requested === []) {
+            return null;
+        }
+        $countEntry = static function (mixed $entry) use (&$countEntry): ?int {
+            if (is_string($entry)) {
+                return trim($entry) === '' ? null : 1;
+            }
+            if (!is_array($entry)) {
+                return null;
+            }
+            $title = trim((string) ($entry['title'] ?? ''));
+            if ($title === '') {
+                return null;
+            }
+            $children = $entry['children'] ?? [];
+            if (!is_array($children) || !array_is_list($children)) {
+                return null;
+            }
+            $count = 1;
+            foreach ($children as $child) {
+                $childCount = $countEntry($child);
+                if ($childCount === null) {
+                    return null;
+                }
+                $count += $childCount;
+            }
+            return $count;
+        };
+
+        $count = 0;
+        foreach ($requested as $entry) {
+            $entryCount = $countEntry($entry);
+            if ($entryCount === null) {
+                return null;
+            }
+            $count += $entryCount;
+        }
+        return $count;
+    }
+
+    /**
      * Validate and coerce the raw direction into the persisted structure.
      * Returns null when it is unusable (no description). Everything else
      * degrades gracefully: invalid palette hexes and unknown roles are
      * dropped, missing fields become empty strings — downstream renders only
      * what is present. Pure — unit-testable.
      *
-     * @param mixed $raw
-     * @return ?array<string,mixed>
-     */
-    public static function normalize($raw): ?array
-    {
-        $warnings = [];
-        return self::normalizeDirection($raw, $warnings);
-    }
-
-    /**
-     * @param mixed $raw
+     * @param mixed        $raw
+     * @param list<string> $repairs
      * @param list<string> $warnings
      * @return ?array<string,mixed>
      */
-    private static function normalizeDirection($raw, array &$warnings): ?array
-    {
+    public static function normalize(
+        mixed $raw,
+        string $assignedRecipe = 'cinematic-safe-zone',
+        string $conceptSeed = '',
+        array &$repairs = [],
+        array &$warnings = [],
+    ): ?array {
         if (!is_array($raw)) {
             return null;
         }
@@ -302,10 +536,51 @@ final class DesignDirectionStep implements Step
             $hex = strtoupper(trim((string) ($rawPalette[$role] ?? '')));
             if (preg_match('/^#[0-9A-F]{6}$/', $hex) === 1) {
                 $palette[$role] = $hex;
+            } elseif (array_key_exists($role, $rawPalette)) {
+                $repairs[] = 'designDirection.json: field palette.' . $role
+                    . ' authored ' . self::describe($rawPalette[$role])
+                    . ' delivered removed; disposition dropped invalid generated color';
             }
         }
 
         $type = is_array($raw['type'] ?? null) ? $raw['type'] : [];
+
+        HeroComposition::assertKnown($assignedRecipe);
+
+        $signatureDevice = trim((string) ($raw['signature_device'] ?? ''));
+        $signatureSlots = self::normalizeSignatureDeviceSlots(
+            $raw['signature_device_slots'] ?? null,
+            $signatureDevice,
+            $repairs,
+            $warnings,
+        );
+        $blueprint = HeroBlueprint::normalize(
+            $raw['hero_blueprint'] ?? null,
+            $assignedRecipe,
+            [
+                'signature_device' => $signatureDevice,
+                'signature_device_slots' => $signatureSlots,
+            ],
+            $repairs,
+            $warnings,
+        );
+
+        $canvasRaw = strtolower(trim((string) ($raw['canvas'] ?? '')));
+        $canvas = $canvasRaw === 'framed' ? 'framed' : 'full-bleed';
+        if ($canvasRaw !== '' && $canvasRaw !== $canvas) {
+            $repairs[] = 'designDirection.json: field canvas authored '
+                . self::describe($raw['canvas']) . ' delivered "full-bleed"; disposition repaired invalid value';
+        }
+
+        $motion = self::motionProfile($raw['motion'] ?? null);
+        $rawMotion = is_string($raw['motion'] ?? null)
+            ? strtolower(trim($raw['motion']))
+            : '';
+        if ($rawMotion !== '' && $rawMotion !== $motion) {
+            $repairs[] = 'designDirection.json: field motion authored '
+                . self::describe($raw['motion']) . ' delivered ' . self::describe($motion)
+                . '; disposition repaired invalid profile';
+        }
 
         return [
             'title'            => trim((string) ($raw['title'] ?? '')),
@@ -318,14 +593,16 @@ final class DesignDirectionStep implements Step
             'image_grade'      => trim((string) ($raw['image_grade'] ?? '')),
             // Anything that isn't an explicit "framed" commitment is full-bleed:
             // an accidental frame reads as a rendering bug, not a design choice.
-            'canvas'           => strtolower(trim((string) ($raw['canvas'] ?? ''))) === 'framed' ? 'framed' : 'full-bleed',
+            'canvas'           => $canvas,
             // The motion profile is a fixed list (the kit ships exactly these);
             // anything unrecognized falls back to the default so every build
             // commits to ONE profile the downstream steps can gate on.
-            'motion'           => self::motionProfile($raw['motion'] ?? null),
+            'motion'           => $motion,
             'motion_note'      => trim((string) ($raw['motion_note'] ?? '')),
-            'signature_device' => trim((string) ($raw['signature_device'] ?? '')),
-            'hero_composition' => trim((string) ($raw['hero_composition'] ?? '')),
+            'signature_device' => $signatureDevice,
+            'signature_device_slots' => $signatureSlots,
+            'concept_seed'     => $conceptSeed,
+            'hero_blueprint'   => $blueprint,
         ];
     }
 
@@ -544,7 +821,7 @@ final class DesignDirectionStep implements Step
         // keyword. Directions persisted before the field existed carry none.
         $canvas = trim((string) ($direction['canvas'] ?? ''));
         if ($canvas === 'framed') {
-            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band; cap bands at `"align":"wide"`, never `"align":"full"`.';
+            $facts[] = '- **Canvas**: framed — the page keeps a visible mat of page background around every band BELOW the hero; cap those bands at `"align":"wide"`, never `"align":"full"`. The page-opening hero is exempt: it always runs edge-to-edge with `"align":"full"`, and the mat begins with the following section.';
         } elseif ($canvas !== '') {
             $facts[] = '- **Canvas**: full-bleed — heroes, image bands and color bands may run edge-to-edge with `"align":"full"`.';
         }
@@ -568,13 +845,21 @@ final class DesignDirectionStep implements Step
 
         foreach ([
             'signature_device' => 'Signature device',
-            'hero_composition' => 'Hero composition',
             'image_grade'      => 'Image grade (all imagery)',
         ] as $key => $label) {
             $value = trim((string) ($direction[$key] ?? ''));
             if ($value !== '') {
                 $facts[] = "- **{$label}**: {$value}";
             }
+        }
+
+        $signatureDevice = trim((string) ($direction['signature_device'] ?? ''));
+        if ($signatureDevice !== '') {
+            $slots = is_array($direction['signature_device_slots'] ?? null)
+                ? array_values(array_map('strval', $direction['signature_device_slots']))
+                : [];
+            $facts[] = '- **Signature device placement slots**: '
+                . ($slots === [] ? 'none — do not place the device' : implode(', ', $slots));
         }
 
         return $head . ($facts === [] ? '' : "\n\n" . implode("\n", $facts));
@@ -596,6 +881,69 @@ final class DesignDirectionStep implements Step
         return $project->exists(self::FILE)
             ? self::format($project->readJson(self::FILE))
             : self::FALLBACK;
+    }
+
+    /**
+     * Read the separately scoped, normalized front-page blueprint. This is a
+     * required build artifact contract: silently inventing a default here
+     * would let downstream units author a recipe that was never assigned.
+     *
+     * @return array<string,mixed>
+     */
+    public static function heroBlueprintFor(Project $project): array
+    {
+        if (!$project->exists(self::FILE)) {
+            throw new \RuntimeException('designDirection.json is missing the required persisted hero blueprint');
+        }
+        $direction = $project->readJson(self::FILE);
+        $blueprint = $direction['hero_blueprint'] ?? null;
+        if (!is_array($blueprint)) {
+            throw new \RuntimeException('designDirection.json has no structured hero_blueprint');
+        }
+        $recipe = trim((string) ($blueprint['recipe'] ?? ''));
+        if (!in_array($recipe, HeroComposition::RECIPES, true)) {
+            throw new \RuntimeException("designDirection.json has unknown hero_blueprint recipe '{$recipe}'");
+        }
+        $repairs = [];
+        $warnings = [];
+        $normalized = HeroBlueprint::normalize($blueprint, $recipe, [
+            'signature_device' => $direction['signature_device'] ?? '',
+            'signature_device_slots' => $direction['signature_device_slots'] ?? [],
+        ], $repairs, $warnings);
+        if ($normalized !== $blueprint) {
+            throw new \RuntimeException(
+                'designDirection.json hero_blueprint is not normalized (the producing step must persist its fixed point)'
+            );
+        }
+        return $blueprint;
+    }
+
+    /**
+     * Render the focused blueprint for the few front-page-only consumers.
+     * This intentionally does not call format()/readFor(), preventing the
+     * recipe from leaking into ordinary section or footer prompts.
+     *
+     * @param array<string,mixed> $blueprint
+     */
+    public static function formatHeroBlueprint(array $blueprint): string
+    {
+        HeroBlueprint::recipe($blueprint);
+        return "## Front-page hero blueprint (front page only)\n\n```json\n"
+            . json_encode(
+                $blueprint,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            )
+            . "\n```";
+    }
+
+    public static function formatHeroBlueprintFor(Project $project): string
+    {
+        return self::formatHeroBlueprint(self::heroBlueprintFor($project));
+    }
+
+    public static function heroRecipeFor(Project $project): string
+    {
+        return HeroBlueprint::recipe(self::heroBlueprintFor($project));
     }
 
     /**
@@ -634,7 +982,7 @@ final class DesignDirectionStep implements Step
      * The committed direction's canvas ("full-bleed" or "framed"), or '' when
      * no direction was persisted. A framed canvas keeps a mat of page
      * background around every band, so an overlay header can never float over
-     * the hero image — SectionsStep gates the header archetype pool on this.
+     * the hero image; AboveFoldContract resolves that relation once.
      */
     public static function canvasFor(Project $project): string
     {
@@ -659,10 +1007,78 @@ final class DesignDirectionStep implements Step
         return in_array($motion, Motion::PROFILES, true) ? $motion : 'none';
     }
 
+    /**
+     * Normalize the explicit placement budget without parsing motif prose.
+     * Any invalid list for a real device degrades as a whole to [] so a
+     * partially trusted list cannot accidentally duplicate the global motif.
+     *
+     * @param mixed        $raw
+     * @param list<string> $repairs
+     * @param list<string> $warnings
+     * @return list<string>
+     */
+    private static function normalizeSignatureDeviceSlots(
+        mixed $raw,
+        string $signatureDevice,
+        array &$repairs,
+        array &$warnings,
+    ): array {
+        if ($signatureDevice === '') {
+            if ($raw !== null && $raw !== []) {
+                $repairs[] = 'designDirection.json: field signature_device_slots authored '
+                    . self::describe($raw)
+                    . ' delivered []; disposition cleared because signature_device is empty';
+            }
+            return [];
+        }
+
+        if (!is_array($raw) || !array_is_list($raw)) {
+            $warnings[] = 'designDirection.json: field signature_device_slots authored '
+                . self::describe($raw)
+                . ' delivered []; disposition removed invalid/missing placement budget without inferring from prose';
+            return [];
+        }
+
+        $slots = [];
+        $valid = count($raw) <= 2;
+        foreach ($raw as $slot) {
+            if (!is_string($slot)) {
+                $valid = false;
+                continue;
+            }
+            $normalized = strtolower(trim($slot));
+            if (!in_array($normalized, self::SIGNATURE_DEVICE_SLOTS, true)
+                || in_array($normalized, $slots, true)) {
+                $valid = false;
+                continue;
+            }
+            $slots[] = $normalized;
+            if ($slot !== $normalized) {
+                $repairs[] = 'designDirection.json: field signature_device_slots authored '
+                    . self::describe($slot) . ' delivered ' . self::describe($normalized)
+                    . '; disposition canonicalized';
+            }
+        }
+
+        if (!$valid) {
+            $warnings[] = 'designDirection.json: field signature_device_slots authored '
+                . self::describe($raw)
+                . ' delivered []; disposition removed invalid placement budget without inferring from prose';
+            return [];
+        }
+        return $slots;
+    }
+
     /** Coerce a raw motion value onto the fixed profile list. */
     private static function motionProfile(mixed $raw): string
     {
         $motion = strtolower(trim((string) (is_string($raw) ? $raw : '')));
         return in_array($motion, Motion::PROFILES, true) ? $motion : Motion::DEFAULT_PROFILE;
+    }
+
+    private static function describe(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return $encoded === false ? get_debug_type($value) : $encoded;
     }
 }

@@ -105,6 +105,12 @@ final class ImagePromptComposer
         // The two fold into ONE sentence ("used as X on the website Y") — the
         // site context leads with a noun phrase (GenerateImagesStep::siteContext)
         // precisely so it reads after "on".
+        //
+        // A page context that mentions overlaid copy ("hero with the headline
+        // overlaid on the left") is the audited trigger for the model painting
+        // ghost headlines, URLs and UI chrome into that exact region, so the
+        // guidance spells out that overlay text arrives later as HTML and any
+        // region described as carrying it must stay empty.
         if ($pageContext !== '' && $siteContext !== '') {
             $where = "This image is used as {$pageContext} on {$siteContext}";
         } elseif ($pageContext !== '') {
@@ -114,8 +120,15 @@ final class ImagePromptComposer
         } else {
             $where = '';
         }
-        $guidance = $where === '' ? '' : 'Context to guide the subject, mood and '
-            . 'composition only — do not render any of it as text or literal objects: '
+        // The no-text rule precedes the context sentence so end-trimming under
+        // token pressure sheds the trigger (the context) before the guard.
+        $guidance = $where === '' ? '' : 'The website\'s own text is added later as real'
+            . ' HTML on top of the image — never paint it in: render no website text,'
+            . ' lettering, headlines, captions, watermarks, logos or user-interface'
+            . ' elements, and leave any region described below as carrying overlaid'
+            . ' copy as clean, low-detail empty space. Context to guide the subject,'
+            . ' mood and composition only — do not render any of it as text or literal'
+            . ' objects: '
             . $where;
 
         $prompt = $renderer->render('image-prompt.md', [
