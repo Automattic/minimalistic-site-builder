@@ -95,8 +95,16 @@ test('section layout constrains every planned section root and leaves nested lay
         $step->run($project);
 
         foreach (['page-home--hero', 'page-home--story', 'page-about--team'] as $part) {
-            $attrs = section_layout_root_attrs($project->readText("theme/parts/{$part}.html"));
+            $markup = $project->readText("theme/parts/{$part}.html");
+            $attrs = section_layout_root_attrs($markup);
             assert_eq(['type' => 'constrained'], $attrs['layout'], "{$part} root is constrained");
+            $doc = BlockMarkup::parse($markup);
+            $root = $doc->topLevel();
+            assert_true($root !== null);
+            assert_true(
+                !str_contains($doc->ownHtml($root), 'is-layout-constrained'),
+                'SectionLayout owns comment attrs; FixBlocks owns derived wrapper classes',
+            );
         }
         assert_contains(
             $nested,
@@ -142,6 +150,7 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
         'slug' => 'home',
         'sections' => [
             ['slug' => 'visual', 'background' => 'image', 'vertical_density' => 'standard'],
+            ['slug' => 'ambiguous', 'background' => 'image', 'vertical_density' => 'standard'],
             ['slug' => 'nested', 'background' => 'image', 'vertical_density' => 'standard'],
             ['slug' => 'text', 'background' => 'base', 'vertical_density' => 'compact'],
         ],
@@ -151,6 +160,7 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
         $image = '<!-- wp:image {"id":7} --><figure class="wp-block-image"><img src="visual.jpg" alt=""></figure><!-- /wp:image -->';
         $paragraph = '<!-- wp:paragraph --><p>Sibling text</p><!-- /wp:paragraph -->';
         $project->writeText('theme/parts/page-home--visual.html', section_layout_group([], $cover . $paragraph . $image));
+        $project->writeText('theme/parts/page-home--ambiguous.html', section_layout_group([], $cover . $cover));
         $project->writeText(
             'theme/parts/page-home--nested.html',
             section_layout_group([], section_layout_group([], $cover)),
@@ -163,6 +173,21 @@ test('section layout bleeds only a direct cover and never nested or ordinary ima
         assert_eq('full', section_layout_first_attrs($visual, 'cover')['align'] ?? null);
         assert_true(!isset(section_layout_first_attrs($visual, 'paragraph')['align']), 'sibling text stays constrained');
         assert_true(!isset(section_layout_first_attrs($visual, 'image')['align']), 'ordinary direct image stays inset');
+
+        $ambiguous = BlockMarkup::parse($project->readText('theme/parts/page-home--ambiguous.html'));
+        $ambiguousRoot = $ambiguous->topLevel();
+        assert_true($ambiguousRoot !== null);
+        $directCovers = array_values(array_filter(
+            $ambiguous->children($ambiguousRoot),
+            static fn (int $i): bool => $ambiguous->name($i) === 'cover',
+        ));
+        assert_eq(2, count($directCovers));
+        foreach ($directCovers as $coverIndex) {
+            assert_true(
+                !isset(($ambiguous->attrs($coverIndex) ?? [])['align']),
+                'multiple direct covers are ambiguous, so none bleeds',
+            );
+        }
 
         $nested = $project->readText('theme/parts/page-home--nested.html');
         assert_true(!isset(section_layout_first_attrs($nested, 'cover')['align']), 'nested cover is not a section-root visual');
