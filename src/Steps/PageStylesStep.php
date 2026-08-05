@@ -60,6 +60,9 @@ final class PageStylesStep implements Step
     use LlmOptions;
 
     private const PAGE_ARTIFACT_MAP = 'design/page-artifact-map.json';
+    private const ROOT_NONE = 0;
+    private const ROOT_ALL = 1;
+    private const ROOT_MIXED = 2;
 
     /**
      * The documented utility-class vocabulary, each with its implementation
@@ -371,9 +374,11 @@ CSS;
             foreach ($removals as $removal) {
                 $warnings[] = sprintf(
                     'source=%s; block_path=section-root CSS declaration; authored_value=%s; '
+                        . 'authored_spelling=%s; '
                         . 'delivered_value=%s; disposition=%s',
                     $source,
                     self::warningValue($removal['authored_value']),
+                    self::warningSourceSpelling($removal['authored_value']),
                     $removal['delivered_value'],
                     $removal['disposition'],
                 );
@@ -452,6 +457,7 @@ CSS;
         array $sectionRootIds,
         array &$removals,
         ?string &$error,
+        array $parentSelectors = [],
     ): ?string {
         $length = strlen($css);
         $offset = 0;
@@ -492,7 +498,13 @@ CSS;
                         ['media', 'supports', 'container', 'layer', 'scope', 'document', 'starting-style'],
                         true,
                     )) {
-                        $body = self::rewriteRuleList($body, $sectionRootIds, $removals, $error);
+                        $body = self::rewriteRuleList(
+                            $body,
+                            $sectionRootIds,
+                            $removals,
+                            $error,
+                            $parentSelectors,
+                        );
                         if ($body === null) {
                             return null;
                         }
@@ -505,6 +517,7 @@ CSS;
                         $sectionRootIds,
                         $removals,
                         $error,
+                        $parentSelectors,
                     );
                     if ($rule === null) {
                         return null;
@@ -582,6 +595,7 @@ CSS;
         array $sectionRootIds,
         array &$removals,
         ?string &$error,
+        array $parentSelectors,
     ): ?string {
         [$leading, $selectorText] = self::leadingTriviaAndRest($prelude);
         $branches = self::splitSelectorList($selectorText, $error);
@@ -589,43 +603,90 @@ CSS;
             return null;
         }
 
-        $rootBranches = [];
-        $otherBranches = [];
+        $entries = [];
+        $anyChanged = false;
+        $rootFilter = self::rootSubjectFilter($sectionRootIds);
         foreach ($branches as $branch) {
-            $targetsRoot = self::selectorTargetsRoot($branch, $sectionRootIds, $error);
-            if ($targetsRoot === null) {
+            $branch = trim($branch);
+            $resolved = self::resolveNestedSelectorBranch($branch, $parentSelectors, $error);
+            if ($resolved === null) {
                 return null;
             }
-            if ($targetsRoot) {
-                $rootBranches[] = trim($branch);
-            } else {
-                $otherBranches[] = trim($branch);
+            $relation = self::selectorSetRootRelation($resolved, $sectionRootIds, $error);
+            if ($relation === null) {
+                return null;
             }
-        }
-        if ($rootBranches === []) {
-            return $prelude . '{' . $body . '}';
+
+            if ($relation !== self::ROOT_MIXED) {
+                $changed = false;
+                $rewrittenBody = self::rewriteRuleBody(
+                    $body,
+                    $sectionRootIds,
+                    $resolved,
+                    $relation === self::ROOT_ALL,
+                    $changed,
+                    $removals,
+                    $error,
+                );
+                if ($rewrittenBody === null) {
+                    return null;
+                }
+                $entries[] = ['selector' => $branch, 'body' => $rewrittenBody];
+                $anyChanged = $anyChanged || $changed;
+                continue;
+            }
+
+            $rootSelector = $branch . ':where(' . $rootFilter . ')';
+            $otherSelector = $branch . ':not(:where(' . $rootFilter . '))';
+            $rootResolved = self::resolveNestedSelectorBranch($rootSelector, $parentSelectors, $error);
+            $otherResolved = self::resolveNestedSelectorBranch($otherSelector, $parentSelectors, $error);
+            if ($rootResolved === null || $otherResolved === null) {
+                return null;
+            }
+            $rootChanged = false;
+            $rootBody = self::rewriteRuleBody(
+                $body,
+                $sectionRootIds,
+                $rootResolved,
+                true,
+                $rootChanged,
+                $removals,
+                $error,
+            );
+            $otherChanged = false;
+            $otherBody = self::rewriteRuleBody(
+                $body,
+                $sectionRootIds,
+                $otherResolved,
+                false,
+                $otherChanged,
+                $removals,
+                $error,
+            );
+            if ($rootBody === null || $otherBody === null) {
+                return null;
+            }
+            if (!$rootChanged && !$otherChanged) {
+                $entries[] = ['selector' => $branch, 'body' => $body];
+                continue;
+            }
+            $entries[] = ['selector' => $rootSelector, 'body' => $rootBody];
+            $entries[] = ['selector' => $otherSelector, 'body' => $otherBody];
+            $anyChanged = true;
         }
 
-        $changed = false;
-        $rootBody = self::rewriteRootDeclarations($body, $changed, $removals, $error);
-        if ($rootBody === null) {
-            return null;
-        }
-        if (!$changed) {
+        if (!$anyChanged) {
             return $prelude . '{' . $body . '}';
         }
-        if ($otherBranches === []) {
-            return $prelude . '{' . $rootBody . '}';
-        }
-
         $indent = '';
         if (preg_match('/\n([ \t]*)\z/', $leading, $match) === 1) {
             $indent = $match[1];
         }
-        return $leading
-            . implode(', ', $rootBranches) . ' {' . $rootBody . '}'
-            . "\n{$indent}"
-            . implode(', ', $otherBranches) . ' {' . $body . '}';
+        $rules = [];
+        foreach ($entries as $entry) {
+            $rules[] = $entry['selector'] . ' {' . $entry['body'] . '}';
+        }
+        return $leading . implode("\n{$indent}", $rules);
     }
 
     /**
@@ -683,23 +744,138 @@ CSS;
         return $branches;
     }
 
+    /** @param array<string,true> $sectionRootIds */
+    private static function rootSubjectFilter(array $sectionRootIds): string
+    {
+        $ids = array_keys($sectionRootIds);
+        sort($ids, SORT_STRING);
+        return implode(', ', array_map(self::cssIdSelector(...), $ids));
+    }
+
+    private static function cssIdSelector(string $id): string
+    {
+        if (preg_match('/\A-?(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_-]|[^\x00-\x7F])*\z/', $id) === 1) {
+            return '#' . $id;
+        }
+        $escaped = str_replace(
+            ["\\", '"', "\n", "\r", "\f"],
+            ["\\\\", '\\"', '\\a ', '\\d ', '\\c '],
+            $id,
+        );
+        return '[id="' . $escaped . '"]';
+    }
+
     /**
-     * A selector qualifies only when its final compound contains a delivered
-     * root ID. IDs inside ancestors, attributes, or pseudo-class arguments do
-     * not widen the mutation boundary.
+     * Resolve one nested selector branch only for subject analysis. Emitted
+     * CSS keeps its authored nesting. Parent branches are already resolved.
      *
+     * @param list<string> $parentSelectors
+     * @return list<string>|null
+     */
+    private static function resolveNestedSelectorBranch(
+        string $selector,
+        array $parentSelectors,
+        ?string &$error,
+    ): ?array {
+        if ($parentSelectors === []) {
+            return [$selector];
+        }
+
+        $resolved = [];
+        foreach ($parentSelectors as $parent) {
+            $usedNesting = false;
+            $candidate = self::replaceNestingAmpersands(
+                $selector,
+                $parent,
+                $usedNesting,
+                $error,
+            );
+            if ($candidate === null) {
+                return null;
+            }
+            $resolved[] = $usedNesting ? $candidate : $parent . ' ' . $selector;
+        }
+        return $resolved;
+    }
+
+    private static function replaceNestingAmpersands(
+        string $selector,
+        string $parent,
+        bool &$usedNesting,
+        ?string &$error,
+    ): ?string {
+        $state = CssSyntaxScanner::state();
+        $length = strlen($selector);
+        $out = '';
+        for ($offset = 0; $offset < $length;) {
+            $byte = $selector[$offset];
+            if (
+                $byte === '&'
+                && $state['quote'] === ''
+                && !$state['comment']
+                && $state['brackets'] === 0
+            ) {
+                $out .= $parent;
+                $usedNesting = true;
+                $offset++;
+                continue;
+            }
+            $next = CssSyntaxScanner::consume($selector, $offset, $state);
+            if ($next === null) {
+                $error = "invalid nested selector at byte {$offset}";
+                return null;
+            }
+            $out .= substr($selector, $offset, $next - $offset);
+            $offset = $next;
+        }
+        if (!CssSyntaxScanner::isComplete($state)) {
+            $error = 'unterminated nested selector';
+            return null;
+        }
+        return $out;
+    }
+
+    /**
+     * ROOT_ALL means every explicit alternative identifies a delivered root;
+     * ROOT_MIXED means the same branch also has a non-root alternative. That
+     * distinction lets the emitter preserve the authored selector specificity
+     * while applying disjoint zero-specificity subject filters.
+     *
+     * @param list<string> $selectors
      * @param array<string,true> $sectionRootIds
      */
-    private static function selectorTargetsRoot(
+    private static function selectorSetRootRelation(
+        array $selectors,
+        array $sectionRootIds,
+        ?string &$error,
+    ): ?int {
+        $sawRoot = false;
+        $sawOther = false;
+        foreach ($selectors as $selector) {
+            $relation = self::selectorRootRelation($selector, $sectionRootIds, $error);
+            if ($relation === null) {
+                return null;
+            }
+            $sawRoot = $sawRoot || $relation !== self::ROOT_NONE;
+            $sawOther = $sawOther || $relation !== self::ROOT_ALL;
+        }
+        if (!$sawRoot) {
+            return self::ROOT_NONE;
+        }
+        return $sawOther ? self::ROOT_MIXED : self::ROOT_ALL;
+    }
+
+    /** @param array<string,true> $sectionRootIds */
+    private static function selectorRootRelation(
         string $selector,
         array $sectionRootIds,
         ?string &$error,
-    ): ?bool {
+    ): ?int {
         $compound = self::finalSelectorCompound($selector, $error);
         if ($compound === null) {
             return null;
         }
-        return self::compoundTargetsRoot($compound, $sectionRootIds, $error);
+        return self::compoundRootRelation($compound, $sectionRootIds, $error);
     }
 
     private static function finalSelectorCompound(string $selector, ?string &$error): ?string
@@ -759,14 +935,15 @@ CSS;
     }
 
     /** @param array<string,true> $sectionRootIds */
-    private static function compoundTargetsRoot(
+    private static function compoundRootRelation(
         string $compound,
         array $sectionRootIds,
         ?string &$error,
-    ): ?bool {
+    ): ?int {
         $length = strlen($compound);
         $state = CssSyntaxScanner::state();
-        $matchesRoot = false;
+        $relation = self::ROOT_NONE;
+        $excludesRoot = false;
         for ($offset = 0; $offset < $length;) {
             $topLevel = CssSyntaxScanner::isTopLevel($state);
             if ($topLevel && substr($compound, $offset, 2) === '/*') {
@@ -783,7 +960,7 @@ CSS;
                 $identifier = self::cssIdentifierAt($compound, $offset + 1);
                 if ($identifier !== null) {
                     if (isset($sectionRootIds[$identifier['decoded']])) {
-                        $matchesRoot = true;
+                        $relation = self::ROOT_ALL;
                     }
                     $offset = $identifier['end'];
                     continue;
@@ -798,20 +975,20 @@ CSS;
                     substr($compound, $offset, $end - $offset),
                     $sectionRootIds,
                 )) {
-                    $matchesRoot = true;
+                    $relation = self::ROOT_ALL;
                 }
                 $offset = $end;
                 continue;
             }
             if ($topLevel && $byte === ':') {
                 if (($compound[$offset + 1] ?? '') === ':') {
-                    return false;
+                    return self::ROOT_NONE;
                 }
                 $pseudo = self::cssIdentifierAt($compound, $offset + 1);
                 if ($pseudo !== null) {
                     $name = strtolower($pseudo['decoded']);
                     if (in_array($name, ['before', 'after', 'first-letter', 'first-line'], true)) {
-                        return false;
+                        return self::ROOT_NONE;
                     }
                     $functionOpen = self::skipSelectorTrivia($compound, $pseudo['end']);
                     if (($compound[$functionOpen] ?? '') === '(') {
@@ -819,30 +996,81 @@ CSS;
                         if ($end === null) {
                             return null;
                         }
+                        $argumentsText = substr(
+                            $compound,
+                            $functionOpen + 1,
+                            $end - $functionOpen - 2,
+                        );
                         if (in_array($name, ['is', 'where'], true)) {
-                            $arguments = self::splitSelectorList(
-                                substr($compound, $functionOpen + 1, $end - $functionOpen - 2),
+                            $argumentRelation = self::selectorArgumentRootRelation(
+                                $argumentsText,
+                                $sectionRootIds,
                                 $error,
                             );
-                            if ($arguments === null) {
+                            if ($argumentRelation === null) {
                                 return null;
                             }
-                            foreach ($arguments as $argument) {
-                                $argumentTargetsRoot = self::selectorTargetsRoot(
-                                    $argument,
+                            if ($argumentRelation === self::ROOT_ALL) {
+                                $relation = self::ROOT_ALL;
+                            } elseif (
+                                $argumentRelation === self::ROOT_MIXED
+                                && $relation !== self::ROOT_ALL
+                            ) {
+                                $relation = self::ROOT_MIXED;
+                            }
+                        } elseif ($name === 'not') {
+                            $doubleNegated = self::unwrappedNotArgument($argumentsText, $error);
+                            if ($error !== null) {
+                                return null;
+                            }
+                            if ($doubleNegated !== null) {
+                                $argumentRelation = self::selectorRootRelation(
+                                    $doubleNegated,
                                     $sectionRootIds,
                                     $error,
                                 );
-                                if ($argumentTargetsRoot === null) {
+                                if ($argumentRelation === null) {
                                     return null;
                                 }
-                                if ($argumentTargetsRoot) {
-                                    $matchesRoot = true;
+                                if ($argumentRelation === self::ROOT_ALL) {
+                                    $relation = self::ROOT_ALL;
+                                } elseif (
+                                    $argumentRelation === self::ROOT_MIXED
+                                    && $relation !== self::ROOT_ALL
+                                ) {
+                                    $relation = self::ROOT_MIXED;
+                                }
+                            } else {
+                                $argumentRelation = self::selectorArgumentRootRelation(
+                                    $argumentsText,
+                                    $sectionRootIds,
+                                    $error,
+                                );
+                                if ($argumentRelation === null) {
+                                    return null;
+                                }
+                                if ($argumentRelation !== self::ROOT_NONE) {
+                                    $excludesRoot = true;
                                 }
                             }
+                        } elseif (in_array($name, ['nth-child', 'nth-last-child'], true)) {
+                            $argumentRelation = self::nthOfRootRelation(
+                                $argumentsText,
+                                $sectionRootIds,
+                                $error,
+                            );
+                            if ($argumentRelation === null) {
+                                return null;
+                            }
+                            if ($argumentRelation === self::ROOT_ALL) {
+                                $relation = self::ROOT_ALL;
+                            } elseif (
+                                $argumentRelation === self::ROOT_MIXED
+                                && $relation !== self::ROOT_ALL
+                            ) {
+                                $relation = self::ROOT_MIXED;
+                            }
                         }
-                        // :not() and :has() inspect related elements or negate
-                        // a match; IDs inside them never identify this subject.
                         $offset = $end;
                         continue;
                     }
@@ -862,7 +1090,85 @@ CSS;
             $error = 'unterminated final selector compound';
             return null;
         }
-        return $matchesRoot;
+        return $excludesRoot ? self::ROOT_NONE : $relation;
+    }
+
+    /** @param array<string,true> $sectionRootIds */
+    private static function selectorArgumentRootRelation(
+        string $arguments,
+        array $sectionRootIds,
+        ?string &$error,
+    ): ?int {
+        $branches = self::splitSelectorList($arguments, $error);
+        return $branches === null
+            ? null
+            : self::selectorSetRootRelation($branches, $sectionRootIds, $error);
+    }
+
+    private static function unwrappedNotArgument(string $selector, ?string &$error): ?string
+    {
+        $selector = trim($selector);
+        if (($selector[0] ?? '') !== ':') {
+            return null;
+        }
+        $pseudo = self::cssIdentifierAt($selector, 1);
+        if ($pseudo === null || strtolower($pseudo['decoded']) !== 'not') {
+            return null;
+        }
+        $open = self::skipSelectorTrivia($selector, $pseudo['end']);
+        if (($selector[$open] ?? '') !== '(') {
+            return null;
+        }
+        $end = self::selectorGroupEnd($selector, $open, '(', ')', $error);
+        if ($end === null || trim(substr($selector, $end)) !== '') {
+            return null;
+        }
+        return substr($selector, $open + 1, $end - $open - 2);
+    }
+
+    /** @param array<string,true> $sectionRootIds */
+    private static function nthOfRootRelation(
+        string $arguments,
+        array $sectionRootIds,
+        ?string &$error,
+    ): ?int {
+        $state = CssSyntaxScanner::state();
+        $length = strlen($arguments);
+        for ($offset = 0; $offset < $length;) {
+            if (CssSyntaxScanner::isTopLevel($state)) {
+                $identifier = self::cssIdentifierAt($arguments, $offset);
+                if ($identifier !== null) {
+                    $hasLeadingGap = $offset > 0
+                        && CssSyntaxScanner::isCssWhitespace($arguments[$offset - 1]);
+                    $after = self::skipSelectorTrivia($arguments, $identifier['end']);
+                    if (
+                        $hasLeadingGap
+                        && strtolower($identifier['decoded']) === 'of'
+                        && $after > $identifier['end']
+                        && $after < $length
+                    ) {
+                        return self::selectorArgumentRootRelation(
+                            substr($arguments, $after),
+                            $sectionRootIds,
+                            $error,
+                        );
+                    }
+                    $offset = $identifier['end'];
+                    continue;
+                }
+            }
+            $next = CssSyntaxScanner::consume($arguments, $offset, $state);
+            if ($next === null) {
+                $error = "invalid nth-child argument at byte {$offset}";
+                return null;
+            }
+            $offset = $next;
+        }
+        if (!CssSyntaxScanner::isComplete($state)) {
+            $error = 'unterminated nth-child argument';
+            return null;
+        }
+        return self::ROOT_NONE;
     }
 
     private static function skipSelectorTrivia(string $selector, int $offset): int
@@ -923,12 +1229,43 @@ CSS;
             return false;
         }
         $inside = trim(substr($withoutComments, 1, -1));
-        if (preg_match('/\Aid[ \t\r\n\f]*=[ \t\r\n\f]*(?:"((?:\\.|[^"])*)"|\'((?:\\.|[^\'])*)\'|([^ \t\r\n\f]+))\z/is', $inside, $match) !== 1) {
+        $name = self::cssIdentifierAt($inside, 0);
+        if ($name === null || strtolower($name['decoded']) !== 'id') {
+            return false;
+        }
+        $rest = ltrim(substr($inside, $name['end']), " \t\r\n\f");
+        if (($rest[0] ?? '') !== '=') {
+            return false;
+        }
+        $rest = ltrim(substr($rest, 1), " \t\r\n\f");
+        if (preg_match(
+            '/\A(?:"((?:\\\\.|[^"])*)"|\'((?:\\\\.|[^\'])*)\'|([^ \t\r\n\f]+?))'
+                . '(?:[ \t\r\n\f]+((?:\\\\.|[A-Za-z])+))?[ \t\r\n\f]*\z/s',
+            $rest,
+            $match,
+        ) !== 1) {
             return false;
         }
         $raw = $match[1] !== '' ? $match[1] : ($match[2] !== '' ? $match[2] : ($match[3] ?? ''));
         $decoded = self::decodeCssEscapes($raw);
-        return $decoded !== null && isset($sectionRootIds[$decoded]);
+        if ($decoded === null) {
+            return false;
+        }
+        $modifier = isset($match[4]) && $match[4] !== ''
+            ? strtolower((string) self::decodeCssIdentifierText($match[4]))
+            : '';
+        if ($modifier !== '' && !in_array($modifier, ['i', 's'], true)) {
+            return false;
+        }
+        if ($modifier !== 'i') {
+            return isset($sectionRootIds[$decoded]);
+        }
+        foreach ($sectionRootIds as $id => $_) {
+            if (strcasecmp($id, $decoded) === 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @return array{decoded:string,end:int}|null */
@@ -1028,10 +1365,19 @@ CSS;
             || $ord >= 0x80;
     }
     /**
+     * Parse every qualified-rule body so nested selectors inherit the actual
+     * resolved parent context. Direct declarations are neutralized only when
+     * this rule's subject is known to be a delivered section root.
+     *
+     * @param array<string,true> $sectionRootIds
+     * @param list<string> $parentSelectors
      * @param list<array{authored_value:string,delivered_value:string,disposition:string}> $removals
      */
-    private static function rewriteRootDeclarations(
+    private static function rewriteRuleBody(
         string $body,
+        array $sectionRootIds,
+        array $parentSelectors,
+        bool $neutralizeDirect,
         bool &$changed,
         array &$removals,
         ?string &$error,
@@ -1049,12 +1395,16 @@ CSS;
             }
             if ($topLevel && $byte === ';') {
                 $segment = substr($body, $start, $offset - $start);
-                $rewritten = self::rewriteRootDeclaration($segment, $removals, $error);
-                if ($rewritten === null) {
-                    return null;
+                if ($neutralizeDirect) {
+                    $rewritten = self::rewriteRootDeclaration($segment, $removals, $error);
+                    if ($rewritten === null) {
+                        return null;
+                    }
+                    $out .= $rewritten['text'] . ';';
+                    $changed = $changed || $rewritten['changed'];
+                } else {
+                    $out .= $segment . ';';
                 }
-                $out .= $rewritten['text'] . ';';
-                $changed = $changed || $rewritten['changed'];
                 $start = $offset + 1;
                 $offset++;
                 continue;
@@ -1077,8 +1427,11 @@ CSS;
                     true,
                 )) {
                     $nestedChanged = false;
-                    $nestedBody = self::rewriteRootDeclarations(
+                    $nestedBody = self::rewriteRuleBody(
                         $nestedBody,
+                        $sectionRootIds,
+                        $parentSelectors,
+                        $neutralizeDirect,
                         $nestedChanged,
                         $removals,
                         $error,
@@ -1087,10 +1440,24 @@ CSS;
                         return null;
                     }
                     $changed = $changed || $nestedChanged;
+                    $out .= $prelude . '{' . $nestedBody . '}';
+                } elseif ($nestedAtRule !== null) {
+                    $out .= $prelude . '{' . $nestedBody . '}';
+                } else {
+                    $nestedRule = self::rewriteQualifiedRule(
+                        $prelude,
+                        $nestedBody,
+                        $sectionRootIds,
+                        $removals,
+                        $error,
+                        $parentSelectors,
+                    );
+                    if ($nestedRule === null) {
+                        return null;
+                    }
+                    $changed = $changed || $nestedRule !== $prelude . '{' . $nestedBody . '}';
+                    $out .= $nestedRule;
                 }
-                // Nested qualified selectors target their own final subject,
-                // not the outer root. Preserve those branches byte-for-byte.
-                $out .= $prelude . '{' . $nestedBody . '}';
                 $offset = $close + 1;
                 $start = $offset;
                 $state = CssSyntaxScanner::state();
@@ -1107,7 +1474,11 @@ CSS;
             $error = 'unterminated declaration string, comment, or function';
             return null;
         }
-        $rewritten = self::rewriteRootDeclaration(substr($body, $start), $removals, $error);
+        $tail = substr($body, $start);
+        if (!$neutralizeDirect) {
+            return $out . $tail;
+        }
+        $rewritten = self::rewriteRootDeclaration($tail, $removals, $error);
         if ($rewritten === null) {
             return null;
         }
@@ -1231,11 +1602,25 @@ CSS;
     private static function hasOpaquePaddingComponent(array $values): bool
     {
         foreach ($values as $value) {
-            if (preg_match('/\Avar[ \t\r\n\f]*\(/i', $value) === 1) {
+            $function = self::paddingComponentFunctionName($value);
+            if ($function !== null && !in_array($function, ['calc', 'min', 'max', 'clamp'], true)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static function paddingComponentFunctionName(string $value): ?string
+    {
+        $value = ltrim($value, " \t\r\n\f");
+        $identifier = self::cssIdentifierAt($value, 0);
+        if ($identifier === null) {
+            return null;
+        }
+        $open = self::skipSelectorTrivia($value, $identifier['end']);
+        return ($value[$open] ?? '') === '('
+            ? strtolower($identifier['decoded'])
+            : null;
     }
 
     private static function topLevelBang(string $value, ?string &$error): ?int
@@ -1340,6 +1725,15 @@ CSS;
             JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
         );
         return is_string($encoded) ? $encoded : '"unencodable CSS error"';
+    }
+
+    private static function warningSourceSpelling(string $value): string
+    {
+        return str_replace(
+            ["\r\n", "\r", "\n", "\f"],
+            ['\\n', '\\r', '\\n', '\\f'],
+            $value,
+        );
     }
 
     /** @return list<string> */
