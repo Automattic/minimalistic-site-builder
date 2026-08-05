@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/FakeLlm.php';
+require_once __DIR__ . '/doubles.php';
 
 /** @var array<int,array{0:string,1:callable}> */
 $GLOBALS['__tests'] = [];
@@ -66,6 +67,47 @@ function assert_throws(callable $fn, string $msg = ''): Throwable
         return $e;
     }
     throw new RuntimeException('assert_throws failed: no exception' . ($msg !== '' ? ": {$msg}" : ''));
+}
+
+/** Recursively delete a file or directory tree; missing paths are a no-op. */
+function remove_tree(string $path): void
+{
+    if (is_link($path) || is_file($path)) {
+        @unlink($path);
+        return;
+    }
+    if (!is_dir($path)) {
+        return;
+    }
+    @chmod($path, 0775);
+    foreach (scandir($path) ?: [] as $name) {
+        if ($name !== '.' && $name !== '..') {
+            remove_tree($path . '/' . $name);
+        }
+    }
+    @rmdir($path);
+}
+
+/** Run $fn($dir) with a fresh temp dir, removing the tree even when the test fails. */
+function with_temp_dir(string $prefix, callable $fn): mixed
+{
+    $dir = sys_get_temp_dir() . '/' . $prefix . uniqid();
+    if (!mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException("Could not create temp dir: {$dir}");
+    }
+    try {
+        return $fn($dir);
+    } finally {
+        remove_tree($dir);
+    }
+}
+
+/** Run $fn($project, $dir) with a throwaway project in a scoped temp dir. */
+function with_project(string $prefix, callable $fn): mixed
+{
+    return with_temp_dir($prefix, function (string $dir) use ($fn): mixed {
+        return $fn((new \Automattic\SiteBuild\ProjectStore($dir))->create('demo'), $dir);
+    });
 }
 
 /** Run $fn with its output buffered and discarded — even when it throws. */

@@ -12,17 +12,6 @@ function native_staged_writer_temp_dir(): string
     return $dir;
 }
 
-function native_staged_writer_remove(string $dir): void
-{
-    @chmod($dir, 0775);
-    foreach (scandir($dir) ?: [] as $name) {
-        if ($name !== '.' && $name !== '..') {
-            @unlink($dir . '/' . $name);
-        }
-    }
-    @rmdir($dir);
-}
-
 test('NativeStagedFileWriter stages beside the target and replaces atomically', function (): void {
     $dir = native_staged_writer_temp_dir();
     try {
@@ -38,7 +27,7 @@ test('NativeStagedFileWriter stages beside the target and replaces atomically', 
         assert_eq('after', file_get_contents($target));
         assert_true(!file_exists($staged), 'staged file must be consumed by replace');
     } finally {
-        native_staged_writer_remove($dir);
+        remove_tree($dir);
     }
 });
 
@@ -54,7 +43,7 @@ test('NativeStagedFileWriter preserves the target file mode on replace', functio
         clearstatcache();
         assert_eq(0644, fileperms($target) & 0777, 'replaced file must keep the original mode');
     } finally {
-        native_staged_writer_remove($dir);
+        remove_tree($dir);
     }
 });
 
@@ -77,6 +66,6 @@ test('NativeStagedFileWriter refuses to stage when tempnam falls back to the sys
         );
         assert_eq('before', file_get_contents($target), 'target must be untouched');
     } finally {
-        native_staged_writer_remove($dir);
+        remove_tree($dir);
     }
 });

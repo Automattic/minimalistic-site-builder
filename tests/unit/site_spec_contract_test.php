@@ -144,37 +144,47 @@ test('siteSpec schema and example publish the canonical package contract', funct
     );
 });
 
+/** Run $fn($project) on a scoped project normalized from the given supplied spec. */
+function site_spec_contract_normalized(bool $multiPage, array $siteSpec, callable $fn): void
+{
+    with_project('builder_sitespec_contract_', function ($project) use ($multiPage, $siteSpec, $fn) {
+        $project->writeJson('meta.json', [
+            'prompt'     => 'A cozy neighborhood bakery',
+            'multi_page' => $multiPage,
+            'site_spec'  => $siteSpec,
+        ]);
+        (new SiteSpecStep(new FakeLlm(), new PromptRenderer(Package::promptsDir())))->run($project);
+        $fn($project);
+    });
+}
+
 test('siteSpec example is a warning-free normalization fixed point', function () {
-    $tmp = sys_get_temp_dir() . '/builder_sitespec_contract_' . uniqid();
-    $llm = new FakeLlm();
-    $builder = make_test_builder($llm, $tmp);
-    $example = site_spec_contract_object(Package::siteSpecExamplePath());
-    $project = $builder->createProject(
-        prompt: 'Use the complete canonical bakery facts supplied by the host.',
-        slug: 'site-spec-contract',
-        siteSpec: $example,
-    );
+    with_temp_dir('builder_sitespec_contract_', function (string $tmp) {
+        $llm = new FakeLlm();
+        $builder = make_test_builder($llm, $tmp);
+        $example = site_spec_contract_object(Package::siteSpecExamplePath());
+        $project = $builder->createProject(
+            prompt: 'Use the complete canonical bakery facts supplied by the host.',
+            slug: 'site-spec-contract',
+            siteSpec: $example,
+        );
 
-    (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
+        (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
 
-    assert_eq(0, $llm->completeJsonCalls, 'the canonical example must bypass site-spec generation');
-    assert_eq($example, $project->readJson('siteSpec.json'), 'normalization must leave the example unchanged');
-    assert_true(!$project->exists('warnings.json'), 'the canonical example must need no repair warning');
-
-    exec('rm -rf ' . escapeshellarg($tmp));
+        assert_eq(0, $llm->completeJsonCalls, 'the canonical example must bypass site-spec generation');
+        assert_eq($example, $project->readJson('siteSpec.json'), 'normalization must leave the example unchanged');
+        assert_true(!$project->exists('warnings.json'), 'the canonical example must need no repair warning');
+    });
 });
 
 test('siteSpec schema required fields match exhaustive normalization', function () {
-    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: true, siteSpec: []);
-    (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
-
-    $normalizedKeys = array_keys($project->readJson('siteSpec.json'));
-    $schemaKeys = site_spec_contract_object(Package::siteSpecSchemaPath())['required'];
-    sort($normalizedKeys);
-    sort($schemaKeys);
-    assert_eq($schemaKeys, $normalizedKeys, 'schema required fields must match an exhaustively normalized spec');
-
-    exec('rm -rf ' . escapeshellarg($tmp));
+    site_spec_contract_normalized(multiPage: true, siteSpec: [], fn: function ($project) {
+        $normalizedKeys = array_keys($project->readJson('siteSpec.json'));
+        $schemaKeys = site_spec_contract_object(Package::siteSpecSchemaPath())['required'];
+        sort($normalizedKeys);
+        sort($schemaKeys);
+        assert_eq($schemaKeys, $normalizedKeys, 'schema required fields must match an exhaustively normalized spec');
+    });
 });
 
 test('siteSpec schema invented enum matches the identities normalization can invent', function () {
@@ -182,31 +192,26 @@ test('siteSpec schema invented enum matches the identities normalization can inv
     // written by hand in two places. Same tripwire style as the required-fields
     // test above: force every invention from an empty spec and check the schema
     // admits exactly what normalization produced.
-    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: false, siteSpec: []);
-    (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
-
-    $invented = $project->readJson('siteSpec.json')['invented'];
     $schema = site_spec_contract_object(Package::siteSpecSchemaPath());
     $allowed = $schema['properties']['invented']['items']['enum'];
 
-    assert_true($invented !== [], 'an empty spec must invent identity fields');
-    foreach ($invented as $key) {
-        assert_true(in_array($key, $allowed, true), "schema enum is missing invented key '{$key}'");
-    }
-    exec('rm -rf ' . escapeshellarg($tmp));
+    site_spec_contract_normalized(multiPage: false, siteSpec: [], fn: function ($project) use ($allowed) {
+        $invented = $project->readJson('siteSpec.json')['invented'];
+        assert_true($invented !== [], 'an empty spec must invent identity fields');
+        foreach ($invented as $key) {
+            assert_true(in_array($key, $allowed, true), "schema enum is missing invented key '{$key}'");
+        }
+    });
 
     // Reverse direction: a spec claiming every enum key as invented must keep
     // them all — normalization strips identity keys it cannot invent, so a
     // stale enum entry would go missing here.
-    [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: false, siteSpec: ['invented' => $allowed]);
-    (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
-
-    $kept = $project->readJson('siteSpec.json')['invented'];
-    sort($allowed);
-    sort($kept);
-    assert_eq($allowed, $kept, 'schema enum lists a key normalization cannot invent');
-
-    exec('rm -rf ' . escapeshellarg($tmp));
+    site_spec_contract_normalized(multiPage: false, siteSpec: ['invented' => $allowed], fn: function ($project) use ($allowed) {
+        $kept = $project->readJson('siteSpec.json')['invented'];
+        sort($allowed);
+        sort($kept);
+        assert_eq($allowed, $kept, 'schema enum lists a key normalization cannot invent');
+    });
 });
 
 test('siteSpec schema email_domain pattern agrees with normalization', function () {
@@ -226,12 +231,11 @@ test('siteSpec schema email_domain pattern agrees with normalization', function 
     foreach ($samples as $domain => $valid) {
         assert_eq($valid, preg_match($pattern, $domain) === 1, "schema pattern disagrees on '{$domain}'");
 
-        [$project, $llm, $tmp] = make_sitespec_fixture(multiPage: false, siteSpec: ['email_domain' => $domain]);
-        (new SiteSpecStep($llm, new PromptRenderer(Package::promptsDir())))->run($project);
-        $spec = $project->readJson('siteSpec.json');
-        $preserved = strtolower($domain) === ($spec['email_domain'] ?? null)
-            && !in_array('email_domain', $spec['invented'] ?? [], true);
-        assert_eq($valid, $preserved, "normalization disagrees with the schema on '{$domain}'");
-        exec('rm -rf ' . escapeshellarg($tmp));
+        site_spec_contract_normalized(multiPage: false, siteSpec: ['email_domain' => $domain], fn: function ($project) use ($domain, $valid) {
+            $spec = $project->readJson('siteSpec.json');
+            $preserved = strtolower($domain) === ($spec['email_domain'] ?? null)
+                && !in_array('email_domain', $spec['invented'] ?? [], true);
+            assert_eq($valid, $preserved, "normalization disagrees with the schema on '{$domain}'");
+        });
     }
 });

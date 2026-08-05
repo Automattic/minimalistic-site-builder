@@ -65,14 +65,14 @@ final class FooterUnit extends AbstractMarkupUnit
         FooterComposition::assertKnown($archetype);
         if ($this->pageCount($input) === 1) {
             $before = $markup;
-            $markup = GeneratedMarkup::withoutSiteTitleLinks($markup);
+            $markup = FooterMarkup::withoutSiteTitleLinks($markup);
             if ($markup !== $before) {
                 $repairs[] = self::repair('one-page-site-title-link-disabled', $key);
             }
         }
-        $markup = GeneratedMarkup::withoutPortraitImagePlaceholders($markup, $warnings);
+        $markup = FooterMarkup::withoutPortraitImagePlaceholders($markup, $warnings);
         $before = $markup;
-        $markup = GeneratedMarkup::withRootBackgroundColor(
+        $markup = FooterMarkup::withRootBackgroundColor(
             $markup,
             FooterComposition::surface($archetype),
             $warnings

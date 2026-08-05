@@ -427,15 +427,3 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
-
-test('pipeline step order is correct', function () {
-    $tmp = sys_get_temp_dir() . '/builder_int_order_' . uniqid();
-    $ids = make_integration_builder(new FakeLlm(), $tmp)->pipeline()->stepIds();
-    assert_eq([
-        'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+page-plan', 'sections', 'section-rhythm',
-        'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks', 'assemble-pages', 'page-styles', 'custom-motion',
-        'bundle-fonts', 'fonts-php', 'finalize-theme', 'validate-theme',
-    ], $ids);
-    exec('rm -rf ' . escapeshellarg($tmp));
-});

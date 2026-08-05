@@ -90,43 +90,6 @@ final class PhpBlockFixerTestWriter implements StagedFileWriter
     }
 }
 
-/** @param array<string,string> $files relative theme path => bytes */
-function php_block_fixer_test_theme(array $files = []): string
-{
-    $root = sys_get_temp_dir() . '/php-block-fixer-' . bin2hex(random_bytes(8));
-    $theme = $root . '/theme';
-    if (!mkdir($theme, 0775, true) && !is_dir($theme)) {
-        throw new RuntimeException('Could not create PHP block fixer test theme');
-    }
-    foreach ($files as $relative => $content) {
-        $path = $theme . '/' . $relative;
-        if (!is_dir(dirname($path)) && !mkdir(dirname($path), 0775, true) && !is_dir(dirname($path))) {
-            throw new RuntimeException('Could not create PHP block fixer fixture directory');
-        }
-        if (file_put_contents($path, $content) !== strlen($content)) {
-            throw new RuntimeException('Could not write PHP block fixer fixture');
-        }
-    }
-    return $theme;
-}
-
-function php_block_fixer_test_remove(string $path): void
-{
-    if (is_link($path) || is_file($path)) {
-        @unlink($path);
-        return;
-    }
-    if (!is_dir($path)) {
-        return;
-    }
-    foreach (scandir($path) ?: [] as $name) {
-        if ($name !== '.' && $name !== '..') {
-            php_block_fixer_test_remove($path . '/' . $name);
-        }
-    }
-    @rmdir($path);
-}
-
 test('PhpBlockFixer reaches a fixed point, reports exact drops and repairs, and is a no-op on retry', function () {
     $original = '<!-- wp:paragraph --><p class="keep lost" style=\'padding-top:4rem;color:red\'>dirty'
         . '<span class=\'lost lost\' style="padding-top:4rem"></span></p><!-- /wp:paragraph -->';
@@ -186,7 +149,7 @@ test('PhpBlockFixer reaches a fixed point, reports exact drops and repairs, and 
             'the second invocation emits no new drop or repair row'
         );
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -210,7 +173,7 @@ test('PhpBlockFixer skips non-block HTML and does not invoke transformation or w
             $report
         );
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -230,7 +193,7 @@ test('PhpBlockFixer reports an empty theme without requiring templates or parts 
         assert_eq([], $transformer->calls);
         assert_eq(0, $writer->stageCalls);
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -261,7 +224,7 @@ test('PhpBlockFixer discovers only immediate lowercase HTML files in determinist
         assert_true(!str_contains($report, 'upper.HTML'));
         assert_contains('[fix-templates] 0/2 file(s) re-serialized', $report, 'skips do not count as eligible');
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -315,7 +278,7 @@ test('PhpBlockFixer permits convergence on pass five', function () {
         assert_eq($states[4], file_get_contents($theme . '/parts/state.html'));
         assert_eq(1, $writer->replaceCalls);
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -343,7 +306,7 @@ test('PhpBlockFixer isolates a file that still changes bytes on pass five', func
         assert_eq(0, $writer->stageCalls, 'a failed file is never staged');
         assert_eq($initial, file_get_contents($theme . '/parts/state.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -380,7 +343,7 @@ test('PhpBlockFixer isolates a throwing file and still fixes its siblings', func
         assert_eq($aCanonical, file_get_contents($theme . '/parts/a.html'));
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -402,7 +365,7 @@ test('PhpBlockFixer isolates a file carrying an unsupported registered block', f
         assert_eq(1, $writer->replaceCalls);
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -424,7 +387,7 @@ test('PhpBlockFixer isolates a file carrying an unknown deprecation signature', 
         assert_contains('a reviewed deprecation adapter is required', $report);
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -449,7 +412,7 @@ test('PhpBlockFixer isolates a current-key historical style signature to its fil
         assert_contains('Unsupported deprecated core/paragraph style signature at 0: color', $report);
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -473,7 +436,7 @@ test('PhpBlockFixer isolates an unsupported block-support family to its file', f
         assert_eq(0, $writer->stageCalls);
         assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -488,7 +451,7 @@ test('PhpBlockFixer isolates unreviewed layout variants to their file', function
         assert_eq(0, $writer->stageCalls);
         assert_eq($original, file_get_contents($theme . '/parts/unsupported.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -524,7 +487,7 @@ test('PhpBlockFixer carries inert unimplemented style families without failing',
                 'carried style state keeps its authored bytes'
             );
         } finally {
-            php_block_fixer_test_remove(dirname($theme));
+            remove_tree(dirname($theme));
         }
     }
 });
@@ -575,8 +538,8 @@ test('PhpBlockFixer deep-merges duplicate comment JSON keys instead of failing t
         $second = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
         assert_contains('  ok     parts/page-home--contact-and-location.html', $second, 'merged output is a fixed point');
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
-        php_block_fixer_test_remove(dirname($collapsedTheme));
+        remove_tree(dirname($theme));
+        remove_tree(dirname($collapsedTheme));
     }
 });
 
@@ -606,7 +569,7 @@ test('escaped-equivalent duplicate keys survive LayoutFixer and block re-seriali
         assert_contains('"color":{"background":"#123456"}', $fixed, 'the escaped spelling survives');
         assert_contains('0 style/class value(s) dropped', $report);
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -633,7 +596,7 @@ test('PhpBlockFixer prunes invented style keys, reports each removal, and conver
         $second = (new PhpBlockFixer(writer: new PhpBlockFixerTestWriter()))->fix($theme);
         assert_contains('  ok     parts/invented.html', $second, 'pruned output is a fixed point');
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -650,7 +613,7 @@ test('PhpBlockFixer removes an entirely invented style attribute and its empty p
         assert_true(!str_contains($fixed, '"style"'), 'an emptied style object is not serialized');
         assert_contains('REPAIR invented-style-pruned:spacing.mediaPadding at 0', $report);
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -688,7 +651,7 @@ test('PhpBlockFixer discards prior stages and writes nothing when a later stage 
         assert_eq($aOriginal, file_get_contents($theme . '/parts/a.html'));
         assert_eq($bOriginal, file_get_contents($theme . '/parts/b.html'));
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });
 
@@ -750,6 +713,6 @@ test('PhpBlockFixer leaves only complete original or canonical bytes after mid-c
         ))->fix($theme);
         assert_contains('[fix-templates] 0/3 file(s) re-serialized', $stableReport);
     } finally {
-        php_block_fixer_test_remove(dirname($theme));
+        remove_tree(dirname($theme));
     }
 });

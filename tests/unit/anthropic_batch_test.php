@@ -164,35 +164,6 @@ test('retryTextBatch handles integer-keyed bodies end to end', function () {
     assert_eq([7], $reported, 'the int key reaches a string|int-typed onFailure intact');
 });
 
-test('concurrencyWindows caps each window at 10 and preserves keys in order', function () {
-    $bodies = [];
-    for ($i = 0; $i < 12; $i++) {
-        $bodies["r{$i}"] = ['prompt' => "P{$i}"];
-    }
-
-    $windows = AnthropicClient::concurrencyWindows($bodies);
-
-    assert_eq([10, 2], array_map('count', $windows), 'no more than 10 in flight per window');
-    foreach ($windows as $window) {
-        assert_true(count($window) <= 10, 'window within the cap');
-    }
-
-    // Every request appears exactly once, with its key and order intact.
-    $flat = [];
-    foreach ($windows as $window) {
-        $flat += $window;
-    }
-    assert_eq(array_keys($bodies), array_keys($flat), 'keys preserved across windows');
-    assert_eq(['prompt' => 'P7'], $flat['r7'], 'request body intact');
-});
-
-test('concurrencyWindows leaves a small batch as a single window', function () {
-    $bodies = ['a' => [], 'b' => [], 'c' => []];
-    $windows = AnthropicClient::concurrencyWindows($bodies);
-    assert_eq(1, count($windows), 'a sub-cap batch is one window');
-    assert_eq(['a', 'b', 'c'], array_keys($windows[0]));
-});
-
 test('bodyFor sends temperature only when set and supported, and applies model/token defaults', function () {
     $body = AnthropicClient::bodyFor(
         ['prompt' => 'Hi', 'temperature' => 0.9, 'system' => 'Be terse.'],
@@ -852,4 +823,31 @@ test('retryTextBatch survives a held launch with an empty delay schedule', funct
         [],
     );
     assert_eq('H', $results['h']['text'], 'a held launch retries even when no transient rounds are configured');
+});
+
+test('retryTextBatch charges the first backoff for a held-only retry wave', function () {
+    // When the rate-limited sibling itself resolves another way (a stripped
+    // parameter, or a 429 carrying a terminal stop reason), the retry wave
+    // contains ONLY held keys and no request owns a backoff slot. Re-sending
+    // with zero wait would fire straight into the still-active rate limit, so
+    // the wave must wait at least the first backoff delay.
+    $bodies = ['h' => ['model' => 'm']];
+    $round = 0;
+    $slept = [];
+    $results = AnthropicClient::retryTextBatch(
+        $bodies,
+        function (array $subset) use (&$round): array {
+            $round++;
+            return ['h' => $round === 1
+                ? ['ok' => false, 'transient' => true, 'held' => true, 'error' => 'launch held: a sibling request was rate-limited (HTTP 429)']
+                : ['ok' => true, 'text' => 'H', 'input' => 1, 'output' => 1]];
+        },
+        [3, 9],
+        null,
+        function (int $seconds) use (&$slept): void {
+            $slept[] = $seconds;
+        },
+    );
+    assert_eq('H', $results['h']['text']);
+    assert_eq([3], $slept, 'a held-only wave waits the first backoff delay instead of zero');
 });

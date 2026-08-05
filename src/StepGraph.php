@@ -14,7 +14,7 @@ final class StepGraph
     public const DEFAULT_SEEDS = ['meta.json'];
 
     /** Prefix keeps numeric-string paths from being coerced to integer array keys. */
-    private const PATH_SET_PREFIX = "\0path:";
+    public const PATH_SET_PREFIX = "\0path:";
 
     /**
      * @param Step[]   $steps

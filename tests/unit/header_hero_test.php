@@ -563,302 +563,295 @@ test('closed behavior artifact rejects extra fields and impossible tuples', func
 });
 
 test('the step repairs parts, writes the behavior artifact, and keeps successful fixes out of warnings', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', hh_theme_json());
-    $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
-    $project->writeJson('pages.json', ['pages' => [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-    ]]]);
-    hh_above_fold($project, [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-    ]], 'focal-subject-stage');
-    $project->writeText('theme/parts/header.html', hh_header('{"className":"header-overlay","layout":{"type":"constrained"}}') . "\n");
-    $project->writeText('theme/parts/page-home--hero.html', hh_cover('92') . "\n");
+    with_project('builder_hh_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]], 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"className":"header-overlay","layout":{"type":"constrained"}}') . "\n");
+        $project->writeText('theme/parts/page-home--hero.html', hh_cover('92') . "\n");
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    assert_true(!str_contains($project->readText('theme/parts/header.html'), 'header-overlay'), 'stacked mode strips the stray overlay hook');
-    assert_contains('"minHeight":80', $project->readText('theme/parts/page-home--hero.html'));
-    assert_eq(HeaderBehavior::STATIC, $project->readJson(HeaderBehavior::FILE)['behavior']);
-    assert_true(!$project->exists('warnings.json'), 'complete deterministic repair is not queued for AI repair');
-    assert_true($project->exists('logs/header-hero.txt'));
-    exec('rm -rf ' . escapeshellarg($tmp));
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'header-overlay'), 'stacked mode strips the stray overlay hook');
+        assert_contains('"minHeight":80', $project->readText('theme/parts/page-home--hero.html'));
+        assert_eq(HeaderBehavior::STATIC, $project->readJson(HeaderBehavior::FILE)['behavior']);
+        assert_true(!$project->exists('warnings.json'), 'complete deterministic repair is not queued for AI repair');
+        assert_true($project->exists('logs/header-hero.txt'));
+    });
 });
 
 test('the step protects a resumed legacy theme with global Group padding', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_group_padding_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Atlas Field']);
-    $theme = hh_theme_json();
-    $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
-        'top' => 'var:preset|spacing|xl',
-        'bottom' => 'var:preset|spacing|xl',
-    ];
-    $project->writeJson('theme/theme.json', $theme);
-    $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
-    $project->writeJson('pages.json', ['pages' => [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-    ]]]);
-    hh_above_fold($project, [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-    ]], 'focal-subject-stage');
-    $project->writeText(
-        'theme/parts/header.html',
-        '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}} -->'
-            . '<div class="wp-block-group"><!-- wp:group {"layout":{"type":"flex"}} -->'
-            . '<div class="wp-block-group"><!-- wp:group {"layout":{"type":"flex"}} -->'
-            . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
-            . '<!-- wp:navigation /--></div><!-- /wp:group --></div><!-- /wp:group -->',
-    );
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-            . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
-            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
-    );
+    with_project('builder_hh_group_padding_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Atlas Field']);
+        $theme = hh_theme_json();
+        $theme['styles']['blocks']['core/group']['spacing']['padding'] = [
+            'top' => 'var:preset|spacing|xl',
+            'bottom' => 'var:preset|spacing|xl',
+        ];
+        $project->writeJson('theme/theme.json', $theme);
+        $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]], 'focal-subject-stage');
+        $project->writeText(
+            'theme/parts/header.html',
+            '<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|sm","bottom":"var:preset|spacing|sm"}}},"layout":{"type":"constrained"}} -->'
+                . '<div class="wp-block-group"><!-- wp:group {"layout":{"type":"flex"}} -->'
+                . '<div class="wp-block-group"><!-- wp:group {"layout":{"type":"flex"}} -->'
+                . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+                . '<!-- wp:navigation /--></div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
-    $groups = array_values(array_filter(
-        $header->indices(),
-        static fn (int $i): bool => $header->name($i) === 'group',
-    ));
-    foreach (array_slice($groups, 1) as $group) {
-        $padding = ($header->attrs($group) ?? [])['style']['spacing']['padding'];
-        assert_eq('0', $padding['top']);
-        assert_eq('0', $padding['bottom']);
-    }
-    assert_contains('neutralized inherited core/group', $project->readText('logs/header-hero.txt'));
-    assert_true(!$project->exists('warnings.json'), 'lossless legacy repair is not queued');
-    exec('rm -rf ' . escapeshellarg($tmp));
+        $header = BlockMarkup::parse($project->readText('theme/parts/header.html'));
+        $groups = array_values(array_filter(
+            $header->indices(),
+            static fn (int $i): bool => $header->name($i) === 'group',
+        ));
+        foreach (array_slice($groups, 1) as $group) {
+            $padding = ($header->attrs($group) ?? [])['style']['spacing']['padding'];
+            assert_eq('0', $padding['top']);
+            assert_eq('0', $padding['bottom']);
+        }
+        assert_contains('neutralized inherited core/group', $project->readText('logs/header-hero.txt'));
+        assert_true(!$project->exists('warnings.json'), 'lossless legacy repair is not queued');
+    });
 });
 
 test('removing authored sticky behavior from a resolved static header warns actionably', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_loss_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', hh_theme_json());
-    $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none']);
-    $project->writeJson('pages.json', ['pages' => [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-    ]]]);
-    hh_above_fold($project, [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
-    ]], 'focal-subject-stage');
-    $project->writeText(
-        'theme/parts/header.html',
-        hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
-    );
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-            . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
-            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
-    );
+    with_project('builder_hh_loss_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'none']);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base']],
+        ]], 'focal-subject-stage');
+        $project->writeText(
+            'theme/parts/header.html',
+            hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
+        );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    $warnings = $project->readText('warnings.json');
-    assert_contains("file='theme/parts/header.html'", $warnings);
-    assert_contains("block='wp:group[0]'", $warnings);
-    assert_contains('authored=', $warnings);
-    assert_contains('delivered=removed', $warnings);
-    assert_contains('disposition=', $warnings);
-    assert_true(!str_contains($project->readText('theme/parts/header.html'), '"position"'));
-    assert_eq('instant', $project->readJson(HeaderBehavior::FILE)['transition']);
-    exec('rm -rf ' . escapeshellarg($tmp));
+        $warnings = $project->readText('warnings.json');
+        assert_contains("file='theme/parts/header.html'", $warnings);
+        assert_contains("block='wp:group[0]'", $warnings);
+        assert_contains('authored=', $warnings);
+        assert_contains('delivered=removed', $warnings);
+        assert_contains('disposition=', $warnings);
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), '"position"'));
+        assert_eq('instant', $project->readJson(HeaderBehavior::FILE)['transition']);
+    });
 });
 
 test('the step warns actionably when an unreadable palette downgrades sticky-soft to static', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_downgrade_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    // Every palette token sits near mid-gray: no foreground/surface pair
-    // reaches 4.5:1, so the requested sticky-soft cannot stay readable.
-    $palette = [];
-    foreach ([
-        'base' => '#7F7F7F',
-        'contrast' => '#8A8A8A',
-        'primary' => '#757575',
-        'secondary' => '#808080',
-        'accent' => '#8F8F8F',
-    ] as $slug => $color) {
-        $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $color];
-    }
-    $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]]);
-    $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
-    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
-    $project->writeJson('pages.json', ['pages' => [
-        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-    ]]);
-    hh_above_fold($project, [
-        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-    ], 'focal-subject-stage');
-    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-            . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
-            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
-    );
+    with_project('builder_hh_downgrade_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        // Every palette token sits near mid-gray: no foreground/surface pair
+        // reaches 4.5:1, so the requested sticky-soft cannot stay readable.
+        $palette = [];
+        foreach ([
+            'base' => '#7F7F7F',
+            'contrast' => '#8A8A8A',
+            'primary' => '#757575',
+            'secondary' => '#808080',
+            'accent' => '#8F8F8F',
+        ] as $slug => $color) {
+            $palette[] = ['slug' => $slug, 'name' => ucfirst($slug), 'color' => $color];
+        }
+        $project->writeJson('theme/theme.json', ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]]);
+        $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $project->writeJson('pages.json', ['pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ]]);
+        hh_above_fold($project, [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ], 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    $artifact = $project->readJson(HeaderBehavior::FILE);
-    assert_eq(HeaderBehavior::STATIC, $artifact['behavior'], 'unsafe palette downgrades sticky-soft');
-    assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode']);
-    assert_true($project->exists('warnings.json'), 'a behavior downgrade is actionable and must be queued');
-    $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
-    assert_contains("file='" . HeaderBehavior::FILE . "'", $warnings);
-    assert_contains("block='behavior'", $warnings);
-    assert_contains("authored='sticky-soft' in mode 'stacked'", $warnings);
-    assert_contains("delivered='static' in mode 'stacked'", $warnings);
-    assert_contains('disposition=behavior downgraded', $warnings);
-    assert_contains('no palette-token foreground/surface pair', $warnings);
-    exec('rm -rf ' . escapeshellarg($tmp));
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::STATIC, $artifact['behavior'], 'unsafe palette downgrades sticky-soft');
+        assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode']);
+        assert_true($project->exists('warnings.json'), 'a behavior downgrade is actionable and must be queued');
+        $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+        assert_contains("file='" . HeaderBehavior::FILE . "'", $warnings);
+        assert_contains("block='behavior'", $warnings);
+        assert_contains("authored='sticky-soft' in mode 'stacked'", $warnings);
+        assert_contains("delivered='static' in mode 'stacked'", $warnings);
+        assert_contains('disposition=behavior downgraded', $warnings);
+        assert_contains('no palette-token foreground/surface pair', $warnings);
+    });
 });
 
 test('moving authored root sticky behavior to a sticky outer shell is a warning-free canonical repair', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_move_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', hh_theme_json());
-    $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
-    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
-    $project->writeJson('pages.json', ['pages' => [
-        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-    ]]);
-    hh_above_fold($project, [
-        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-    ], 'focal-subject-stage');
-    $project->writeText(
-        'theme/parts/header.html',
-        hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
-    );
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-            . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
-            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
-    );
+    with_project('builder_hh_move_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $project->writeJson('pages.json', ['pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ]]);
+        hh_above_fold($project, [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ], 'focal-subject-stage');
+        $project->writeText(
+            'theme/parts/header.html',
+            hh_header('{"backgroundColor":"base","textColor":"contrast","style":{"position":{"type":"sticky","top":"0px"}},"layout":{"type":"constrained"}}') . "\n",
+        );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    assert_eq(HeaderBehavior::STICKY_SOFT, $project->readJson(HeaderBehavior::FILE)['behavior']);
-    assert_true(!$project->exists('warnings.json'), 'equivalent outer sticky behavior preserves the authored intent');
-    assert_true(!str_contains($project->readText('theme/parts/header.html'), '"position"'));
-    exec('rm -rf ' . escapeshellarg($tmp));
+        assert_eq(HeaderBehavior::STICKY_SOFT, $project->readJson(HeaderBehavior::FILE)['behavior']);
+        assert_true(!$project->exists('warnings.json'), 'equivalent outer sticky behavior preserves the authored intent');
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), '"position"'));
+    });
 });
 
 test('the step downgrades a planned overlay when generated opening markup loses its image band', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_opening_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', hh_theme_json());
-    $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
-    $project->writeJson('pages.json', ['pages' => [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [[
-            'slug' => 'hero',
-            'role' => 'hero',
-            'layout_archetype' => 'full-bleed-cover',
-            'background' => 'image',
-        ]],
-    ]]]);
-    hh_above_fold($project, [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [[
-            'slug' => 'hero',
-            'role' => 'hero',
-            'layout_archetype' => 'full-bleed-cover',
-            'background' => 'image',
-        ]],
-    ]], 'cinematic-safe-zone');
-    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"backgroundColor":"base"} --><div class="wp-block-group has-base-background-color has-background">'
-            . '<!-- wp:heading --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
-            . '</div><!-- /wp:group -->',
-    );
+    with_project('builder_hh_opening_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]], 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"backgroundColor":"base"} --><div class="wp-block-group has-base-background-color has-background">'
+                . '<!-- wp:heading --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading -->'
+                . '</div><!-- /wp:group -->',
+        );
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    $artifact = $project->readJson(HeaderBehavior::FILE);
-    assert_eq(HeaderBehavior::STATIC, $artifact['behavior']);
-    assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode']);
-    $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
-    assert_contains("file='theme/parts/page-home--hero.html'", $warnings);
-    assert_contains('authored="overlay-to-solid for page \'home\'"', $warnings);
-    assert_contains("delivered='static' in mode 'stacked'", $warnings);
-    assert_contains('disposition=overlay downgraded', $warnings);
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::STATIC, $artifact['behavior']);
+        assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode']);
+        $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+        assert_contains("file='theme/parts/page-home--hero.html'", $warnings);
+        assert_contains('authored="overlay-to-solid for page \'home\'"', $warnings);
+        assert_contains("delivered='static' in mode 'stacked'", $warnings);
+        assert_contains('disposition=overlay downgraded', $warnings);
 
-    exec('rm -rf ' . escapeshellarg($tmp));
+    });
 });
 
 test('the step keeps overlay when generated opening markup begins with a real cover image', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_overlay_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', hh_theme_json());
-    $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
-    $project->writeJson('pages.json', ['pages' => [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [[
-            'slug' => 'hero',
-            'role' => 'hero',
-            'layout_archetype' => 'full-bleed-cover',
-            'background' => 'image',
-        ]],
-    ]]]);
-    hh_above_fold($project, [[
-        'slug' => 'home', 'title' => 'Home', 'front' => true,
-        'sections' => [[
-            'slug' => 'hero',
-            'role' => 'hero',
-            'layout_archetype' => 'full-bleed-cover',
-            'background' => 'image',
-        ]],
-    ]], 'cinematic-safe-zone');
-    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-            . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
-            . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":50,"overlayColor":"contrast"} -->'
-            . '<div class="wp-block-cover alignfull"></div><!-- /wp:cover -->'
-            . '</div><!-- /wp:group -->',
-    );
+    with_project('builder_hh_overlay_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+        $project->writeJson('pages.json', ['pages' => [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]]]);
+        hh_above_fold($project, [[
+            'slug' => 'home', 'title' => 'Home', 'front' => true,
+            'sections' => [[
+                'slug' => 'hero',
+                'role' => 'hero',
+                'layout_archetype' => 'full-bleed-cover',
+                'background' => 'image',
+            ]],
+        ]], 'cinematic-safe-zone');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--cinematic-safe-zone hero-mobile--stack-media-first">'
+                . '<!-- wp:cover {"url":"theme:./assets/hero.jpg","align":"full","dimRatio":50,"overlayColor":"contrast"} -->'
+                . '<div class="wp-block-cover alignfull"></div><!-- /wp:cover -->'
+                . '</div><!-- /wp:group -->',
+        );
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    $artifact = $project->readJson(HeaderBehavior::FILE);
-    assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $artifact['behavior']);
-    assert_eq(HeaderBehavior::MODE_OVERLAY, $artifact['mode']);
-    assert_contains('header-behavior-overlay-to-solid', $project->readText('theme/parts/header.html'));
-    assert_true(!$project->exists('warnings.json'), 'verified overlay is a warning-free deterministic treatment');
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $artifact['behavior']);
+        assert_eq(HeaderBehavior::MODE_OVERLAY, $artifact['mode']);
+        assert_contains('header-behavior-overlay-to-solid', $project->readText('theme/parts/header.html'));
+        assert_true(!$project->exists('warnings.json'), 'verified overlay is a warning-free deterministic treatment');
 
-    exec('rm -rf ' . escapeshellarg($tmp));
+    });
 });
 
 test('the step rejects opening markup whose image does not actually meet the viewport-wide top edge', function () {
@@ -881,82 +874,80 @@ test('the step rejects opening markup whose image does not actually meet the vie
 
     putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
     foreach ($cases as $label => $openingMarkup) {
-        $tmp = sys_get_temp_dir() . '/builder_hh_opening_edge_' . uniqid();
-        $project = (new ProjectStore($tmp))->create('demo');
-        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-        $project->writeJson('theme/theme.json', hh_theme_json());
-        $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
-        $project->writeJson('pages.json', ['pages' => [[
-            'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [[
-                'slug' => 'hero',
-                'role' => 'hero',
-                'layout_archetype' => 'full-bleed-cover',
-                'background' => 'image',
-            ]],
-        ]]]);
-    hh_above_fold($project, [[
-            'slug' => 'home', 'title' => 'Home', 'front' => true,
-            'sections' => [[
-                'slug' => 'hero',
-                'role' => 'hero',
-                'layout_archetype' => 'full-bleed-cover',
-                'background' => 'image',
-            ]],
-        ]], 'cinematic-safe-zone');
-        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
-        $project->writeText('theme/parts/page-home--hero.html', $openingMarkup);
+        with_project('builder_hh_opening_edge_', function ($project) use ($label, $openingMarkup) {
+            $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+            $project->writeJson('theme/theme.json', hh_theme_json());
+            $project->writeJson('designDirection.json', ['canvas' => 'full-bleed', 'motion' => 'calm']);
+            $project->writeJson('pages.json', ['pages' => [[
+                'slug' => 'home', 'title' => 'Home', 'front' => true,
+                'sections' => [[
+                    'slug' => 'hero',
+                    'role' => 'hero',
+                    'layout_archetype' => 'full-bleed-cover',
+                    'background' => 'image',
+                ]],
+            ]]]);
+        hh_above_fold($project, [[
+                'slug' => 'home', 'title' => 'Home', 'front' => true,
+                'sections' => [[
+                    'slug' => 'hero',
+                    'role' => 'hero',
+                    'layout_archetype' => 'full-bleed-cover',
+                    'background' => 'image',
+                ]],
+            ]], 'cinematic-safe-zone');
+            $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+            $project->writeText('theme/parts/page-home--hero.html', $openingMarkup);
 
-        (new HeaderHeroStep())->run($project);
+            (new HeaderHeroStep())->run($project);
 
-        $artifact = $project->readJson(HeaderBehavior::FILE);
-        assert_eq(HeaderBehavior::STATIC, $artifact['behavior'], $label);
-        assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode'], $label);
-        $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
-        assert_contains('disposition=overlay downgraded', $warnings, $label);
+            $artifact = $project->readJson(HeaderBehavior::FILE);
+            assert_eq(HeaderBehavior::STATIC, $artifact['behavior'], $label);
+            assert_eq(HeaderBehavior::MODE_STACKED, $artifact['mode'], $label);
+            $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+            assert_contains('disposition=overlay downgraded', $warnings, $label);
 
-        exec('rm -rf ' . escapeshellarg($tmp));
+        });
     }
 });
 
 test('the step writes earned sticky treatments into both the header part and the artifact', function () {
-    $tmp = sys_get_temp_dir() . '/builder_hh_treatments_' . uniqid();
-    $project = (new ProjectStore($tmp))->create('demo');
-    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-    $project->writeJson('theme/theme.json', hh_theme_json());
-    $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
-    // Every opening is a token-backed 'base' band and theme.json paints no
-    // custom page background, so the near-black foreground is provable
-    // against everything a transparent start reveals; the scrolled state
-    // frosts the soft neutral it lands on.
-    $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
-    $project->writeJson('pages.json', ['pages' => [
-        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-    ]]);
-    hh_above_fold($project, [
-        ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-        ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-    ], 'focal-subject-stage');
-    $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-            . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
-            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
-    );
+    with_project('builder_hh_treatments_', function ($project) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+        // Every opening is a token-backed 'base' band and theme.json paints no
+        // custom page background, so the near-black foreground is provable
+        // against everything a transparent start reveals; the scrolled state
+        // frosts the soft neutral it lands on.
+        $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
+        $project->writeJson('pages.json', ['pages' => [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ]]);
+        hh_above_fold($project, [
+            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+        ], 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
 
-    putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-    (new HeaderHeroStep())->run($project);
+        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
 
-    $artifact = $project->readJson(HeaderBehavior::FILE);
-    assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior']);
-    assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $artifact['topTreatment']);
-    assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['scrolledTreatment']);
-    $header = $project->readText('theme/parts/header.html');
-    assert_contains('header-top-transparent', $header, 'earned top treatment reaches the written part');
-    assert_contains('header-scrolled-glass', $header, 'earned scrolled treatment reaches the written part');
-    exec('rm -rf ' . escapeshellarg($tmp));
+        $artifact = $project->readJson(HeaderBehavior::FILE);
+        assert_eq(HeaderBehavior::STICKY_SOFT, $artifact['behavior']);
+        assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $artifact['topTreatment']);
+        assert_eq(HeaderBehavior::TREATMENT_GLASS, $artifact['scrolledTreatment']);
+        $header = $project->readText('theme/parts/header.html');
+        assert_contains('header-top-transparent', $header, 'earned top treatment reaches the written part');
+        assert_contains('header-scrolled-glass', $header, 'earned scrolled treatment reaches the written part');
+    });
 });
 
 test('theme.json page background feeds the transparent-start contrast contract in both preset spellings', function () {
@@ -970,35 +961,33 @@ test('theme.json page background feeds the transparent-start contrast contract i
     }
     $section = ['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'centered-stack', 'background' => 'base'];
     $run = static function (?string $background) use ($palette, $section): array {
-        $tmp = sys_get_temp_dir() . '/builder_hh_pagebg_' . uniqid();
-        $project = (new ProjectStore($tmp))->create('demo');
-        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
-        $theme = ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]];
-        if ($background !== null) {
-            $theme['styles']['color']['background'] = $background;
-        }
-        $project->writeJson('theme/theme.json', $theme);
-        $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
-        $project->writeJson('pages.json', ['pages' => [
-            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-        ]]);
-    hh_above_fold($project, [
-            ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
-            ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
-        ], 'focal-subject-stage');
-        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
-    $project->writeText(
-        'theme/parts/page-home--hero.html',
-        '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
-            . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
-            . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
-    );
-        putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
-        (new HeaderHeroStep())->run($project);
-        $artifact = $project->readJson(HeaderBehavior::FILE);
-        exec('rm -rf ' . escapeshellarg($tmp));
-        return $artifact;
+        return with_project('builder_hh_pagebg_', function ($project) use ($palette, $section, $background): array {
+            $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+            $theme = ['version' => 3, 'settings' => ['color' => ['palette' => $palette]]];
+            if ($background !== null) {
+                $theme['styles']['color']['background'] = $background;
+            }
+            $project->writeJson('theme/theme.json', $theme);
+            $project->writeJson('designDirection.json', ['canvas' => 'contained', 'motion' => 'calm']);
+            $project->writeJson('pages.json', ['pages' => [
+                ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+                ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+            ]]);
+        hh_above_fold($project, [
+                ['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => [$section]],
+                ['slug' => 'about', 'title' => 'About', 'front' => false, 'sections' => [$section]],
+            ], 'focal-subject-stage');
+            $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}') . "\n");
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            '<!-- wp:group {"anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+                . '<div id="hero" class="wp-block-group hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+                . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Hero</h1><!-- /wp:heading --></div><!-- /wp:group -->',
+        );
+            putenv(AboveFoldContract::HEADER_ARCHETYPE_ENV);
+            (new HeaderHeroStep())->run($project);
+            return $project->readJson(HeaderBehavior::FILE);
+        });
     };
 
     $control = $run(null);

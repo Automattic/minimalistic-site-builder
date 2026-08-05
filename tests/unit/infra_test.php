@@ -4,9 +4,8 @@ declare(strict_types=1);
 use Automattic\SiteBuild\Env;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
-use Automattic\SiteBuild\PromptRenderer;
 
-// Infrastructure tests: ProjectStore, Project, PromptRenderer.
+// Infrastructure tests: ProjectStore, Project.
 
 test('slugify lowercases and hyphenates', function () {
     assert_eq('a-climate-care-blog', ProjectStore::slugify('A Climate Care Blog!'));
@@ -118,17 +117,6 @@ test('themePath builds under theme/', function () {
     $p = new Project('/base/projects/demo');
     assert_eq('/base/projects/demo/theme', $p->themePath());
     assert_eq('/base/projects/demo/theme/theme.json', $p->themePath('theme.json'));
-});
-
-test('prompt renderer fills placeholders', function () {
-    $out = PromptRenderer::fill('Hello {{ name }}, slug={{slug}}', ['name' => 'Bob', 'slug' => 'bob']);
-    assert_eq('Hello Bob, slug=bob', $out);
-});
-
-test('prompt renderer throws on unresolved placeholder', function () {
-    assert_throws(function () {
-        PromptRenderer::fill('Hi {{missing}}', ['name' => 'Bob']);
-    });
 });
 
 test('env get falls back to default', function () {

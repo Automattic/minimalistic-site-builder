@@ -1,34 +1,13 @@
 <?php
 declare(strict_types=1);
 
-use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\Package;
-use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\Tests\FakeLlm;
 
 /**
  * SiteBuilder facade: assembles the default pipeline from injected deps and
  * seeds projects the same way bin/build.php does.
  */
-
-/** @param array<string,string> $models */
-function make_test_builder(FakeLlm $llm, string $outputRoot, ?BlockFixer $fixer = null, array $models = []): SiteBuilder
-{
-    $fixer ??= new class implements BlockFixer {
-        public function fix(string $themeDir): string
-        {
-            return '[fix-templates] noop';
-        }
-    };
-
-    return new SiteBuilder(
-        llm: $llm,
-        promptsDir: Package::promptsDir(),
-        outputRoot: $outputRoot,
-        blockFixer: $fixer,
-        models: $models,
-    );
-}
 
 test('SiteBuilder pipeline exposes the default step order and stop ids', function () {
     $tmp = sys_get_temp_dir() . '/builder_sb_' . uniqid();
