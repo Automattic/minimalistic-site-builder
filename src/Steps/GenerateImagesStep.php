@@ -46,6 +46,13 @@ final class GenerateImagesStep implements Step
     /** Written only once this step has completed all generation and rewrites. */
     public const COMPLETION_ARTIFACT = 'images.generated.json';
 
+    /** Web-artifact wording is a design-comp cue, not subject matter. */
+    private const WEB_ARTIFACT_CONTEXT = '/\b(?:web[- ]?sites?|web[- ]?pages?|home[- ]?pages?'
+        . '|landing[- ]?(?:pages?|sites?)|(?:one|single)[- ]page\s+sites?'
+        . '|portfolios?(?:\s+(?:web[- ]?sites?|sites?))?|official\s+sites?'
+        . '|sitios?\s+(?:web\s+)?oficial(?:es)?|sitios?\s+web'
+        . '|páginas?\s+(?:web|de\s+inicio|de\s+aterrizaje)|sites?\s+(?:web|oficial(?:es)?))\b/iu';
+
     /**
      * @param ?Llm    $llm         used only to rewrite safety-filtered prompts;
      *        null disables that repair (filtered images just fail)
@@ -123,7 +130,7 @@ final class GenerateImagesStep implements Step
         // this step directly, logs too.
         ImageLogger::setDir($project->logPath('images'));
 
-        // Site-wide subject matter (topic/description — never the site name;
+        // Site-wide subject matter (topic/area/description — never identity;
         // see siteContext) woven into every image prompt so the model grounds
         // each image in what the site is about.
         $siteContext = self::siteContext(
@@ -267,38 +274,71 @@ final class GenerateImagesStep implements Step
     }
 
     /**
-     * A compact subject-matter sentence built from the site spec, fed into
-     * every image prompt so the model grounds each image in what the site is
-     * about. Returns '' when the spec carries no topic or description. Public
-     * so tools (e.g. the image-prompt debugger) can reproduce the exact
-     * context the step feeds into ImagePromptComposer.
+     * A compact identity-free subject-matter sentence selected from the site
+     * spec, fed into every image prompt so the model grounds each image in what
+     * the site is about. Public so tools (e.g. the image-prompt debugger) can
+     * reproduce the exact context the step feeds into ImagePromptComposer.
      *
      * The site NAME is deliberately never included (BIGR-768): telling a
      * typography-capable image model the site is called “X” is exactly what a
      * painted-in fake wordmark stands in for — the model typesets a title
      * block for the name it was told about, in the very region reserved for
-     * the real HTML copy. Only subject-matter steering survives: the
-     * description as its own terminally punctuated sentence (the composer
-     * splices it after its composition sentence and relies on that
-     * punctuation), or the topic when there is NO description — a description
-     * restates what the site is about, and repeating the topic next to it
-     * reads like a stutter.
+     * the real HTML copy. Only subject-matter steering survives. A canonical
+     * description may itself repeat the site/person name or call the artifact
+     * a website, so merely omitting the `name` field does not enforce that
+     * boundary. Candidates are accepted whole or rejected whole: the concise
+     * topic and area facts take priority, with description as a fallback. This
+     * avoids broken prose from deleting an identity in place and avoids
+     * preferring a description of the web artifact over its actual subject.
+     * Returns '' when every candidate is absent or unsafe.
      *
      * @param array<mixed> $spec
      */
     public static function siteContext(array $spec): string
     {
-        $topic       = trim((string) ($spec['topic'] ?? ''));
-        $description = trim((string) ($spec['description'] ?? ''));
-
-        if ($description === '') {
-            return $topic === '' ? '' : "The subject matter is {$topic}.";
+        $identities = [
+            trim((string) ($spec['name'] ?? '')),
+            trim((string) ($spec['persona_name'] ?? '')),
+            trim((string) ($spec['email_domain'] ?? '')),
+        ];
+        foreach (['topic', 'area', 'description'] as $field) {
+            $candidate = trim((string) ($spec[$field] ?? ''));
+            if ($candidate === '' || !self::safeSubjectMatter($candidate, $identities)) {
+                continue;
+            }
+            if ($field !== 'description') {
+                $candidate = "The subject matter is {$candidate}";
+            }
+            // Keep this explicit for PHP 8.1 builds linked against PCRE2
+            // before 10.40, where the Unicode STerm property is unavailable.
+            return preg_match('/[.!?…。！？｡؟۔।॥]$/u', $candidate)
+                ? $candidate
+                : $candidate . '.';
         }
+        return '';
+    }
 
-        if (!preg_match('/[.!?…]$/u', $description)) {
-            $description .= '.';
+    /**
+     * Reject one complete prose candidate instead of deleting identity words
+     * and risking grammatical shards such as "is a bakery".
+     *
+     * @param list<string> $identities
+     */
+    private static function safeSubjectMatter(string $candidate, array $identities): bool
+    {
+        foreach ($identities as $identity) {
+            if ($identity === '') {
+                continue;
+            }
+            // Word boundaries do not exist between an identity and particles
+            // in scripts such as Japanese. This is optional steering, so a
+            // conservative literal substring check is preferable to leaking
+            // even one identity-bearing candidate.
+            if (mb_stripos($candidate, $identity, 0, 'UTF-8') !== false) {
+                return false;
+            }
         }
-        return $description;
+        return preg_match(self::WEB_ARTIFACT_CONTEXT, $candidate) !== 1;
     }
 
     /**

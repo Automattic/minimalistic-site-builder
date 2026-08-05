@@ -183,18 +183,18 @@ test('generate-images weaves the site context into each prompt as one sentence',
     $project->writeJson('siteSpec.json', [
         'name'        => 'Hearth & Crumb',
         'topic'       => 'artisan sourdough',
-        'description' => 'A neighborhood bakery selling sourdough and pastries.',
+        'description' => 'Hearth & Crumb is a neighborhood bakery selling sourdough and pastries.',
     ]);
     $images = new FakeImageClient('JPEGDATA');
 
     (new GenerateImagesStep($images))->run($project);
 
     $sent = $images->calls[0]['prompt'];
-    // The recast page context and the site description read as adjacent
-    // guidance sentences — with the topic NOT repeated beside the description.
+    // The identity-bearing description is rejected whole; the recast page
+    // context and clean topic fallback read as adjacent guidance sentences.
     assert_contains(
-        'Composition: full-frame wide editorial photograph with open, low-detail negative space.'
-        . ' A neighborhood bakery selling sourdough and pastries.',
+        'Composition: full-frame editorial photograph with a reserved area kept as open, low-detail negative space.'
+        . ' The subject matter is artisan sourdough.',
         $sent
     );
     // The site NAME never reaches the image model: it is what painted-in fake
@@ -202,7 +202,10 @@ test('generate-images weaves the site context into each prompt as one sentence',
     // describe the image as part of a website.
     assert_true(!str_contains($sent, 'Hearth & Crumb'), 'site name withheld from the image prompt');
     assert_true(!str_contains(strtolower($sent), 'website'), 'the prompt never mentions a website');
-    assert_true(!str_contains($sent, 'artisan sourdough'), 'topic not repeated when the description covers it');
+    assert_true(
+        !str_contains($sent, 'neighborhood bakery selling'),
+        'identity-bearing description is not partially forwarded'
+    );
     assert_contains('A bakery at dawn', $sent);               // the image subject is still there
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -219,15 +222,14 @@ test('siteContext carries only subject matter and never the site name', function
         'name' => 'Hearth & Crumb',
     ]));
 
-    // The topic is included only while there is no description to cover it…
+    // The concise topic is the preferred subject-matter source.
     assert_eq('The subject matter is artisan sourdough.', GenerateImagesStep::siteContext([
         'name' => 'Hearth & Crumb', 'topic' => 'artisan sourdough',
     ]));
 
-    // …and folds away once a description exists (it restates the topic) —
-    // and the name still never appears.
+    // It remains preferred over a longer description of the site artifact.
     assert_eq(
-        'A neighborhood bakery selling sourdough and pastries.',
+        'The subject matter is artisan sourdough.',
         GenerateImagesStep::siteContext([
             'name'        => 'Hearth & Crumb',
             'topic'       => 'artisan sourdough',
@@ -235,13 +237,72 @@ test('siteContext carries only subject matter and never the site name', function
         ])
     );
 
-    // A description without terminal punctuation is closed, so the composer's
-    // guidance sentence (which relies on this phrase ending one) never runs on.
+    // A description remains a fallback. Without terminal punctuation it is
+    // closed, so the composer's following guidance never runs on.
     assert_eq('Fresh bread daily.', GenerateImagesStep::siteContext([
         'name' => 'Hearth & Crumb', 'description' => 'Fresh bread daily',
     ]));
     assert_eq('Fresh bread daily!', GenerateImagesStep::siteContext([
         'description' => 'Fresh bread daily!', // already punctuated: untouched
+    ]));
+    assert_eq('静かな喫茶店です。', GenerateImagesStep::siteContext([
+        'description' => '静かな喫茶店です。', // Unicode sentence terminal: untouched
+    ]));
+
+    // Canonical descriptions commonly repeat the identity. Reject the whole
+    // prose candidate and fall back to a clean factual field rather than
+    // deleting the name into an ungrammatical fragment.
+    assert_eq('The subject matter is construction management app.', GenerateImagesStep::siteContext([
+        'name'        => 'Atlas Field',
+        'description' => 'Atlas Field is a mobile app for construction crews.',
+        'topic'       => 'construction management app',
+        'area'        => 'business software',
+    ]));
+
+    // Identity matching is conservative and Unicode-safe; web-artifact prose
+    // is rejected, while a real-world use of "site" remains valid subject matter.
+    assert_eq('The subject matter is hospitality.', GenerateImagesStep::siteContext([
+        'name'        => 'Café C++（東京）',
+        'description' => 'The official website for Café C++（東京）.',
+        'topic'       => 'Café C++（東京） hospitality',
+        'area'        => 'hospitality',
+    ]));
+    assert_eq('The subject matter is hospitality.', GenerateImagesStep::siteContext([
+        'email_domain' => 'cafecpp.example',
+        'topic'        => 'Book at cafecpp.example',
+        'area'         => 'hospitality',
+    ]));
+    assert_eq('The subject matter is construction site reporting.', GenerateImagesStep::siteContext([
+        'name'  => 'Atlas Field',
+        'topic' => 'construction site reporting',
+    ]));
+    assert_eq('The subject matter is 喫茶店.', GenerateImagesStep::siteContext([
+        'name'  => '東京茶房',
+        'topic' => '東京茶房は喫茶店です。', // no word boundary before the particle
+        'area'  => '喫茶店',
+    ]));
+
+    assert_eq('The subject matter is astronomy lodging.', GenerateImagesStep::siteContext([
+        'topic'       => 'astronomy lodging',
+        'description' => 'A one-page site for an observatory lodge.',
+    ]));
+    assert_eq('', GenerateImagesStep::siteContext([
+        'description' => 'A one-page site for an observatory lodge.',
+    ]));
+    assert_eq('', GenerateImagesStep::siteContext([
+        'description' => 'A minimalist portfolio for a documentary photographer.',
+    ]));
+    assert_eq('', GenerateImagesStep::siteContext([
+        'description' => 'Photography portfolios and landing pages for artists.',
+    ]));
+
+    // If every available fact leaks identity or website framing, omit this
+    // optional context; never send the trigger or broken prose to the model.
+    assert_eq('', GenerateImagesStep::siteContext([
+        'name'        => 'Alcorta',
+        'description' => 'Alcorta is a portfolio website.',
+        'topic'       => 'Alcorta website',
+        'area'        => 'official site',
     ]));
 });
 
@@ -254,7 +315,10 @@ test('generate-images leads with the subject + style and adds the page context',
     $sent = $images->calls[0]['prompt'];
     assert_contains('A bakery at dawn. Style: photorealistic', $sent);   // subject leads, style appended
     // The page context is included as guidance, recast photographically.
-    assert_contains('full-frame wide editorial photograph with open, low-detail negative space', $sent);
+    assert_contains(
+        'full-frame editorial photograph with a reserved area kept as open, low-detail negative space',
+        $sent
+    );
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

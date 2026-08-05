@@ -64,7 +64,7 @@ function debug_examples(): array
             'subject'     => 'A lone figure seen from behind facing a vast crowd at a dusk demonstration on a wide '
                 . 'Buenos Aires avenue, banners blurred in the distance, smoke and low golden light, documentary '
                 . 'reportage feel, subject placed to the right with open low-detail sky to the left',
-            'pageContext' => 'full-frame wide editorial photograph with the left third kept as open, low-detail negative space',
+            'pageContext' => 'full-frame editorial photograph with the left third kept as open, low-detail negative space',
             'style'       => 'photorealistic',
             'aspectRatio' => 'landscape',
         ],
