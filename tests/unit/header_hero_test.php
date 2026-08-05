@@ -153,7 +153,7 @@ test('nested header Groups neutralize Atlas-style global vertical padding', func
     assert_eq([], $again['notes']);
 });
 
-test('nested Group repair preserves explicit double-decker and partial-side padding', function () {
+test('nested Group repair preserves explicit strip and partial-side padding', function () {
     $theme = ['styles' => ['blocks' => ['core/group' => ['spacing' => ['padding' => [
         'top' => 'var:preset|spacing|xl',
         'bottom' => 'var:preset|spacing|xl',
@@ -382,7 +382,7 @@ test('header behavior selection uses site depth and excludes forced tall chrome'
     assert_eq(HeaderBehavior::STICKY_SOFT, HeaderBehavior::behaviorFor($long, HeaderBehavior::MODE_STACKED));
     assert_eq(
         HeaderBehavior::STATIC,
-        HeaderBehavior::behaviorFor($long, HeaderBehavior::MODE_STACKED, 'double-decker'),
+        HeaderBehavior::behaviorFor($long, HeaderBehavior::MODE_STACKED, 'centered-masthead'),
     );
 
     $multi = [$short[0], ['slug' => 'about', 'sections' => [['slug' => 'intro']]]];
