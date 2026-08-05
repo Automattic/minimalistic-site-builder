@@ -110,9 +110,10 @@ final class CssChecks
 
     /**
      * Whether a selector's subject is one of the build-owned corner surfaces:
-     * a core image/image element or the rendered button control. Only the
-     * rightmost (subject) compound is considered, so `.wp-block-image + .card`
-     * does not accidentally make a generic card shape-owned. Attribute values,
+     * a core image/image element, the rendered button control, a cover
+     * canvas, or a media-text block and its media half. Only the rightmost
+     * (subject) compound is considered, so `.wp-block-image + .card` does not
+     * accidentally make a generic card shape-owned. Attribute values,
      * negation/relational pseudo arguments, comments, and quoted strings are
      * ignored. :is() and :where() keep their subject semantics and are walked.
      */
@@ -140,7 +141,12 @@ final class CssChecks
                 return true;
             }
             $plain = self::withoutSelectorAttributes($plain);
-            if (preg_match('/\.(?:wp-block-image|wp-block-button__link|wp-element-button)(?![-\w])/i', $plain) === 1) {
+            if (preg_match(
+                '/\.(?:wp-block-image|wp-block-button__link|wp-element-button'
+                    . '|wp-block-cover(?:__(?:background|image-background|video-background))?'
+                    . '|wp-block-media-text(?:__media)?)(?![-\w])/i',
+                $plain,
+            ) === 1) {
                 return true;
             }
             if (preg_match('/^(?:(?:\*|[-\w]+)\|)?(?:img|button|a|figure)(?![-\w])/i', ltrim($plain)) === 1) {

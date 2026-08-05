@@ -567,7 +567,7 @@ test('design-direction persists invalid shape fallback evidence in warnings.json
 test('format renders the shape commitment with its executable meaning', function () {
     $sharp = DesignDirectionStep::format(['description' => 'x', 'shape' => 'sharp']);
     assert_contains('**Shape**: sharp', $sharp);
-    assert_contains('contained `core/image` media and buttons square', $sharp);
+    assert_contains('contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons square', $sharp);
     assert_contains('Full-bleed media stays square', $sharp);
     assert_true(!str_contains($sharp, 'cards'), 'shape does not promise generic card geometry');
 

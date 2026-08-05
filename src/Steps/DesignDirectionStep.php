@@ -851,15 +851,16 @@ final class DesignDirectionStep implements Step
         }
 
         // Render the shape commitment with its executable meaning. The build
-        // wires contained core/image and button radii itself; this
-        // line keeps prompts from re-interpreting a bare keyword. Directions
-        // persisted before the field existed carry none.
+        // wires contained media (core/image, core/cover, the media half of
+        // core/media-text) and button radii itself; this line keeps prompts
+        // from re-interpreting a bare keyword. Directions persisted before
+        // the field existed carry none.
         $shape = self::explicitShape($direction['shape'] ?? null);
         if ($shape !== null) {
             $facts[] = match ($shape) {
-                'sharp' => '- **Shape**: sharp — the build keeps contained `core/image` media and buttons square. Full-bleed media stays square.',
-                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained `core/image` media and a modest radius onto buttons. Full-bleed media stays square.',
-                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained `core/image` media and pill-shaped buttons. Full-bleed media stays square.',
+                'sharp' => '- **Shape**: sharp — the build keeps contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and buttons square. Full-bleed media stays square.',
+                'soft'  => '- **Shape**: soft — the build wires a subtle corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and a modest radius onto buttons. Full-bleed media stays square.',
+                'round' => '- **Shape**: round — the build wires a decisive corner radius onto contained media (`core/image`, `core/cover`, the media half of `core/media-text`) and pill-shaped buttons. Full-bleed media stays square.',
             };
         }
 

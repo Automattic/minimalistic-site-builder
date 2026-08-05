@@ -215,9 +215,11 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * The image-corner radius each committed corner language wires onto
      * core/image (WordPress applies the block's border support to the inner
-     * img, so contained figures, card crops and gallery items all pick it up
-     * while covers and media-text halves — deliberately — do not). `sharp`
-     * removes the declaration instead of writing a redundant zero.
+     * img, so contained figures, card crops and gallery items all pick it
+     * up). Covers and media-text halves have no structured theme.json path to
+     * their media surface; their committed radius ships in the build-owned
+     * shape kit instead (ShapeMarkup::kitCss(), enqueued by FinalizeThemeStep).
+     * `sharp` removes the declaration instead of writing a redundant zero.
      *
      * @var array<string,string>
      */
@@ -874,7 +876,9 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      * siblings survive. Fully resolved conflicts do not enter warnings.json.
      * `sharp` removes the image radius and gives buttons a zero radius, `soft`
      * gives both a subtle radius, and `round` gives contained images a decisive
-     * radius with pill buttons. Covers and media-text halves are untouched;
+     * radius with pill buttons. Cover and media-text corners are owned by the
+     * build-owned shape kit stylesheet (FinalizeThemeStep), so authored radii
+     * on those blocks are repaired here without an authoritative base leaf;
      * FixBlocksStep adds a local zero-radius override to alignfull core/image
      * blocks so full-bleed media also stays square. A direction persisted
      * before the shape field existed remains a complete no-op.
@@ -968,7 +972,7 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
 
     /**
      * @param array<mixed> $node
-     * @param 'image'|'button'|null $target
+     * @param 'image'|'button'|'cover'|'media-text'|null $target
      * @param list<string> $repairs
      * @param list<string> $warnings
      * @return array<mixed>
@@ -1072,6 +1076,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 $childTarget = match ($block) {
                     'core/image' => 'image',
                     'core/button' => 'button',
+                    'core/cover' => 'cover',
+                    'core/media-text' => 'media-text',
                     default => null,
                 };
                 $blocks[$block] = self::repairShapeStyleNode(

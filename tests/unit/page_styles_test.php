@@ -309,7 +309,7 @@ test('run appends validated CSS to style.css and passes the configured model', f
     assert_true(!str_contains($llm->calls[0]['prompt'], '- .hover-reveal'), 'hover-reveal is not a requested utility');
     assert_true(!str_contains($llm->calls[0]['prompt'], 'MOTION TUNING'), 'motion timing is not offered');
     assert_true(!str_contains($llm->calls[0]['prompt'], '- .sticky-side'), 'unused class not requested');
-    assert_contains('The design direction owns contained-image and button corners', $llm->calls[0]['prompt']);
+    assert_contains('The design direction owns contained-media and button corners', $llm->calls[0]['prompt']);
     assert_eq('claude-haiku-4-5', $llm->calls[0]['opts']['model'] ?? null);
     exec('rm -rf ' . escapeshellarg($tmp));
 });

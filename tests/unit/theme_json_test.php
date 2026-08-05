@@ -1478,7 +1478,7 @@ test('theme-json request makes both committed shape radii build-owned', function
     assert_contains('`sharp` removes the `core/image` radius and gives buttons `0`', $prompt);
     assert_contains('`soft` gives both `0.5rem`', $prompt);
     assert_contains('`round` gives `core/image` `1.25rem` and buttons `9999px`', $prompt);
-    assert_contains('Never restate or reset either build-owned radius', $prompt);
+    assert_contains('Never restate or reset any build-owned radius', $prompt);
     assert_contains('in a theme.json `css` string or structured style', $prompt);
     assert_contains('block variations, and responsive or interaction states', $prompt);
 
@@ -1615,4 +1615,37 @@ test('theme-json representative model response survives scaffold and validates',
         'scaffold does not force a text color ContrastFix cannot see',
     );
     exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('repairShapeWiring repairs authored cover and media-text corner styles without adding a base leaf', function () {
+    $authored = ['styles' => ['blocks' => [
+        'core/cover' => ['border' => ['radius' => '8px', 'color' => '#111111']],
+        'core/media-text' => [
+            'border' => ['radius' => '6px'],
+            'css' => '& .wp-block-media-text__media img { border-radius: 24px; } '
+                . '& .wp-block-media-text__content { color: #222222; }',
+        ],
+    ]]];
+
+    foreach (['soft', 'round', 'sharp'] as $shape) {
+        [$theme, $repairs, $warnings] = ThemeJsonStep::repairShapeWiring($authored, $shape);
+        assert_true(!isset($theme['styles']['blocks']['core/cover']['border']['radius']), $shape);
+        assert_eq('#111111', $theme['styles']['blocks']['core/cover']['border']['color']);
+        assert_true(!isset($theme['styles']['blocks']['core/media-text']['border']), $shape);
+        $css = $theme['styles']['blocks']['core/media-text']['css'] ?? '';
+        assert_true(!str_contains($css, 'border-radius'), $shape);
+        assert_contains('color: #222222', $css);
+        // The kit stylesheet owns these corners; theme.json gains no cover or
+        // media-text radius leaf of its own.
+        assert_true(!isset($theme['styles']['blocks']['core/cover']['border']['radius']));
+        $joined = implode(' ', $repairs);
+        assert_contains('styles.blocks.core/cover.border.radius: authored "8px"; delivered removed', $joined);
+        assert_contains('styles.blocks.core/media-text.border.radius: authored "6px"; delivered removed', $joined);
+        assert_eq([], $warnings, $shape);
+
+        [$fixed, $fixedRepairs, $fixedWarnings] = ThemeJsonStep::repairShapeWiring($theme, $shape);
+        assert_eq($theme, $fixed, "fixed point for {$shape}");
+        assert_eq([], $fixedRepairs, "fixed point reports nothing for {$shape}");
+        assert_eq([], $fixedWarnings);
+    }
 });

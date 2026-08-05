@@ -258,7 +258,7 @@ test('custom-motion appends validated CSS wrapped in the reduced-motion media qu
     // The prompt carried the verbatim request and the tagged element context.
     assert_contains('the logo should spin on hover', $llm->calls[0]['prompt']);
     assert_contains('wp-block-image custom-motion', $llm->calls[0]['prompt']);
-    assert_contains('Contained-image and button corner shape is build-owned', $llm->calls[0]['prompt']);
+    assert_contains('Contained-media and button corner shape is build-owned', $llm->calls[0]['prompt']);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

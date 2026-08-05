@@ -715,3 +715,82 @@ test('FixBlocksStep keeps an already-normalized shape fixed point warning-free',
         assert_true(!$project->exists('warnings.json'));
     });
 });
+
+test('shape kit css wires rounded contained cover and media-text surfaces and exempts alignfull', function () {
+    foreach ([null, '', 'wavy', 'sharp'] as $shape) {
+        assert_true(ShapeMarkup::kitCss($shape) === null, var_export($shape, true));
+    }
+
+    $soft = ShapeMarkup::kitCss('soft');
+    assert_contains('.wp-block-media-text:not(.alignfull) .wp-block-media-text__media,', $soft);
+    assert_contains('.wp-block-media-text:not(.alignfull) .wp-block-media-text__media img,', $soft);
+    assert_contains('.wp-block-media-text:not(.alignfull) .wp-block-media-text__media video', $soft);
+    assert_contains('.wp-block-cover:not(.alignfull)', $soft);
+    assert_contains('border-radius: 0.5rem', $soft);
+    assert_contains('overflow: hidden', $soft);
+    assert_true(!str_contains($soft, '9999px'), 'media surfaces never take the pill radius');
+
+    $round = ShapeMarkup::kitCss(' ROUND ');
+    assert_contains('border-radius: 1.25rem', $round);
+    assert_true(!str_contains($round, '0.5rem'));
+});
+
+test('shape markup strips authored cover and media-text radii for every alignment', function () {
+    $markup = '<!-- wp:cover {"url":"a.jpg","align":"full","dimRatio":30,"style":{"border":{"radius":"12px"}}} -->'
+        . '<div class="wp-block-cover alignfull"><img class="wp-block-cover__image-background" src="a.jpg" alt=""/>'
+        . '<div class="wp-block-cover__inner-container"></div></div>'
+        . '<!-- /wp:cover -->'
+        . '<!-- wp:cover {"url":"b.jpg","style":{"border":{"radius":"0.5rem"}}} -->'
+        . '<div class="wp-block-cover"><img class="wp-block-cover__image-background" src="b.jpg" alt=""/>'
+        . '<div class="wp-block-cover__inner-container"></div></div>'
+        . '<!-- /wp:cover -->'
+        . '<!-- wp:media-text {"align":"wide","mediaType":"image","style":{"border":{"radius":"1rem","width":"1px"}}} -->'
+        . '<div class="wp-block-media-text alignwide"><figure class="wp-block-media-text__media">'
+        . '<img src="c.jpg" alt=""/></figure><div class="wp-block-media-text__content"></div></div>'
+        . '<!-- /wp:media-text -->';
+
+    $result = ShapeMarkup::normalize($markup, 'soft');
+    $doc = BlockMarkup::parse($result['markup']);
+    $radii = [];
+    foreach ($doc->indices() as $i) {
+        $attrs = $doc->attrs($i) ?? [];
+        $radii[] = $attrs['style']['border']['radius'] ?? null;
+    }
+    assert_eq([null, null, null], $radii, 'no cover/media-text keeps a local radius');
+
+    // Unrelated border siblings survive the smallest-unit removal.
+    $mediaText = $doc->attrs($doc->indices()[2]) ?? [];
+    assert_eq('1px', $mediaText['style']['border']['width'] ?? null);
+
+    $dispositions = array_column($result['changes'], 'disposition');
+    assert_eq(3, count($dispositions));
+    foreach ($dispositions as $disposition) {
+        assert_contains('authoritative theme radius', $disposition);
+    }
+    // The contained cover's 0.5rem matches the committed soft radius exactly.
+    assert_contains('removed redundant local radius', implode(' ', $dispositions));
+
+    // Fixed point: a second pass reports nothing.
+    $second = ShapeMarkup::normalize($result['markup'], 'soft');
+    assert_eq($result['markup'], $second['markup']);
+    assert_eq([], $second['changes']);
+});
+
+test('shape markup polices media-text per-block css that rounds the owned media surface', function () {
+    $markup = '<!-- wp:media-text {"align":"wide","mediaType":"image","style":{"css":'
+        . '"& .wp-block-media-text__media img { border-radius: 24px; } '
+        . '& .wp-block-media-text__content { padding-top: 4px; }"}} -->'
+        . '<div class="wp-block-media-text alignwide"><figure class="wp-block-media-text__media">'
+        . '<img src="c.jpg" alt=""/></figure><div class="wp-block-media-text__content"></div></div>'
+        . '<!-- /wp:media-text -->';
+
+    $result = ShapeMarkup::normalize($markup, 'round');
+    $doc = BlockMarkup::parse($result['markup']);
+    $css = ($doc->attrs($doc->indices()[0]) ?? [])['style']['css'] ?? '';
+    assert_true(!str_contains($css, 'border-radius'), 'the owned corner declaration is removed');
+    assert_contains('padding-top: 4px', $css);
+
+    $changes = $result['changes'];
+    assert_eq(1, count($changes));
+    assert_contains('media-text corner language', $changes[0]['disposition']);
+});

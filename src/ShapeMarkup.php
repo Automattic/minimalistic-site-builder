@@ -9,14 +9,17 @@ use Automattic\SiteBuild\BlockSerializer\Html\HtmlNode;
 /**
  * Enforce an explicit design-direction corner language on generated blocks.
  *
- * The theme owns the radius for contained core/image and core/button blocks,
- * so a generated per-block radius must not outrank it. Full-width images are
- * the exception: rounded commitments receive an inline zero radius so the
- * global image rule cannot round full-bleed media; sharp needs no redundant
- * override. Shape-affecting variation classes are removed
- * from both comment attributes and saved HTML when they conflict with that
- * contract; otherwise the following block-fixer pass could recover the HTML
- * token into className and reintroduce the override.
+ * The theme owns the radius for contained media (core/image, core/cover, the
+ * media half of core/media-text) and core/button blocks, so a generated
+ * per-block radius must not outrank it. Full-width images are the exception:
+ * rounded commitments receive an inline zero radius so the global image rule
+ * cannot round full-bleed media; sharp needs no redundant override. Cover and
+ * media-text need no inline exception — their committed rules live in the
+ * shape kit stylesheet (kitCss()), whose selectors already exempt alignfull
+ * blocks, so an authored radius is simply removed. Shape-affecting variation
+ * classes are removed from both comment attributes and saved HTML when they
+ * conflict with that contract; otherwise the following block-fixer pass could
+ * recover the HTML token into className and reintroduce the override.
  *
  * This transform edits comment attributes and the target block's own class
  * attributes only. The block fixer that immediately follows regenerates the
@@ -35,10 +38,71 @@ final class ShapeMarkup
 
     /** @var array<string,array<string,string>> */
     private const COMMITTED_RADII = [
-        'sharp' => ['core/image' => '0', 'core/button' => '0'],
-        'soft' => ['core/image' => '0.5rem', 'core/button' => '0.5rem'],
-        'round' => ['core/image' => '1.25rem', 'core/button' => '9999px'],
+        'sharp' => [
+            'core/image' => '0',
+            'core/button' => '0',
+            'core/cover' => '0',
+            'core/media-text' => '0',
+        ],
+        'soft' => [
+            'core/image' => '0.5rem',
+            'core/button' => '0.5rem',
+            'core/cover' => '0.5rem',
+            'core/media-text' => '0.5rem',
+        ],
+        'round' => [
+            'core/image' => '1.25rem',
+            'core/button' => '9999px',
+            'core/cover' => '1.25rem',
+            'core/media-text' => '1.25rem',
+        ],
     ];
+
+    /** @var array<string,string> disposition wording per owned target */
+    private const TARGET_LABELS = [
+        'core/image' => 'image',
+        'core/button' => 'button',
+        'core/cover' => 'cover',
+        'core/media-text' => 'media-text',
+    ];
+
+    /**
+     * The build-owned stylesheet executing a rounded commitment on contained
+     * media surfaces theme.json has no structured path to: the media half of
+     * core/media-text and the core/cover canvas (core clips a cover's
+     * background at the root radius via its own overflow rule). Full-bleed
+     * (alignfull) blocks keep square media, matching the full-width image
+     * exemption. `sharp` and unknown shapes ship no kit — those surfaces are
+     * square by default and authored overrides are removed in normalize().
+     */
+    public static function kitCss(?string $shape): ?string
+    {
+        $shape = is_string($shape) ? strtolower(trim($shape)) : '';
+        if (!in_array($shape, ['soft', 'round'], true)) {
+            return null;
+        }
+        $radius = self::COMMITTED_RADII[$shape]['core/cover'];
+        return <<<CSS
+            /* Committed '{$shape}' corner language for contained media surfaces
+               theme.json cannot reach: the media half of core/media-text and the
+               core/cover canvas. Full-bleed (alignfull) rows keep their media
+               square, matching the committed image rule. Written by the build,
+               never by a model. */
+            .wp-block-media-text:not(.alignfull) .wp-block-media-text__media,
+            .wp-block-media-text:not(.alignfull) .wp-block-media-text__media img,
+            .wp-block-media-text:not(.alignfull) .wp-block-media-text__media video {
+                border-radius: {$radius};
+            }
+            /* imageFill media paints as a background on the figure; clip it too. */
+            .wp-block-media-text:not(.alignfull) .wp-block-media-text__media {
+                overflow: hidden;
+            }
+            .wp-block-cover:not(.alignfull) {
+                border-radius: {$radius};
+            }
+
+            CSS;
+    }
 
     /**
      * @return array{
@@ -73,7 +137,7 @@ final class ShapeMarkup
             $attrs = $doc->attrs($i) ?? [];
             $changedAttrs = false;
             $path = $paths[$i] ?? (string) $i;
-            $target = in_array($name, ['core/image', 'core/button'], true) ? $name : null;
+            $target = array_key_exists($name, self::TARGET_LABELS) ? $name : null;
 
             if ($target === 'core/image') {
                 $htmlTargets = self::htmlClassTargets($doc, $i);
@@ -144,6 +208,20 @@ final class ShapeMarkup
                         $changedAttrs,
                     );
                 }
+            } elseif ($target !== null) {
+                // Cover and media-text: the shape kit stylesheet owns their
+                // corners and already exempts alignfull blocks, so a local
+                // authored radius is removed for every alignment instead of
+                // being replaced with an inline exemption.
+                self::normalizeRadius(
+                    $attrs,
+                    false,
+                    $shape,
+                    $path,
+                    $name,
+                    $changes,
+                    $changedAttrs,
+                );
             }
 
             self::normalizeCarriedStyleOverrides(
@@ -165,10 +243,10 @@ final class ShapeMarkup
 
     /**
      * Remove render-time shape overrides carried outside the reviewed save
-     * paths. A target image/button owns its direct responsive/variation state;
-     * every block may also carry `style.elements.button` for descendant
-     * controls. Other elements (captions, links, generic card shells) remain
-     * outside the commitment.
+     * paths. A target image/button/cover/media-text owns its direct
+     * responsive/variation state; every block may also carry
+     * `style.elements.button` for descendant controls. Other elements
+     * (captions, links, generic card shells) remain outside the commitment.
      *
      * @param array<mixed> $attrs
      * @param list<array{
@@ -247,7 +325,7 @@ final class ShapeMarkup
                     'authored' => $authored,
                     'delivered' => null,
                     'disposition' => 'removed carried radius that overrides the authoritative '
-                        . ($target === 'core/image' ? 'image' : 'button') . ' corner language',
+                        . self::targetLabel($target) . ' corner language',
                 ];
             }
         }
@@ -369,7 +447,7 @@ final class ShapeMarkup
                 'authored' => $css,
                 'delivered' => null,
                 'disposition' => 'removed structurally malformed custom CSS containing an owned '
-                    . ($target === 'core/image' ? 'image' : 'button')
+                    . self::targetLabel($target)
                     . ' corner override that could not be isolated safely',
                 'warning' => true,
             ];
@@ -397,7 +475,7 @@ final class ShapeMarkup
                 'authored' => trim($declaration['raw']),
                 'delivered' => null,
                 'disposition' => 'removed custom CSS that overrides the authoritative '
-                    . ($target === 'core/image' ? 'image' : 'button') . ' corner language',
+                    . self::targetLabel($target) . ' corner language',
             ];
         }
     }
@@ -405,6 +483,12 @@ final class ShapeMarkup
     private static function selectorTargetsImplicitBlockRoot(string $selector): bool
     {
         return CssChecks::selectorTargetsSubject($selector, '&');
+    }
+
+    /** Disposition wording for an owned target block. */
+    private static function targetLabel(string $target): string
+    {
+        return self::TARGET_LABELS[$target] ?? $target;
     }
 
     /**

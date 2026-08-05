@@ -105,6 +105,13 @@ test('selectorTargetsShape recognizes owned and broad selector subjects', functi
         '[class]',
         ':not(.card)',
         ':is(:hover, .card)',
+        '.wp-block-cover',
+        '.wp-block-cover:not(.alignfull)',
+        '.wp-block-cover__image-background',
+        '.hero .wp-block-cover__background:hover',
+        '.wp-block-cover__video-background',
+        '.wp-block-media-text',
+        '.section .wp-block-media-text__media',
     ] as $selector) {
         assert_true(CssChecks::selectorTargetsShape($selector), $selector);
     }
@@ -119,6 +126,9 @@ test('selectorTargetsShape recognizes owned and broad selector subjects', functi
         'div[data-example="img .wp-element-button"]',
         ':is(.card, .wp-block-group)',
         '.wp-block-image::before',
+        '.wp-block-cover__inner-container',
+        '.wp-block-media-text__content',
+        '.wp-block-cover-image',
     ] as $selector) {
         assert_true(!CssChecks::selectorTargetsShape($selector), $selector);
     }

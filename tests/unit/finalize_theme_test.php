@@ -264,3 +264,46 @@ test('finalize-theme treats a missing trusted asset as fatal for adaptive behavi
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('finalize-theme ships and enqueues the shape kit for a rounded commitment', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => 'soft']);
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    $css = $project->readText('theme/assets/shape/shape.css');
+    assert_contains('border-radius: 0.5rem', $css);
+    assert_contains('.wp-block-cover:not(.alignfull)', $css);
+    $php = $project->readText('theme/functions.php');
+    assert_contains(
+        "wp_enqueue_style('forno-vero-shape', get_theme_file_uri('assets/shape/shape.css'), array('forno-vero-style')",
+        $php,
+    );
+    assert_contains("add_editor_style(array('style.css', 'assets/shape/shape.css'))", $php);
+    $out = [];
+    $rc = 0;
+    exec('php -l ' . escapeshellarg($project->themePath('functions.php')) . ' 2>&1', $out, $rc);
+    assert_eq(0, $rc, implode("\n", $out));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('finalize-theme ships no shape kit for sharp and prunes a stale one', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fin_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('Forno Vero');
+    $project->writeJson('designDirection.json', ['description' => 'x', 'shape' => 'sharp']);
+    // A kit left by an earlier rounded finalize run must not survive sharp.
+    $project->writeText('theme/assets/shape/shape.css', '.wp-block-cover { border-radius: 1.25rem; }');
+    finalize_static_header($project);
+
+    quietly(fn () => (new FinalizeThemeStep())->run($project));
+
+    assert_true(!$project->exists('theme/assets/shape/shape.css'), 'stale kit pruned');
+    $php = $project->readText('theme/functions.php');
+    assert_true(!str_contains($php, 'forno-vero-shape'), 'no shape enqueue for sharp');
+    assert_contains("add_editor_style('style.css')", $php);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

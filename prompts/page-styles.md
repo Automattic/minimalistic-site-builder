@@ -14,7 +14,7 @@ HARD RULES — the output is machine-validated and the whole appendix is rejecte
 - Do not visually hide generated content. NEVER use `opacity: 0`, `visibility: hidden`, or `display: none`; full-page screenshots and non-hover browsing must show all images and text.
 - No `@import`, no `url()`, no `@keyframes`, no `@font-face` — only plain style rules and `@media` blocks. Never write CSS for the motion classes (`reveal`, `reveal-up`, `reveal-fade`, `reveal-scale`, `stagger-children`, `hero-entrance`, `ken-burns`, `gradient-shift`, `ambient-drift`, `hover-lift`, `hover-reveal`) — their CSS plus profile-owned keyframes and timing ship statically with the theme.
 - Never declare a `--motion-*` custom property, even inside an allowed layout selector; the committed profile owns those values.
-- The design direction owns contained-image and button corners. Rules that target `.wp-block-image`, its `img`, `.wp-block-button__link`, `.wp-element-button`, or `button` must not declare `border-radius`, a physical/logical/vendor corner-radius longhand, or a CSS-wide `all` reset. Radius on the utility's generic group/card wrapper is allowed when it genuinely belongs to that component.
+- The design direction owns contained-media and button corners. Rules that target `.wp-block-image`, its `img`, `.wp-block-button__link`, `.wp-element-button`, `button`, `.wp-block-cover` (or its background layers), or `.wp-block-media-text` / `.wp-block-media-text__media` must not declare `border-radius`, a physical/logical/vendor corner-radius longhand, or a CSS-wide `all` reset. Radius on the utility's generic group/card wrapper is allowed when it genuinely belongs to that component.
 - Under 80 lines total.
 
 Output ONLY the CSS — no markdown fences, no prose, no HTML.

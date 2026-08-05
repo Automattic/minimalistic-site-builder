@@ -7,6 +7,7 @@ use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Warnings;
@@ -38,6 +39,11 @@ use Automattic\SiteBuild\Warnings;
  *           resolved behavior, even when site motion is `none`; static headers
  *           prune the whole kit. The script is head-loaded so its fixed-overlay
  *           enhancement scope is present before paint.
+ *         - for a rounded shape commitment (`soft`/`round`), writes and
+ *           enqueues the build-owned shape kit (assets/shape/shape.css) that
+ *           rounds contained media surfaces theme.json cannot reach — the
+ *           media half of core/media-text and the core/cover canvas — while
+ *           its selectors keep alignfull media square; `sharp` ships no kit.
  *         - require_once's the generated fonts.php (written by the fonts-php
  *           step) when present, guarded so a fontless theme stays valid.
  */
@@ -71,6 +77,7 @@ final class FinalizeThemeStep implements Step
                 'theme/parts/header.html',
                 'theme/assets/motion/*',
                 'theme/assets/header/*',
+                'theme/assets/shape/*',
                 'warnings.json',
             ],
             concurrent: false,
@@ -97,16 +104,48 @@ final class FinalizeThemeStep implements Step
         }
         self::pruneMotionKit($project, $motion);
         self::pruneHeaderKit($project, $header);
+        $shape = DesignDirectionStep::shapeFor($project);
+        $shapeKit = self::writeShapeKit($project, $shape);
         if ($headerWarnings !== []) {
             $project->addWarnings($this->id(), $headerWarnings);
         }
-        $project->writeText('theme/functions.php', self::functionsPhp($project->slug(), $motion, $header));
+        $project->writeText(
+            'theme/functions.php',
+            self::functionsPhp($project->slug(), $motion, $header, $shapeKit),
+        );
         Narrator::write($motion === null
             ? "  motion: none (kit not shipped)\n"
             : "  motion: '{$motion}' profile enqueued\n");
         Narrator::write($header
             ? "  header: '{$headerBehavior}' state kit enqueued\n"
             : "  header: static (kit not shipped)\n");
+        Narrator::write($shapeKit
+            ? "  shape: '{$shape}' corner kit enqueued\n"
+            : '  shape: ' . ($shape ?? 'none committed') . " (kit not shipped)\n");
+    }
+
+    /**
+     * Write the build-owned corner-language stylesheet for a rounded shape
+     * commitment: contained media surfaces theme.json cannot reach (the media
+     * half of core/media-text, the core/cover canvas). `sharp` and an absent
+     * commitment ship no kit — those surfaces are square by default — and any
+     * kit left by an earlier finalize run is pruned so the shape cannot go
+     * stale.
+     */
+    private static function writeShapeKit(Project $project, ?string $shape): bool
+    {
+        $css = ShapeMarkup::kitCss($shape);
+        if ($css !== null) {
+            $project->writeText('theme/assets/shape/shape.css', $css);
+            return true;
+        }
+        $file = $project->themePath('assets/shape/shape.css');
+        if (is_file($file)) {
+            unlink($file);
+        }
+        @rmdir($project->themePath('assets/shape'));
+        @rmdir($project->themePath('assets'));
+        return false;
     }
 
     /**
@@ -250,8 +289,12 @@ final class FinalizeThemeStep implements Step
         @rmdir($project->themePath('assets'));
     }
 
-    private static function functionsPhp(string $slug, ?string $motion, bool $header): string
-    {
+    private static function functionsPhp(
+        string $slug,
+        ?string $motion,
+        bool $header,
+        bool $shapeKit,
+    ): string {
         $slug = ProjectStore::slugify($slug);
 
         $motionEnqueues = '';
@@ -267,6 +310,19 @@ final class FinalizeThemeStep implements Step
                 wp_enqueue_style('{$slug}-motion', get_theme_file_uri('assets/motion/motion.css'), array(), \$ver);
                 wp_enqueue_style('{$slug}-motion-profile', get_theme_file_uri('assets/motion/profiles/{$motion}.css'), array('{$slug}-motion'), \$ver);
                 wp_enqueue_script('{$slug}-motion', get_theme_file_uri('assets/motion/motion.js'), array(), \$ver, false);
+            PHP;
+        }
+
+        $shapeEnqueues = '';
+        $editorStyles = "add_editor_style('style.css');";
+        if ($shapeKit) {
+            $editorStyles = "add_editor_style(array('style.css', 'assets/shape/shape.css'));";
+            $shapeEnqueues = <<<PHP
+
+                // Committed corner language for contained media surfaces theme.json
+                // cannot reach (media-text halves, contained covers). Loads after
+                // generated style.css so the commitment outranks generated utilities.
+                wp_enqueue_style('{$slug}-shape', get_theme_file_uri('assets/shape/shape.css'), array('{$slug}-style'), \$ver);
             PHP;
         }
 
@@ -293,12 +349,12 @@ final class FinalizeThemeStep implements Step
                 \$ver = wp_get_theme()->get('Version');{$motionEnqueues}
                 // Block themes do not load style.css automatically — without this
                 // enqueue its utility CSS (card layouts, layout utilities) never applies.
-                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$headerEnqueues}
+                wp_enqueue_style('{$slug}-style', get_stylesheet_uri(), {$styleDeps}, \$ver);{$shapeEnqueues}{$headerEnqueues}
             });
 
-            // Mirror style.css into the editor so previews match the front end.
+            // Mirror the theme stylesheets into the editor so previews match the front end.
             add_action('after_setup_theme', function () {
-                add_editor_style('style.css');
+                {$editorStyles}
             });
 
             // Google Fonts loading lives in its own generated module.
