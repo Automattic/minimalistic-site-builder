@@ -274,6 +274,150 @@ test('card contract records exact reserved-hook drift when anatomy blocks class 
     assert_eq($first, $second, 'blocked hook evidence is a fixed point');
 });
 
+test('card contract blocks ambiguous text wrappers for every style with exact hook evidence', function () {
+    $firstClasses = 'wrapper-first overlap-up';
+    $secondClasses = 'wrapper-second card-body card-style--framed card-flush';
+    $firstBody = card_contract_group(
+        ['className' => $firstClasses],
+        '<!-- wp:heading --><h3>First wrapper.</h3><!-- /wp:heading -->',
+        'wp-block-group ' . $firstClasses,
+    );
+    $secondBody = card_contract_group(
+        ['className' => $secondClasses],
+        '<!-- wp:paragraph --><p>Second wrapper.</p><!-- /wp:paragraph -->',
+        'wp-block-group ' . $secondClasses,
+    );
+    $cases = [
+        'flush' => [
+            'outer' => [
+                'backgroundColor' => 'base',
+                'className' => 'card-style--flush card-flush',
+                'style' => ['border' => ['radius' => '16px'], 'spacing' => ['blockGap' => '0']],
+            ],
+            'html' => 'wp-block-group has-base-background-color has-background card-style--flush card-flush',
+            'image_radius' => null,
+        ],
+        'overlap' => [
+            'outer' => [
+                'backgroundColor' => 'base',
+                'className' => 'card-style--overlap card-flush',
+                'style' => ['border' => ['radius' => '16px'], 'spacing' => ['blockGap' => '0']],
+            ],
+            'html' => 'wp-block-group has-base-background-color has-background card-style--overlap card-flush',
+            'image_radius' => null,
+        ],
+        'framed' => [
+            'outer' => [
+                'backgroundColor' => 'base',
+                'className' => 'card-style--framed',
+                'style' => [
+                    'border' => ['radius' => '24px'],
+                    'spacing' => ['padding' => [
+                        'top' => '8px', 'right' => '8px', 'bottom' => '8px', 'left' => '8px',
+                    ]],
+                ],
+            ],
+            'html' => 'wp-block-group has-base-background-color has-background card-style--framed',
+            'image_radius' => '16px',
+        ],
+        'borderless' => [
+            'outer' => ['className' => 'card-style--borderless'],
+            'html' => 'wp-block-group card-style--borderless',
+            'image_radius' => null,
+        ],
+    ];
+
+    foreach ($cases as $style => $case) {
+        $card = card_contract_group(
+            $case['outer'],
+            card_contract_image($case['image_radius']) . $firstBody . $secondBody,
+            $case['html'],
+        );
+        $first = CardStyleContract::enforce($card, $style, "page-home--{$style}-ambiguous-bodies");
+
+        assert_eq($card, $first['markup'], "{$style} ambiguous body stays byte-exact");
+        assert_eq([], $first['repairs']);
+        assert_eq(1, count($first['warnings']));
+        foreach ([
+            'text_body_topology=',
+            'multiple ambiguous direct text wrappers',
+            'attribute_reserved_hooks":["overlap-up"]',
+            'attribute_reserved_hooks":["card-body","card-style--framed","card-flush"]',
+            'text_body_group=',
+        ] as $evidence) {
+            assert_contains($evidence, $first['warnings'][0], "{$style}: {$evidence}");
+        }
+        assert_true(
+            substr_count($first['warnings'][0], 'text_body_group') >= 2,
+            "{$style} warning records every direct text group",
+        );
+        assert_eq($first, CardStyleContract::enforce(
+            $first['markup'],
+            $style,
+            "page-home--{$style}-ambiguous-bodies",
+        ));
+    }
+});
+
+test('card contract blocks mixed flat and wrapped text for framed and borderless cards', function () {
+    $wrapperClasses = 'mixed-wrapper overlap-up';
+    $wrapper = card_contract_group(
+        ['className' => $wrapperClasses],
+        '<!-- wp:paragraph --><p>Wrapped copy.</p><!-- /wp:paragraph -->',
+        'wp-block-group ' . $wrapperClasses,
+    );
+    $cases = [
+        'framed' => [
+            'outer' => [
+                'backgroundColor' => 'base',
+                'className' => 'card-style--framed',
+                'style' => [
+                    'border' => ['radius' => '24px'],
+                    'spacing' => ['padding' => [
+                        'top' => '8px', 'right' => '8px', 'bottom' => '8px', 'left' => '8px',
+                    ]],
+                ],
+            ],
+            'html' => 'wp-block-group has-base-background-color has-background card-style--framed',
+            'image_radius' => '16px',
+        ],
+        'borderless' => [
+            'outer' => ['className' => 'card-style--borderless'],
+            'html' => 'wp-block-group card-style--borderless',
+            'image_radius' => null,
+        ],
+    ];
+
+    foreach ($cases as $style => $case) {
+        $card = card_contract_group(
+            $case['outer'],
+            card_contract_image($case['image_radius'])
+                . '<!-- wp:paragraph --><p>Flat copy.</p><!-- /wp:paragraph -->'
+                . $wrapper,
+            $case['html'],
+        );
+        $first = CardStyleContract::enforce($card, $style, "page-home--{$style}-mixed-body");
+
+        assert_eq($card, $first['markup']);
+        assert_eq([], $first['repairs']);
+        assert_eq(1, count($first['warnings']));
+        foreach ([
+            'text_body_topology=',
+            'wp:image","wp:paragraph","wp:group',
+            'mixes a text wrapper with related content outside that wrapper',
+            'attribute_reserved_hooks":["overlap-up"]',
+            '"text_group_paths":',
+        ] as $evidence) {
+            assert_contains($evidence, $first['warnings'][0], "{$style}: {$evidence}");
+        }
+        assert_eq($first, CardStyleContract::enforce(
+            $first['markup'],
+            $style,
+            "page-home--{$style}-mixed-body",
+        ));
+    }
+});
+
 test('card contract quarantines a nested image-card subtree while repairing a sibling', function () {
     $nested = card_contract_group(
         ['className' => 'card-style--borderless'],
@@ -301,7 +445,7 @@ test('card contract quarantines a nested image-card subtree while repairing a si
     assert_contains($outer, $first['markup'], 'the entire conflicting outer subtree stays byte-exact');
     assert_contains('nested_image_card=', $first['warnings'][0]);
     assert_contains('card-style--borderless', $first['warnings'][0]);
-    assert_contains('a nested image card, not a text body', $first['warnings'][0]);
+    assert_contains('nested inside the outer card subtree', $first['warnings'][0]);
     assert_contains('Nested card copy stays exact.', $first['markup']);
 
     $second = CardStyleContract::enforce(
@@ -316,7 +460,7 @@ test('card contract quarantines a nested image-card subtree while repairing a si
 
 test('card contract quarantines nested image cards across multi-group and deeper body shapes', function () {
     $padding = ['top' => '1rem', 'right' => '1rem', 'bottom' => '1rem', 'left' => '1rem'];
-    $nested = card_contract_flush_card('card-style--framed');
+    $nested = card_contract_flush_card('card-style--framed nested-first');
     $extraBody = card_contract_body(
         ['style' => ['spacing' => ['padding' => $padding]]],
         'extra-body',
@@ -365,6 +509,116 @@ test('card contract quarantines nested image cards across multi-group and deeper
             "page-home--nested-{$case}",
         ));
     }
+
+    $nestedSecond = card_contract_group(
+        ['className' => 'card-style--borderless nested-second'],
+        card_contract_image()
+            . '<!-- wp:paragraph --><p>Second nested card.</p><!-- /wp:paragraph -->',
+        'wp-block-group card-style--borderless nested-second',
+    );
+    $multiple = card_contract_group(
+        $outerAttrs,
+        card_contract_image() . $nested . $nestedSecond,
+        $outerHtml,
+    );
+    $multipleResult = CardStyleContract::enforce(
+        $multiple,
+        'flush',
+        'page-home--multiple-nested-cards',
+    );
+
+    assert_eq($multiple, $multipleResult['markup']);
+    assert_eq([], $multipleResult['repairs']);
+    assert_eq(1, count($multipleResult['warnings']));
+    assert_contains('nested-first', $multipleResult['warnings'][0]);
+    assert_contains('nested-second', $multipleResult['warnings'][0]);
+    assert_true(substr_count($multipleResult['warnings'][0], 'nested_image_card') >= 2);
+    assert_true(!str_contains($multipleResult['warnings'][0], 'the sole group after'));
+    assert_eq($multipleResult, CardStyleContract::enforce(
+        $multipleResult['markup'],
+        'flush',
+        'page-home--multiple-nested-cards',
+    ));
+});
+
+test('card contract quarantines every marked descendant of a nested image card', function () {
+    $padding = ['top' => '1rem', 'right' => '1rem', 'bottom' => '1rem', 'left' => '1rem'];
+    $nestedBodyClasses = 'nested-marked-body card-style--overlap card-flush overlap-up';
+    $nestedBody = card_contract_group([
+        'className' => $nestedBodyClasses,
+        'style' => ['spacing' => ['padding' => $padding]],
+    ], '<!-- wp:paragraph --><p>Nested marked body.</p><!-- /wp:paragraph -->',
+        'wp-block-group ' . $nestedBodyClasses);
+    $nestedCard = card_contract_group(
+        ['className' => 'card-style--framed nested-card-root'],
+        card_contract_image() . $nestedBody,
+        'wp-block-group card-style--framed nested-card-root',
+    );
+    $outer = card_contract_group([
+        'backgroundColor' => 'base',
+        'className' => 'card-style--flush card-flush',
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['blockGap' => '0'],
+        ],
+    ], card_contract_image() . $nestedCard,
+        'wp-block-group has-base-background-color has-background card-style--flush card-flush');
+
+    $first = CardStyleContract::enforce($outer, 'flush', 'page-home--nested-marked-body');
+
+    assert_eq($outer, $first['markup'], 'the quarantined subtree remains byte-for-byte exact');
+    assert_eq([], $first['repairs']);
+    assert_eq(1, count($first['warnings']));
+    assert_contains('nested-card-root', $first['warnings'][0]);
+    assert_contains('nested-marked-body', $first['warnings'][0]);
+    assert_contains('nested_reserved_hooks=', $first['warnings'][0]);
+    assert_contains('card-style--overlap', $first['warnings'][0]);
+    assert_eq($first, CardStyleContract::enforce(
+        $first['markup'],
+        'flush',
+        'page-home--nested-marked-body',
+    ));
+});
+
+test('card contract warns a marker-only grandchild on the first pass and then stays fixed', function () {
+    $padding = ['top' => '1rem', 'right' => '1rem', 'bottom' => '1rem', 'left' => '1rem'];
+    $deepClasses = 'deep-marker card-style--overlap card-flush overlap-up';
+    $deepMarker = card_contract_group(
+        ['className' => $deepClasses],
+        '<!-- wp:paragraph --><p>Deep marker content.</p><!-- /wp:paragraph -->',
+        'wp-block-group ' . $deepClasses,
+    );
+    $bodyClasses = 'body-marker card-style--framed card-flush';
+    $body = card_contract_group([
+        'className' => $bodyClasses,
+        'style' => ['spacing' => ['padding' => $padding]],
+    ], $deepMarker, 'wp-block-group ' . $bodyClasses);
+    $outer = card_contract_group([
+        'backgroundColor' => 'base',
+        'className' => 'card-style--flush card-flush',
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['blockGap' => '0'],
+        ],
+    ], card_contract_image() . $body,
+        'wp-block-group has-base-background-color has-background card-style--flush card-flush');
+
+    $first = CardStyleContract::enforce($outer, 'flush', 'page-home--marker-chain');
+
+    assert_eq(1, count($first['repairs']), 'the retained parent repairs its immediate body');
+    assert_eq(1, count($first['warnings']), 'the unowned deep marker warns on the first pass');
+    assert_contains('wp:group[0] > wp:group[0] > wp:group[0]', $first['warnings'][0]);
+    assert_contains('deep-marker card-style--overlap card-flush overlap-up', $first['markup']);
+    assert_contains('wp-block-group body-marker card-body', $first['markup']);
+
+    $second = CardStyleContract::enforce(
+        $first['markup'],
+        'flush',
+        'page-home--marker-chain',
+    );
+    assert_eq($first['markup'], $second['markup']);
+    assert_eq([], $second['repairs']);
+    assert_eq($first['warnings'], $second['warnings']);
 });
 
 test('card contract recovers unmarked staggered and editorial cards in ordinary columns', function () {
@@ -699,6 +953,81 @@ test('card contract accepts leading-decimal pixel values in the framed radius fo
         'framed',
         'page-home--framed-leading-decimal',
     ));
+});
+
+test('card contract treats every leading-decimal zero spelling consistently', function () {
+    $zeroPadding = ['top' => '.0px', 'right' => '.00px', 'bottom' => '00px', 'left' => '00.0px'];
+    $framed = card_contract_group([
+        'backgroundColor' => 'base',
+        'className' => 'card-style--framed',
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['padding' => $zeroPadding],
+        ],
+    ], card_contract_image('16px')
+        . '<!-- wp:paragraph --><p>Zero framed padding.</p><!-- /wp:paragraph -->',
+        'wp-block-group has-base-background-color has-background card-style--framed');
+    $framedResult = CardStyleContract::enforce(
+        $framed,
+        'framed',
+        'page-home--framed-leading-zero',
+    );
+    assert_eq($framed, $framedResult['markup']);
+    assert_eq([], $framedResult['repairs']);
+    assert_eq(1, count($framedResult['warnings']));
+    assert_contains('outer_padding=', $framedResult['warnings'][0]);
+    assert_contains('non-zero top/right/bottom/left padding', $framedResult['warnings'][0]);
+    assert_eq($framedResult, CardStyleContract::enforce(
+        $framedResult['markup'],
+        'framed',
+        'page-home--framed-leading-zero',
+    ));
+
+    $flushAttrs = [
+        'backgroundColor' => 'base',
+        'className' => 'card-style--flush card-flush',
+        'style' => [
+            'border' => ['radius' => '16px'],
+            'spacing' => ['blockGap' => '.0px'],
+        ],
+    ];
+    $validPadding = ['top' => '1rem', 'right' => '1rem', 'bottom' => '1rem', 'left' => '1rem'];
+    $zeroBodyPadding = ['top' => '.0rem', 'right' => '.00rem', 'bottom' => '00rem', 'left' => '00.0rem'];
+    $validZeroGap = card_contract_group(
+        $flushAttrs,
+        card_contract_image() . card_contract_body(
+            ['style' => ['spacing' => ['padding' => $validPadding]]],
+            'card-body',
+        ),
+        'wp-block-group has-base-background-color has-background card-style--flush card-flush',
+    );
+    $gapResult = CardStyleContract::enforce(
+        $validZeroGap,
+        'flush',
+        'page-home--flush-leading-zero-gap',
+    );
+    assert_eq($validZeroGap, $gapResult['markup']);
+    assert_eq([], $gapResult['repairs']);
+    assert_eq([], $gapResult['warnings']);
+
+    $zeroBody = card_contract_group(
+        $flushAttrs,
+        card_contract_image() . card_contract_body(
+            ['style' => ['spacing' => ['padding' => $zeroBodyPadding]]],
+            'card-body',
+        ),
+        'wp-block-group has-base-background-color has-background card-style--flush card-flush',
+    );
+    $bodyResult = CardStyleContract::enforce(
+        $zeroBody,
+        'flush',
+        'page-home--flush-leading-zero-padding',
+    );
+    assert_eq($zeroBody, $bodyResult['markup']);
+    assert_eq([], $bodyResult['repairs']);
+    assert_eq(1, count($bodyResult['warnings']));
+    assert_contains('body_padding=', $bodyResult['warnings'][0]);
+    assert_contains('padding on all four sides', $bodyResult['warnings'][0]);
 });
 
 test('card contract refuses to certify framed radii it cannot compare in pixels', function () {

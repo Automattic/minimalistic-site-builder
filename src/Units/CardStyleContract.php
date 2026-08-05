@@ -246,22 +246,47 @@ final class CardStyleContract
             }
         }
         $candidates = array_values(array_unique($candidates));
-        $candidateSet = array_fill_keys($candidates, true);
-
-        // Keep one transaction owner for a candidate subtree. A sole group
-        // child without media is the card's text body, so its misplaced hooks
-        // belong to the parent repair. Any image-card candidate nested beneath
-        // another candidate is instead quarantined with that outer card. This
-        // prevents a descendant class repair from making the parent's
-        // "delivered unchanged" warning false.
-        return array_values(array_filter(
+        usort(
             $candidates,
-            static fn (int $index): bool => !self::isOwnedByCandidateSubtree(
-                $document,
-                $index,
-                $candidateSet,
-            ),
-        ));
+            static fn (int $left, int $right): int =>
+                $document->openingOffset($left) <=> $document->openingOffset($right),
+        );
+
+        // Suppress a text-wrapper candidate only when its immediate parent is
+        // itself retained and can report/repair that wrapper. A marker-only
+        // child of an already-suppressed body must remain a candidate so its
+        // harmful hooks are warned on the first pass, not discovered only after
+        // the parent normalizes. Nested image cards are quarantined by their
+        // nearest retained candidate ancestor, which reports the whole list.
+        $retained = [];
+        $retainedSet = [];
+        $quarantinedRoots = [];
+        foreach ($candidates as $index) {
+            $parent = $document->parent($index);
+            $owned = self::isWithinSubtree($document, $index, $quarantinedRoots);
+            if (!$owned && self::firstDirectImage($document, $index) === null) {
+                $owned = $parent !== null
+                    && isset($retainedSet[$parent])
+                    && $document->name($parent) === 'group';
+            } elseif (!$owned) {
+                $cursor = $parent;
+                while ($cursor !== null) {
+                    if (isset($retainedSet[$cursor])) {
+                        $owned = true;
+                        break;
+                    }
+                    $cursor = $document->parent($cursor);
+                }
+            }
+            if (!$owned) {
+                $retained[] = $index;
+                $retainedSet[$index] = true;
+                foreach (self::nestedImageGroups($document, $index) as $nestedRoot) {
+                    $quarantinedRoots[$nestedRoot] = true;
+                }
+            }
+        }
+        return $retained;
     }
 
     /**
@@ -271,8 +296,12 @@ final class CardStyleContract
      *   direct:list<int>,directNames:list<string>,image:?int,imageAttrs:array<mixed>,imageRadius:mixed,
      *   body:?int,bodyAttrs:array<mixed>,bodyClasses:list<string>,
      *   bodyAttributeClasses:list<string>,bodyHtmlClasses:?list<string>,
-     *   nestedCard:?int,nestedCardPath:?string,nestedCardClasses:list<string>,
-     *   nestedCardDirectNames:list<string>,box:bool,padding:mixed,blockGap:mixed
+     *   textGroups:list<array{index:int,path:string,classes:list<string>,attributeClasses:list<string>,
+     *     htmlClasses:?list<string>,directNames:list<string>}>,
+     *   nestedCards:list<array{path:string,classes:list<string>,direct_children:list<string>}>,
+     *   nestedReservedGroups:list<array{path:string,attribute_reserved_hooks:list<string>,
+     *     html_reserved_hooks:?list<string>}>,
+     *   box:bool,padding:mixed,blockGap:mixed
      * }
      */
     private static function inspect(BlockMarkup $document, int $index): array
@@ -284,11 +313,44 @@ final class CardStyleContract
             $direct,
             static fn (int $child): bool => $document->name($child) === 'group',
         ));
-        $soleGroup = count($groups) === 1 ? $groups[0] : null;
-        $body = $soleGroup !== null && self::firstDirectImage($document, $soleGroup) === null
-            ? $soleGroup
-            : null;
-        $nestedCard = self::firstNestedImageGroup($document, $index);
+        $textGroupIndices = array_values(array_filter(
+            $groups,
+            static fn (int $group): bool => self::firstDirectImage($document, $group) === null,
+        ));
+        $body = count($textGroupIndices) === 1 ? $textGroupIndices[0] : null;
+        $textGroups = array_map(
+            static function (int $group) use ($document): array {
+                $groupAttrs = $document->attrs($group) ?? [];
+                return [
+                    'index' => $group,
+                    'path' => self::blockPath($document, $group),
+                    'classes' => self::nodeClasses($document, $group),
+                    'attributeClasses' => self::attributeClasses($groupAttrs),
+                    'htmlClasses' => self::htmlClasses($document, $group),
+                    'directNames' => array_map(
+                        static fn (int $child): string => 'wp:' . $document->name($child),
+                        $document->children($group),
+                    ),
+                ];
+            },
+            $textGroupIndices,
+        );
+        $nestedCardIndices = self::nestedImageGroups($document, $index);
+        $nestedCards = array_map(
+            static fn (int $group): array => [
+                'path' => self::blockPath($document, $group),
+                'classes' => self::nodeClasses($document, $group),
+                'direct_children' => array_map(
+                    static fn (int $child): string => 'wp:' . $document->name($child),
+                    $document->children($group),
+                ),
+            ],
+            $nestedCardIndices,
+        );
+        $nestedReservedGroups = self::nestedReservedHookGroups(
+            $document,
+            array_fill_keys($nestedCardIndices, true),
+        );
         $bodyAttrs = $body === null ? [] : ($document->attrs($body) ?? []);
         $imageAttrs = $image === null ? [] : ($document->attrs($image) ?? []);
         $classes = self::nodeClasses($document, $index);
@@ -319,17 +381,9 @@ final class CardStyleContract
             'bodyClasses' => $bodyClasses,
             'bodyAttributeClasses' => $bodyAttributeClasses,
             'bodyHtmlClasses' => $bodyHtmlClasses,
-            'nestedCard' => $nestedCard,
-            'nestedCardPath' => $nestedCard === null ? null : self::blockPath($document, $nestedCard),
-            'nestedCardClasses' => $nestedCard === null
-                ? []
-                : self::nodeClasses($document, $nestedCard),
-            'nestedCardDirectNames' => $nestedCard === null
-                ? []
-                : array_map(
-                    static fn (int $child): string => 'wp:' . $document->name($child),
-                    $document->children($nestedCard),
-                ),
+            'textGroups' => $textGroups,
+            'nestedCards' => $nestedCards,
+            'nestedReservedGroups' => $nestedReservedGroups,
             'box' => self::hasVisualBox($attrs),
             'padding' => self::nested($attrs, ['style', 'spacing', 'padding']),
             'blockGap' => self::nested($attrs, ['style', 'spacing', 'blockGap']),
@@ -374,18 +428,23 @@ final class CardStyleContract
                 );
             }
         }
-        if (is_int($inspection['nestedCard'])) {
+        foreach ($inspection['nestedCards'] as $nestedCard) {
             $issues[] = self::issue(
                 'nested_image_card',
-                [
-                    'path' => $inspection['nestedCardPath'],
-                    'classes' => $inspection['nestedCardClasses'],
-                    'direct_children' => $inspection['nestedCardDirectNames'],
-                ],
-                'one text-body wp:group without a direct wp:image child',
-                'the sole group after the primary image is a nested image card, not a text body',
+                $nestedCard,
+                'no image-card group nested anywhere inside an outer card subtree',
+                'an image-card group is nested inside the outer card subtree',
             );
         }
+        foreach ($inspection['nestedReservedGroups'] as $nestedGroup) {
+            $issues[] = self::issue(
+                'nested_reserved_hooks',
+                $nestedGroup,
+                'remove or flatten the nested card; no reserved card hooks remain inside the outer card subtree',
+                'reserved hooks inside the quarantined nested-card subtree were retained unchanged for repair',
+            );
+        }
+        array_push($issues, ...self::textBodyTopologyIssues($inspection, $style));
 
         if (in_array($style, ['flush', 'overlap'], true)) {
             if (!$inspection['box']) {
@@ -405,7 +464,7 @@ final class CardStyleContract
                 );
             }
             if (count($direct) !== 2
-                || ($inspection['body'] === null && $inspection['nestedCard'] === null)
+                || ($inspection['body'] === null && $inspection['nestedCards'] === [])
             ) {
                 $issues[] = self::issue(
                     'direct_children',
@@ -616,6 +675,66 @@ final class CardStyleContract
             array_push($issues, ...self::reservedHookDriftIssues($inspection, $style));
         }
 
+        return $issues;
+    }
+
+    /**
+     * A card may be flat only for framed/borderless. Once any direct text
+     * wrapper exists, it must be the sole content child after the primary
+     * image and must contain all related text/actions. Ambiguous or mixed
+     * shapes remain byte-exact, with every wrapper's reserved hooks captured
+     * for the later repair pass.
+     *
+     * @param array<string,mixed> $inspection
+     * @return list<array{field:string,authored:mixed,required:mixed,message:string}>
+     */
+    private static function textBodyTopologyIssues(array $inspection, string $style): array
+    {
+        $groups = $inspection['textGroups'];
+        if ($groups === []) {
+            return [];
+        }
+        $oneWrappedBody = count($groups) === 1
+            && count($inspection['direct']) === 2
+            && ($inspection['direct'][0] ?? null) === $inspection['image']
+            && ($inspection['direct'][1] ?? null) === $groups[0]['index'];
+        if ($oneWrappedBody) {
+            return [];
+        }
+
+        $requiredShape = in_array($style, ['flush', 'overlap'], true)
+            ? ['wp:image', 'one wp:group containing all text/actions']
+            : 'flat direct content with no wp:group, or wp:image plus one wp:group containing all text/actions';
+        $issues = [self::issue(
+            'text_body_topology',
+            [
+                'direct_children' => $inspection['directNames'],
+                'text_group_paths' => array_column($groups, 'path'),
+            ],
+            $requiredShape,
+            count($groups) > 1
+                ? 'the card has multiple ambiguous direct text wrappers'
+                : 'the card mixes a text wrapper with related content outside that wrapper',
+        )];
+        $expectedHooks = ['card-body'];
+        if ($style === 'overlap') {
+            $expectedHooks[] = 'overlap-up';
+        }
+        foreach ($groups as $group) {
+            $issues[] = self::issue(
+                'text_body_group',
+                [
+                    'path' => $group['path'],
+                    'attribute_reserved_hooks' => self::reservedHooks($group['attributeClasses']),
+                    'html_reserved_hooks' => is_array($group['htmlClasses'])
+                        ? self::reservedHooks($group['htmlClasses'])
+                        : null,
+                    'direct_children' => $group['directNames'],
+                ],
+                ['reserved_hooks' => $expectedHooks],
+                'the direct text-wrapper hook evidence was retained because its topology is unsafe to rewrite',
+            );
+        }
         return $issues;
     }
 
@@ -1295,32 +1414,34 @@ final class CardStyleContract
         return false;
     }
 
-    /** @param array<int,true> $candidateSet */
-    private static function isOwnedByCandidateSubtree(
-        BlockMarkup $document,
-        int $index,
-        array $candidateSet,
-    ): bool {
-        $parent = $document->parent($index);
-        if ($parent === null) {
-            return false;
-        }
-        if (isset($candidateSet[$parent]) && $document->name($parent) === 'group') {
-            $groups = array_values(array_filter(
-                $document->children($parent),
-                static fn (int $child): bool => $document->name($child) === 'group',
-            ));
-            if ($groups === [$index]) {
-                return true;
+    /** @return list<int> */
+    private static function nestedImageGroups(BlockMarkup $document, int $root): array
+    {
+        $found = [];
+        $pending = array_reverse($document->children($root));
+        while ($pending !== []) {
+            $candidate = array_pop($pending);
+            if ($document->name($candidate) === 'group'
+                && self::firstDirectImage($document, $candidate) !== null
+            ) {
+                $found[] = $candidate;
+            }
+            foreach (array_reverse($document->children($candidate)) as $child) {
+                $pending[] = $child;
             }
         }
+        return $found;
+    }
 
-        if (self::firstDirectImage($document, $index) === null) {
-            return false;
-        }
-        $cursor = $parent;
+    /** @param array<int,true> $roots */
+    private static function isWithinSubtree(
+        BlockMarkup $document,
+        int $index,
+        array $roots,
+    ): bool {
+        $cursor = $index;
         while ($cursor !== null) {
-            if (isset($candidateSet[$cursor])) {
+            if (isset($roots[$cursor])) {
                 return true;
             }
             $cursor = $document->parent($cursor);
@@ -1328,21 +1449,37 @@ final class CardStyleContract
         return false;
     }
 
-    private static function firstNestedImageGroup(BlockMarkup $document, int $root): ?int
-    {
-        $pending = array_reverse($document->children($root));
-        while ($pending !== []) {
-            $candidate = array_pop($pending);
-            if ($document->name($candidate) === 'group'
-                && self::firstDirectImage($document, $candidate) !== null
-            ) {
-                return $candidate;
-            }
-            foreach (array_reverse($document->children($candidate)) as $child) {
-                $pending[] = $child;
-            }
+    /**
+     * @param array<int,true> $roots
+     * @return list<array{path:string,attribute_reserved_hooks:list<string>,html_reserved_hooks:?list<string>}>
+     */
+    private static function nestedReservedHookGroups(
+        BlockMarkup $document,
+        array $roots,
+    ): array {
+        if ($roots === []) {
+            return [];
         }
-        return null;
+        $groups = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'group'
+                || !self::isWithinSubtree($document, $index, $roots)
+            ) {
+                continue;
+            }
+            $attributeHooks = self::reservedHooks(self::attributeClasses($document->attrs($index) ?? []));
+            $htmlClasses = self::htmlClasses($document, $index);
+            $htmlHooks = is_array($htmlClasses) ? self::reservedHooks($htmlClasses) : null;
+            if ($attributeHooks === [] && $htmlHooks === []) {
+                continue;
+            }
+            $groups[] = [
+                'path' => self::blockPath($document, $index),
+                'attribute_reserved_hooks' => $attributeHooks,
+                'html_reserved_hooks' => $htmlHooks,
+            ];
+        }
+        return $groups;
     }
 
     /** @param array<mixed> $attrs */
@@ -1475,7 +1612,9 @@ final class CardStyleContract
     {
         return $value === 0
             || $value === 0.0
-            || (is_string($value) && preg_match('/^0(?:\.0+)?(?:px|rem|em|%)?$/i', trim($value)) === 1);
+            || (is_string($value)
+                && preg_match('/^(?:0+(?:\.0+)?|\.0+)(?:px|rem|em|%)?$/i', trim($value)) === 1
+            );
     }
 
     /** @param array<mixed> $attrs @param list<string> $path */
