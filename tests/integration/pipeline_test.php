@@ -107,8 +107,11 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     ]);
     // page-plan home (json) — ordered list of the front page's sections
     $llm->queueJson(['sections' => [
-        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the base specials grid below.', 'primary_action' => null],
-        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the image hero above and the footer below.', 'primary_action' => null],
+        ['slug' => 'hero', 'title' => 'Hero', 'role' => 'hero', 'type' => 'immersive-welcome', 'layout_archetype' => 'full-bleed-cover', 'background' => 'image', 'vertical_density' => 'standard', 'handoff' => 'Between the site header above and the contrast overview split below.', 'primary_action' => null],
+        // A third planned section keeps the front plan above the deterministic
+        // thin-plan padding threshold, so parts map 1:1 to the queued texts.
+        ['slug' => 'overview', 'title' => 'Overview', 'role' => 'content', 'type' => 'bakery-story', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast', 'vertical_density' => 'standard', 'handoff' => 'Between the image hero above and the base specials grid below.', 'primary_action' => null],
+        ['slug' => 'specials', 'title' => 'Specials', 'role' => 'closing', 'type' => 'seasonal-specials', 'layout_archetype' => 'equal-card-grid', 'background' => 'base', 'vertical_density' => 'compact', 'handoff' => 'Between the contrast overview split above and the footer below.', 'primary_action' => null],
     ]]);
     // page-plan menu (json) — the interior page's sections
     $llm->queueJson(['sections' => [
@@ -134,6 +137,13 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
         . '<!-- wp:heading {"level":1,"textColor":"base"} --><h1 class="wp-block-heading has-base-color has-text-color">Hero</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
         . '</div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->'
+    );
+    $llm->queueText(
+        '<!-- wp:group {"backgroundColor":"contrast","textColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-contrast-background-color has-base-color has-text-color has-background">'
+        . '<!-- wp:heading --><h2>Our Story</h2><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>Artisan bread baked daily.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->'
     );
     // The specials section opts into one generated layout utility (overlap-up)
@@ -288,8 +298,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
     // Structural role is constrained independently while semantic section
     // types remain open-ended and survive the complete pipeline.
     $plannedPages = $project->readJson('pages.json')['pages'];
-    assert_eq(['hero', 'closing'], array_column($plannedPages[0]['sections'], 'role'));
-    assert_eq(['immersive-welcome', 'seasonal-specials'], array_column($plannedPages[0]['sections'], 'type'));
+    assert_eq(['hero', 'content', 'closing'], array_column($plannedPages[0]['sections'], 'role'));
+    assert_eq(['immersive-welcome', 'bakery-story', 'seasonal-specials'], array_column($plannedPages[0]['sections'], 'type'));
 
     // Every page's content was inlined into the plugin in plan order, and the
     // transient page parts left the theme.
@@ -343,7 +353,8 @@ test('full pipeline produces a structurally valid theme and content plugin', fun
 
     // The rhythm pass owned each section root's vertical spacing before the
     // markup moved into the plugin: judge the assembled home page's chunks.
-    [$heroHtml, $specialsHtml] = SectionRhythmStep::splitTopLevel($home);
+    [$heroHtml, $overviewHtml, $specialsHtml] = SectionRhythmStep::splitTopLevel($home);
+    assert_contains('Our Story', $overviewHtml, 'the planned middle section survives assembly in order');
     assert_contains('hero-entrance', $heroHtml, 'first section keeps its page-load entrance');
     assert_contains('ken-burns', $heroHtml, 'first section keeps the page ambient effect');
     $heroBlocks = BlockMarkup::parse($heroHtml);
