@@ -4,6 +4,7 @@ declare(strict_types=1);
 use Automattic\SiteBuild\Html;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
+use Automattic\SiteBuild\Steps\InnerPagesDesignStep;
 use Automattic\SiteBuild\Steps\SpliceHomeDesignStep;
 
 function splice_home_preview(): string
@@ -20,6 +21,17 @@ function splice_home_body(): string
     return '<main><section id="story"><h2>HOME-BODY-STORY-5D2E</h2></section>'
         . '<section id="visit"><p>HOME-BODY-VISIT-6F70</p></section></main>'
         . '<footer class="site-footer"><p>HOME-BODY-FOOTER-2B19</p></footer>';
+}
+
+function splice_home_body_with_nested_attributions(): string
+{
+    return '<main>'
+        . '<section id="story"><h2>NESTED-BODY-STORY-A17C</h2>'
+        . '<blockquote><p>First testimonial.</p><footer>ATTRIBUTION-ONE-6B31</footer></blockquote></section>'
+        . '<section id="work"><h2>NESTED-BODY-WORK-C842</h2>'
+        . '<article><p>Second case study.</p><footer>ATTRIBUTION-TWO-935D</footer></article></section>'
+        . '<section id="contact"><h2>NESTED-BODY-CONTACT-D054</h2></section>'
+        . '</main><footer class="site-footer"><p>NESTED-PAGE-FOOTER-E7A9</p></footer>';
 }
 
 /** @return array{0:Project,1:string} */
@@ -76,6 +88,99 @@ test('splice-home-design declares exact inputs and deterministic home output', f
     }
 
     assert_eq($outputs[0], $outputs[1], 'fixed fold and body compose byte-identically');
+});
+
+test('splice-home-design preserves the full body with nested attribution footers', function () {
+    [$project, $tmp] = splice_home_fixture(
+        splice_home_preview(),
+        splice_home_body_with_nested_attributions(),
+    );
+
+    try {
+        splice_home_run($project);
+
+        $home = $project->readText('design/home.html');
+        $warnings = $project->exists('warnings.json')
+            ? implode("\n", $project->readJson('warnings.json')['splice-home-design'] ?? [])
+            : '';
+        assert_true(
+            !str_contains($warnings, 'retained header and hero only'),
+            'nested attribution footers must not trigger the fold-only fallback warning',
+        );
+        foreach ([
+            'FOLD-HERO-97C4',
+            'NESTED-BODY-STORY-A17C',
+            'ATTRIBUTION-ONE-6B31',
+            'NESTED-BODY-WORK-C842',
+            'ATTRIBUTION-TWO-935D',
+            'NESTED-BODY-CONTACT-D054',
+            'NESTED-PAGE-FOOTER-E7A9',
+        ] as $marker) {
+            assert_contains($marker, $home, "composed home preserves {$marker}");
+        }
+        assert_eq('', $warnings, 'valid nested-attribution fixture needs no splice warning');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('splice-home-design keeps malformed footer and main depth guards', function () {
+    $bodyParts = new ReflectionMethod(SpliceHomeDesignStep::class, 'bodyParts');
+    $bodyParts->setAccessible(true);
+    $invalid = [
+        'footer in footer' => '<main><p>Body</p></main><footer><footer>Nested</footer></footer>',
+        'footer in address' => '<main><address><footer>Nested</footer></address></main><footer>Page</footer>',
+        'two top-level footers' => '<main><p>Body</p></main><footer>One</footer><footer>Two</footer>',
+        'nested main' => '<main><section><main>Nested</main></section></main><footer>Page</footer>',
+    ];
+
+    foreach ($invalid as $case => $html) {
+        assert_eq(null, $bodyParts->invoke(null, $html), "{$case} remains malformed");
+    }
+});
+
+test('splice and home-body validation agree on footer and main depth', function () {
+    $bodyParts = new ReflectionMethod(SpliceHomeDesignStep::class, 'bodyParts');
+    $bodyParts->setAccessible(true);
+    $isValidHomeBody = new ReflectionMethod(InnerPagesDesignStep::class, 'isValidHomeBodyFragment');
+    $isValidHomeBody->setAccessible(true);
+    $cases = [
+        'idiomatic nested attribution' => splice_home_body_with_nested_attributions(),
+        'footer in footer' => '<main><p>Body</p></main><footer><footer>Nested</footer></footer>',
+        'footer in address' => '<main><address><footer>Nested</footer></address></main><footer>Page</footer>',
+        'two top-level footers' => '<main><p>Body</p></main><footer>One</footer><footer>Two</footer>',
+        'nested main' => '<main><section><main>Nested</main></section></main><footer>Page</footer>',
+    ];
+
+    foreach ($cases as $case => $html) {
+        $spliceAccepts = $bodyParts->invoke(null, $html) !== null;
+        $generationAccepts = $isValidHomeBody->invoke(null, $html);
+        assert_eq($generationAccepts, $spliceAccepts, "{$case} acceptance must match generation");
+    }
+});
+
+test('splice-home-design keeps fold-only degradation for empty and malformed bodies', function () {
+    $cases = [
+        'empty' => '',
+        'malformed' => '<main><section>UNCLOSED-BODY',
+    ];
+
+    foreach ($cases as $case => $body) {
+        [$project, $tmp] = splice_home_fixture(splice_home_preview(), $body);
+        try {
+            splice_home_run($project);
+
+            assert_eq(splice_home_preview(), $project->readText('design/home.html'), "{$case} keeps fold bytes");
+            $warnings = implode(
+                "\n",
+                $project->readJson('warnings.json')['splice-home-design'] ?? [],
+            );
+            assert_contains('home-body missing, empty, or malformed', $warnings, "{$case} warning has cause");
+            assert_contains('retained header and hero only', $warnings, "{$case} warning has disposition");
+        } finally {
+            exec('rm -rf ' . escapeshellarg($tmp));
+        }
+    }
 });
 
 test('splice-home-design degrades every generated-content boundary and never drops home', function () {
