@@ -93,11 +93,10 @@ foreach (array_slice($argv, 1) as $a) {
 }
 
 // Both flags are forwarded to the children, so check them once here rather than
-// let every child build fail with the same message. Only --provider's normalized
-// form is kept: the page list is forwarded verbatim, so this call is for the
-// "--pages requires --multi-page" guard alone.
+// let every child build fail with the same message. The page list goes over
+// verbatim; only --provider's normalized form is kept, for the child commands.
 try {
-    parse_pages_flags($pagesArg, $multiPage);
+    require_multi_page_for_pages($pagesArg, $multiPage);
     $provider = normalize_provider($provider);
 } catch (InvalidArgumentException $e) {
     fwrite(STDERR, $e->getMessage() . "\n");

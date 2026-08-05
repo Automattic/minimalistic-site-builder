@@ -15,9 +15,7 @@ use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\SiteBuilder;
-use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDefaults;
-use Automattic\SiteBuild\Steps\CoverContrastStep;
 use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\WpcomImageClient;
 
@@ -50,39 +48,42 @@ function llm_temperature(string $envSuffix, ?float $default): ?float
 }
 
 /**
- * Normalize a `--pages` list against `--multi-page`.
+ * Split a comma-separated CLI flag value into its trimmed, non-blank items.
  *
- * --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
- * exist at all, so a list without the flag is a contradiction — it throws
- * rather than let either flag be silently ignored. Blank entries left by a
- * trailing or doubled comma are dropped; the first surviving title is the
- * homepage.
+ * Blanks left by a trailing or doubled comma are dropped and the keys are
+ * re-indexed, so position stays meaningful (--pages' first title is the
+ * homepage).
  *
  * @return list<string>
  */
-function parse_pages_flags(?string $pagesArg, bool $multiPage): array
+function split_csv_flag(string $value): array
+{
+    return array_values(array_filter(
+        array_map('trim', explode(',', $value)),
+        static fn (string $item): bool => $item !== '',
+    ));
+}
+
+/**
+ * Reject a `--pages` list handed over without `--multi-page`.
+ *
+ * --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
+ * exist at all, so a list without the flag is a contradiction — it throws
+ * rather than let either flag be silently ignored.
+ */
+function require_multi_page_for_pages(?string $pagesArg, bool $multiPage): void
 {
     if ($pagesArg !== null && !$multiPage) {
         throw new InvalidArgumentException('--pages requires --multi-page.');
     }
-    if ($pagesArg === null) {
-        return [];
-    }
-
-    return array_values(array_filter(
-        array_map('trim', explode(',', $pagesArg)),
-        static fn (string $title): bool => $title !== '',
-    ));
 }
 
 /**
  * Validate a `--provider` flag against config/models.json, returning it
  * lowercased and trimmed (null when the flag was not given).
  *
- * Validating only — what the provider is then used FOR differs per entry point:
- * bin/build.php exports it as LLM_PROVIDER for its own run, bin/build-demos.php
- * forwards it to each child build instead. Both want the same friendly early
- * error rather than a later failure deep in the transport.
+ * Validating only: it throws so every entry point gives the same friendly early
+ * error instead of failing later, deep in the transport.
  */
 function normalize_provider(?string $provider): ?string
 {
@@ -192,26 +193,14 @@ function make_image_client(): ImageClient
 }
 
 /**
- * The opt-in image pair, in the order it has to run.
+ * Wire the opt-in image-generation step: the Vertex transport, the Llm that
+ * rewrites prompts the safety filter rejects, and that repair's model.
  *
- * Generation goes through the Vertex proxy rather than the LLM, but it is not a
- * zero-token step: the Llm rewrites prompts the safety filter rejects (small
- * tier) before regenerating. CoverContrastStep follows because only then do the
- * real pixels exist to re-check cover text against — dimRatio and text colors
- * were picked earlier against an image nobody had seen.
- *
- * Construction is shared; running is not. bin/build.php announces, times and
- * records each step into its BuildReport, while bin/images.php times the
- * generation alone — so callers run the steps themselves.
- *
- * @return list<Step>
+ * A null $llm still generates images, minus the prompt repair.
  */
-function image_generation_steps(?Llm $llm): array
+function make_generate_images_step(?Llm $llm): GenerateImagesStep
 {
-    return [
-        new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null),
-        new CoverContrastStep(BlockFixers::default()),
-    ];
+    return new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
 }
 
 /** Project root path helper. */

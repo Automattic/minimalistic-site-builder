@@ -1,9 +1,11 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\BuildReport;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Step;
+use Automattic\SiteBuild\Steps\CoverContrastStep;
 
 /**
  * Build a site from a prompt.
@@ -101,10 +103,19 @@ if ($prompt === null || trim($prompt) === '') {
 }
 
 try {
-    $pages = parse_pages_flags($pagesArg, $multiPage);
+    require_multi_page_for_pages($pagesArg, $multiPage);
+    $pages = $pagesArg === null ? [] : split_csv_flag($pagesArg);
+    $provider = normalize_provider($provider);
 } catch (InvalidArgumentException $e) {
     Narrator::write($e->getMessage() . "\n");
     exit(1);
+}
+
+// --provider selects the model set for the whole run. It just sets LLM_PROVIDER
+// (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
+// overrides still apply on top.
+if ($provider !== null) {
+    putenv("LLM_PROVIDER={$provider}");
 }
 
 $designConstraints = [];
@@ -112,10 +123,7 @@ if ($heroCanvas !== null) {
     $designConstraints['hero_canvas'] = $heroCanvas;
 }
 if ($heroMediaModesArg !== null) {
-    $designConstraints['allowed_hero_media_modes'] = array_values(array_filter(
-        array_map('trim', explode(',', $heroMediaModesArg)),
-        static fn (string $mode): bool => $mode !== '',
-    ));
+    $designConstraints['allowed_hero_media_modes'] = split_csv_flag($heroMediaModesArg);
 }
 if ($maxHeroImagesArg !== null) {
     if (preg_match('/^\d+$/', $maxHeroImagesArg) !== 1) {
@@ -126,20 +134,6 @@ if ($maxHeroImagesArg !== null) {
 }
 if ($heroCopyCapacity !== null) {
     $designConstraints['hero_copy_capacity'] = $heroCopyCapacity;
-}
-
-// --provider selects the model set for the whole run. It just sets LLM_PROVIDER
-// (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
-// overrides still apply on top.
-try {
-    $provider = normalize_provider($provider);
-} catch (InvalidArgumentException $e) {
-    Narrator::write($e->getMessage() . "\n");
-    exit(1);
-}
-if ($provider !== null) {
-    putenv("LLM_PROVIDER={$provider}");
-    $_ENV['LLM_PROVIDER'] = $provider;
 }
 
 $llm = make_llm();
@@ -235,9 +229,14 @@ try {
 // Image generation is opt-in: slow and networked, so it runs only on request
 // and only for a full build (skipped when --until stops the pipeline early).
 if ($withImages && $until === null) {
-    foreach (image_generation_steps($llm) as $step) {
-        $runExtraStep($step);
-    }
+    // Image generation goes through the Vertex proxy, not the LLM — its only
+    // model use is the Llm rewriting safety-filtered prompts (small tier) and
+    // regenerating. The tally comes from images.json below.
+    $runExtraStep(make_generate_images_step($llm));
+
+    // Now that the real pixels exist, re-check cover text against the actual
+    // (dimmed) images and raise dimRatio / flip text colors where needed.
+    $runExtraStep(new CoverContrastStep(BlockFixers::default()));
 
     $specs = $project->exists('images.json') ? $project->readJson('images.json') : [];
     $generated = 0;
