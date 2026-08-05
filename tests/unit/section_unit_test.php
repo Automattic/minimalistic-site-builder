@@ -13,6 +13,7 @@ function section_unit_input(): array
         'language'         => 'unit-language-sentinel',
         'theme_json'       => '{"unit-theme-sentinel":true}',
         'design_direction' => 'UNIT-DIRECTION-SENTINEL',
+        'card_style'       => 'flush',
         'outline'          => '1. UNIT-OUTLINE-SENTINEL (hero)',
         'site_pages'       => '- "Home" — / (front page): UNIT-PAGES-SENTINEL',
         'page'             => [
@@ -72,6 +73,7 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq(2, count($sent['cached_prefixes'] ?? []), 'direct execution forwards both cache layers');
     $prompt = section_unit_request_text($sent);
     assert_contains('Role:     hero', $prompt);
+    assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): flush', $prompt);
     foreach ([
         'UNIT-SPEC-SENTINEL',
         'unit-language-sentinel',
@@ -125,6 +127,69 @@ test('SectionUnit request preparation does not call the LLM', function () {
     assert_eq(0, $llm->completeBatchCalls);
 });
 
+test('SectionUnit documents the nested flush-card body contract', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+
+    assert_contains(
+        'ONE inner `wp:group` with `"className":"card-body"`',
+        $prompt,
+        'flush cards give their padded text group the stable flex-body hook',
+    );
+    assert_contains(
+        '`"className":"card-body overlap-up"`',
+        $prompt,
+        'overlap cards retain both the flex-body and overlap hooks',
+    );
+    assert_contains(
+        'a nested `cta-bottom` can align with sibling cards',
+        $prompt,
+        'the placement requirement explains why the body hook is structural',
+    );
+    foreach (['flush', 'framed', 'overlap', 'borderless'] as $treatment) {
+        assert_contains(
+            '`card-style--' . $treatment . '`',
+            $prompt,
+            "the {$treatment} construction has one universal treatment marker",
+        );
+    }
+    assert_contains(
+        '`"className":"card-style--overlap card-flush"`',
+        $prompt,
+        'overlap cards carry the universal marker and flush behavior hook together',
+    );
+});
+
+test('SectionUnit gives standalone requests the authoritative machine card style', function () {
+    $input = section_unit_input();
+    $input['design_direction'] = 'Direction prose with no card-treatment commitment.';
+    $input['card_style'] = 'framed';
+
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request($input);
+    $prompt = section_unit_request_text($request);
+
+    assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): framed', $prompt);
+    assert_contains(
+        'overrides absent or conflicting prose in the DESIGN DIRECTION',
+        $prompt,
+    );
+    assert_true(
+        !str_contains($prompt, 'when the direction carries no card-treatment line, default to `flush`'),
+        'standalone non-flush input is not contradicted by a prose-derived default',
+    );
+    assert_contains(
+        'ASSIGNED CARD STYLE (authoritative machine contract): framed',
+        $request['cached_prefixes'][0] ?? '',
+        'the site-wide machine assignment remains in the stable build cache layer',
+    );
+});
+
 test('SectionUnit keeps front-page hero topology out of the general prompt', function () {
     $input = section_unit_input();
     $input['outline'] = '1. UNIT-OUTLINE-SENTINEL (content)';
@@ -173,6 +238,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'language'          => $input['language'],
         'theme_json'        => $input['theme_json'],
         'design_direction'  => $input['design_direction'],
+        'card_style'        => $input['card_style'],
         'outline'           => $input['outline'],
         'site_pages'        => $input['site_pages'],
         'page_title'        => $input['page']['title'],

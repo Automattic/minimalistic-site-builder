@@ -19,6 +19,7 @@ function section_cache_input(string $slug = 'hero', string $title = 'Hero'): arr
         'language'         => 'cache-language-sentinel',
         'theme_json'       => '{"cache-theme-sentinel":true}',
         'design_direction' => 'CACHE-DIRECTION-SENTINEL',
+        'card_style'       => 'flush',
         'outline'          => "1. Hero (hero) [#hero]\n2. About (about) [#about]",
         'site_pages'       => '- "Home" — / (front page)',
         'page'             => ['slug' => 'home', 'title' => 'Home', 'path' => '/'],
@@ -104,6 +105,7 @@ test('section prompt freezes build, page, and brief layer boundaries', function 
         '{{language}}',
         '{{theme_json}}',
         '{{design_direction}}',
+        '{{card_style}}',
         '{{image_instructions}}',
         '{{block_markup_output_contract}}',
     ] as $placeholder) {
@@ -137,6 +139,7 @@ test('section request contract exposes two stable cached prefixes and a varying 
     assert_eq(0.4, $hero['temperature'] ?? null);
     assert_contains('CACHE-SPEC-SENTINEL', $hero['cached_prefixes'][0]);
     assert_contains('CACHE-DIRECTION-SENTINEL', $hero['cached_prefixes'][0]);
+    assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): flush', $hero['cached_prefixes'][0]);
     assert_contains('FULL PAGE OUTLINE', $hero['cached_prefixes'][1]);
     assert_contains('SECTION TO BUILD', $hero['prompt']);
     foreach ($hero['cached_prefixes'] as $prefix) {

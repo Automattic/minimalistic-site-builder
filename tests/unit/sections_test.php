@@ -85,6 +85,42 @@ test('sections requests one part per header/footer/page-section', function () {
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('sections safely adapts non-string persisted card style, briefs flush, and persists the fallback warning', function () {
+    [$project, $tmp] = sections_fixture();
+    $direction = $project->readJson('designDirection.json');
+    $direction['card_style'] = ['polaroid'];
+    $project->writeJson('designDirection.json', $direction);
+
+    $llm = new FakeLlm();
+    $step = new SectionsStep($llm, new PromptRenderer(repo_path('prompts')));
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    });
+    try {
+        $requests = $step->requests($project);
+        assert_contains(
+            'ASSIGNED CARD STYLE (authoritative machine contract): flush',
+            sections_request_text($requests['page-home--about']),
+        );
+
+        $llm->queueText('OK');
+        $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+        $llm->queueText('<!-- wp:group --><!-- /wp:group -->');
+        $llm->queueText('<!-- wp:heading --><h2>Hero</h2><!-- /wp:heading -->');
+        $llm->queueText('<!-- wp:heading --><h2>About</h2><!-- /wp:heading -->');
+        $step->run($project);
+    } finally {
+        restore_error_handler();
+    }
+
+    $warnings = implode("\n", $project->readJson('warnings.json')['sections'] ?? []);
+    assert_contains('designDirection.json: field card_style', $warnings);
+    assert_contains('authored ["polaroid"]', $warnings);
+    assert_contains('delivered "flush"', $warnings);
+    assert_contains('disposition', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('sections fans out across every page and gives each section its own page context', function () {
     [$project, $tmp] = sections_fixture();
     $project->writeJson('pages.json', ['pages' => [
