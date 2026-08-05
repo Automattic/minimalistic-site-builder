@@ -161,10 +161,8 @@ final class CollectImagesStep implements Step
                 ' ',
                 html_entity_decode($alt[2], ENT_QUOTES | ENT_HTML5),
             ));
-            // An AI_IMAGE alt belongs to the canonical parser above, which
-            // splits its four fields instead of taking the whole line.
             if (str_starts_with($subject, 'AI_IMAGE:')) {
-                continue;
+                $subject = trim(explode('|', substr($subject, strlen('AI_IMAGE:')), 2)[0]);
             }
             $context = self::pageContextFor($source);
             // A decorative image the design left undescribed still has an
