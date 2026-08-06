@@ -107,7 +107,9 @@ final class ScaffoldThemeStep implements Step
            aren't mirrored in block attributes, and a class hook survives
            untouched. Aspect ratios, not fixed pixel heights: a fixed crop
            height distorts card media proportions across 2/3/4-column layouts
-           and viewports (BIGR-771); the tiny list thumb stays px-based. */
+           and viewports (BIGR-771); the list thumb's old fixed 110px height
+           letterboxed its square image to whatever ratio the column width
+           produced and left it floating in taller rows (BIGR-777). */
         .card-media img,
         .card-media-tall img,
         .card-media-thumb img {
@@ -117,7 +119,7 @@ final class ScaffoldThemeStep implements Step
         }
         .card-media img { aspect-ratio: 3 / 2; height: auto; }
         .card-media-tall img { aspect-ratio: 4 / 5; height: auto; }
-        .card-media-thumb img { height: 110px; }
+        .card-media-thumb img { aspect-ratio: 1 / 1; height: auto; }
 
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
@@ -198,6 +200,29 @@ final class ScaffoldThemeStep implements Step
            generated image radius from surviving; descendants also cover images
            wrapped in a link. */
         .wp-block-group.card-flush > figure.wp-block-image img {
+            border-radius: 0 !important;
+        }
+
+        /* Flush list-thumb rows (sections opt in via className="list-thumb-flush"
+           on the row wp:columns): the thumbnail bleeds to the row's top/left/
+           bottom edges and stretches to the row height while only the text
+           column carries padding (BIGR-777). Zeroed row padding must beat
+           generated inline padding, exactly like .card-flush, and the row's
+           border radius clips the bleeding image. */
+        .wp-block-columns.list-thumb-flush {
+            overflow: hidden;
+            padding: 0 !important;
+            align-items: stretch;
+        }
+        .list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {
+            height: 100%;
+            margin: 0;
+        }
+        /* The text column defines the row height; the thumb follows it instead
+           of imposing the square crop (same stretch pattern as panorama-rail). */
+        .list-thumb-flush .card-media-thumb img {
+            aspect-ratio: auto;
+            height: 100%;
             border-radius: 0 !important;
         }
 

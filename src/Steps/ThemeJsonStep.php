@@ -95,14 +95,16 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
     /**
      * One bounded spacing vocabulary for every generated site.
      *
-     * sm/md are component-level gaps. lg/xl/xxl are the compact, standard,
-     * and spacious section-padding choices. Their fluid ranges prevent the
-     * largest token from becoming fixed 128px padding on mobile or growing
-     * beyond 112px on wide screens.
+     * xs is the tight intra-component text rhythm (an eyebrow/heading/line
+     * stack inside one card or list row — BIGR-777). sm/md are component-level
+     * gaps. lg/xl/xxl are the compact, standard, and spacious section-padding
+     * choices. Their fluid ranges prevent the largest token from becoming
+     * fixed 128px padding on mobile or growing beyond 112px on wide screens.
      *
      * @var list<array{slug: string, name: string, size: string}>
      */
     private const SPACING_PROFILE = [
+        ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
         ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
         ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
         ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
