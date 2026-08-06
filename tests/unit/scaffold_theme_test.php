@@ -19,10 +19,112 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('Description: {{DESCRIPTION}}', $css);
 
     // The card-cropping class hooks the section recipes reference (they keep
-    // card sizing out of inline CSS, which fix-blocks would strip).
+    // card sizing out of inline CSS, which fix-blocks would strip). Card media
+    // crops by aspect ratio, not fixed pixel heights, so proportions survive
+    // 2/3/4-column layouts (BIGR-771); only the tiny list thumb stays px-based.
     assert_contains('.card-media img', $css);
-    assert_contains('.card-media-tall img { height: 320px; }', $css);
+    assert_contains('.card-media img { aspect-ratio: 3 / 2; height: auto; }', $css);
+    assert_contains('.card-media-tall img { aspect-ratio: 4 / 5; height: auto; }', $css);
     assert_contains('.card-media-thumb img { height: 110px; }', $css);
+    assert_true(!str_contains($css, 'height: 200px'), 'fixed card crop heights are gone');
+    assert_true(!str_contains($css, 'height: 320px'), 'fixed tall crop heights are gone');
+
+    // Card media fills the card's content box even though the equal-cards card
+    // is a flex column (core's constrained-layout auto margins would otherwise
+    // shrink-wrap the figure to the image's intrinsic width, BIGR-771).
+    assert_contains(
+        ".equal-cards .wp-block-group > figure.wp-block-image {\n"
+            . "    width: 100%;\n"
+            . "    max-width: none;\n"
+            . "    margin-left: 0 !important;\n"
+            . "    margin-right: 0 !important;\n"
+            . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
+
+    // Any nested card text wrapper carries card-body. It grows as a flex column
+    // only in an equal-height row, so its nested CTA can consume the remaining
+    // height and align with sibling card buttons across all four treatments.
+    assert_contains(
+        ".equal-cards .wp-block-group.card-body {\n"
+            . "    display: flex;\n"
+            . "    flex-direction: column;\n"
+            . "    flex-grow: 1;\n"
+            . '}',
+        $css,
+    );
+
+    // Width and constrained-layout margin resets apply to every marked card,
+    // including ordinary staggered/editorial cards outside .equal-cards. The
+    // overlap treatment then restores its deliberate one-rem side reveal.
+    assert_contains(
+        ".wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body {\n"
+            . "    box-sizing: border-box;\n"
+            . "    width: 100%;\n"
+            . "    max-width: none;\n"
+            . "    margin-left: 0 !important;\n"
+            . "    margin-right: 0 !important;\n"
+            . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".wp-block-group.card-style--overlap > .wp-block-group.card-body.overlap-up {\n"
+            . "    width: calc(100% - 2rem);\n"
+            . "    margin-left: 1rem !important;\n"
+            . "    margin-right: 1rem !important;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {\n"
+            . "    box-sizing: border-box;\n"
+            . "    width: 100%;\n"
+            . "    max-width: none;\n"
+            . "    margin-left: 0 !important;\n"
+            . "    margin-right: 0 !important;\n"
+            . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
+    assert_true(
+        !str_contains($css, '.wp-site-blocks .equal-cards'),
+        'card layout rules remain available in both the editor and front end',
+    );
+    assert_true(
+        !str_contains($css, '.equal-cards .wp-block-group.card-body.overlap-up'),
+        'overlap side-inset geometry is not limited to the equal-grid recipe',
+    );
+    assert_contains(
+        ".equal-cards .cta-bottom {\n"
+            . "    margin-top: auto;\n"
+            . "    justify-content: center;\n"
+            . '}',
+        $css,
+    );
+
+    // The reset targets only the outer flush group, leaving .card-body padding
+    // intact. Importance makes the zero padding stable against later global
+    // Group styles and generated inline padding. Inline image radii need the
+    // same precedence; the descendant img selector also handles linked images.
+    assert_contains(
+        ".wp-block-group.card-flush {\n"
+            . "    overflow: hidden;\n"
+            . "    padding: 0 !important;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".wp-block-group.card-flush > figure.wp-block-image img {\n"
+            . "    border-radius: 0 !important;\n"
+            . '}',
+        $css,
+    );
+    assert_true(
+        !str_contains($css, '.card-flush .card-body'),
+        'the flush reset must not remove the inner text body padding',
+    );
 
     // Core's font-relative pullquote spacing must not compound unpredictably
     // with the deterministic section rhythm.

@@ -61,8 +61,18 @@ function designdir_direction(): array
         ],
         'type'             => designdir_type(),
         'image_grade'      => 'warm kodachrome color, soft golden light',
+        'card_style'       => 'framed',
         'hero_blueprint'   => HeroBlueprint::defaultFor('editorial-split'),
     ];
+}
+
+/** @param list<string> $rows @return list<string> */
+function designdir_card_rows(array $rows): array
+{
+    return array_values(array_filter(
+        $rows,
+        static fn (string $row): bool => str_contains($row, 'card_style'),
+    ));
 }
 
 test('design-direction expands a picked seed into structured designDirection.json', function () {
@@ -80,6 +90,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_eq('Fraunces', $written['type']['heading']['family']);
     assert_eq([700, 900], $written['type']['heading']['weights']);
     assert_eq('warm kodachrome color, soft golden light', $written['image_grade']);
+    assert_eq('framed', $written['card_style']);
     assert_true(!array_key_exists('signature_device', $written), 'signature_device field is gone');
     assert_true(in_array($written['hero_blueprint']['recipe'], HeroComposition::RECIPES, true));
     assert_contains('Seed ', $written['concept_seed']);
@@ -96,7 +107,7 @@ test('design-direction expands a picked seed into structured designDirection.jso
     assert_contains('cozy neighborhood bakery', $llm->calls[1]['prompt']);
     assert_contains('Hearth & Crumb', $llm->calls[1]['prompt']);
     assert_contains('Seed ', $llm->calls[1]['prompt'], 'a seed reached the expansion prompt');
-    foreach (['palette', 'type', 'image_grade', 'hero_blueprint'] as $field) {
+    foreach (['palette', 'type', 'image_grade', 'card_style', 'hero_blueprint'] as $field) {
         assert_contains($field, $llm->calls[1]['prompt']);
     }
     $assigned = $written['hero_blueprint']['recipe'];
@@ -471,6 +482,168 @@ test('format renders the canvas commitment with its executable meaning', functio
     assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
 });
 
+test('normalize commits a card style: bounded values pass through and missing defaults without warning', function () {
+    assert_eq('framed', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => ' Framed '], 'cinematic-safe-zone')['card_style']);
+    assert_eq('overlap', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => 'overlap'], 'cinematic-safe-zone')['card_style']);
+    assert_eq('borderless', DesignDirectionStep::normalize(['description' => 'x', 'card_style' => 'borderless'], 'cinematic-safe-zone')['card_style']);
+
+    $missingRepairs = [];
+    $missingWarnings = [];
+    $missing = DesignDirectionStep::normalize(
+        ['description' => 'x'],
+        'cinematic-safe-zone',
+        '',
+        $missingRepairs,
+        $missingWarnings,
+    );
+    assert_eq('flush', $missing['card_style']);
+    assert_eq([], designdir_card_rows($missingRepairs));
+    assert_eq([], designdir_card_rows($missingWarnings));
+
+    $emptyWarnings = [];
+    DesignDirectionStep::normalize(
+        ['description' => 'x', 'card_style' => '   '],
+        'cinematic-safe-zone',
+        '',
+        $missingRepairs,
+        $emptyWarnings,
+    );
+    assert_eq(
+        [],
+        designdir_card_rows($emptyWarnings),
+        'an empty optional commitment behaves like a missing one',
+    );
+});
+
+test('normalizeCardStyle is the canonical downstream card-style normalizer', function () {
+    $warnings = [];
+    assert_eq('framed', DesignDirectionStep::normalizeCardStyle(' Framed ', $warnings));
+    assert_eq([], $warnings);
+
+    assert_eq('flush', DesignDirectionStep::normalizeCardStyle(null, $warnings));
+    assert_eq('flush', DesignDirectionStep::normalizeCardStyle('   ', $warnings));
+    assert_eq([], $warnings, 'missing and blank commitments use the documented default silently');
+
+    assert_eq('flush', DesignDirectionStep::normalizeCardStyle(['framed'], $warnings));
+    $cardWarnings = designdir_card_rows($warnings);
+    assert_eq(1, count($cardWarnings));
+    assert_contains('authored ["framed"]', $cardWarnings[0]);
+    assert_contains('delivered "flush"', $cardWarnings[0]);
+    assert_contains('disposition', $cardWarnings[0]);
+});
+
+test('normalize warns actionably when an invalid card style loses authored intent', function () {
+    $repairs = [];
+    $warnings = [];
+    $direction = DesignDirectionStep::normalize(
+        ['description' => 'x', 'card_style' => 'polaroid'],
+        'cinematic-safe-zone',
+        '',
+        $repairs,
+        $warnings,
+    );
+    assert_eq('flush', $direction['card_style']);
+    assert_eq(
+        [],
+        designdir_card_rows($repairs),
+        'a value-losing fallback is not reported as a successful repair',
+    );
+    $cardWarnings = designdir_card_rows($warnings);
+    assert_eq(1, count($cardWarnings));
+    foreach ([
+        'designDirection.json',
+        'field card_style',
+        'authored "polaroid"',
+        'delivered "flush"',
+        'disposition',
+    ] as $context) {
+        assert_contains($context, $cardWarnings[0]);
+    }
+
+    $fixedPointRepairs = [];
+    $fixedPointWarnings = [];
+    $fixedPoint = DesignDirectionStep::normalize(
+        ['description' => 'x', 'card_style' => $direction['card_style']],
+        'cinematic-safe-zone',
+        '',
+        $fixedPointRepairs,
+        $fixedPointWarnings,
+    );
+    assert_eq('flush', $fixedPoint['card_style']);
+    assert_eq([], designdir_card_rows($fixedPointRepairs));
+    assert_eq(
+        [],
+        designdir_card_rows($fixedPointWarnings),
+        'the delivered value is a warning-free fixed point',
+    );
+});
+
+test('normalize degrades object and list card styles without emitting PHP diagnostics', function () {
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    });
+    try {
+        foreach ([
+            ['flush'],
+            ['style' => 'framed'],
+            (object) ['style' => 'overlap'],
+        ] as $authored) {
+            $repairs = [];
+            $warnings = [];
+            $direction = DesignDirectionStep::normalize(
+                ['description' => 'x', 'card_style' => $authored],
+                'cinematic-safe-zone',
+                '',
+                $repairs,
+                $warnings,
+            );
+
+            assert_eq('flush', $direction['card_style']);
+            assert_eq([], designdir_card_rows($repairs));
+            $cardWarnings = designdir_card_rows($warnings);
+            assert_eq(1, count($cardWarnings));
+            assert_contains('field card_style authored', $cardWarnings[0]);
+            assert_contains('delivered "flush"', $cardWarnings[0]);
+            assert_contains('disposition', $cardWarnings[0]);
+        }
+    } finally {
+        restore_error_handler();
+    }
+});
+
+test('design-direction persists an invalid card style as a durable warning', function () {
+    [$project, $llm, $tmp] = make_designdir_fixture();
+    $llm->queueJson(['seeds' => designdir_seeds()]);
+    $direction = designdir_direction();
+    $direction['card_style'] = 'polaroid';
+    $llm->queueJson(['direction' => $direction]);
+
+    (new DesignDirectionStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    assert_eq('flush', $project->readJson('designDirection.json')['card_style']);
+    $warnings = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
+    assert_contains('designDirection.json', $warnings);
+    assert_contains('field card_style', $warnings);
+    assert_contains('authored "polaroid"', $warnings);
+    assert_contains('delivered "flush"', $warnings);
+    assert_contains('disposition', $warnings);
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('format renders the card treatment with its executable meaning', function () {
+    $flush = DesignDirectionStep::format(['description' => 'x', 'card_style' => 'flush']);
+    assert_contains('**Card treatment**: flush', $flush);
+    assert_contains('bleeds to the card edges', $flush);
+
+    $framed = DesignDirectionStep::format(['description' => 'x', 'card_style' => 'framed']);
+    assert_contains('**Card treatment**: framed', $framed);
+    assert_contains('concentric corner radii', $framed);
+
+    // Directions persisted before the field existed carry no card fact —
+    // the section prompt's own default (flush) then applies.
+    assert_eq('Just prose.', DesignDirectionStep::format(['description' => 'Just prose.']));
+});
+
 test('normalize commits a shape while valid normalization and a missing field stay silent', function () {
     $base = [
         'description' => 'x',
@@ -597,6 +770,7 @@ test('design-direction delivers the deterministic fallback when the model return
     $direction = $project->readJson('designDirection.json');
     assert_true(trim((string) $direction['description']) !== '', 'fallback carries a usable narrative');
     assert_eq('full-bleed', $direction['canvas']);
+    assert_eq('flush', $direction['card_style']);
     $joined = implode(' ', $project->readJson('warnings.json')['design-direction'] ?? []);
     assert_contains('no usable design direction', $joined);
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -726,6 +900,25 @@ test('imageGradeFor reads the grade from designDirection.json, empty when absent
     $project->writeJson('designDirection.json', ['description' => 'No grade.']);
     assert_eq('', DesignDirectionStep::imageGradeFor($project));
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('cardStyleFor adapts persisted direction data through the canonical normalizer', function () {
+    [$project, , $tmp] = make_designdir_fixture();
+    $warnings = [];
+    assert_eq('flush', DesignDirectionStep::cardStyleFor($project, $warnings));
+    assert_eq([], $warnings);
+
+    $project->writeJson('designDirection.json', ['card_style' => ' Overlap ']);
+    assert_eq('overlap', DesignDirectionStep::cardStyleFor($project, $warnings));
+    assert_eq([], $warnings);
+
+    $project->writeJson('designDirection.json', ['card_style' => 'polaroid']);
+    assert_eq('flush', DesignDirectionStep::cardStyleFor($project, $warnings));
+    $cardWarnings = designdir_card_rows($warnings);
+    assert_eq(1, count($cardWarnings));
+    assert_contains('authored "polaroid"', $cardWarnings[0]);
+    assert_contains('delivered "flush"', $cardWarnings[0]);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

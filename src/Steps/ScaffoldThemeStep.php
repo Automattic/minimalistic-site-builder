@@ -102,9 +102,12 @@ final class ScaffoldThemeStep implements Step
         */
 
         /* Card image cropping (sections opt in via className on the wp:image).
-           Uniform media heights live here, in the theme stylesheet, instead of
-           per-image inline CSS — fix-blocks deletes inline styles that aren't
-           mirrored in block attributes, and a class hook survives untouched. */
+           Uniform media proportions live here, in the theme stylesheet, instead
+           of per-image inline CSS — fix-blocks deletes inline styles that
+           aren't mirrored in block attributes, and a class hook survives
+           untouched. Aspect ratios, not fixed pixel heights: a fixed crop
+           height distorts card media proportions across 2/3/4-column layouts
+           and viewports (BIGR-771); the tiny list thumb stays px-based. */
         .card-media img,
         .card-media-tall img,
         .card-media-thumb img {
@@ -112,8 +115,8 @@ final class ScaffoldThemeStep implements Step
             object-fit: cover;
             display: block;
         }
-        .card-media img { height: 200px; }
-        .card-media-tall img { height: 320px; }
+        .card-media img { aspect-ratio: 3 / 2; height: auto; }
+        .card-media-tall img { aspect-ratio: 4 / 5; height: auto; }
         .card-media-thumb img { height: 110px; }
 
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
@@ -127,9 +130,75 @@ final class ScaffoldThemeStep implements Step
             flex-direction: column;
             flex-grow: 1;
         }
+        /* A nested card body becomes another growing flex column only in an
+           equal-height row, so a nested .cta-bottom can consume its remaining
+           height and align with CTAs in sibling cards. */
+        .equal-cards .wp-block-group.card-body {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+        }
+        /* Core's constrained layout gives direct children auto side margins
+           with !important. Reset that geometry for any marked card's optional
+           text wrapper, not only equal-grid cards: staggered and editorial
+           overlap cards need the same side reveal in both editor and front end. */
+        .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: none;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            align-self: stretch;
+        }
+        /* The overlap panel deliberately retains a one-rem reveal on each side.
+           Its explicit width keeps the fixed margins inside the card box. */
+        .wp-block-group.card-style--overlap > .wp-block-group.card-body.overlap-up {
+            width: calc(100% - 2rem);
+            margin-left: 1rem !important;
+            margin-right: 1rem !important;
+        }
+        .wp-block-group:is(.card-style--flush, .card-style--framed, .card-style--overlap, .card-style--borderless) > .wp-block-group.card-body > :where(:not(.alignleft):not(.alignright):not(.alignfull)) {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: none;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            align-self: stretch;
+        }
+        /* The flex-column card above defeats core's constrained layout on its
+           media: `.is-layout-constrained > *` gives the figure auto side
+           margins, and in a flex container auto cross-axis margins beat
+           stretch, so the figure shrink-wraps to the image's intrinsic width
+           and floats centered (BIGR-771). Pin card media to the card's full
+           content box regardless of the source image's aspect ratio. */
+        .equal-cards .wp-block-group > figure.wp-block-image {
+            width: 100%;
+            max-width: none;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            align-self: stretch;
+        }
         .equal-cards .cta-bottom {
             margin-top: auto;
             justify-content: center;
+        }
+
+        /* Flush-media cards (sections opt in via className="card-flush" on the
+           card wp:group): the media is the card's first child at full width and
+           only an inner .card-body group carries padding. Reset the card itself
+           with enough specificity and importance to beat a global Group
+           padding rule and stray generated inline padding without touching the
+           body's authored padding. The card's radius clips the bleeding image. */
+        .wp-block-group.card-flush {
+            overflow: hidden;
+            padding: 0 !important;
+        }
+        /* An image's block attributes serialize radius inline. The flush-card
+           contract owns this edge, so importance is required to keep a stray
+           generated image radius from surviving; descendants also cover images
+           wrapped in a link. */
+        .wp-block-group.card-flush > figure.wp-block-image img {
+            border-radius: 0 !important;
         }
 
         /* Core gives pullquotes a font-relative 4em vertical pad and a trailing

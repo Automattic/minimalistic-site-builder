@@ -154,7 +154,7 @@ final class SectionsStep implements Step
         $repairs = [];
         $plan = $project->readJson('pages.json');
         $pages = self::repairedPages(self::pages($project), $repairs);
-        $jobPlan = $this->jobPlan($project, $repairs, $pages);
+        $jobPlan = $this->jobPlan($project, $repairs, $pages, $warnings);
         $jobs = $jobPlan['jobs'];
         $initialContract = $jobPlan['contract'];
         $requests = self::requestsFor($jobs);
@@ -595,17 +595,24 @@ final class SectionsStep implements Step
      *
      * @param list<string> $repairs appended to in place
      * @param array<int,array<string,mixed>>|null $sourcePages
+     * @param list<string> $warnings appended to in place
      * @return array{
      *   jobs:array<string,array{unit:MarkupUnit,input:array<mixed>,file:string,opening?:bool,front_hero?:bool}>,
      *   contract:array<string,mixed>
      * }
      */
-    private function jobPlan(Project $project, array &$repairs = [], ?array $sourcePages = null): array
+    private function jobPlan(
+        Project $project,
+        array &$repairs = [],
+        ?array $sourcePages = null,
+        array &$warnings = [],
+    ): array
     {
         $pages = self::repairedPages($sourcePages ?? self::pages($project), $repairs);
         $siteSpec = $project->readText('siteSpec.json');
         $siteSpecData = $project->readJson('siteSpec.json');
         $designDirection = DesignDirectionStep::readFor($project);
+        $cardStyle = DesignDirectionStep::cardStyleFor($project, $warnings);
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
 
         // One read serves both consumers: the raw text goes verbatim into the
@@ -621,6 +628,11 @@ final class SectionsStep implements Step
             'language'         => SiteSpecStep::languageOf($project),
             'theme_json'       => $themeJsonText,
             'design_direction' => $designDirection,
+            // Unlike design_direction's prose, this value is a portable,
+            // machine-readable execution contract consumed by SectionUnit's
+            // delivery boundary. Old/missing directions retain the documented
+            // flush default without making section generation fatal.
+            'card_style'       => $cardStyle,
             'site_pages'       => PagePlanStep::sitePagesList($pages),
         ];
 

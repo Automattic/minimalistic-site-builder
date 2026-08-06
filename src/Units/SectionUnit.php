@@ -9,6 +9,7 @@ namespace Automattic\SiteBuild\Units;
  * Input shape:
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
+ * - card_style: normalized site-wide card construction enforced on delivery
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
  *   layout_archetype/background/vertical_density/handoff. Role is required
@@ -32,6 +33,7 @@ final class SectionUnit extends AbstractPageSectionUnit
      *   language:string,
      *   theme_json:string|array<mixed>,
      *   design_direction:string,
+     *   card_style?:string,
      *   outline:string,
      *   site_pages:string,
      *   page:array{slug:string,title?:string,path?:string},
@@ -45,6 +47,10 @@ final class SectionUnit extends AbstractPageSectionUnit
      */
     public function request(array $input): array
     {
+        // Validate the machine-readable execution input before spending an LLM
+        // call. Missing means flush for standalone callers whose persisted
+        // design direction predates the field; SectionsStep always supplies it.
+        $cardStyle = $this->cardStyle($input);
         $section = $this->section($input);
         $slug = trim($this->sectionString($section, 'slug'));
         $pageSlug = trim($this->pageString($input, 'slug'));
@@ -67,6 +73,7 @@ final class SectionUnit extends AbstractPageSectionUnit
 
         $request = $this->renderedRequest('section.md', $this->commonVars($input) + [
             'site_pages'        => $this->inputString($input, 'site_pages'),
+            'card_style'        => $cardStyle,
             'page_title'        => $this->pageString($input, 'title'),
             'page_path'         => $this->pageString($input, 'path', '/'),
             'section_title'     => $this->sectionString($section, 'title'),
@@ -88,10 +95,31 @@ final class SectionUnit extends AbstractPageSectionUnit
 
     public function finish(string $raw, array $input): MarkupResult
     {
+        $cardStyle = $this->cardStyle($input);
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
+        $contract = CardStyleContract::enforce(
+            $markup,
+            $cardStyle,
+            $this->key($input),
+            themeJson: $input['theme_json'] ?? null,
+        );
+        $markup = $contract['markup'];
+        array_push($repairs, ...$contract['repairs']);
+        array_push($warnings, ...$contract['warnings']);
         return new MarkupResult($markup, $repairs, $warnings);
+    }
+
+    private function cardStyle(array $input): string
+    {
+        $style = $input['card_style'] ?? 'flush';
+        if (!is_string($style) || !in_array($style, CardStyleContract::STYLES, true)) {
+            throw new \InvalidArgumentException(
+                "unit input 'card_style' must be one of: " . implode(', ', CardStyleContract::STYLES),
+            );
+        }
+        return $style;
     }
 
     /**
