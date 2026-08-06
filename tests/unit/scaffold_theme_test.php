@@ -35,12 +35,33 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // Flush list-thumb rows: the zeroed row padding must beat generated inline
     // padding, the row clips the bleeding thumb under its border radius, and
     // the thumb releases its square crop to stretch to the text-driven row
-    // height (BIGR-777).
+    // height (BIGR-777). The zeroed column gap keeps the text column's own
+    // left padding as the whole image-to-text distance — the default md gap
+    // would stack with it and push the text farther from its own thumb than
+    // the md rhythm separating rows. Column-level align-self pins the stretch
+    // against generator-authored verticalAlignment:center.
     assert_contains(
         ".wp-block-columns.list-thumb-flush {\n"
             . "    overflow: hidden;\n"
             . "    padding: 0 !important;\n"
             . "    align-items: stretch;\n"
+            . "    gap: 0;\n"
+            . '}',
+        $css,
+    );
+    assert_contains(
+        ".wp-block-columns.list-thumb-flush > .wp-block-column {\n"
+            . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
+    // When the square thumb out-measures a short text stack the row takes the
+    // thumb's height; the text column centers its copy in the extra space.
+    assert_contains(
+        ".wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {\n"
+            . "    display: flex;\n"
+            . "    flex-direction: column;\n"
+            . "    justify-content: center;\n"
             . '}',
         $css,
     );

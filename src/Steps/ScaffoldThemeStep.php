@@ -208,11 +208,31 @@ final class ScaffoldThemeStep implements Step
            bottom edges and stretches to the row height while only the text
            column carries padding (BIGR-777). Zeroed row padding must beat
            generated inline padding, exactly like .card-flush, and the row's
-           border radius clips the bleeding image. */
+           border radius clips the bleeding image. The column gap is zeroed
+           too: the text column's own left padding is the whole image-to-text
+           distance — left to the default md gap it stacks with that padding
+           and pushes each row's text farther from its own thumb than the md
+           rhythm separating the rows. */
         .wp-block-columns.list-thumb-flush {
             overflow: hidden;
             padding: 0 !important;
             align-items: stretch;
+            gap: 0;
+        }
+        /* Generators drift into verticalAlignment:center on these rows, and
+           core's align-self on the column beats the row's align-items, which
+           would collapse the stretched thumb back to a floating strip. */
+        .wp-block-columns.list-thumb-flush > .wp-block-column {
+            align-self: stretch;
+        }
+        /* At wide viewports the square thumb can out-measure a short text
+           stack; the row then takes the thumb's height and top-pinned copy
+           would ride the row's upper edge. Centering only spends the extra
+           space — a text-driven row height leaves none. */
+        .wp-block-columns.list-thumb-flush > .wp-block-column:not(:has(figure.card-media-thumb)) {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         .list-thumb-flush > .wp-block-column > figure.wp-block-image.card-media-thumb {
             height: 100%;
