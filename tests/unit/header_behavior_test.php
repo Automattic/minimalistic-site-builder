@@ -467,6 +467,22 @@ test('the clear overlay resting state is earned from the cover dim, worst case i
     assert_true(!HeaderBehavior::clearOverlayTopIsSafe($white, $ink, 50.0, $ink, false));
     assert_eq(60, HeaderBehavior::minimalClearOverlayDim($white, $ink, $ink, false));
 
+    // Core renders dimRatio through a 10-point class. The proof must judge
+    // that delivered opacity rather than a slightly more favorable authored
+    // fraction, and values outside Core's class range cannot earn a grant.
+    assert_eq(50, HeaderBehavior::renderedCoverDim(54.0));
+    assert_eq(60, HeaderBehavior::renderedCoverDim(56.0));
+    assert_true(!HeaderBehavior::clearOverlayTopIsSafe($white, [0, 0, 0], 54.0, $ink, false));
+    assert_true(HeaderBehavior::clearOverlayTopIsSafe($white, [0, 0, 0], 56.0, $ink, false));
+    assert_eq(null, HeaderBehavior::renderedCoverDim(-1.0));
+    assert_eq(null, HeaderBehavior::renderedCoverDim(101.0));
+
+    // #222 needs more than the 60% class. Authored 62% previously passed the
+    // raw math but serializes to 60%; the canonical safe repair is 70%.
+    $softInk = [34, 34, 34];
+    assert_true(!HeaderBehavior::clearOverlayTopIsSafe($white, $softInk, 62.0, $softInk, false));
+    assert_eq(70, HeaderBehavior::minimalClearOverlayDim($white, $softInk, $softInk, false));
+
     // Smooth transitions additionally prove the whole path into the
     // scrolled solid; a same-family dark landing keeps the grant.
     assert_true(HeaderBehavior::clearOverlayTopIsSafe($white, $ink, 60.0, $ink, true));

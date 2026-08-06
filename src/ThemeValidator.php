@@ -125,6 +125,20 @@ final class ThemeValidator
             'is_array',
         ));
         $warnings = [];
+        $requiresClearOpeningProof = false;
+        if ($project->exists(HeaderBehavior::FILE)) {
+            try {
+                $headerBehavior = $project->readJson(HeaderBehavior::FILE);
+                if (is_array($headerBehavior)) {
+                    $headerBehavior = HeaderBehavior::validateArtifact($headerBehavior);
+                    $requiresClearOpeningProof = $headerBehavior['behavior'] === HeaderBehavior::OVERLAY_TO_SOLID
+                        && $headerBehavior['topTreatment'] === HeaderBehavior::TREATMENT_TRANSPARENT;
+                }
+            } catch (\RuntimeException|\InvalidArgumentException) {
+                // ValidateThemeStep records the malformed artifact itself. Do
+                // not let that advisory defect abort this independent scan.
+            }
+        }
 
         $headerFile = 'theme/parts/header.html';
         if (!$project->exists($headerFile)) {
@@ -259,7 +273,44 @@ final class ThemeValidator
                 }
                 $surface = (string) ($openingContract['surface'] ?? '');
                 $protection = (string) ($contract['header']['protection_token'] ?? 'contrast');
-                if (!AboveFoldPartFacts::supportsOverlay($opening, $surface, $protection)) {
+                $protectionHex = is_string($contract['theme_tokens'][$protection]['hex'] ?? null)
+                    ? (string) $contract['theme_tokens'][$protection]['hex']
+                    : null;
+                if ($requiresClearOpeningProof) {
+                    $foregroundToken = (string) ($contract['header']['foreground_token'] ?? '');
+                    $foregroundHex = is_string($contract['theme_tokens'][$foregroundToken]['hex'] ?? null)
+                        ? (string) $contract['theme_tokens'][$foregroundToken]['hex']
+                        : null;
+                    $foreground = $foregroundHex === null ? null : ContrastMath::hexToRgb($foregroundHex);
+                    $protectionRgb = $protectionHex === null ? null : ContrastMath::hexToRgb($protectionHex);
+                    $dim = AboveFoldPartFacts::clearOverlayTopDimRatio(
+                        $opening,
+                        $surface,
+                        $protection,
+                        $protectionHex,
+                    );
+                    // Earned-clear CSS snaps the background surface while its
+                    // shadow keeps the motion cue, so only the delivered rest
+                    // state needs a dim composite proof here.
+                    $supported = $foreground !== null
+                        && $protectionRgb !== null
+                        && $dim !== null
+                        && HeaderBehavior::clearOverlayTopIsSafe(
+                            $foreground,
+                            $protectionRgb,
+                            $dim,
+                            null,
+                            false,
+                        );
+                } else {
+                    $supported = AboveFoldPartFacts::supportsOverlay(
+                        $opening,
+                        $surface,
+                        $protection,
+                        $protectionHex,
+                    );
+                }
+                if (!$supported) {
                     $warnings[] = self::aboveFoldWarning(
                         $pageFile,
                         "openings[page='{$pageSlug}'].top_protection_token",

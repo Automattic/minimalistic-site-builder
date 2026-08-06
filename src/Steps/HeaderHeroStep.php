@@ -6,6 +6,7 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
+use Automattic\SiteBuild\ContrastFix;
 use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
@@ -433,7 +434,9 @@ final class HeaderHeroStep implements Step
         // dim proves the persisted foreground, the kit scrim is redundant
         // double darkening over an already-protected image (BIGR-778). A
         // just-short dim is raised as a recorded repair; any unprovable
-        // opening keeps the scrim veil.
+        // opening keeps the scrim veil. The clear treatment snaps its
+        // background paint on scroll (while its shadow may still transition),
+        // because a fixed header's underlay can change between frames.
         if ($behavior['behavior'] === HeaderBehavior::OVERLAY_TO_SOLID
             && ($final['header']['mode'] ?? null) === AboveFoldContract::MODE_OVERLAY
             && self::grantClearOverlayTop($project, $final, $behavior, $palette, $writes, $report)
@@ -457,7 +460,7 @@ final class HeaderHeroStep implements Step
             }
             $report[] = "[{$headerRel}] overlay resting scrim dropped: every opening cover's own dim "
                 . 'proves the foreground, so the header starts truly transparent and gains its '
-                . 'surface only when scrolled';
+                . 'surface immediately when scrolled (the shadow retains the configured transition)';
         }
 
         if (is_array($delivery['primary_action'] ?? null) && !is_array($final['primary_action'] ?? null)) {
@@ -1790,14 +1793,6 @@ final class HeaderHeroStep implements Step
     }
 
     /**
-     * Apply the shared stacked first-viewport cap to every positional opening
-     * in the pending transaction.
-     *
-     * @param array<int,array<string,mixed>> $pages
-     * @param array<string,string> $writes
-     * @param list<string> $report
-     */
-    /**
      * Prove — and where a small dim raise makes it provable, repair — the
      * clear overlay resting state against every delivered opening. Returns
      * true only when each opening either passes clearOverlayTopIsSafe at its
@@ -1822,13 +1817,18 @@ final class HeaderHeroStep implements Step
         $foreground = ContrastMath::hexToRgb((string) ($palette[(string) $behavior['foreground']] ?? ''));
         $scrolled = ContrastMath::hexToRgb((string) ($palette[(string) $behavior['scrolledSurface']] ?? ''));
         $protectionToken = (string) ($final['header']['protection_token'] ?? '');
-        $protection = ContrastMath::hexToRgb((string) (
+        $protectionHex = (string) (
             $final['theme_tokens'][$protectionToken]['hex'] ?? ($palette[$protectionToken] ?? '')
-        ));
+        );
+        $protection = ContrastMath::hexToRgb($protectionHex);
         if ($foreground === null || $scrolled === null || $protection === null) {
             return false;
         }
-        $smooth = ($behavior['transition'] ?? '') === HeaderBehavior::TRANSITION_SMOOTH;
+        // CSS switches background paint immediately for an earned-clear
+        // fixed header: a timed transparent transition cannot prove a page
+        // section that may scroll underneath it. Motion-enabled themes keep
+        // their smooth shadow transition, which does not affect contrast.
+        $smooth = false;
         $minimalDim = HeaderBehavior::minimalClearOverlayDim($foreground, $protection, $scrolled, $smooth);
 
         $edits = [];
@@ -1842,13 +1842,14 @@ final class HeaderHeroStep implements Step
             if ($markup === null) {
                 return false;
             }
-            if ((string) ($opening['surface'] ?? '') !== 'image') {
-                // A solid protection-token band: the clear state reveals that
-                // solid directly (a full-opacity dim is the same composite).
-                if (!HeaderBehavior::clearOverlayTopIsSafe($foreground, $protection, 100.0, $scrolled, $smooth)) {
-                    return false;
-                }
-                continue;
+            $surface = (string) ($opening['surface'] ?? '');
+            if (!AboveFoldPartFacts::supportsClearOverlayTop(
+                $markup,
+                $surface,
+                $protectionToken,
+                $protectionHex,
+            )) {
+                return false;
             }
             $doc = BlockMarkup::parse($markup);
             $root = $doc->topLevel();
@@ -1865,20 +1866,35 @@ final class HeaderHeroStep implements Step
                 }
             }
             if ($cover === null) {
-                return false;
+                // A solid protection-token band: the clear state reveals that
+                // solid directly (a full-opacity dim is the same composite).
+                if (!HeaderBehavior::clearOverlayTopIsSafe($foreground, $protection, 100.0, $scrolled, $smooth)) {
+                    return false;
+                }
+                continue;
             }
             $attrs = $doc->attrs($cover) ?? [];
-            $dim = is_numeric($attrs['dimRatio'] ?? null) ? (float) $attrs['dimRatio'] : 50.0;
+            $authoredDim = $attrs['dimRatio'] ?? 100;
+            if (!is_int($authoredDim) && !is_float($authoredDim)) {
+                return false;
+            }
+            $dim = (float) $authoredDim;
+            $renderedDim = HeaderBehavior::renderedCoverDim($dim);
+            if ($renderedDim === null) {
+                return false;
+            }
             if (HeaderBehavior::clearOverlayTopIsSafe($foreground, $protection, $dim, $scrolled, $smooth)) {
                 continue;
             }
-            if ($minimalDim === null || $dim >= $minimalDim) {
+            if ($minimalDim === null || $renderedDim >= $minimalDim) {
                 return false;
             }
-            // Attribute-only edit: the stale saved dim class survives until
-            // fix-blocks re-serializes the HTML from these attributes.
             $attrs['dimRatio'] = $minimalDim;
             $doc->setAttrs($cover, $attrs);
+            // Keep the file safe even if the later fix-blocks transaction has
+            // to retain its input bytes: the clear header and the repaired
+            // Cover opacity become effective in the same unit.
+            ContrastFix::swapDimClass($doc, $cover, $renderedDim, $minimalDim);
             $edits[$rel] = [
                 'markup' => $doc->render(),
                 'note' => "cover dimRatio {$dim} raised to {$minimalDim} (the smallest dim whose own "
@@ -1892,6 +1908,14 @@ final class HeaderHeroStep implements Step
         return true;
     }
 
+    /**
+     * Apply the shared stacked first-viewport cap to every positional opening
+     * in the pending transaction.
+     *
+     * @param array<int,array<string,mixed>> $pages
+     * @param array<string,string> $writes
+     * @param list<string> $report
+     */
     private static function capOpeningCovers(
         Project $project,
         array $pages,

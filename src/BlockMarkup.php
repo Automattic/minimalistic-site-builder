@@ -68,8 +68,9 @@ final class BlockMarkup
 
     /**
      * @var list<array{start:int, end:int, search:string, replace:string, token:?string}>
-     *      a non-null token means "remove this class token"; search/replace are
-     *      then unused, and vice versa
+     *      a non-null token means "replace this class token with the
+     *      whitespace-delimited tokens in replace"; search is then unused,
+     *      and vice versa
      */
     private array $innerEdits = [];
 
@@ -505,7 +506,22 @@ final class BlockMarkup
         $end = $n['children'] !== []
             ? $this->nodes[$n['children'][0]]['offset']
             : $n['innerEnd'];
-        $this->removeClassTokenInRange($n['innerStart'], $end, $token);
+        $this->replaceClassTokenInRange($n['innerStart'], $end, $token, '');
+    }
+
+    /**
+     * Replace one exact class token in this node's own saved HTML. The
+     * replacement may contain multiple whitespace-delimited tokens, which is
+     * useful when a canonical state expands one default token into a more
+     * specific token plus the default (for example Cover dim classes).
+     */
+    public function replaceClassTokenInOwnHtml(int $i, string $token, string $replacement): void
+    {
+        $n = $this->nodes[$i];
+        $end = $n['children'] !== []
+            ? $this->nodes[$n['children'][0]]['offset']
+            : $n['innerEnd'];
+        $this->replaceClassTokenInRange($n['innerStart'], $end, $token, $replacement);
     }
 
     /**
@@ -529,20 +545,26 @@ final class BlockMarkup
             || $relativeEnd > $ownLength) {
             throw new \InvalidArgumentException('class-token edit range must stay inside the block own HTML');
         }
-        $this->removeClassTokenInRange(
+        $this->replaceClassTokenInRange(
             $n['innerStart'] + $relativeStart,
             $n['innerStart'] + $relativeEnd,
             $token,
+            '',
         );
     }
 
-    private function removeClassTokenInRange(int $start, int $end, string $token): void
+    private function replaceClassTokenInRange(
+        int $start,
+        int $end,
+        string $token,
+        string $replacement,
+    ): void
     {
         $this->innerEdits[] = [
             'start'   => $start,
             'end'     => $end,
             'search'  => '',
-            'replace' => '',
+            'replace' => $replacement,
             'token'   => $token,
         ];
     }
@@ -591,10 +613,20 @@ final class BlockMarkup
                     if ($edit['token'] === null) {
                         return str_replace($edit['search'], $edit['replace'], $m[0]);
                     }
-                    $kept = array_filter(
-                        preg_split('/\s+/', $m[2], -1, PREG_SPLIT_NO_EMPTY) ?: [],
-                        static fn (string $t): bool => $t !== $edit['token']
-                    );
+                    $replacement = preg_split(
+                        '/\s+/',
+                        trim($edit['replace']),
+                        -1,
+                        PREG_SPLIT_NO_EMPTY,
+                    ) ?: [];
+                    $kept = [];
+                    foreach (preg_split('/\s+/', $m[2], -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                        if ($token === $edit['token']) {
+                            array_push($kept, ...$replacement);
+                        } else {
+                            $kept[] = $token;
+                        }
+                    }
                     return substr($m[0], 0, strlen($m[0]) - strlen($m[2]) - 1)
                         . implode(' ', $kept) . $m[1];
                 },

@@ -389,13 +389,29 @@ final class HeaderBehavior
     }
 
     /**
+     * Core Cover serializes dimRatio through a 10-point opacity class. Model
+     * the value the browser receives, not a more favorable authored fraction.
+     * Values outside Core's implemented 0..100 class range have no trustworthy
+     * rendered opacity and cannot participate in a clear-top grant.
+     */
+    public static function renderedCoverDim(float $dimRatio): ?int
+    {
+        if (!is_finite($dimRatio) || $dimRatio < 0 || $dimRatio > 100) {
+            return null;
+        }
+        return (int) (10 * round($dimRatio / 10, 0, PHP_ROUND_HALF_UP));
+    }
+
+    /**
      * Whether the overlay header may rest with no kit scrim at all: the
-     * foreground must stay readable over the opening cover's own dim for
-     * every pixel the image can produce (the dim composited over pure white
-     * and pure black bound the luminance range), and — on smooth
-     * transitions — along the whole premultiplied path into the scrolled
-     * solid. Same proof shape as the sticky grants: the clear state is
-     * earned per delivered opening, never assumed.
+     * foreground must stay readable over the opening cover's own rendered
+     * dim for every pixel the image can produce (the dim composited over pure
+     * white and pure black bound the luminance range), and — when the
+     * underlay is stationary — along the whole premultiplied path into the
+     * scrolled solid. Same proof shape as the sticky grants: the clear state
+     * is earned per delivered opening, never assumed. HeaderHeroStep uses an
+     * instant landing for fixed clear headers because scrolling can replace
+     * their underlay during a timed transition.
      *
      * @param array{0:int,1:int,2:int}      $foreground
      * @param array{0:int,1:int,2:int}      $protection cover dim color
@@ -408,7 +424,11 @@ final class HeaderBehavior
         ?array $scrolled,
         bool $smooth,
     ): bool {
-        $alpha = max(0.0, min(1.0, $dimRatio / 100));
+        $renderedDim = self::renderedCoverDim($dimRatio);
+        if ($renderedDim === null) {
+            return false;
+        }
+        $alpha = $renderedDim / 100;
         foreach ([[255, 255, 255], [0, 0, 0]] as $under) {
             $rest = ContrastMath::compositeOver($protection, $alpha, $under);
             if (ContrastMath::ratio($foreground, $rest) < ContrastMath::NORMAL_TEXT) {
@@ -422,10 +442,10 @@ final class HeaderBehavior
     }
 
     /**
-     * The smallest cover dimRatio (multiples of five, capped so the image
-     * remains an image) whose own dim proves the clear resting state, or
-     * null when none does. Lets a just-short delivered dim be raised as a
-     * recorded repair instead of keeping the redundant kit scrim.
+     * The smallest rendered cover dimRatio (Core's 10-point classes, capped
+     * so the image remains an image) whose own dim proves the clear resting
+     * state, or null when none does. Lets a just-short delivered dim be raised
+     * as a recorded repair instead of keeping the redundant kit scrim.
      *
      * @param array{0:int,1:int,2:int}      $foreground
      * @param array{0:int,1:int,2:int}      $protection
@@ -438,7 +458,7 @@ final class HeaderBehavior
         bool $smooth,
         int $cap = 70,
     ): ?int {
-        for ($dim = 40; $dim <= $cap; $dim += 5) {
+        for ($dim = 40; $dim <= $cap; $dim += 10) {
             if (self::clearOverlayTopIsSafe($foreground, $protection, (float) $dim, $scrolled, $smooth)) {
                 return $dim;
             }
