@@ -47,7 +47,7 @@ final class SectionLayoutStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['pages.json', 'theme/parts/*'],
+            reads: ['pages.json', 'theme/parts/*', 'design/site.css'],
             writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
@@ -58,6 +58,7 @@ final class SectionLayoutStep implements Step
         $writes = [];
         $adjustments = 0;
         $warnings = [];
+        $wideClasses = self::wideClassSet($project);
 
         foreach (SectionRhythmStep::pages($project) as $page) {
             $pageSlug = trim((string) ($page['slug'] ?? ''));
@@ -72,6 +73,7 @@ final class SectionLayoutStep implements Step
                     $rewritten = self::rewriteSection(
                         $entry['markup'],
                         "page '{$pageSlug}', section '{$entry['slug']}'",
+                        $wideClasses,
                     );
                     $pageWrites[$currentPath] = $rewritten;
                     if ($rewritten !== $entry['markup']) {
@@ -103,7 +105,8 @@ final class SectionLayoutStep implements Step
         }
     }
 
-    private static function rewriteSection(string $markup, string $label): string
+    /** @param array<string,true> $wideClasses class token => true from design/site.css */
+    private static function rewriteSection(string $markup, string $label, array $wideClasses = []): string
     {
         $doc = self::validatedDocument($markup, $label);
         $root = (int) $doc->topLevel();
@@ -124,6 +127,22 @@ final class SectionLayoutStep implements Step
             $coverAttrs['layout'] = ['type' => 'constrained'];
             self::constrainCommentClass($coverAttrs, "{$label}, direct cover");
             $doc->setAttrs($covers[0], $coverAttrs);
+        }
+
+        // A constrained layout re-caps its children at contentSize unless the
+        // measure-bearing block opts into wide. Align the OUTERMOST block whose
+        // element carries a var(--wide-size) class (the root when it bears it,
+        // else the inner wrapper that does). A direct cover already runs full,
+        // so its explicit align is never downgraded.
+        if ($wideClasses !== []) {
+            $target = self::outermostWideBlock($doc, $wideClasses);
+            if ($target !== null) {
+                $targetAttrs = $doc->attrs($target) ?? [];
+                if (!isset($targetAttrs['align'])) {
+                    $targetAttrs['align'] = 'wide';
+                    $doc->setAttrs($target, $targetAttrs);
+                }
+            }
         }
 
         $rewritten = $doc->render();
@@ -310,5 +329,110 @@ final class SectionLayoutStep implements Step
             }
         }
         return implode(';', $kept);
+    }
+
+    /** The wide-class lookup set from the design stylesheet, empty when absent. @return array<string,true> */
+    private static function wideClassSet(Project $project): array
+    {
+        if (!$project->exists('design/site.css')) {
+            return [];
+        }
+        $set = [];
+        foreach (self::wideClassTokens($project->readText('design/site.css')) as $token) {
+            $set[$token] = true;
+        }
+        return $set;
+    }
+
+    /**
+     * Class selectors in a stylesheet whose horizontal measure references the
+     * literal var(--wide-size) token. Token-based only: a max-width/width that
+     * resolves to var(--content-size) or an absolute value is content tier and
+     * never counted. Comment-stripped; malformed or absent rules yield []. Pure
+     * — unit-testable.
+     *
+     * @return list<string>
+     */
+    public static function wideClassTokens(string $css): array
+    {
+        $stripped = preg_replace('~/\*.*?\*/~s', '', $css);
+        if (!is_string($stripped)) {
+            return [];
+        }
+        $tokens = [];
+        if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $stripped, $rules, PREG_SET_ORDER)) {
+            foreach ($rules as $rule) {
+                if (!self::measuresWideSize($rule[2])) {
+                    continue;
+                }
+                if (preg_match_all('/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/', $rule[1], $classes) > 0) {
+                    foreach ($classes[1] as $class) {
+                        $tokens[$class] = true;
+                    }
+                }
+            }
+        }
+        return array_keys($tokens);
+    }
+
+    /** Whether a rule body's max-width or width references var(--wide-size). */
+    private static function measuresWideSize(string $body): bool
+    {
+        foreach (explode(';', $body) as $declaration) {
+            $colon = strpos($declaration, ':');
+            if ($colon === false) {
+                continue;
+            }
+            $property = strtolower(trim(substr($declaration, 0, $colon)));
+            if (($property === 'max-width' || $property === 'width')
+                && preg_match('/var\(\s*--wide-size\s*\)/i', substr($declaration, $colon + 1)) === 1
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The first block, in document (outermost-first) order, whose own element
+     * carries a wide-class token.
+     *
+     * @param array<string,true> $wideClasses
+     */
+    private static function outermostWideBlock(BlockMarkup $doc, array $wideClasses): ?int
+    {
+        foreach ($doc->indices() as $index) {
+            foreach (self::elementClassTokens($doc, $index) as $token) {
+                if (isset($wideClasses[$token])) {
+                    return $index;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Class tokens on a block's own element: its comment className plus the
+     * class attribute of its first wrapper tag. Descendant markup is ignored.
+     *
+     * @return list<string>
+     */
+    private static function elementClassTokens(BlockMarkup $doc, int $index): array
+    {
+        $tokens = [];
+        $className = ($doc->attrs($index) ?? [])['className'] ?? null;
+        if (is_string($className)) {
+            $tokens = preg_split('/[\x20\t\r\n\f]+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+        if (preg_match('/<[a-zA-Z][a-zA-Z0-9-]*\b[^>]*>/s', $doc->ownHtml($index), $tag) === 1) {
+            $class = self::tagAttribute($tag[0], 'class');
+            if ($class !== null && trim($class[0]) !== '') {
+                $tokens = array_merge(
+                    $tokens,
+                    preg_split('/[\x20\t\r\n\f]+/', trim($class[0]), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+                );
+            }
+        }
+        return $tokens;
     }
 }

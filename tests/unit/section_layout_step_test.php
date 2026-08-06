@@ -90,7 +90,7 @@ test('section layout constrains every planned section root and leaves nested lay
 
         $step = new SectionLayoutStep();
         assert_eq('section-layout', $step->id());
-        assert_eq(['pages.json', 'theme/parts/*'], $step->declaration()->reads);
+        assert_eq(['pages.json', 'theme/parts/*', 'design/site.css'], $step->declaration()->reads);
         assert_eq(['theme/parts/*', 'warnings.json'], $step->declaration()->writes);
         $step->run($project);
 
@@ -336,6 +336,141 @@ test('section layout isolates malformed pages with one durable fixed-point warni
         assert_eq($bad, $project->readText('theme/parts/page-home--bad.html'));
         assert_eq($healthy, $project->readText('theme/parts/page-about--healthy.html'));
         assert_eq($warnings, $project->readJson('warnings.json'));
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout wide-class parser counts only var(--wide-size) horizontal measures', function () {
+    assert_eq(['shell'], SectionLayoutStep::wideClassTokens('.shell{max-width:var(--wide-size)}'));
+    assert_eq([], SectionLayoutStep::wideClassTokens('.x{max-width:var(--content-size)}'));
+    assert_eq([], SectionLayoutStep::wideClassTokens('.shared-shell{max-width:72rem}'));
+    assert_eq([], SectionLayoutStep::wideClassTokens('.shell{max-width'));
+    assert_eq(
+        ['wrap'],
+        SectionLayoutStep::wideClassTokens(':root{--wide-size:1280px}.wrap{width:min(100%,var(--wide-size))}'),
+        'width:min(...) referencing the wide token counts',
+    );
+});
+
+test('section layout promotes a root whose wrapper bears a wide-size class to align:wide', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', ':root{--wide-size:1280px}.wrap{max-width:var(--wide-size)}');
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group wrap">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph --></div><!-- /wp:group -->',
+        );
+        (new SectionLayoutStep())->run($project);
+        $attrs = section_layout_root_attrs($project->readText('theme/parts/page-home--band.html'));
+        assert_eq('wide', $attrs['align'] ?? null, 'measure-bearing root reaches align:wide');
+        assert_eq(['type' => 'constrained'], $attrs['layout'] ?? null, 'root stays constrained');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout aligns the inner wrapper that bears the wide measure and leaves the root constrained', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', ':root{--wide-size:1280px}.shell{max-width:var(--wide-size)}');
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group">'
+                . '<!-- wp:group {"className":"shell"} --><div class="wp-block-group shell">'
+                . '<!-- wp:paragraph --><p>Inner</p><!-- /wp:paragraph -->'
+                . '</div><!-- /wp:group --></div><!-- /wp:group -->',
+        );
+        (new SectionLayoutStep())->run($project);
+        $markup = $project->readText('theme/parts/page-home--band.html');
+        assert_true(!isset(section_layout_root_attrs($markup)['align']), 'root without the measure stays constrained');
+        $doc = BlockMarkup::parse($markup);
+        $root = (int) $doc->topLevel();
+        $inner = array_values(array_filter(
+            $doc->children($root),
+            static fn (int $i): bool => $doc->name($i) === 'group',
+        ));
+        assert_eq(1, count($inner));
+        assert_eq('wide', ($doc->attrs($inner[0]) ?? [])['align'] ?? null, 'inner .shell reaches align:wide');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout leaves sections constrained when no class bears the wide measure', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'read', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', ':root{--content-size:800px;--wide-size:1280px}.reading{max-width:var(--content-size)}');
+        $project->writeText(
+            'theme/parts/page-home--read.html',
+            '<!-- wp:group --><div class="wp-block-group reading">'
+                . '<!-- wp:paragraph --><p>Read</p><!-- /wp:paragraph --></div><!-- /wp:group -->',
+        );
+        (new SectionLayoutStep())->run($project);
+        $attrs = section_layout_root_attrs($project->readText('theme/parts/page-home--read.html'));
+        assert_true(!isset($attrs['align']), 'content-tier class does not opt into wide');
+        assert_eq(['type' => 'constrained'], $attrs['layout'] ?? null);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout reaches a byte-stable fixed point after promoting a wide wrapper', function () {
+    [$project, $tmp] = section_layout_project([[
+        'slug' => 'home',
+        'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']],
+    ]]);
+    try {
+        $project->writeText('design/site.css', ':root{--wide-size:1280px}.wrap{max-width:var(--wide-size)}');
+        $project->writeText(
+            'theme/parts/page-home--band.html',
+            '<!-- wp:group --><div class="wp-block-group wrap">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph --></div><!-- /wp:group -->',
+        );
+        $step = new SectionLayoutStep();
+        $step->run($project);
+        $once = $project->readText('theme/parts/page-home--band.html');
+        assert_contains('"align":"wide"', $once);
+        $step->run($project);
+        assert_eq($once, $project->readText('theme/parts/page-home--band.html'), 'second pass is byte-stable');
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('section layout isolates a malformed page while still promoting healthy wide siblings', function () {
+    [$project, $tmp] = section_layout_project([
+        ['slug' => 'home', 'sections' => [['slug' => 'bad', 'background' => 'base', 'vertical_density' => 'standard']]],
+        ['slug' => 'about', 'sections' => [['slug' => 'band', 'background' => 'base', 'vertical_density' => 'standard']]],
+    ]);
+    try {
+        $project->writeText('design/site.css', ':root{--wide-size:1280px}.wrap{max-width:var(--wide-size)}');
+        $bad = '<!-- wp:paragraph --><p>Authored fallback</p><!-- /wp:paragraph -->';
+        $project->writeText('theme/parts/page-home--bad.html', $bad);
+        $project->writeText(
+            'theme/parts/page-about--band.html',
+            '<!-- wp:group --><div class="wp-block-group wrap">'
+                . '<!-- wp:paragraph --><p>Band</p><!-- /wp:paragraph --></div><!-- /wp:group -->',
+        );
+        (new SectionLayoutStep())->run($project);
+        assert_eq($bad, $project->readText('theme/parts/page-home--bad.html'), 'malformed page keeps authored bytes');
+        assert_eq(
+            'wide',
+            section_layout_root_attrs($project->readText('theme/parts/page-about--band.html'))['align'] ?? null,
+            'healthy sibling still reaches align:wide',
+        );
+        $warnings = $project->readJson('warnings.json');
+        assert_eq(1, count($warnings['section-layout']), 'exactly one durable degradation');
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
