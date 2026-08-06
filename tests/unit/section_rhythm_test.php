@@ -702,7 +702,7 @@ test('the opening hero top cap is sm for media-led roots and leaves later sectio
     // media-led heroes after HeroUnit had already clamped them (naturaleza8's
     // panorama band opened ~160px under the header, rail below the fold).
     $mediaHero = sr_section([
-        'className' => 'hero-composition--panorama-rail',
+        'className' => 'hero-composition--focal-subject-stage',
         'layout' => ['type' => 'constrained'],
     ], '<!-- wp:image {"className":"hero-composition__media"} -->'
         . '<figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt=""/></figure>'

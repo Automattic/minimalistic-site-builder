@@ -20,10 +20,13 @@ content off screen.
   column) so no line of supporting text runs past it into the busy or focal
   area — when the copy does not fit the zone legibly, shorten the copy rather
   than widening the zone.
+- Copy budget: the safe zone holds exactly one level-1 heading, at most ONE
+  supporting paragraph, and at most one planned button. No hairline rules,
+  caption lines, or credit lines beneath the standfirst.
 - Identity: the one root group carries exactly `.hero-composition--layered-poster`.
 - Media: exactly one wide cover image. Use group, cover, heading, paragraph,
-  spacer or separator when structurally needed, and optional planned button;
-  every decorative layer remains a token-built core block.
+  spacer when structurally needed, and optional planned button; every
+  decorative layer remains a token-built core block.
 - Surface/width: use the planned image surface/full-bleed-cover projection,
   with contrast as the reviewed no-image fallback; the root and cover run
   `"align":"full"` edge-to-edge on every canvas, framed included.

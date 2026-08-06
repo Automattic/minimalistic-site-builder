@@ -248,9 +248,19 @@ test('overlay requires an image-led recipe, every protected opening, an unframed
 });
 
 test('logical hero regions resolve to physical RTL sides once', function () {
+    // cinematic-safe-zone centers its copy (BIGR-775), so the safe region is
+    // direction-neutral while the focal region still flips physically.
     $contract = above_fold_resolve(above_fold_pages(), direction: 'rtl');
-    assert_eq(['logical' => 'start', 'physical' => 'right'], $contract['regions']['text_safe']);
+    assert_eq(['logical' => 'center', 'physical' => 'center'], $contract['regions']['text_safe']);
     assert_eq(['logical' => 'end', 'physical' => 'left'], $contract['regions']['focal']);
+
+    // A start-anchored foreground recipe still resolves to a physical side.
+    $split = above_fold_resolve(
+        above_fold_pages(null, 'base', 'base'),
+        recipe: 'editorial-split',
+        direction: 'rtl',
+    );
+    assert_eq('full', $split['regions']['text_safe']['logical']);
 });
 
 test('front serialization is canonical while the interior opening subset is recipe-free', function () {
@@ -559,9 +569,22 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     assert_eq(null, $masthead['header']['tagline_text']);
     assert_eq(2, $masthead['header']['text_rows']);
 
-    // A single-row bar keeps the eyebrow available.
+    // A single-row bar without a stated tagline stays one text row.
     $row = above_fold_resolve($pages, recipe: 'editorial-split', forced: 'standard-row');
+    assert_eq(false, $row['header']['displays_tagline']);
     assert_eq(1, $row['header']['text_rows']);
+
+    // standard-row + a stated tagline renders it too (BIGR-775): the hero no
+    // longer carries an eyebrow, so orientation copy lives in the header.
+    $rowTagline = above_fold_resolve(
+        $pages,
+        recipe: 'editorial-split',
+        forced: 'standard-row',
+        tagline: 'Handmade ceramic lamps from Copenhagen',
+    );
+    assert_eq(true, $rowTagline['header']['displays_tagline']);
+    assert_eq('Handmade ceramic lamps from Copenhagen', $rowTagline['header']['tagline_text']);
+    assert_eq(2, $rowTagline['header']['text_rows']);
 
     // Header degradation resets the text-shape facts with the archetype.
     $split = above_fold_resolve(
@@ -576,6 +599,9 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     $facts = AboveFoldPartFacts::inspect($deliveredPages, $parts, $split);
     $degraded = AboveFoldContract::finalizeDelivery($split, $deliveredPages, $facts);
     assert_eq('standard-row', $degraded['header']['archetype']);
+    // Degradation is conservative: the stated tagline is out of scope at
+    // degrade time, so the fallback standard-row renders without one even
+    // though the archetype's full form could carry it (BIGR-775).
     assert_eq(false, $degraded['header']['displays_tagline']);
     assert_eq(null, $degraded['header']['tagline_text']);
     assert_eq(1, $degraded['header']['text_rows']);

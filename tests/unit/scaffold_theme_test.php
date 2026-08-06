@@ -147,7 +147,6 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
         'cinematic-safe-zone',
         'editorial-split',
         'framed-portrait',
-        'panorama-rail',
         'focal-subject-stage',
         'layered-poster',
     ] as $recipe) {
@@ -157,7 +156,6 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     foreach ([
         'stack-copy-first',
         'stack-media-first',
-        'rail-below',
         'flatten-layers',
         'retain-media-overlay',
     ] as $transformation) {
@@ -166,11 +164,13 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // Retired with diptych-editorial: no dead recipe or transformation hooks.
     assert_true(!str_contains($css, 'diptych'), 'retired recipe CSS is gone');
     assert_true(!str_contains($css, 'collapse-to-single-focus'), 'retired transformation CSS is gone');
+    // Retired with panorama-rail (BIGR-775): no dead recipe or transformation hooks.
+    assert_true(!str_contains($css, 'panorama-rail'), 'retired panorama-rail recipe CSS is gone');
+    assert_true(!str_contains($css, 'rail-below'), 'retired rail-below transformation CSS is gone');
     assert_contains('.hero-mobile--stack-copy-first .wp-block-media-text__content', $css);
     assert_contains('.hero-mobile--stack-copy-first .wp-block-media-text__media', $css);
     assert_contains('.hero-mobile--stack-media-first .wp-block-media-text__media', $css);
     assert_contains('.hero-mobile--stack-media-first .wp-block-media-text__content', $css);
-    assert_contains('.hero-mobile--rail-below .wp-block-media-text__media', $css);
     assert_contains('grid-template-columns: minmax(0, 1fr) !important;', $css);
     assert_contains('grid-row: 2;', $css);
 

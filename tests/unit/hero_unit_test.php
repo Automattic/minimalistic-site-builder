@@ -114,7 +114,6 @@ test('HeroUnit exposes one isolated assigned recipe and no section cache prefixe
         'cinematic-safe-zone' => 'landscape cover stage',
         'editorial-split' => 'deliberately unequal copy and foreground-media regions',
         'framed-portrait' => 'contained vertical foreground image',
-        'panorama-rail' => 'wide foreground visual field',
         'focal-subject-stage' => 'singular subject as an opaque foreground content image',
         'layered-poster' => 'cover image beneath controlled block-built type',
     ];

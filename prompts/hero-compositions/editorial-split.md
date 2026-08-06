@@ -10,6 +10,9 @@ into a generic equal half-and-half split or center every element.
 - Structure: use one unequal `wp:columns`/column pair (or one `wp:media-text`
   with a deliberately unequal media width), with one `hero-composition__copy`
   region and one `hero-composition__media` region.
+- Copy budget: the copy region is one level-1 heading, at most TWO supporting
+  paragraphs, and at most one planned button — no further caption or credit
+  lines, and no hairline rules between the copy lines.
 - Identity: the one root group carries exactly `.hero-composition--editorial-split`.
 - Media: exactly one foreground image with a deliberate non-cover aspect. Use
   only group, columns/column or media-text, image, heading, paragraph, and an

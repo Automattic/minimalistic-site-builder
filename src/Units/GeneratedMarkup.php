@@ -2103,6 +2103,127 @@ final class GeneratedMarkup
     }
 
     /**
+     * Remove hairline separators from the hero.
+     *
+     * Reviewed direction (BIGR-775): a wp:separator inside the opening hero
+     * reads as a stray rule slicing the copy stack, not structure (audited:
+     * portfolio7, atlas7, hearth7). The hero prompt no longer offers the
+     * block; this pass keeps the ban structural when a model authors one
+     * anyway. The whole block is removed — a separator carries no content.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function stripHeroSeparators(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $spans = [];
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'separator') {
+                continue;
+            }
+            $end = $document->endOffset($index);
+            if ($end === null) {
+                continue;
+            }
+            $offset = $document->openingOffset($index);
+            $spans[] = [$offset, $end - $offset];
+        }
+        if ($spans === []) {
+            return $markup;
+        }
+        usort($spans, static fn (array $left, array $right): int => $right[0] <=> $left[0]);
+        foreach ($spans as [$offset, $length]) {
+            $markup = substr_replace($markup, '', $offset, $length);
+        }
+        $repairs[] = [
+            'code' => 'hero-separator-stripped',
+            'part' => $part,
+            'authored' => count($spans) . ' wp:separator block(s) inside the hero',
+            'delivered' => 'the same composition without hairline rules',
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    /**
+     * Remove eyebrow/kicker lines above the hero headline.
+     *
+     * Reviewed direction (BIGR-775): the hero opens on its level-1 headline —
+     * orientation micro-copy (place, category, audience) belongs to the
+     * header tagline or the standfirst, never to a tracked caption line above
+     * the H1 (audited: tbilisi7, naturaleza7, lumen7, hearth7). A candidate
+     * is a short pre-H1 paragraph or minor heading carrying eyebrow signals:
+     * caption-scale preset, uppercase transform, wide tracking, or a level-4+
+     * heading. Plain standfirst copy authored above the H1 carries none of
+     * those signals and is left alone.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function stripHeroEyebrow(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $h1Offset = null;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) === 'heading'
+                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+            ) {
+                $h1Offset = $document->openingOffset($index);
+                break;
+            }
+        }
+        if ($h1Offset === null) {
+            return $markup;
+        }
+
+        $spans = [];
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            if (!in_array($name, ['heading', 'paragraph'], true)) {
+                continue;
+            }
+            $attrs = $document->attrs($index) ?? [];
+            if ($name === 'heading' && (int) ($attrs['level'] ?? 2) < 4) {
+                continue;
+            }
+            // endOffset is exclusive: an eyebrow closing exactly where the H1
+            // opens has end == h1Offset and still sits entirely before it.
+            $end = $document->endOffset($index);
+            if ($end === null || $end > $h1Offset) {
+                continue;
+            }
+            $text = self::readingText($document->innerHtml($index));
+            if ($text === '' || mb_strlen($text, 'UTF-8') > 90) {
+                continue;
+            }
+            $typography = (array) ($attrs['style']['typography'] ?? []);
+            $signals = $name === 'heading'
+                || in_array((string) ($attrs['fontSize'] ?? ''), ['caption', 'small', 'x-small', 'tiny'], true)
+                || strtolower((string) ($typography['textTransform'] ?? '')) === 'uppercase'
+                || trim((string) ($typography['letterSpacing'] ?? '')) !== '';
+            if (!$signals) {
+                continue;
+            }
+            $offset = $document->openingOffset($index);
+            $spans[] = [$offset, $end - $offset];
+        }
+        if ($spans === []) {
+            return $markup;
+        }
+        usort($spans, static fn (array $left, array $right): int => $right[0] <=> $left[0]);
+        foreach ($spans as [$offset, $length]) {
+            $markup = substr_replace($markup, '', $offset, $length);
+        }
+        $repairs[] = [
+            'code' => 'hero-eyebrow-stripped',
+            'part' => $part,
+            'authored' => count($spans) . ' eyebrow-position text block(s) above the headline',
+            'delivered' => 'the headline as the copy region\'s first text line',
+            'disposition' => 'repaired',
+        ];
+        return $markup;
+    }
+
+    /**
      * Force a cover-band hero to span the full viewport width.
      *
      * The page-opening hero is exempt from the framed canvas: the mat begins

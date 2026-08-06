@@ -514,17 +514,20 @@ final class AboveFoldContract
      * Canonical header text-shape facts (BIGR-773), shared byte-for-byte by
      * both above-fold authors. `displays_tagline` is true only when the
      * archetype's catalog form includes wp:site-tagline AND a stated tagline
-     * exists to render (branded-lockup with an empty tagline is a logo+title
-     * lockup — the blank block is stripped deterministically). `text_rows`
-     * counts the header's stacked text lines: a two-row header bans the hero
-     * eyebrow, because a third caption-scale line ~100px below reads as a
-     * masthead row, not hero copy.
+     * exists to render (an empty tagline leaves a title-only form — the
+     * blank block is stripped deterministically). The tagline-bearing forms
+     * are branded-lockup and standard-row (BIGR-775): the hero no longer
+     * carries an eyebrow, so the orientation micro-copy that used to live
+     * there renders as the header tagline instead. `text_rows` counts the
+     * header's stacked text lines: a two-row header bans the hero eyebrow,
+     * because a third caption-scale line ~100px below reads as a masthead
+     * row, not hero copy.
      *
      * @return array{displays_tagline:bool,tagline_text:?string,text_rows:int}
      */
     private static function headerTextFacts(string $archetype, string $tagline): array
     {
-        $displays = $archetype === 'branded-lockup' && $tagline !== '';
+        $displays = in_array($archetype, ['branded-lockup', 'standard-row'], true) && $tagline !== '';
         return [
             'displays_tagline' => $displays,
             'tagline_text' => $displays ? $tagline : null,

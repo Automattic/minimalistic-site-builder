@@ -675,6 +675,74 @@ test('stripEyebrowChipChrome ignores media/action wrappers, long text, and heroe
     assert_eq([], $r);
 });
 
+test('stripHeroSeparators removes hairline rules from the hero (BIGR-775)', function () {
+    // Regression: portfolio7, atlas7, and hearth7 sliced their copy stacks
+    // with a wp:separator between the headline and the standfirst.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="hero">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Bread Made Slowly</h1><!-- /wp:heading -->'
+        . '<!-- wp:separator {"backgroundColor":"primary","className":"is-style-wide"} -->'
+        . '<hr class="wp-block-separator has-primary-background-color has-background is-style-wide"/>'
+        . '<!-- /wp:separator -->'
+        . '<!-- wp:paragraph --><p>Naturally leavened loaves, baked fresh by hand.</p><!-- /wp:paragraph -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroSeparators($doc, 'p', $repairs);
+    assert_true(!str_contains($out, 'wp:separator'), 'separator delimiters removed');
+    assert_true(!str_contains($out, 'wp-block-separator'), 'separator HTML removed');
+    assert_contains('Bread Made Slowly', $out, 'headline untouched');
+    assert_contains('Naturally leavened loaves', $out, 'standfirst untouched');
+    assert_true(in_array('hero-separator-stripped', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroSeparators($out, 'p', $again));
+    assert_eq([], $again);
+});
+
+test('stripHeroEyebrow removes tracked caption lines and minor headings above the H1 only (BIGR-775)', function () {
+    // Regression: tbilisi7/naturaleza7/hearth7 opened on an uppercase tracked
+    // caption line and lumen7 on a level-5 heading — three or four copy lines
+    // stacked before the proposition.
+    $doc = '<!-- wp:group {"tagName":"section","anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<section class="wp-block-group" id="hero">'
+        . '<!-- wp:paragraph {"fontSize":"caption","style":{"typography":{"textTransform":"uppercase","letterSpacing":"0.16em"}}} -->'
+        . '<p class="has-caption-font-size" style="letter-spacing:0.16em;text-transform:uppercase">Tbilisi Old Town</p>'
+        . '<!-- /wp:paragraph -->'
+        . '<!-- wp:heading {"level":5} --><h5 class="wp-block-heading">Recycled Glass Studio</h5><!-- /wp:heading -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Bread from the hearth</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"fontSize":"lead"} --><p class="has-lead-font-size">Home cooking of the Caucasus at long tavern tables.</p><!-- /wp:paragraph -->'
+        . '</section><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow($doc, 'p', $repairs);
+    assert_true(!str_contains($out, 'Tbilisi Old Town'), 'tracked caption eyebrow removed');
+    assert_true(!str_contains($out, 'Recycled Glass Studio'), 'minor-heading eyebrow removed');
+    assert_contains('Bread from the hearth', $out, 'headline untouched');
+    assert_contains('Home cooking of the Caucasus', $out, 'standfirst untouched');
+    assert_true(in_array('hero-eyebrow-stripped', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow($out, 'p', $again));
+    assert_eq([], $again);
+
+    // A plain pre-H1 paragraph without eyebrow signals is reading copy, and a
+    // hero without an H1 is left alone entirely.
+    $plain = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:paragraph --><p>An unstyled introduction line.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Headline</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $r = [];
+    assert_eq($plain, Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow($plain, 'p', $r));
+    assert_eq([], $r);
+
+    $noH1 = '<!-- wp:group {"layout":{"type":"constrained"}} --><div class="wp-block-group">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Label</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    assert_eq($noH1, Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow($noH1, 'p', $r));
+    assert_eq([], $r);
+});
+
 test('fullBleedCoverAlignment upgrades a wide-capped cover-band hero to align:full', function () {
     // Regression: portfolio26's framed canvas capped the layered-poster cover
     // at alignwide, insetting the hero band from both viewport edges. The
@@ -744,10 +812,10 @@ test('wrapper repair leaves stray closers and content-bearing shells alone', fun
 });
 
 test('clampHeroTopPadding lowers xl to sm on media-led and to md on copy-led hero roots', function () {
-    // Regression: lumen4's panorama-rail root carried padding-top:xl, opening
+    // Regression: lumen4's panorama-rail (recipe since retired) root carried padding-top:xl, opening
     // a dead band under the header that pushed the whole rail below the fold.
-    $mediaLed = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--panorama-rail","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
-        . '<section id="hero" class="wp-block-group hero-composition--panorama-rail" style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)">'
+    $mediaLed = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--focal-subject-stage","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
+        . '<section id="hero" class="wp-block-group hero-composition--focal-subject-stage" style="padding-top:var(--wp--preset--spacing--xl);padding-bottom:var(--wp--preset--spacing--xl)">'
         . '<!-- wp:image {"className":"hero-composition__media"} --><figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt="AI_IMAGE: a | b | c | landscape"/></figure><!-- /wp:image -->'
         . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">A quiet panorama headline</h1><!-- /wp:heading -->'
         . '</section><!-- /wp:group -->';
