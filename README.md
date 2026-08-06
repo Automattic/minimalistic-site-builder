@@ -105,6 +105,23 @@ services; page objects have the exact recursive `title` / `slug` / `purpose` /
 (including WordPress.com) maps that payload in its adapter rather than adding
 host-specific aliases to this package.
 
+### Embedding with an existing page plan
+
+A host that already knows how a page is laid out can supply that page's section
+list the same way, as `meta.json.page_plan` — a list of `{slug, sections: [...]}`
+maps, extra keys ignored. `createProject()` merges over any pre-seeded meta, so
+a host writes the key before calling it. Entries are matched to the page tree
+**by slug**: the tree stays the site spec's decision, so a supplied plan naming
+a slug the tree does not contain is simply unused and can never add a page.
+
+The `page-plan` step then issues no LLM request for the pages it covers.
+Supplied sections still go through the same normalization, fallback ladder and
+`warnings.json` path as generated ones — only the model repair round is skipped,
+because paying for a repair call on a plan supplied precisely to avoid a call
+defeats the purpose; a supplied plan that breaks an art-direction rule is
+coerced mechanically instead. Pages the plan does not cover are generated as
+usual.
+
 ### Choosing the model / provider
 
 `--provider=<anthropic|openai|xai|openrouter>` (or the `LLM_PROVIDER` env var) picks a whole

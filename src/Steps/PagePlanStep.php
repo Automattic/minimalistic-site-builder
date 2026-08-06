@@ -36,6 +36,14 @@ use Automattic\SiteBuild\StepDeclaration;
  * to each other, this step is also each page's art director: it assigns every
  * section a layout archetype and background treatment (validated below, with
  * an adjacency rule) so every page has a deliberate visual rhythm.
+ *
+ * A host-supplied `meta.json.page_plan` replaces candidate generation for the
+ * pages it covers, exactly as `meta.json.site_spec` does for the site spec:
+ * entries are matched to the flattened tree BY SLUG, so a supplied plan can
+ * never add or rename a page. Supplied sections still go through the same
+ * deterministic normalization, fallback ladder, and warning path as model
+ * output — only the model-repair round is skipped, because paying for a repair
+ * call on a plan supplied precisely to avoid a call defeats the purpose.
  */
 final class PagePlanStep implements GeneratedJsonFallbackStep
 {
@@ -191,9 +199,22 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             'site_pages'       => self::sitePagesList($pages),
         ];
 
+        // A host-supplied plan replaces candidate generation for the pages it
+        // covers, exactly as meta.json `site_spec` does for the site spec.
+        // Matched by slug only: the page TREE is the spec's decision, and a
+        // supplied plan that names a page the tree dropped is simply unused.
+        $supplied = self::suppliedPlan($meta);
+        if ($supplied !== []) {
+            Narrator::write('  using host-supplied page plan for ' . count($supplied)
+                . " page(s) (no page-plan LLM call for those)\n");
+        }
+
         $requests = [];
         $jsonSchema = ['name' => 'page_plan', 'schema' => self::jsonSchema()];
         foreach ($pages as $page) {
+            if (isset($supplied[$page['slug']])) {
+                continue;
+            }
             $front = (bool) $page['front'];
             $requests[$page['slug']] = $this->withOptions([
                 'prompt' => $this->renderer->render('page-plan.md', $shared + [
@@ -214,6 +235,38 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             ]);
         }
         return $requests;
+    }
+
+    /**
+     * slug => raw sections list, from meta.json `page_plan`. Entries without a
+     * usable slug or a non-empty sections list are dropped; validation itself
+     * stays in normalize(), which every page still goes through. Pure —
+     * unit-testable.
+     *
+     * @param array<mixed> $meta
+     * @return array<string,array<mixed>>
+     */
+    public static function suppliedPlan(array $meta): array
+    {
+        $raw = $meta['page_plan'] ?? null;
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $page) {
+            if (!is_array($page)) {
+                continue;
+            }
+            // Guard the RAW slug: slugify('') answers 'site', so slugifying
+            // first would key an unnamed entry onto a real page called "site".
+            $rawSlug = trim((string) ($page['slug'] ?? ''));
+            $sections = $page['sections'] ?? null;
+            if ($rawSlug === '' || !is_array($sections) || $sections === []) {
+                continue;
+            }
+            $out[ProjectStore::slugify($rawSlug)] = $sections;
+        }
+        return $out;
     }
 
     /**
@@ -255,6 +308,8 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $frontProjection = HeroComposition::planProjection($blueprint);
         $actionContext = self::primaryActionContext($siteSpec, $pages);
+        // The same slug-matched supplied plan requests() skipped asking for.
+        $supplied = self::suppliedPlan($project->readJson('meta.json'));
 
         // First pass: normalize what the model returned, collecting every page
         // that broke a rule so they can all be re-asked together below.
@@ -266,6 +321,18 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             $slug = (string) $page['slug'];
             $front = (bool) $page['front'];
             $projection = $front ? $frontProjection : null;
+            if (isset($supplied[$slug])) {
+                $sectionsBySlug[$slug] = self::normalizeSupplied(
+                    $supplied[$slug],
+                    $front,
+                    $warnings,
+                    $slug,
+                    $projection,
+                    $actionContext,
+                    $successfulRepairs,
+                );
+                continue;
+            }
             $plan = $results[$slug] ?? null;
             if (!is_array($plan)) {
                 $sectionsBySlug[$slug] = self::fallbackAfterGeneratedPlanLoss(
@@ -1527,6 +1594,76 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $warnings[] = "page-plan: file='pages.json'; path=\"{$pagePath}\"; authored={$authored}; "
             . "delivered=one synthesized content section; disposition={$disposition}";
         return self::fallbackSections($front, $frontProjection, $actionContext);
+    }
+
+    /**
+     * A host-supplied plan through the SAME normalize() as generated output —
+     * but with the model-repair rung skipped. Paying for a repair call on a
+     * plan supplied precisely to avoid a call defeats the purpose, and
+     * recoverSections() already covers every known normalize() rejection.
+     *
+     * @param array<mixed> $rawSections
+     * @param list<string> $warnings appended to in place
+     * @param list<string> $repairs appended for semantics-preserving fixes
+     * @return array<int,array<string,mixed>>
+     */
+    private static function normalizeSupplied(
+        array $rawSections,
+        bool $front,
+        array &$warnings,
+        string $pageSlug,
+        ?array $frontProjection = null,
+        array $actionContext = [],
+        array &$repairs = [],
+    ): array {
+        $rawSections = self::removeTemplateFooterSections($rawSections, $warnings, $pageSlug);
+        try {
+            $normalizationWarnings = [];
+            $normalizationRepairs = [];
+            $sections = self::normalize(
+                $rawSections,
+                $front,
+                $frontProjection,
+                $actionContext,
+                $normalizationWarnings,
+                $pageSlug,
+                $normalizationRepairs,
+            );
+            if ($sections !== []) {
+                $warnings = array_merge($warnings, $normalizationWarnings);
+                $repairs = array_merge($repairs, $normalizationRepairs);
+                return $sections;
+            }
+        } catch (\RuntimeException $e) {
+            $warnings[] = "page-plan: supplied plan for '{$pageSlug}' broke a rule ("
+                . $e->getMessage() . '); coerced mechanically';
+        }
+
+        // recoverSections() deliberately returns [] rather than inventing
+        // sections from nothing, so an empty result is a page-boundary loss and
+        // must degrade the same way a lost generated plan does. Returning []
+        // here would ship a sectionless page.
+        $recovered = self::recoverSections(
+            $rawSections,
+            $front,
+            $warnings,
+            $pageSlug,
+            $frontProjection,
+            $actionContext,
+            $repairs,
+        );
+        if ($recovered !== []) {
+            return $recovered;
+        }
+        return self::fallbackAfterGeneratedPlanLoss(
+            $front,
+            $warnings,
+            $pageSlug,
+            'unusable host-supplied page plan',
+            'deterministic fallback substituted for the unusable supplied plan',
+            $frontProjection,
+            $actionContext,
+        );
     }
 
     /**

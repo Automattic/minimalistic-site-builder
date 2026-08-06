@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\GeneratedJsonException;
@@ -1637,4 +1638,255 @@ test('PagePlanStep rewrites an invented external CTA URL to an anchor for the re
     $anchorWarnings = [];
     $delivered = PagePlanStep::validatePrimaryActionAnchors($pages, $anchorWarnings);
     assert_eq('#signup', $delivered[0]['sections'][0]['primary_action']['destination']);
+});
+
+/**
+ * A two-page project (home + menu) whose meta.json carries $pagePlan as the
+ * host-supplied `page_plan`. An empty list seeds no key at all, so the same
+ * fixture also expresses today's generated-only behaviour.
+ *
+ * @return array{0:\Automattic\SiteBuild\Project,1:string}
+ */
+function supplied_plan_fixture(array $pagePlan = []): array
+{
+    $tmp = sys_get_temp_dir() . '/builder_pp_supplied_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $meta = ['prompt' => 'A japanese restaurant'];
+    if ($pagePlan !== []) {
+        $meta['page_plan'] = $pagePlan;
+    }
+    $project->writeJson('meta.json', $meta);
+    seed_test_design_direction($project);
+    $project->writeJson('siteSpec.json', plan_spec(['pages' => [
+        ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome', 'children' => []],
+        ['title' => 'Menu', 'slug' => 'menu', 'purpose' => 'What we serve', 'children' => []],
+    ]]));
+    return [$project, $tmp];
+}
+
+/** A valid two-section interior plan a host could supply for /menu/. */
+function supplied_menu_sections(array $firstOverrides = []): array
+{
+    return [
+        plan_section(array_merge([
+            'slug'             => 'menu-hero',
+            'title'            => 'Menu Hero',
+            'type'             => 'page-hero',
+            'layout_archetype' => 'centered-stack',
+            'background'       => 'tinted',
+            'handoff'          => 'Between the site header above and the dish list below.',
+        ], $firstOverrides)),
+        plan_section([
+            'slug'             => 'dishes',
+            'title'            => 'Dishes',
+            'type'             => 'menu-list',
+            'layout_archetype' => 'list-with-thumbnails',
+            'background'       => 'base',
+            'handoff'          => 'Between the tinted menu hero above and the footer below.',
+        ]),
+    ];
+}
+
+/** One valid three-section homepage response, for the page the host did not plan. */
+function queue_supplied_plan_home_response(FakeLlm $llm): void
+{
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'hero', 'title' => 'Hero']),
+        plan_section([
+            'slug'             => 'story',
+            'title'            => 'Story',
+            'type'             => 'about',
+            'layout_archetype' => 'asymmetric-split',
+            'background'       => 'base',
+            'handoff'          => 'Between the hero above and the closing call below.',
+        ]),
+        plan_section([
+            'slug'             => 'visit',
+            'title'            => 'Visit',
+            'type'             => 'cta',
+            'layout_archetype' => 'centered-stack',
+            'background'       => 'contrast',
+            'handoff'          => 'Between the story above and the footer below.',
+        ]),
+    ]]);
+}
+
+/** Run $fn with narration captured, and return everything it wrote. */
+function captured_narration(callable $fn): string
+{
+    $sink = fopen('php://memory', 'w+');
+    Narrator::setStream($sink);
+    try {
+        $fn();
+        rewind($sink);
+        return (string) stream_get_contents($sink);
+    } finally {
+        Narrator::reset();
+        fclose($sink);
+    }
+}
+
+test('page-plan asks for no plan on a page the host already planned', function () {
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'menu', 'sections' => supplied_menu_sections()],
+    ]);
+    $step = new PagePlanStep(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    $reqs = [];
+    $narration = captured_narration(function () use ($step, $project, &$reqs) {
+        $reqs = $step->requests($project);
+    });
+
+    assert_eq(['home'], array_keys($reqs), 'the covered page is not asked for');
+    assert_contains('host-supplied page plan for 1 page(s)', $narration);
+    assert_contains('no page-plan LLM call', $narration);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan carries the host-supplied sections into pages.json', function () {
+    [$project, $tmp] = supplied_plan_fixture([
+        // Extra host keys the package does not own are simply ignored.
+        ['slug' => 'menu', 'source' => 'host-cms', 'sections' => supplied_menu_sections()],
+    ]);
+    $llm = new FakeLlm();
+    queue_supplied_plan_home_response($llm);
+
+    captured_narration(fn () => (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $plan = $project->readJson('pages.json');
+    assert_eq(['home', 'menu'], array_column($plan['pages'], 'slug'));
+    assert_eq(['hero', 'story', 'visit'], array_column($plan['pages'][0]['sections'], 'slug'));
+    assert_eq('menu', $plan['pages'][1]['slug']);
+    assert_true($plan['pages'][1]['sections'] !== [], 'supplied sections are kept');
+    assert_eq(['menu-hero', 'dishes'], array_column($plan['pages'][1]['sections'], 'slug'));
+    // Same normalize() as generated output: positional roles are stamped here too.
+    assert_eq(['hero', 'closing'], array_column($plan['pages'][1]['sections'], 'role'));
+    assert_eq('tinted', $plan['pages'][1]['sections'][0]['background']);
+    assert_eq(1, $llm->completeJsonBatchCalls, 'only the unplanned page reaches the model');
+    assert_eq(0, $llm->remaining(), 'exactly one response was needed');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan ignores a supplied plan for a slug the page tree does not contain', function () {
+    // The page TREE is the site spec's decision: a supplied plan can never add
+    // a page, only replace generation for one that already exists.
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'contact', 'sections' => supplied_menu_sections()],
+    ]);
+    $llm = new FakeLlm();
+    queue_supplied_plan_home_response($llm);
+    $llm->queueJson(['sections' => supplied_menu_sections(['slug' => 'generated-menu-hero'])]);
+
+    $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+    $reqs = [];
+    captured_narration(function () use ($step, $project, &$reqs) {
+        $reqs = $step->requests($project);
+        $step->run($project);
+    });
+
+    assert_eq(['home', 'menu'], array_keys($reqs), 'every page in the tree is still asked for');
+    $plan = $project->readJson('pages.json');
+    assert_eq(['home', 'menu'], array_column($plan['pages'], 'slug'), 'no page was added');
+    assert_eq(
+        ['generated-menu-hero', 'dishes'],
+        array_column($plan['pages'][1]['sections'], 'slug'),
+        'the unused supplied plan did not leak into another page',
+    );
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan coerces a rule-breaking supplied plan mechanically instead of paying for a repair', function () {
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'menu', 'sections' => supplied_menu_sections(['background' => 'plaid'])],
+    ]);
+    $llm = new FakeLlm();
+    queue_supplied_plan_home_response($llm);
+
+    captured_narration(fn () => (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $sections = $project->readJson('pages.json')['pages'][1]['sections'];
+    assert_eq(['menu-hero', 'dishes'], array_column($sections, 'slug'), 'the supplied plan still ships');
+    assert_eq('base', $sections[0]['background'], 'the unknown surface is coerced, not re-asked');
+
+    assert_eq(1, $llm->completeJsonBatchCalls, 'a supplied plan never triggers the repair round');
+    foreach ($llm->calls as $call) {
+        assert_true(
+            !str_contains($call['prompt'], 'YOUR PREVIOUS PLAN'),
+            'no repair request was issued for the supplied plan',
+        );
+    }
+
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains("supplied plan for 'menu' broke a rule", $joined);
+    assert_contains('coerced mechanically', $joined);
+    assert_contains('plaid', $joined, 'the authored value stays actionable in warnings.json');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan degrades an unusable supplied plan to a valid page instead of shipping none', function () {
+    // Every entry is a scalar, so removeTemplateFooterSections keeps them,
+    // normalize() rejects them, and recoverSections() has nothing to coerce.
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'menu', 'sections' => ['not a section', 42]],
+    ]);
+    $llm = new FakeLlm();
+    queue_supplied_plan_home_response($llm);
+
+    captured_narration(fn () => (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $sections = $project->readJson('pages.json')['pages'][1]['sections'];
+    assert_eq(['content'], array_column($sections, 'slug'), 'a sectionless page must never ship');
+    assert_eq('centered-stack', $sections[0]['layout_archetype'], 'the interior fallback opens compact');
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains('authored=unusable host-supplied page plan', $joined);
+    assert_contains('deterministic fallback substituted for the unusable supplied plan', $joined);
+    assert_eq(1, $llm->completeJsonBatchCalls, 'even the unusable supplied plan costs no extra call');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan without a supplied plan behaves exactly as before', function () {
+    [$project, $tmp] = supplied_plan_fixture();
+    $llm = new FakeLlm();
+    queue_supplied_plan_home_response($llm);
+    $llm->queueJson(['sections' => supplied_menu_sections()]);
+    $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+
+    $narration = captured_narration(function () use ($step, $project) {
+        $step->run($project);
+    });
+
+    assert_true(
+        !str_contains($narration, 'host-supplied page plan'),
+        'an absent page_plan announces nothing',
+    );
+    $plan = $project->readJson('pages.json');
+    assert_eq(['home', 'menu'], array_column($plan['pages'], 'slug'));
+    assert_eq(['menu-hero', 'dishes'], array_column($plan['pages'][1]['sections'], 'slug'));
+    assert_eq(0, $llm->remaining(), 'every page was generated');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('PagePlanStep::suppliedPlan keys usable entries by slug and drops the rest', function () {
+    assert_eq([], PagePlanStep::suppliedPlan([]), 'an absent page_plan is not a supplied plan');
+    assert_eq([], PagePlanStep::suppliedPlan(['page_plan' => 'not a list']));
+    assert_eq([], PagePlanStep::suppliedPlan(['page_plan' => [
+        'not a page',
+        ['sections' => [['slug' => 'hero']]],          // no slug
+        ['slug' => '   ', 'sections' => [['slug' => 'hero']]], // blank slug is not 'site'
+        ['slug' => 'menu'],                            // no sections
+        ['slug' => 'menu', 'sections' => []],          // empty sections
+        ['slug' => 'menu', 'sections' => 'nope'],      // sections must be a list
+    ]]));
+
+    $supplied = PagePlanStep::suppliedPlan(['page_plan' => [
+        ['slug' => 'Our Menu', 'sections' => [['slug' => 'dishes']]],
+    ]]);
+    assert_eq(['our-menu'], array_keys($supplied), 'slugs are slugified the same way the tree is');
+    assert_eq([['slug' => 'dishes']], $supplied['our-menu']);
 });
