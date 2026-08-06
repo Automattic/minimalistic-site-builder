@@ -31,6 +31,7 @@ final class FallbackBuildPipeline implements BuildPipeline
         ?string $untilId = null,
         ?callable $reporter = null,
         ?callable $onStart = null,
+        ?string $fromId = null,
     ): void {
         $currentStep = null;
         $trackingStart = static function (Step $step) use (&$currentStep, $onStart): void {
@@ -57,6 +58,7 @@ final class FallbackBuildPipeline implements BuildPipeline
                 $untilId,
                 $trackingReporter,
                 $trackingStart,
+                $fromId,
             );
         } catch (MalformedDesignException $error) {
             if (!$currentStep instanceof Step || $currentStep->id() !== 'homepage-design') {
@@ -70,7 +72,7 @@ final class FallbackBuildPipeline implements BuildPipeline
                     . 'disposition legacy_reroute; error ' . $error->getMessage(),
             ]);
 
-            $this->legacyTail->runThrough($project, $untilId, $reporter, $onStart);
+            $this->legacyTail->runThrough($project, $untilId, $reporter, $onStart, $fromId);
         }
     }
 }

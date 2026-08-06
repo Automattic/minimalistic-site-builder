@@ -251,6 +251,76 @@ function assert_html_first_page_sections_constrained(Project $project, string $s
     return $count;
 }
 
+/** @return array<string,string> design/*.html path => sha1 of its bytes */
+function html_first_design_html_hashes(Project $project): array
+{
+    $hashes = [];
+    foreach (glob($project->path('design') . '/*.html') ?: [] as $abs) {
+        $rel = 'design/' . basename($abs);
+        $hashes[$rel] = sha1($project->readText($rel));
+    }
+    return $hashes;
+}
+
+test('--from resumes the deterministic tail against on-disk artifacts with no LLM', function () {
+    $tmp = sys_get_temp_dir() . '/builder_html_first_resume_' . uniqid();
+    $previous = getenv('SITE_BUILD_LEGACY');
+    putenv('SITE_BUILD_LEGACY');
+    try {
+        $llm = new FakeLlm();
+        html_first_queue_success($llm, html_first_site_spec([
+            ['title' => 'Home', 'slug' => 'home', 'purpose' => 'Welcome visitors', 'children' => []],
+        ]), html_first_home_body());
+
+        $builder = html_first_integration_builder($llm, $tmp);
+        $project = $builder->createProject('A neighborhood bakery', 'demo');
+        $meta = $project->readJson('meta.json');
+        $meta['design_candidates'] = 1;
+        $meta['critique_rounds'] = 1;
+        $project->writeJson('meta.json', $meta);
+
+        // A full build materializes design/*.html, site.css, theme parts, etc.
+        $builder->pipeline()->runThrough($project);
+
+        $designBefore = html_first_design_html_hashes($project);
+        assert_true($designBefore !== [], 'the full build produced design/*.html to resume from');
+        $callsAfterBuild = count($llm->calls);
+        $sentinel = "/* SENTINEL-NO-TAIL */\n";
+
+        // A sentinel that lacks the deterministic wrap-policy tail: page-styles
+        // must rewrite theme/style.css during the resume for the tail to return.
+        $resume = static function () use ($builder, $project, $sentinel): string {
+            $project->writeText('theme/style.css', $sentinel);
+            // Fresh pipeline, resuming at transform-site through page-styles.
+            $builder->pipeline()->runThrough($project, 'page-styles', fromId: 'transform-site');
+            return $project->readText('theme/style.css');
+        };
+
+        $styleFirst = $resume();
+
+        // (a) The deterministic tail touches no LLM: zero calls added on resume.
+        assert_eq($callsAfterBuild, count($llm->calls), 'resume made zero new LLM calls');
+        // (b) The design HTML the resume reads is left byte-for-byte unchanged.
+        assert_eq($designBefore, html_first_design_html_hashes($project), 'design/*.html bytes unchanged by resume');
+        // (c) page-styles (re)wrote theme/style.css: the tail is back, sentinel gone.
+        assert_true($styleFirst !== $sentinel, 'theme/style.css was rewritten during resume');
+        assert_contains('hyphens: none;', $styleFirst, 'page-styles re-merged the deterministic wrap policy');
+
+        // (d) A second identical resume from the same inputs is byte-identical.
+        $styleSecond = $resume();
+        assert_eq($styleFirst, $styleSecond, 'a repeated resume is deterministic (byte-identical style.css)');
+        assert_eq($callsAfterBuild, count($llm->calls), 'the repeat resume also made zero LLM calls');
+        assert_eq($designBefore, html_first_design_html_hashes($project), 'design/*.html still unchanged after the repeat');
+    } finally {
+        $previous === false
+            ? putenv('SITE_BUILD_LEGACY')
+            : putenv('SITE_BUILD_LEGACY=' . $previous);
+        if (is_dir($tmp)) {
+            exec('rm -rf ' . escapeshellarg($tmp));
+        }
+    }
+});
+
 test('HTML-first default builds and validates every single-page artifact', function () {
     $tmp = sys_get_temp_dir() . '/builder_html_first_' . uniqid();
     $previous = getenv('SITE_BUILD_LEGACY');

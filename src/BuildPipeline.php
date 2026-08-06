@@ -15,6 +15,10 @@ interface BuildPipeline
     /**
      * Run every step up to and including $untilId, or the complete build when null.
      *
+     * $fromId resumes mid-graph: every step that order-precedes it is skipped
+     * (its artifacts are assumed already on disk), symmetric to $untilId. Null
+     * runs from the first step.
+     *
      * @param callable(Step,float):void|null $reporter
      * @param callable(Step):void|null       $onStart
      */
@@ -23,5 +27,6 @@ interface BuildPipeline
         ?string $untilId = null,
         ?callable $reporter = null,
         ?callable $onStart = null,
+        ?string $fromId = null,
     ): void;
 }

@@ -37,6 +37,7 @@ final class FallbackPipelineProbe implements BuildPipeline
         ?string $untilId = null,
         ?callable $reporter = null,
         ?callable $onStart = null,
+        ?string $fromId = null,
     ): void {
         if ($onStart !== null) {
             $onStart($this->step);

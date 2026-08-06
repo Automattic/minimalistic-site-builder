@@ -13,7 +13,7 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
 /**
  * Build a site from a prompt.
  *
- *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]
+ *   php bin/build.php "A cozy neighborhood bakery" [--provider=openai] [--slug=my-slug] [--from=step-id] [--until=step-id] [--multi-page] [--pages="Home, Menu, About"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=foreground-image] [--max-hero-images=1] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]
  *
  * --provider=<anthropic|openai|xai|openrouter> picks the model set (config/models.json):
  * each step runs on that provider's large/small tier. Per-step LLM_MODEL_<STEP>
@@ -28,6 +28,21 @@ use Automattic\SiteBuild\Steps\GenerateImagesStep;
  * --until=<step-id> stops after that step (an unknown id errors with the list).
  * Steps that run concurrently share one id (e.g. theme-json+page-plan), but
  * --until also accepts a member id (theme-json) and stops once the group is done.
+ *
+ * --from=<step-id> is the mirror image: it SKIPS every step that order-precedes
+ * that id and resumes from there, reusing the named --slug project's on-disk
+ * artifacts (design/*.html, site.css, designDirection.json, meta.json, …) as
+ * inputs. It requires --slug (the existing project), ignores the prompt (the
+ * design already exists), and leaves the reused directory otherwise untouched.
+ * Same id list as --until, group members included.
+ *
+ * Deterministic-tail recipe — re-run transform→theme against an already-built
+ * project with NO LLM and NO image generation, iterating in seconds:
+ *
+ *   php bin/build.php --slug=portfolio-new --from=transform-site --until=page-styles
+ *
+ * Because --until stops before generate-images (and --with-images stays opt-in),
+ * that resume makes zero network calls.
  *
  * --multi-page lets the site plan inner pages (about, contact, …) beyond the
  * homepage. Off by default: the build produces ONLY the landing page.
@@ -51,6 +66,7 @@ $args = array_slice($argv, 1);
 $prompt = null;
 $slug = null;
 $until = null;
+$from = null;
 $withImages = false;
 $multiPage = false;
 $pagesArg = null;
@@ -69,6 +85,8 @@ foreach ($args as $a) {
         $provider = substr($a, 11);
     } elseif (str_starts_with($a, '--until=')) {
         $until = substr($a, 8);
+    } elseif (str_starts_with($a, '--from=')) {
+        $from = substr($a, 7);
     } elseif (str_starts_with($a, '--pages=')) {
         $pagesArg = substr($a, 8);
     } elseif (str_starts_with($a, '--port=')) {
@@ -93,13 +111,24 @@ foreach ($args as $a) {
         $prompt = $a;
     } else {
         fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
+        fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
         exit(1);
     }
 }
 
-if ($prompt === null || trim($prompt) === '') {
-    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
+// --from resumes an existing build's deterministic tail against on-disk
+// artifacts, so the prompt is optional (the design already exists); every
+// other invocation still requires it.
+if ($from === null && ($prompt === null || trim($prompt) === '')) {
+    fwrite(STDERR, "Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--from=step-id] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
+    exit(1);
+}
+
+// --from resumes a materialized project in place, so it needs the existing
+// slug to locate that directory (createProject would otherwise pick a random
+// one, and there would be no design/*.html to resume from).
+if ($from !== null && ($slug === null || trim($slug) === '')) {
+    fwrite(STDERR, "--from requires --slug=<existing project> to resume its on-disk artifacts.\n");
     exit(1);
 }
 
@@ -167,24 +196,49 @@ if ($until !== null && !in_array($until, $pipeline->stopIds(), true)) {
     exit(1);
 }
 
-// Without an explicit --slug, createProject picks a free random adjective-noun
-// name. Explicit --slug reuses that directory across re-runs. meta.json is
-// seeded (and merged) inside createProject so demo orchestrators can pre-seed.
-try {
-    $project = $builder->createProject(
-        prompt: $prompt,
-        slug: $slug,
-        multiPage: $multiPage,
-        pages: $pages,
-        designConstraints: $designConstraints,
-        writingDirection: $writingDirection,
-    );
-} catch (InvalidArgumentException $e) {
-    fwrite(STDERR, $e->getMessage() . "\n");
+// Validate --from the same way (same id list, group members included), so an
+// unknown resume point fails loud instead of silently running everything.
+if ($from !== null && !in_array($from, $pipeline->stopIds(), true)) {
+    fwrite(STDERR, "Unknown --from step '{$from}'. Valid steps:\n  "
+        . implode("\n  ", $pipeline->stopIds()) . "\n");
     exit(1);
 }
 
-echo "Building '{$project->slug()}'\n";
+if ($from !== null) {
+    // Resume: open the existing project untouched (no createProject, which would
+    // re-seed meta.json and could clobber multi_page/design_constraints from the
+    // original build). Its design/*.html, site.css, meta.json etc. are the inputs
+    // the deterministic tail reads, so leave every artifact on disk as-is.
+    try {
+        $project = $builder->store()->open($slug);
+    } catch (RuntimeException $e) {
+        fwrite(STDERR, "--from: {$e->getMessage()}\n");
+        exit(1);
+    }
+    // The prompt argument is ignored on resume; the report reuses the recorded one.
+    $prompt = $project->exists('meta.json')
+        ? (string) ($project->readJson('meta.json')['prompt'] ?? '')
+        : '';
+} else {
+    // Without an explicit --slug, createProject picks a free random adjective-noun
+    // name. Explicit --slug reuses that directory across re-runs. meta.json is
+    // seeded (and merged) inside createProject so demo orchestrators can pre-seed.
+    try {
+        $project = $builder->createProject(
+            prompt: $prompt,
+            slug: $slug,
+            multiPage: $multiPage,
+            pages: $pages,
+            designConstraints: $designConstraints,
+            writingDirection: $writingDirection,
+        );
+    } catch (InvalidArgumentException $e) {
+        fwrite(STDERR, $e->getMessage() . "\n");
+        exit(1);
+    }
+}
+
+echo ($from !== null ? "Resuming '{$project->slug()}' from {$from}\n" : "Building '{$project->slug()}'\n");
 
 $report = new BuildReport($prompt, $project->slug(), $project->path(), gmdate('c'));
 
@@ -207,7 +261,7 @@ try {
         echo BuildReport::formatRow($step->id(), $secs, $inDelta, $outDelta), "\n";
     }, function (Step $step) use (&$currentStep): void {
         $currentStep = $step->id();
-    });
+    }, $from);
 } catch (Throwable $e) {
     fwrite(STDERR, '✗ FAILED' . ($currentStep !== null ? " in step {$currentStep}" : '') . ": {$e->getMessage()}\n");
     exit(1);
