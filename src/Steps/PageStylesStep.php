@@ -111,6 +111,23 @@ p, li {
 }
 CSS;
 
+    /**
+     * core/table ships a default border on every cell (`.wp-block-table td/th
+     * { border: 1px }`), boxing the whole grid. Authored designs use a plain
+     * <table> — which has no cell borders — and add their own row rules, almost
+     * always a bottom-only border. Zeroing the core default here, before the
+     * design CSS, lets those authored rules be the only borders that show, so a
+     * border-bottom renders as a row rule instead of a full cell grid. Tables
+     * that do want full borders carry their own and override this.
+     */
+    public const TABLE_BORDER_RESET_CSS = <<<'CSS'
+/* Let authored table CSS own cell borders; drop core/table's default grid. */
+.wp-block-table td,
+.wp-block-table th {
+  border: 0;
+}
+CSS;
+
     /** Hard ceiling on the appendix size; the prompt asks for under 80 lines. */
     private const MAX_LINES = 100;
     private const LOG_FILE = 'page-styles.log';
@@ -316,7 +333,7 @@ CSS;
         );
         // Wrap policy first, so a design that deliberately hyphenates still
         // wins; it ships even when the design contributed no CSS at all.
-        $tail = self::WORD_WRAP_CSS . "\n" . $design;
+        $tail = self::WORD_WRAP_CSS . "\n" . self::TABLE_BORDER_RESET_CSS . "\n" . $design;
         $style = $project->readText('theme/style.css');
         if (str_ends_with($style, $tail)) {
             Narrator::write("  deterministic page CSS already merged\n");
