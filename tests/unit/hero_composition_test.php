@@ -12,7 +12,7 @@ test('hero catalog entries own complete metadata, defaults, prompts, and unique 
         foreach ([
             'canvases', 'media_modes', 'min_images', 'max_images', 'backgrounds',
             'default_background', 'fallback_background', 'header_modes', 'copy_capacity',
-            'mobile_transformations', 'layout_archetype', 'fallback_family', 'root_hook',
+            'backdrops', 'mobile_transformations', 'layout_archetype', 'fallback_family', 'root_hook',
             'prompt', 'headline_registers', 'height_profiles', 'defaults',
         ] as $field) {
             assert_true(array_key_exists($field, $meta), "{$recipe} metadata has {$field}");

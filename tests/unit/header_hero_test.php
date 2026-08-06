@@ -1272,3 +1272,85 @@ test('late overlay protection loss produces matching stacked bytes and the 80vh 
     assert_contains('delivered="stacked"', $warnings);
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('a committed texture backdrop tiles the stacked header and hero as one canvas (BIGR-776)', function () {
+    $sections = [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'asymmetric-split', 'background' => 'base']];
+    $pages = [['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => $sections]];
+    $heroPart = '<!-- wp:group {"backgroundColor":"base","anchor":"hero","className":"hero-composition--focal-subject-stage hero-mobile--stack-media-first","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group has-base-background-color has-background hero-composition--focal-subject-stage hero-mobile--stack-media-first">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Exhibit</h1><!-- /wp:heading --></div><!-- /wp:group -->';
+    $texturedBlueprint = Automattic\SiteBuild\HeroBlueprint::defaultFor('focal-subject-stage');
+    $texturedBlueprint['stage_backdrop'] = 'texture';
+
+    with_project('builder_hh_texture_', function ($project) use ($pages, $heroPart, $texturedBlueprint) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', [
+            'canvas' => 'full-bleed', 'motion' => 'calm', 'hero_blueprint' => $texturedBlueprint,
+        ]);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText('theme/parts/page-home--hero.html', $heroPart);
+
+        putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        $header = $project->readText('theme/parts/header.html');
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        foreach (['header' => $header, 'hero' => $hero] as $label => $part) {
+            assert_contains('theme:./assets/hero-backdrop-texture.jpg', $part, "{$label} carries the texture tile");
+            assert_contains('"backgroundAttachment":"fixed"', $part, "{$label} anchors the shared canvas");
+        }
+        assert_contains('"backgroundColor":"base"', $hero, 'the hero keeps its solid fallback surface');
+        assert_contains('stage-texture-backdrop-applied', $project->readText('logs/header-hero.txt'));
+    });
+
+    // A solid blueprint (the default) leaves both parts untouched.
+    with_project('builder_hh_solid_', function ($project) use ($pages, $heroPart) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', [
+            'canvas' => 'full-bleed', 'motion' => 'calm',
+            'hero_blueprint' => Automattic\SiteBuild\HeroBlueprint::defaultFor('focal-subject-stage'),
+        ]);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText('theme/parts/page-home--hero.html', $heroPart);
+
+        putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'hero-backdrop-texture'));
+        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'hero-backdrop-texture'));
+    });
+
+    // A contrast front surface never receives the tone-on-tone texture. The
+    // gate reads the DELIVERED surface, so the part is genuinely
+    // contrast-surfaced here.
+    $contrastSections = [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'asymmetric-split', 'background' => 'contrast']];
+    $contrastPages = [['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => $contrastSections]];
+    $contrastHeroPart = str_replace(
+        ['"backgroundColor":"base"', 'has-base-background-color'],
+        ['"backgroundColor":"contrast"', 'has-contrast-background-color'],
+        $heroPart,
+    );
+    with_project('builder_hh_texture_contrast_', function ($project) use ($contrastPages, $contrastHeroPart, $texturedBlueprint) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', [
+            'canvas' => 'full-bleed', 'motion' => 'calm', 'hero_blueprint' => $texturedBlueprint,
+        ]);
+        $project->writeJson('pages.json', ['pages' => $contrastPages]);
+        hh_above_fold($project, $contrastPages, 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText('theme/parts/page-home--hero.html', $contrastHeroPart);
+
+        putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'hero-backdrop-texture'));
+        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'hero-backdrop-texture'));
+    });
+});

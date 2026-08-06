@@ -298,3 +298,27 @@ test('collect-images keeps subject pipes and parses the three trailing fields', 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('collect-images synthesizes the code-owned stage-texture spec from style references (BIGR-776)', function () {
+    [$project, $tmp] = collect_fixture();
+    $styled = '<!-- wp:group {"style":{"background":{"backgroundImage":{"url":"theme:./assets/hero-backdrop-texture.jpg"},'
+        . '"backgroundSize":"420px","backgroundRepeat":"repeat","backgroundAttachment":"fixed"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', $styled);
+    $project->writeText('theme/parts/page-home--hero.html', $styled);
+    $project->writeText('theme/parts/footer.html', '<!-- wp:group --><div class="wp-block-group"></div><!-- /wp:group -->');
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq('hero-backdrop-texture.jpg', $images[0]['filename']);
+    assert_eq('theme:./assets/hero-backdrop-texture.jpg', $images[0]['src']);
+    assert_eq('square', $images[0]['aspectRatio']);
+    assert_eq('pending', $images[0]['status']);
+    assert_contains('seamless', $images[0]['subject']);
+    assert_contains('no lettering', $images[0]['subject']);
+    assert_eq(['parts/header.html', 'parts/page-home--hero.html'], $images[0]['sources']);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

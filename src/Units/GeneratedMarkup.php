@@ -2224,6 +2224,56 @@ final class GeneratedMarkup
     }
 
     /**
+     * Canonical placeholder path for the generated stage texture (BIGR-776).
+     * CollectImagesStep keys the code-owned texture spec off this exact path
+     * and GenerateImagesStep's strtr rewrite resolves it in style attributes
+     * the same way it resolves img srcs.
+     */
+    public const STAGE_TEXTURE_ASSET = 'theme:./assets/hero-backdrop-texture.jpg';
+
+    /**
+     * Paint the textured stage canvas on a part's root group (BIGR-776).
+     *
+     * The blueprint's `stage_backdrop: texture` swaps the hero's plain
+     * surface for a quiet generated tile that runs behind the stacked header
+     * and the hero as one canvas: both roots carry the same repeating
+     * background image with fixed attachment, so the tile is anchored to the
+     * viewport and reads as continuous across the header/hero seam. The
+     * root's solid backgroundColor stays beneath the image — an ungenerated
+     * or failed asset degrades to exactly the plain-color build.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function withStageTextureBackdrop(string $markup, string $part, array &$repairs = []): string
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null || $document->name($root) !== 'group') {
+            return $markup;
+        }
+        $attrs = $document->attrs($root) ?? [];
+        $background = (array) ($attrs['style']['background'] ?? []);
+        if ((($background['backgroundImage'] ?? [])['url'] ?? null) === self::STAGE_TEXTURE_ASSET) {
+            return $markup;
+        }
+        $attrs['style']['background'] = [
+            'backgroundImage' => ['url' => self::STAGE_TEXTURE_ASSET],
+            'backgroundSize' => '420px',
+            'backgroundRepeat' => 'repeat',
+            'backgroundAttachment' => 'fixed',
+        ];
+        $document->setAttrs($root, $attrs);
+        $repairs[] = [
+            'code' => 'stage-texture-backdrop-applied',
+            'part' => $part,
+            'authored' => 'a plain solid stage surface',
+            'delivered' => 'the committed texture canvas tiled behind the part (solid surface retained beneath)',
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /**
      * Center the copy of a center-anchored hero.
      *
      * BIGR-775 follow-up: models execute a centered blueprint unevenly — the

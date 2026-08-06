@@ -440,6 +440,37 @@ final class HeaderHeroStep implements Step
             $pages = self::withoutFrontPrimaryAction($pages, $warnings);
         }
 
+        // Textured stage canvas (BIGR-776): when the committed blueprint
+        // swaps the solid stage for a texture, the stacked header root and
+        // the hero root carry the same repeating fixed-attachment tile so the
+        // canvas reads as one surface across the header/hero seam. The solid
+        // surface tokens stay beneath the image, so an ungenerated or failed
+        // asset degrades to exactly the plain-color build. Applied only for
+        // the stacked relation over a base/tinted front surface — a
+        // tone-on-tone light texture has no business under an overlay veil
+        // or over a contrast stage.
+        if (self::stageBackdrop($project) === 'texture'
+            && ($final['header']['mode'] ?? '') === AboveFoldContract::MODE_STACKED
+            && $heroPart !== ''
+            && isset($writes[$heroRel])
+            && in_array(self::frontOpeningSurface($final), ['base', 'tinted'], true)
+        ) {
+            foreach ([$headerRel, $heroRel] as $texturedRel) {
+                $textureRepairs = [];
+                $writes[$texturedRel] = GeneratedMarkup::withStageTextureBackdrop(
+                    $writes[$texturedRel],
+                    basename($texturedRel, '.html'),
+                    $textureRepairs,
+                );
+                foreach ($textureRepairs as $repair) {
+                    $report[] = "[{$texturedRel}] " . (string) json_encode(
+                        $repair,
+                        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+                    );
+                }
+            }
+        }
+
         // Re-read the complete in-memory transaction after relation-dependent
         // repairs. The pure finalizer is independently idempotent, so this is
         // an assertion-by-construction that the bytes, plan, and final
@@ -1798,6 +1829,30 @@ final class HeaderHeroStep implements Step
             }
         }
         return $pages[0] ?? [];
+    }
+
+    /** The committed blueprint's stage backdrop; 'solid' when absent (BIGR-776). */
+    private static function stageBackdrop(Project $project): string
+    {
+        if (!$project->exists('designDirection.json')) {
+            return 'solid';
+        }
+        $blueprint = $project->readJson('designDirection.json')['hero_blueprint'] ?? null;
+        return is_array($blueprint) && ($blueprint['stage_backdrop'] ?? null) === 'texture'
+            ? 'texture'
+            : 'solid';
+    }
+
+    /** The contract's delivered front-opening surface token (BIGR-776). */
+    private static function frontOpeningSurface(array $contract): string
+    {
+        $heroPart = (string) ($contract['hero_part'] ?? '');
+        foreach ((array) ($contract['openings'] ?? []) as $opening) {
+            if (is_array($opening) && (string) ($opening['part'] ?? '') === $heroPart) {
+                return (string) ($opening['surface'] ?? '');
+            }
+        }
+        return '';
     }
 
     /**

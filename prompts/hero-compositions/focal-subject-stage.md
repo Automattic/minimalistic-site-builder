@@ -23,5 +23,14 @@ the blueprint's order; never turn the subject into wallpaper or a tiny card.
   action — below the fold, which is an objective failure.
 - Surface/width: keep the planned solid base/tinted/contrast surface and the
   asymmetric-split projection; image scale must remain the dominant region.
+- Stage backdrop: the blueprint's `stage_backdrop` is `"solid"` (the plain
+  planned surface) or `"texture"`. Choose `"texture"` only when the concept
+  genuinely wants a quiet material canvas — handmade, artisanal, heritage, or
+  tactile directions over a base/tinted stage — and keep `"solid"` for clean
+  product or corporate directions or any contrast stage. When texture is
+  committed, the BUILD supplies one generated tone-on-tone tile deterministically
+  and runs it behind the header and the hero as one canvas: do NOT author a
+  background image, cover, or pattern markup yourself, and do not describe the
+  texture in the general design narrative.
 - Objective failure: a cover/background image, transparent asset, multiple
   subjects/frames, tiny card treatment, or copy obscuring the subject fails.

@@ -10,7 +10,7 @@ test('hero blueprint defaults are complete and recipe-compatible', function () {
         assert_eq([
             'version', 'recipe', 'media_mode', 'headline_register', 'text_anchor',
             'headline_line_target', 'focal_region', 'text_safe_region', 'height_profile',
-            'cta_treatment', 'mobile_transformation',
+            'cta_treatment', 'stage_backdrop', 'mobile_transformation',
         ], array_keys($blueprint));
         assert_eq(1, $blueprint['version']);
         assert_eq($recipe, $blueprint['recipe']);
@@ -106,4 +106,28 @@ test('an unusable hero blueprint degrades to complete assigned defaults and warn
     assert_eq(1, count($warnings));
     assert_contains('hero_blueprint', $warnings[0]);
     assert_contains('synthesized', $warnings[0]);
+});
+
+test('stage_backdrop texture survives on focal-subject-stage and repairs elsewhere (BIGR-776)', function () {
+    $raw = HeroBlueprint::defaultFor('focal-subject-stage');
+    $raw['stage_backdrop'] = 'texture';
+    $repairs = [];
+    $warnings = [];
+    $normalized = HeroBlueprint::normalize($raw, 'focal-subject-stage', $repairs, $warnings);
+    assert_eq('texture', $normalized['stage_backdrop']);
+    assert_eq([], $repairs);
+    assert_eq([], $warnings);
+
+    $raw = HeroBlueprint::defaultFor('editorial-split');
+    $raw['stage_backdrop'] = 'texture';
+    $repairs = [];
+    $normalized = HeroBlueprint::normalize($raw, 'editorial-split', $repairs, $warnings);
+    assert_eq('solid', $normalized['stage_backdrop'], 'texture is repaired to solid on a recipe without the backdrop');
+    assert_true(count($repairs) >= 1);
+
+    $repairs = [];
+    $garbage = HeroBlueprint::defaultFor('focal-subject-stage');
+    $garbage['stage_backdrop'] = 'wallpaper';
+    $normalized = HeroBlueprint::normalize($garbage, 'focal-subject-stage', $repairs, $warnings);
+    assert_eq('solid', $normalized['stage_backdrop'], 'unknown backdrop values repair to the default');
 });

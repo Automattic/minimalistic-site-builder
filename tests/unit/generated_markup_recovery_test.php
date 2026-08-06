@@ -1020,3 +1020,27 @@ test('stripTextBlockShadow removes shadow presets from text blocks but not media
     assert_eq([], $again);
     assert_true(!str_contains($out, '"style":[]') && !str_contains($out, '"style":{}'), 'no empty style attr left behind');
 });
+
+test('withStageTextureBackdrop tiles a root group and stays idempotent (BIGR-776)', function () {
+    $doc = '<!-- wp:group {"backgroundColor":"base","anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-base-background-color has-background" id="hero">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Exhibit</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop($doc, 'p', $repairs);
+    assert_contains('theme:./assets/hero-backdrop-texture.jpg', $out, 'texture url in root attrs');
+    assert_contains('"backgroundAttachment":"fixed"', $out, 'fixed attachment anchors the shared canvas');
+    assert_contains('"backgroundColor":"base"', $out, 'the solid fallback surface stays beneath the image');
+    assert_true(in_array('stage-texture-backdrop-applied', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop($out, 'p', $again));
+    assert_eq([], $again);
+
+    // A non-group root is left alone.
+    $coverRoot = '<!-- wp:cover {"url":"x.jpg"} --><div class="wp-block-cover"></div><!-- /wp:cover -->';
+    $r = [];
+    assert_eq($coverRoot, Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop($coverRoot, 'p', $r));
+    assert_eq([], $r);
+});

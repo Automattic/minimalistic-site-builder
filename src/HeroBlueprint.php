@@ -24,6 +24,7 @@ final class HeroBlueprint
     public const FOCAL_REGIONS = ['start', 'center', 'end', 'full', 'none'];
     public const HEIGHT_PROFILES = ['compact', 'standard', 'immersive'];
     public const CTA_TREATMENTS = ['quiet', 'prominent'];
+    public const STAGE_BACKDROPS = ['solid', 'texture'];
     public const MOBILE_TRANSFORMATIONS = [
         'retain-media-overlay', 'stack-copy-first', 'stack-media-first',
         'flatten-layers',
@@ -61,6 +62,7 @@ final class HeroBlueprint
             'text_safe_region' => $defaults['text_safe_region'],
             'height_profile' => $defaults['height_profile'],
             'cta_treatment' => $defaults['cta_treatment'],
+            'stage_backdrop' => $defaults['stage_backdrop'],
             'mobile_transformation' => $defaults['mobile_transformation'],
         ];
     }
@@ -178,6 +180,23 @@ final class HeroBlueprint
             'cta_treatment',
             $repairs,
         );
+        // A blueprint persisted before the field existed (BIGR-776) defaults
+        // silently so legacy fixed points stay fixed points; a PRESENT but
+        // invalid or recipe-incompatible value still repairs loudly.
+        if (array_key_exists('stage_backdrop', $raw)) {
+            $out['stage_backdrop'] = self::enum(
+                $raw['stage_backdrop'],
+                self::STAGE_BACKDROPS,
+                $defaults['stage_backdrop'],
+                'stage_backdrop',
+                $repairs,
+            );
+            if (!in_array($out['stage_backdrop'], (array) ($meta['backdrops'] ?? ['solid']), true)) {
+                $authored = $out['stage_backdrop'];
+                $out['stage_backdrop'] = $defaults['stage_backdrop'];
+                self::repair($repairs, 'stage_backdrop', $authored, $out['stage_backdrop'], 'recipe compatibility');
+            }
+        }
         $out['mobile_transformation'] = self::enum(
             $raw['mobile_transformation'] ?? null,
             self::MOBILE_TRANSFORMATIONS,

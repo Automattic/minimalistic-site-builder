@@ -8,6 +8,7 @@ use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
+use Automattic\SiteBuild\Units\GeneratedMarkup;
 use Automattic\SiteBuild\Warnings;
 
 /**
@@ -72,12 +73,16 @@ final class CollectImagesStep implements Step
         /** @var array<string,array<string,mixed>> $byFilename keyed by filename, deduped */
         $byFilename = [];
         $warnings = [];
+        $textureSources = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
             $parsed = self::parseAndNormalize($content);
             if ($parsed['content'] !== $content) {
                 $project->writeText('theme/' . $rel, $parsed['content']);
+            }
+            if (str_contains($parsed['content'], GeneratedMarkup::STAGE_TEXTURE_ASSET)) {
+                $textureSources[] = $rel;
             }
             foreach ($parsed['images'] as $img) {
                 $cappedForFooter = false;
@@ -110,6 +115,29 @@ final class CollectImagesStep implements Step
                 $img['status']  = 'pending';
                 $byFilename[$filename] = $img;
             }
+        }
+
+        // Textured stage canvas (BIGR-776): the header/hero roots reference
+        // the texture through a root background style, not an <img>
+        // placeholder, so its code-owned spec is synthesized whenever a part
+        // carries the canonical asset path. The subject is reviewed here —
+        // the design direction's global image grade still applies at
+        // prompt-composition time like every other asset.
+        $textureFilename = basename(GeneratedMarkup::STAGE_TEXTURE_ASSET);
+        if ($textureSources !== [] && !isset($byFilename[$textureFilename])) {
+            $byFilename[$textureFilename] = [
+                'filename' => $textureFilename,
+                'src' => GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                'subject' => 'A seamless repeating tone-on-tone surface texture — subtle paper grain, plaster,'
+                    . ' linen, or stone — extremely low contrast, near-uniform tone, no objects, no lettering,'
+                    . ' no distinct shapes, no vignette',
+                'pageContext' => 'tiled page-canvas texture running behind the site header and the hero copy;'
+                    . ' it must stay quiet enough that readable text sits directly on it',
+                'style' => 'photorealistic',
+                'aspectRatio' => 'square',
+                'sources' => $textureSources,
+                'status' => 'pending',
+            ];
         }
 
         $project->writeJson('images.json', array_values($byFilename));
