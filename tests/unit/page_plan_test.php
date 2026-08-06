@@ -1738,6 +1738,47 @@ test('page-plan asks for no plan on a page the host already planned', function (
     });
 
     assert_eq(['home'], array_keys($reqs), 'the covered page is not asked for');
+    // requests() is re-invoked by repairAll(), so it must stay side-effect free.
+    assert_eq('', $narration, 'building requests narrates nothing');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan announces the host-supplied plan exactly once, even with a repair round', function () {
+    // repairAll() re-renders prompts by calling requests() a second time. An
+    // announcement placed there prints once per invocation; this is the shape
+    // that catches it — a supplied page alongside a rejected generated one.
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'menu', 'sections' => supplied_menu_sections()],
+    ]);
+    $llm = new FakeLlm();
+    // The generated homepage breaks the adjacency rule…
+    $llm->queueJson(['sections' => [
+        plan_section(['slug' => 'hero', 'title' => 'Hero']),
+        plan_section([
+            'slug' => 'story', 'title' => 'Story', 'type' => 'about',
+            'layout_archetype' => 'centered-stack', 'background' => 'base',
+            'handoff' => 'Between the hero above and the visit block below.',
+        ]),
+        plan_section([
+            'slug' => 'visit', 'title' => 'Visit', 'type' => 'cta',
+            'layout_archetype' => 'centered-stack', 'background' => 'contrast',
+            'handoff' => 'Between the story above and the footer below.',
+        ]),
+    ]]);
+    // …and the repair round returns a valid one.
+    queue_supplied_plan_home_response($llm);
+
+    $narration = captured_narration(
+        fn () => (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project)
+    );
+
+    assert_eq(2, $llm->completeJsonBatchCalls, 'the rejected homepage really did reach a repair round');
+    assert_eq(
+        1,
+        substr_count($narration, 'using host-supplied page plan'),
+        'the supplied-plan announcement is not repeated by the repair round',
+    );
     assert_contains('host-supplied page plan for 1 page(s)', $narration);
     assert_contains('no page-plan LLM call', $narration);
 
@@ -1781,7 +1822,7 @@ test('page-plan ignores a supplied plan for a slug the page tree does not contai
 
     $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
     $reqs = [];
-    captured_narration(function () use ($step, $project, &$reqs) {
+    $narration = captured_narration(function () use ($step, $project, &$reqs) {
         $reqs = $step->requests($project);
         $step->run($project);
     });
@@ -1794,6 +1835,19 @@ test('page-plan ignores a supplied plan for a slug the page tree does not contai
         array_column($plan['pages'][1]['sections'], 'slug'),
         'the unused supplied plan did not leak into another page',
     );
+
+    // The narration counts COVERED pages, never supplied entries: announcing a
+    // skipped call and then making one for every page is worse than silence.
+    assert_true(
+        !str_contains($narration, 'host-supplied page plan'),
+        'a plan that covers nothing must not announce a saved call',
+    );
+    // Silence is not enough on its own — the host's payload did nothing, and
+    // that is the one thing they most need told.
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains("file='meta.json'; path=\"page_plan[slug='contact']\"", $joined);
+    assert_contains('delivered=unused', $joined);
+    assert_contains('cannot add pages', $joined);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
@@ -1820,8 +1874,11 @@ test('page-plan coerces a rule-breaking supplied plan mechanically instead of pa
     }
 
     $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
-    assert_contains("supplied plan for 'menu' broke a rule", $joined);
-    assert_contains('coerced mechanically', $joined);
+    // Structured like every other durable row in this step (AGENTS.md rung 4).
+    assert_contains("file='pages.json'; path=\"pages[slug='menu'].sections\"", $joined);
+    assert_contains('authored="host-supplied plan rejected by normalize()', $joined);
+    assert_contains('delivered="mechanically coerced supplied sections"', $joined);
+    assert_contains('disposition=coerced the supplied plan deterministically', $joined);
     assert_contains('plaid', $joined, 'the authored value stays actionable in warnings.json');
 
     exec('rm -rf ' . escapeshellarg($tmp));
@@ -1872,21 +1929,206 @@ test('page-plan without a supplied plan behaves exactly as before', function () 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('PagePlanStep::suppliedPlan keys usable entries by slug and drops the rest', function () {
+test('PagePlanStep::suppliedPlan keys usable entries by slug and warns for the rest', function () {
     assert_eq([], PagePlanStep::suppliedPlan([]), 'an absent page_plan is not a supplied plan');
-    assert_eq([], PagePlanStep::suppliedPlan(['page_plan' => 'not a list']));
-    assert_eq([], PagePlanStep::suppliedPlan(['page_plan' => [
-        'not a page',
-        ['sections' => [['slug' => 'hero']]],          // no slug
-        ['slug' => '   ', 'sections' => [['slug' => 'hero']]], // blank slug is not 'site'
-        ['slug' => 'menu'],                            // no sections
-        ['slug' => 'menu', 'sections' => []],          // empty sections
-        ['slug' => 'menu', 'sections' => 'nope'],      // sections must be a list
-    ]]));
+    assert_eq([], PagePlanStep::suppliedPlan(['page_plan' => []]), 'an empty list supplies nothing');
 
+    $warnings = [];
+    $dropped = PagePlanStep::suppliedPlan(['page_plan' => [
+        'not a page',
+        ['sections' => [['slug' => 'hero']]],                  // no slug
+        ['slug' => '   ', 'sections' => [['slug' => 'hero']]], // blank slug is not 'site'
+        ['slug' => 'menu'],                                    // no sections
+        ['slug' => 'menu', 'sections' => []],                  // empty sections
+        ['slug' => 'menu', 'sections' => 'nope'],              // sections must be a list
+    ]], $warnings);
+
+    assert_eq([], $dropped);
+    assert_eq(6, count($warnings), 'every dropped entry is individually actionable');
+    $joined = implode("\n", $warnings);
+    assert_contains("file='meta.json'; path=\"page_plan[0]\"", $joined);
+    assert_contains('entry is not an object', $joined);
+    assert_contains('entry has no "slug"', $joined);
+    assert_contains('has no non-empty "sections" array', $joined);
+    assert_contains('delivered=removed', $joined);
+    assert_contains('planned by the model instead', $joined);
+
+    $kept = [];
     $supplied = PagePlanStep::suppliedPlan(['page_plan' => [
         ['slug' => 'Our Menu', 'sections' => [['slug' => 'dishes']]],
-    ]]);
+    ]], $kept);
     assert_eq(['our-menu'], array_keys($supplied), 'slugs are slugified the same way the tree is');
     assert_eq([['slug' => 'dishes']], $supplied['our-menu']);
+    assert_eq([], $kept, 'a usable entry is not a loss');
+});
+
+test('PagePlanStep::suppliedPlan rejects a present but wrong-shaped page_plan', function () {
+    // SiteSpecStep throws for a wrong-shaped supplied site_spec rather than
+    // quietly generating one. A corrupt build input the host controls is not
+    // generated content, and swallowing it bills them for a build that did
+    // none of what they asked.
+    foreach ([
+        'a string'                       => 'not a list',
+        'a number'                       => 7,
+        'a slug-keyed map'               => ['menu' => [['slug' => 'dishes']]],
+        'a list with a hole in the keys' => [0 => ['slug' => 'menu'], 2 => ['slug' => 'about']],
+    ] as $label => $value) {
+        $e = assert_throws(
+            fn () => PagePlanStep::suppliedPlan(['page_plan' => $value]),
+            "{$label} must not be silently ignored",
+        );
+        assert_contains('meta.json "page_plan" must be a JSON array', $e->getMessage());
+    }
+
+    // The commonest wrong shape names its own diagnosis.
+    $keyed = assert_throws(fn () => PagePlanStep::suppliedPlan([
+        'page_plan' => ['menu' => [['slug' => 'dishes']]],
+    ]));
+    assert_contains('got a keyed object', $keyed->getMessage());
+});
+
+test('page-plan aborts the build for a wrong-shaped supplied page plan', function () {
+    [$project, $tmp] = supplied_plan_fixture();
+    $meta = $project->readJson('meta.json');
+    $meta['page_plan'] = 'not a list';
+    $project->writeJson('meta.json', $meta);
+    $llm = new FakeLlm();
+
+    $e = assert_throws(
+        fn () => (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project)
+    );
+
+    assert_contains('meta.json "page_plan" must be a JSON array', $e->getMessage());
+    assert_eq(0, $llm->completeJsonBatchCalls, 'the host is told before paying for the batch');
+    assert_true(!$project->exists('pages.json'), 'no half-planned artifact is left behind');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan drops an unusable supplied entry and plans that page normally', function () {
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'menu', 'sections' => []],   // unusable: dropped, generated instead
+        ['slug' => 'home', 'sections' => supplied_menu_sections()],
+    ]);
+    $llm = new FakeLlm();
+    $llm->queueJson(['sections' => supplied_menu_sections(['slug' => 'generated-menu-hero'])]);
+
+    captured_narration(fn () => (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $plan = $project->readJson('pages.json');
+    assert_eq(
+        'generated-menu-hero',
+        $plan['pages'][1]['sections'][0]['slug'],
+        'one bad entry costs only its own page',
+    );
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains("path=\"page_plan[0]\"", $joined);
+    assert_contains('has no non-empty "sections" array', $joined);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan overrides a supplied FRONT page with the code-owned hero topology', function () {
+    // The most surprising thing about this feature, and the one that matters
+    // most on a single-page build (where the front page is the WHOLE site): a
+    // supplied plan owns the page's content, but the assigned hero recipe
+    // still owns the opening, and the front-page section minimum still applies.
+    // Both are deliberate — code-owned topology outranks a supplied plan
+    // exactly as it outranks generated output.
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'home', 'sections' => [
+            plan_section([
+                'slug'             => 'welcome',
+                'title'            => 'Welcome',
+                'type'             => 'intro',
+                'layout_archetype' => 'centered-stack',
+                'background'       => 'tinted',
+                'handoff'          => 'Between the site header above and the closing call below.',
+            ]),
+            plan_section([
+                'slug'             => 'visit',
+                'title'            => 'Visit',
+                'type'             => 'cta',
+                'layout_archetype' => 'asymmetric-split',
+                'background'       => 'contrast',
+                'handoff'          => 'Between the welcome above and the footer below.',
+            ]),
+        ]],
+    ]);
+    $llm = new FakeLlm();
+    $llm->queueJson(['sections' => supplied_menu_sections()]);   // the unplanned /menu/
+
+    captured_narration(fn () => (new PagePlanStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project));
+
+    $home = $project->readJson('pages.json')['pages'][0];
+    assert_eq(true, $home['front']);
+    // The recipe (cinematic-safe-zone) locks the opening topology.
+    assert_eq(
+        'full-bleed-cover',
+        $home['sections'][0]['layout_archetype'],
+        'the assigned hero recipe overrides the supplied opening archetype',
+    );
+    assert_eq(
+        'image',
+        $home['sections'][0]['background'],
+        'and its default surface, because the supplied one is not recipe-compatible',
+    );
+    assert_eq('welcome', $home['sections'][0]['slug'], 'the supplied section itself is kept');
+    // A 2-section front page is degenerate, so the contract minimum pads it.
+    assert_eq(['welcome', 'overview', 'visit'], array_column($home['sections'], 'slug'));
+    assert_eq(['hero', 'content', 'closing'], array_column($home['sections'], 'role'));
+
+    // Both overrides are recorded, not silent: the topology rewrite is a
+    // semantics-preserving repair, the padding is a durable value-loss row.
+    $repairs = $project->readText('logs/page-plan.txt');
+    assert_contains("path=\"pages[slug='home'].sections[0].layout_archetype\"", $repairs);
+    assert_contains('authored="centered-stack"; delivered="full-bleed-cover"', $repairs);
+    assert_contains('restored the code-assigned hero recipe projection', $repairs);
+    assert_contains('authored="tinted"; delivered="image"', $repairs);
+    $joined = implode("\n", $project->readJson('warnings.json')['page-plan'] ?? []);
+    assert_contains('authored=2 delivered section(s); delivered=3 section(s) after padding', $joined);
+    assert_contains('thinner than the contract minimum', $joined);
+    assert_eq(1, $llm->completeJsonBatchCalls, 'the supplied front page still costs no call');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('page-plan makes no LLM request at all when the host supplies every page', function () {
+    // The feature's whole point, and the shape a single-page host build takes.
+    [$project, $tmp] = supplied_plan_fixture([
+        ['slug' => 'home', 'sections' => [
+            plan_section(['slug' => 'hero', 'title' => 'Hero']),
+            plan_section([
+                'slug' => 'story', 'title' => 'Story', 'type' => 'about',
+                'layout_archetype' => 'asymmetric-split', 'background' => 'base',
+                'handoff' => 'Between the hero above and the closing call below.',
+            ]),
+            plan_section([
+                'slug' => 'visit', 'title' => 'Visit', 'type' => 'cta',
+                'layout_archetype' => 'centered-stack', 'background' => 'contrast',
+                'handoff' => 'Between the story above and the footer below.',
+            ]),
+        ]],
+        ['slug' => 'menu', 'sections' => supplied_menu_sections()],
+    ]);
+    $llm = new FakeLlm();
+    $step = new PagePlanStep($llm, new PromptRenderer(repo_path('prompts')));
+
+    $reqs = [];
+    $narration = captured_narration(function () use ($step, $project, &$reqs) {
+        $reqs = $step->requests($project);
+        // No queued response exists: FakeLlm throws if anything is asked for.
+        $step->run($project);
+    });
+
+    assert_eq([], $reqs, 'not one prompt is rendered');
+    assert_eq([], $llm->calls, 'not one request reaches the model');
+    assert_contains('host-supplied page plan for 2 page(s)', $narration);
+
+    $plan = $project->readJson('pages.json');
+    assert_eq(['home', 'menu'], array_column($plan['pages'], 'slug'));
+    assert_eq(['hero', 'story', 'visit'], array_column($plan['pages'][0]['sections'], 'slug'));
+    assert_eq(['menu-hero', 'dishes'], array_column($plan['pages'][1]['sections'], 'slug'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
 });

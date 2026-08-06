@@ -109,18 +109,45 @@ host-specific aliases to this package.
 
 A host that already knows how a page is laid out can supply that page's section
 list the same way, as `meta.json.page_plan` — a list of `{slug, sections: [...]}`
-maps, extra keys ignored. `createProject()` merges over any pre-seeded meta, so
-a host writes the key before calling it. Entries are matched to the page tree
-**by slug**: the tree stays the site spec's decision, so a supplied plan naming
-a slug the tree does not contain is simply unused and can never add a page.
+maps, extra keys ignored. Each `sections` entry has the shape
+`PagePlanStep::jsonSchema()` describes: that public method is the actual
+contract the model is held to, and supplied sections are validated against
+exactly the same rules.
 
-The `page-plan` step then issues no LLM request for the pages it covers.
-Supplied sections still go through the same normalization, fallback ladder and
-`warnings.json` path as generated ones — only the model repair round is skipped,
-because paying for a repair call on a plan supplied precisely to avoid a call
-defeats the purpose; a supplied plan that breaks an art-direction rule is
-coerced mechanically instead. Pages the plan does not cover are generated as
-usual.
+Entries are matched to the page tree **by slug**: the tree stays the site spec's
+decision, so a supplied plan naming a slug the tree does not contain is simply
+unused (recorded in `warnings.json`) and can never add a page. Two entries whose
+slugs slugify to the same key collapse, last one winning.
+
+The `page-plan` step then issues no LLM request for the pages it covers — supply
+every page and it makes none at all. Supplied sections still go through the same
+normalization, fallback ladder and `warnings.json` path as generated ones — only
+the model repair round is skipped, because paying for a repair call on a plan
+supplied precisely to avoid a call defeats the purpose; a supplied plan that
+breaks an art-direction rule is coerced mechanically instead. Pages the plan
+does not cover are generated as usual.
+
+**The code-owned parts still win.** A supplied plan owns a page's content, not
+its topology. On the **front page** the assigned hero recipe overrides the first
+section's `layout_archetype` (and its `background`, when the supplied one is not
+compatible with that recipe), and a front page thinner than the contract minimum
+is still padded with generic briefs. Both are recorded — the topology rewrite in
+`logs/page-plan.txt`, the padding in `warnings.json` — and neither costs an LLM
+call. This matters most on a single-page build, where the front page is the
+whole site.
+
+A present-but-wrong-shaped `page_plan` is **fatal**, exactly as a wrong-shaped
+`site_spec` is: a JSON string, or a slug-keyed object (`{"menu": […]}`) rather
+than a list, aborts the step instead of quietly generating everything and
+billing the host for a build that ignored their payload. An individually
+unusable *entry* inside a well-formed list is the lesser defect and is dropped
+with a warning row, leaving its page to be generated normally.
+
+**Known limitation:** there is no `createProject(pagePlan: …)` parameter yet, so
+the key is pre-seeded into `meta.json` — `createProject()` merges over existing
+meta, and `page_plan` is not one of the keys it writes. That works only when the
+caller passes an explicit `slug:`; the null-slug path claims its directory with
+`mkdir` and so cannot be pre-seeded. A facade parameter is a planned follow-up.
 
 ### Choosing the model / provider
 

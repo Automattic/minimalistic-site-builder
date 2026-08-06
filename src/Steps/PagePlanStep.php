@@ -43,7 +43,11 @@ use Automattic\SiteBuild\StepDeclaration;
  * never add or rename a page. Supplied sections still go through the same
  * deterministic normalization, fallback ladder, and warning path as model
  * output — only the model-repair round is skipped, because paying for a repair
- * call on a plan supplied precisely to avoid a call defeats the purpose.
+ * call on a plan supplied precisely to avoid a call defeats the purpose. The
+ * code-owned pieces still win over a supplied plan exactly as they win over
+ * generated output: a supplied FRONT page has its opening reconciled to the
+ * assigned hero recipe projection and is padded up to the front-page section
+ * minimum, both recorded like any other repair.
  */
 final class PagePlanStep implements GeneratedJsonFallbackStep
 {
@@ -203,11 +207,12 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         // covers, exactly as meta.json `site_spec` does for the site spec.
         // Matched by slug only: the page TREE is the spec's decision, and a
         // supplied plan that names a page the tree dropped is simply unused.
+        //
+        // Deliberately silent: repairAll() calls this method a SECOND time to
+        // re-render the prompts it appends its correction suffix to, so any
+        // narration here would print twice on a build with a rejected page.
+        // The announcement lives in consumeResults(), which runs once.
         $supplied = self::suppliedPlan($meta);
-        if ($supplied !== []) {
-            Narrator::write('  using host-supplied page plan for ' . count($supplied)
-                . " page(s) (no page-plan LLM call for those)\n");
-        }
 
         $requests = [];
         $jsonSchema = ['name' => 'page_plan', 'schema' => self::jsonSchema()];
@@ -238,35 +243,70 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
     }
 
     /**
-     * slug => raw sections list, from meta.json `page_plan`. Entries without a
-     * usable slug or a non-empty sections list are dropped; validation itself
-     * stays in normalize(), which every page still goes through. Pure —
-     * unit-testable.
+     * slug => raw sections list, from meta.json `page_plan`. Extra keys on an
+     * entry are ignored; section validation itself stays in normalize(), which
+     * every page still goes through. Pure — unit-testable.
      *
-     * @param array<mixed> $meta
+     * A present-but-wrong-shaped `page_plan` is FATAL, exactly as a wrong-shaped
+     * `site_spec` is in SiteSpecStep: it is a corrupt build input the host
+     * controls, not generated content, and silently ignoring it would bill the
+     * host for a whole build that quietly did none of what they asked. The
+     * commonest wrong shape is a slug-keyed map ({"menu": [...]}) rather than a
+     * list, which is why a non-list array is rejected too.
+     *
+     * An individually unusable ENTRY inside a well-formed list is a lesser
+     * defect: it is dropped with a warning row and its page is generated
+     * normally, so one bad entry cannot cost the host the other pages.
+     *
+     * @param array<mixed>  $meta
+     * @param list<string>  $warnings appended to in place, one per dropped entry
      * @return array<string,array<mixed>>
      */
-    public static function suppliedPlan(array $meta): array
+    public static function suppliedPlan(array $meta, array &$warnings = []): array
     {
-        $raw = $meta['page_plan'] ?? null;
-        if (!is_array($raw)) {
+        if (!array_key_exists('page_plan', $meta)) {
             return [];
         }
+        $raw = $meta['page_plan'];
+        if (!is_array($raw) || !array_is_list($raw)) {
+            throw new \RuntimeException(
+                'meta.json "page_plan" must be a JSON array of {slug, sections} objects, got '
+                . (is_array($raw) ? 'a keyed object' : get_debug_type($raw))
+            );
+        }
+
         $out = [];
-        foreach ($raw as $page) {
+        foreach ($raw as $index => $page) {
             if (!is_array($page)) {
+                $warnings[] = self::droppedSuppliedEntry($index, 'entry is not an object');
                 continue;
             }
             // Guard the RAW slug: slugify('') answers 'site', so slugifying
             // first would key an unnamed entry onto a real page called "site".
             $rawSlug = trim((string) ($page['slug'] ?? ''));
+            if ($rawSlug === '') {
+                $warnings[] = self::droppedSuppliedEntry($index, 'entry has no "slug"');
+                continue;
+            }
             $sections = $page['sections'] ?? null;
-            if ($rawSlug === '' || !is_array($sections) || $sections === []) {
+            if (!is_array($sections) || $sections === []) {
+                $warnings[] = self::droppedSuppliedEntry(
+                    $index,
+                    "entry for '{$rawSlug}' has no non-empty \"sections\" array",
+                );
                 continue;
             }
             $out[ProjectStore::slugify($rawSlug)] = $sections;
         }
         return $out;
+    }
+
+    /** One durable row per `page_plan` entry the accessor could not use. */
+    private static function droppedSuppliedEntry(int|string $index, string $reason): string
+    {
+        return "page-plan: file='meta.json'; path=\"page_plan[{$index}]\"; authored={$reason}; "
+            . 'delivered=removed; disposition=unusable host-supplied page-plan entry dropped; '
+            . 'that page is planned by the model instead';
     }
 
     /**
@@ -308,22 +348,40 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
         $blueprint = DesignDirectionStep::heroBlueprintFor($project);
         $frontProjection = HeroComposition::planProjection($blueprint);
         $actionContext = self::primaryActionContext($siteSpec, $pages);
-        // The same slug-matched supplied plan requests() skipped asking for.
-        $supplied = self::suppliedPlan($project->readJson('meta.json'));
+
+        // The same slug-matched supplied plan requests() skipped asking for,
+        // resolved against the real page tree. Announced HERE, not in
+        // requests(): repairAll() re-invokes that method to re-render prompts,
+        // so narration placed there prints twice whenever a page is rejected.
+        $warnings = $initialWarnings;
+        $supplied = self::suppliedPlan($project->readJson('meta.json'), $warnings);
+        $covered = array_intersect_key($supplied, array_column($pages, 'slug', 'slug'));
+        if ($covered !== []) {
+            Narrator::write('  using host-supplied page plan for ' . count($covered)
+                . " page(s) (no page-plan LLM call for those)\n");
+        }
+        // Counting supplied ENTRIES here would let the build announce pages it
+        // then went on to ask the model for. An unmatched slug is a real host
+        // defect — their payload silently did nothing — so it gets a row.
+        foreach (array_keys(array_diff_key($supplied, $covered)) as $unmatched) {
+            $warnings[] = "page-plan: file='meta.json'; path=\"page_plan[slug='{$unmatched}']\"; "
+                . 'authored=host-supplied sections for a page the site spec page tree does not contain; '
+                . 'delivered=unused; disposition=supplied plans are matched by slug and cannot add pages; '
+                . 'that plan was ignored and every page in the tree was planned normally';
+        }
 
         // First pass: normalize what the model returned, collecting every page
         // that broke a rule so they can all be re-asked together below.
         $sectionsBySlug = [];
         $rejected = [];
-        $warnings = $initialWarnings;
         $successfulRepairs = [];
         foreach ($pages as $page) {
             $slug = (string) $page['slug'];
             $front = (bool) $page['front'];
             $projection = $front ? $frontProjection : null;
-            if (isset($supplied[$slug])) {
+            if (isset($covered[$slug])) {
                 $sectionsBySlug[$slug] = self::normalizeSupplied(
-                    $supplied[$slug],
+                    $covered[$slug],
                     $front,
                     $warnings,
                     $slug,
@@ -542,8 +600,10 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
             ? "No semantics-preserving page-plan repairs were needed.\n"
             : implode("\n", $successfulRepairs) . "\n");
         if ($successfulRepairs !== []) {
+            // Not "generated" field(s): a host-supplied plan goes through the
+            // same normalize() and lands its repairs in this same report.
             Narrator::write('  [page-plan] repaired ' . count($successfulRepairs)
-                . " generated plan field(s) (reported separately from durable warnings).\n");
+                . " plan field(s) (reported separately from durable warnings).\n");
         }
 
         // Only removals, fallback substitutions, and other delivered-value
@@ -1635,8 +1695,13 @@ final class PagePlanStep implements GeneratedJsonFallbackStep
                 return $sections;
             }
         } catch (\RuntimeException $e) {
-            $warnings[] = "page-plan: supplied plan for '{$pageSlug}' broke a rule ("
-                . $e->getMessage() . '); coerced mechanically';
+            $warnings[] = self::valueLossWarning(
+                $pageSlug === '' ? 'pages[].sections' : "pages[slug='{$pageSlug}'].sections",
+                'host-supplied plan rejected by normalize(): ' . $e->getMessage(),
+                'mechanically coerced supplied sections',
+                'coerced the supplied plan deterministically rather than paying for the model repair '
+                    . 'round it was supplied to avoid',
+            );
         }
 
         // recoverSections() deliberately returns [] rather than inventing
