@@ -265,6 +265,45 @@ test('HeroUnit generate returns a JSON-serializable repairs and warnings envelop
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
 });
 
+test('HeroUnit warns for removed eyebrow and separator content while preserving headline-first copy', function () {
+    $eyebrow = '<!-- wp:paragraph {"fontSize":"caption"} -->'
+        . '<p class="has-caption-font-size">Tbilisi Old Town</p><!-- /wp:paragraph -->';
+    $support = '<!-- wp:paragraph --><p>The exact support paragraph survives.</p><!-- /wp:paragraph -->';
+    $separator = '<!-- wp:separator {"className":"is-style-wide"} -->'
+        . '<hr class="wp-block-separator is-style-wide"/><!-- /wp:separator -->';
+    $eyebrowShell = '<!-- wp:group {"backgroundColor":"accent"} -->'
+        . '<div class="wp-block-group has-accent-background-color has-background">'
+        . $eyebrow . $separator . '</div><!-- /wp:group -->';
+    $headline = '<!-- wp:heading {"level":1} -->'
+        . '<h1 class="wp-block-heading">Headline opens the hero</h1><!-- /wp:heading -->';
+    $raw = hero_unit_root($eyebrowShell . $support . $headline);
+    $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+
+    $first = $unit->finish($raw, hero_unit_contract_input('editorial-split', null));
+
+    assert_true(!str_contains($first->markup, 'Tbilisi Old Town'));
+    assert_true(!str_contains($first->markup, 'wp:separator'));
+    assert_true(!str_contains($first->markup, 'has-accent-background-color'), 'the emptied shell is removed');
+    assert_contains($headline . $support, $first->markup, 'the sole support block moves intact behind the H1');
+    assert_eq(['hero-support-moved-after-headline'], array_column($first->repairs, 'code'));
+    assert_eq(2, count($first->warnings));
+    $warnings = implode("\n", $first->warnings);
+    foreach ([
+        "file='theme/parts/page-home--hero.html'",
+        'Tbilisi Old Town',
+        'is-style-wide',
+        'delivered=removed',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $warnings);
+    }
+
+    $second = $unit->finish($first->markup, hero_unit_contract_input('editorial-split', null));
+    assert_eq($first->markup, $second->markup);
+    assert_eq([], $second->repairs);
+    assert_eq([], $second->warnings);
+});
+
 test('HeroUnit normalizes recipe and mobile root markers while preserving unrelated classes', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $input = hero_unit_contract_input('editorial-split', null);

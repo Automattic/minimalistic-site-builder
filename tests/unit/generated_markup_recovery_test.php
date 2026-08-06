@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 // Structural wrapper recovery in GeneratedMarkup::normalize(): the model
@@ -687,17 +688,74 @@ test('stripHeroSeparators removes hairline rules from the hero (BIGR-775)', func
         . '<!-- wp:paragraph --><p>Naturally leavened loaves, baked fresh by hand.</p><!-- /wp:paragraph -->'
         . '</section><!-- /wp:group -->';
     $repairs = [];
-    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroSeparators($doc, 'p', $repairs);
+    $warnings = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroSeparators(
+        $doc,
+        'p',
+        $repairs,
+        $warnings,
+    );
     assert_true(!str_contains($out, 'wp:separator'), 'separator delimiters removed');
     assert_true(!str_contains($out, 'wp-block-separator'), 'separator HTML removed');
     assert_contains('Bread Made Slowly', $out, 'headline untouched');
     assert_contains('Naturally leavened loaves', $out, 'standfirst untouched');
-    assert_true(in_array('hero-separator-stripped', array_column($repairs, 'code'), true));
+    assert_eq([], $repairs, 'visible separator removal is durable loss, not a semantics-preserving repair');
+    assert_eq(1, count($warnings));
+    foreach ([
+        "file='theme/parts/p.html'",
+        "block='wp:group[0] > wp:separator[0]'",
+        'backgroundColor',
+        'delivered=removed',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
 
     // Idempotent.
     $again = [];
-    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroSeparators($out, 'p', $again));
+    $againWarnings = [];
+    assert_eq(
+        $out,
+        Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroSeparators(
+            $out,
+            'p',
+            $again,
+            $againWarnings,
+        ),
+    );
     assert_eq([], $again);
+    assert_eq([], $againWarnings);
+});
+
+test('stripHeroSeparators removes one outer transaction when generated separators are nested', function () {
+    $following = '<!-- wp:paragraph --><p>KEEP THIS SIBLING</p><!-- /wp:paragraph -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">'
+        . '<!-- wp:separator {"className":"outer-rule"} --><div class="outer-rule">'
+        . '<!-- wp:separator {"className":"inner-rule"} --><hr class="wp-block-separator inner-rule"/>'
+        . '<!-- /wp:separator --></div><!-- /wp:separator -->'
+        . $following
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroSeparators(
+        $doc,
+        'nested-separators',
+        $repairs,
+        $warnings,
+    );
+
+    assert_eq(
+        '<!-- wp:group --><div class="wp-block-group">' . $following . '</div><!-- /wp:group -->',
+        $out,
+        'the outer separator range is removed without consuming the following sibling or root closer',
+    );
+    $parsed = BlockMarkup::parse($out);
+    assert_true($parsed->endOffset((int) $parsed->topLevel()) !== null, 'the surviving root remains complete');
+    assert_eq([], $repairs);
+    assert_eq(1, count($warnings), 'the outer loss boundary covers its malformed nested separator');
+    assert_contains('outer-rule', $warnings[0]);
+    assert_contains('delivered=removed', $warnings[0]);
 });
 
 test('stripHeroEyebrow removes tracked caption lines and minor headings above the H1 only (BIGR-775)', function () {
@@ -714,17 +772,36 @@ test('stripHeroEyebrow removes tracked caption lines and minor headings above th
         . '<!-- wp:paragraph {"fontSize":"lead"} --><p class="has-lead-font-size">Home cooking of the Caucasus at long tavern tables.</p><!-- /wp:paragraph -->'
         . '</section><!-- /wp:group -->';
     $repairs = [];
-    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow($doc, 'p', $repairs);
+    $warnings = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow($doc, 'p', $repairs, $warnings);
     assert_true(!str_contains($out, 'Tbilisi Old Town'), 'tracked caption eyebrow removed');
     assert_true(!str_contains($out, 'Recycled Glass Studio'), 'minor-heading eyebrow removed');
     assert_contains('Bread from the hearth', $out, 'headline untouched');
     assert_contains('Home cooking of the Caucasus', $out, 'standfirst untouched');
-    assert_true(in_array('hero-eyebrow-stripped', array_column($repairs, 'code'), true));
+    assert_eq([], $repairs, 'removed unique copy is durable loss, not a repair');
+    assert_eq(2, count($warnings));
+    assert_contains('Tbilisi Old Town', implode("\n", $warnings));
+    assert_contains('Recycled Glass Studio', implode("\n", $warnings));
+    foreach ($warnings as $warning) {
+        foreach (["file='theme/parts/p.html'", "block='wp:", 'authored=', 'delivered=removed', 'disposition='] as $context) {
+            assert_contains($context, $warning);
+        }
+    }
 
     // Idempotent.
     $again = [];
-    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow($out, 'p', $again));
+    $againWarnings = [];
+    assert_eq(
+        $out,
+        Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow(
+            $out,
+            'p',
+            $again,
+            $againWarnings,
+        ),
+    );
     assert_eq([], $again);
+    assert_eq([], $againWarnings);
 
     // A plain pre-H1 paragraph without eyebrow signals is reading copy, and a
     // hero without an H1 is left alone entirely.
@@ -743,6 +820,144 @@ test('stripHeroEyebrow removes tracked caption lines and minor headings above th
     assert_eq([], $r);
 });
 
+test('stripHeroEyebrow coalesces nested candidates and removes only a dedicated empty wrapper', function () {
+    $headline = '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Headline survives</h1><!-- /wp:heading -->';
+    $standfirst = '<!-- wp:paragraph --><p>Sibling copy stays byte-for-byte.</p><!-- /wp:paragraph -->';
+    $nested = '<!-- wp:paragraph {"fontSize":"caption"} --><div class="has-caption-font-size">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Nested Label</p>'
+        . '<!-- /wp:paragraph --></div><!-- /wp:paragraph -->';
+    $wrapped = '<!-- wp:group {"backgroundColor":"accent","style":{"spacing":{"padding":{"top":"20px"}}}} -->'
+        . '<div class="wp-block-group has-accent-background-color has-background">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p class="has-caption-font-size">Wrapped Label</p>'
+        . '<!-- /wp:paragraph --></div><!-- /wp:group -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">'
+        . $nested . $wrapped . $headline . $standfirst
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::stripHeroEyebrow(
+        $doc,
+        'nested-eyebrows',
+        $repairs,
+        $warnings,
+    );
+
+    assert_eq(
+        '<!-- wp:group --><div class="wp-block-group">' . $headline . $standfirst . '</div><!-- /wp:group -->',
+        $out,
+        'nested candidates and the eyebrow-only wrapper are removed without touching following siblings',
+    );
+    assert_eq([], $repairs);
+    assert_eq(2, count($warnings));
+    assert_contains('Nested Label', implode("\n", $warnings));
+    assert_contains('Wrapped Label', implode("\n", $warnings));
+    assert_contains('now-empty dedicated wrapper', implode("\n", $warnings));
+    $parsed = BlockMarkup::parse($out);
+    assert_true($parsed->endOffset((int) $parsed->topLevel()) !== null, 'the root delimiter remains complete');
+});
+
+test('headlineFirstHeroCopy moves one adjacent support paragraph after the H1 byte-for-byte', function () {
+    $beforeSibling = '<!-- wp:image --><figure class="wp-block-image"><img src="before.jpg" alt="" /></figure><!-- /wp:image -->';
+    $paragraph = '<!-- wp:paragraph {"fontSize":"lead"} --><p class="has-lead-font-size">The exact support line.</p><!-- /wp:paragraph -->';
+    $headline = '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Headline first</h1><!-- /wp:heading -->';
+    $afterSibling = '<!-- wp:buttons --><div class="wp-block-buttons"></div><!-- /wp:buttons -->';
+    $opening = '<!-- wp:group --><div class="wp-block-group">';
+    $closing = '</div><!-- /wp:group -->';
+    $doc = $opening . $beforeSibling . $paragraph . $headline . $afterSibling . $closing;
+    $repairs = [];
+    $warnings = [];
+
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::headlineFirstHeroCopy(
+        $doc,
+        'headline-first',
+        $repairs,
+        $warnings,
+    );
+
+    assert_eq(
+        $opening . $beforeSibling . $headline . $paragraph . $afterSibling . $closing,
+        $out,
+        'only the complete support-paragraph block changes position',
+    );
+    assert_eq([], $warnings);
+    assert_eq(['hero-support-moved-after-headline'], array_column($repairs, 'code'));
+    assert_contains('The exact support line.', $repairs[0]['authored']);
+
+    $againRepairs = [];
+    $againWarnings = [];
+    assert_eq(
+        $out,
+        Automattic\SiteBuild\Units\GeneratedMarkup::headlineFirstHeroCopy(
+            $out,
+            'headline-first',
+            $againRepairs,
+            $againWarnings,
+        ),
+    );
+    assert_eq([], $againRepairs);
+    assert_eq([], $againWarnings);
+});
+
+test('headlineFirstHeroCopy retains ambiguous pre-H1 paragraphs with actionable warnings', function () {
+    $first = '<!-- wp:paragraph --><p>First possible support line.</p><!-- /wp:paragraph -->';
+    $second = '<!-- wp:paragraph --><p>Second possible support line.</p><!-- /wp:paragraph -->';
+    $headline = '<!-- wp:heading {"level":1} --><h1>Headline</h1><!-- /wp:heading -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">'
+        . $first . $second . $headline
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::headlineFirstHeroCopy(
+        $doc,
+        'ambiguous-headline-first',
+        $repairs,
+        $warnings,
+    );
+
+    assert_eq($doc, $out, 'ambiguous authored reading order is retained byte-for-byte');
+    assert_eq([], $repairs);
+    assert_eq(2, count($warnings));
+    assert_contains('First possible support line.', implode("\n", $warnings));
+    assert_contains('Second possible support line.', implode("\n", $warnings));
+    foreach ($warnings as $warning) {
+        foreach ([
+            "file='theme/parts/ambiguous-headline-first.html'",
+            "block='wp:group[0] > wp:paragraph",
+            'authored=',
+            'delivered="original pre-headline position"',
+            'disposition=',
+        ] as $context) {
+            assert_contains($context, $warning);
+        }
+    }
+});
+
+test('headlineFirstHeroCopy never moves a paragraph across raw authored copy', function () {
+    $paragraph = '<!-- wp:paragraph --><p>Block support line.</p><!-- /wp:paragraph -->';
+    $rawCopy = '<p class="model-raw-copy">Raw copy must not be crossed.</p>';
+    $headline = '<!-- wp:heading {"level":1} --><h1>Headline</h1><!-- /wp:heading -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">'
+        . $paragraph . $rawCopy . $headline
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::headlineFirstHeroCopy(
+        $doc,
+        'raw-pre-headline-copy',
+        $repairs,
+        $warnings,
+    );
+
+    assert_eq($doc, $out, 'the whole parent stays byte-for-byte intact when raw copy makes the move ambiguous');
+    assert_eq([], $repairs);
+    assert_eq(1, count($warnings));
+    assert_contains('Block support line.', $warnings[0]);
+    assert_contains('delivered="original pre-headline position"', $warnings[0]);
+});
+
 test('centerHeroCopy aligns the H1 and buttons a model left at start on a fully centered anchor (BIGR-775)', function () {
     // Regression: pulso8 centered the standfirst and left the H1 and buttons
     // at their default start alignment inside the centered copy group.
@@ -759,7 +974,7 @@ test('centerHeroCopy aligns the H1 and buttons a model left at start on a fully 
         . '<!-- /wp:button --></div><!-- /wp:buttons -->'
         . '</div><!-- /wp:group --></div></div><!-- /wp:cover --></div><!-- /wp:group -->';
     $repairs = [];
-    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'center', 'p', $repairs);
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'center', 'ltr', 'p', $repairs);
     // Alignment must land in style.typography.textAlign — the one form the
     // block re-serializer preserves and turns into has-text-align-center.
     assert_contains('"typography":{"textAlign":"center"}', $out, 'H1 centered via typography style');
@@ -769,12 +984,12 @@ test('centerHeroCopy aligns the H1 and buttons a model left at start on a fully 
 
     // Idempotent.
     $again = [];
-    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($out, 'center', 'p', $again));
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($out, 'center', 'ltr', 'p', $again));
     assert_eq([], $again);
 
     // A non-centered anchor leaves the composition alone.
     $r = [];
-    assert_eq($doc, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'bottom-start', 'p', $r));
+    assert_eq($doc, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'bottom-start', 'ltr', 'p', $r));
     assert_eq([], $r);
 
     // Regression (lumen10): a top-level textAlign attribute is NOT accepted
@@ -790,34 +1005,114 @@ test('centerHeroCopy aligns the H1 and buttons a model left at start on a fully 
         . '<!-- /wp:heading -->'
         . '</div><!-- /wp:group --></div><!-- /wp:group -->';
     $r2 = [];
-    $rewritten = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($legacy, 'center', 'p', $r2);
+    $rewritten = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+        $legacy,
+        'center',
+        'ltr',
+        'p',
+        $r2,
+    );
     assert_contains('"typography":{"lineHeight":"1.1","textAlign":"center"}', $rewritten, 'legacy attr folded into typography');
     assert_true(!str_contains($rewritten, '"textAlign":"center","level"'), 'legacy top-level textAlign removed');
     assert_true(in_array('hero-copy-centered', array_column($r2, 'code'), true));
 });
 
-test('centerHeroCopy moves a top-pinned cover onto the center row without touching horizontal alignment', function () {
+test('centerHeroCopy isolates malformed style shapes and continues centering safe siblings', function () {
+    $badHeading = '<!-- wp:heading {"level":1,"style":"oops"} -->'
+        . '<h1 class="wp-block-heading">Authored heading survives</h1><!-- /wp:heading -->';
+    $badParagraph = '<!-- wp:paragraph {"style":{"typography":"also-oops"}} -->'
+        . '<p>Authored paragraph survives</p><!-- /wp:paragraph -->';
+    $doc = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . $badHeading . $badParagraph
+        . '<!-- wp:paragraph --><p>Safe sibling centers.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+        $doc,
+        'center',
+        'ltr',
+        'malformed-style',
+        $repairs,
+        $warnings,
+    );
+
+    assert_contains($badHeading, $out, 'the wrong-shaped heading is retained byte-for-byte');
+    assert_contains($badParagraph, $out, 'the wrong-shaped paragraph is retained byte-for-byte');
+    assert_contains('Safe sibling centers.', $out);
+    assert_contains('"typography":{"textAlign":"center"}', $out, 'a safe sibling still receives the repair');
+    assert_true(in_array('hero-copy-centered', array_column($repairs, 'code'), true));
+    assert_eq(2, count($warnings));
+    assert_contains('authored style="oops"', implode("\n", $warnings));
+    assert_contains('authored style.typography="also-oops"', implode("\n", $warnings));
+    foreach ($warnings as $warning) {
+        foreach ([
+            "file='theme/parts/malformed-style.html'",
+            "block='wp:group[0] > wp:",
+            'delivered="original block bytes"',
+            'disposition=',
+        ] as $context) {
+            assert_contains($context, $warning);
+        }
+    }
+
+    $againRepairs = [];
+    $againWarnings = [];
+    assert_eq(
+        $out,
+        Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+            $out,
+            'center',
+            'ltr',
+            'malformed-style',
+            $againRepairs,
+            $againWarnings,
+        ),
+        'safe repairs reach a fixed point while malformed blocks remain isolated',
+    );
+    assert_eq([], $againRepairs);
+    assert_eq($warnings, $againWarnings, 'residual warnings remain stable for a later repair pass');
+});
+
+test('centerHeroCopy enforces the resolved physical side on the cover center row', function () {
     // Regression: lumen8's layered-poster pinned the copy block to the top of
     // an 80vh stage via contentPosition "top left", opening a dead band below.
     $doc = '<!-- wp:group {"anchor":"hero","className":"hero-composition--layered-poster","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group hero-composition--layered-poster" id="hero">'
-        . '<!-- wp:cover {"url":"theme:./assets/x.jpg","minHeight":80,"minHeightUnit":"vh","contentPosition":"top left","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-cover has-custom-content-position is-position-top-left hero-composition__media" style="min-height:80vh"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:cover {"url":"theme:./assets/x.jpg","minHeight":80,"minHeightUnit":"vh","contentPosition":"top right","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-cover has-custom-content-position is-position-top-right hero-composition__media" style="min-height:80vh"><div class="wp-block-cover__inner-container">'
         . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","justifyContent":"left"}} -->'
         . '<div class="wp-block-group hero-composition__copy">'
         . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Light shaped by hand</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group --></div></div><!-- /wp:cover --></div><!-- /wp:group -->';
     $repairs = [];
-    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'center-start', 'p', $repairs);
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+        $doc,
+        'center-start',
+        'ltr',
+        'p',
+        $repairs,
+    );
     assert_contains('"contentPosition":"center left"', $out, 'cover rides the center row');
-    assert_true(!str_contains($out, 'is-position-top-left'), 'stale position class removed');
+    assert_true(!str_contains($out, 'is-position-top-right'), 'opposite-side stale position class removed');
     assert_true(!str_contains($out, '"textAlign"'), 'start-anchored copy keeps its horizontal alignment');
     assert_contains('"justifyContent":"left"', $out, 'copy group horizontal alignment untouched');
     assert_true(in_array('hero-copy-centered', array_column($repairs, 'code'), true));
 
     // Idempotent.
     $again = [];
-    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($out, 'center-start', 'p', $again));
+    assert_eq(
+        $out,
+        Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+            $out,
+            'center-start',
+            'ltr',
+            'p',
+            $again,
+        ),
+    );
     assert_eq([], $again);
 
     // A fully centered anchor collapses the position to the cover default.
@@ -827,10 +1122,47 @@ test('centerHeroCopy moves a top-pinned cover onto the center row without touchi
         $doc
     );
     $r = [];
-    $centered = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($bottom, 'center', 'p', $r);
+    $centered = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+        $bottom,
+        'center',
+        'ltr',
+        'p',
+        $r,
+    );
     assert_true(!str_contains($centered, 'contentPosition'), 'all-center position drops the attribute');
     assert_true(!str_contains($centered, 'has-custom-content-position'), 'custom-position marker removed');
     assert_true(!str_contains($centered, 'is-position-bottom-right'), 'stale position class removed');
+
+    // The physical side comes from the delivery contract, not from an LTR
+    // assumption or the generated position. Missing positions are repaired,
+    // and center-end follows the same physical-side rule.
+    $withoutPosition = str_replace(
+        [
+            ',"contentPosition":"top right"',
+            'has-custom-content-position is-position-top-right ',
+        ],
+        ['', ''],
+        $doc,
+    );
+    $rtlRepairs = [];
+    $rtl = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+        $withoutPosition,
+        'center-start',
+        'rtl',
+        'p',
+        $rtlRepairs,
+    );
+    assert_contains('"contentPosition":"center right"', $rtl, 'RTL logical start resolves to physical right');
+
+    $endRepairs = [];
+    $end = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy(
+        $withoutPosition,
+        'center-end',
+        'rtl',
+        'p',
+        $endRepairs,
+    );
+    assert_contains('"contentPosition":"center left"', $end, 'RTL logical end resolves to physical left');
 });
 
 test('fullBleedCoverAlignment upgrades a wide-capped cover-band hero to align:full', function () {

@@ -95,17 +95,22 @@ final class HeroUnit extends AbstractPageSectionUnit
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
         $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
-        $markup = GeneratedMarkup::stripHeroEyebrow($markup, $key, $repairs);
+        // Remove non-copy children first so an eyebrow-only decorated shell
+        // is visible as empty to the fresh parse in stripHeroEyebrow().
+        $markup = GeneratedMarkup::stripHeroSeparators($markup, $key, $repairs, $warnings);
+        $markup = GeneratedMarkup::stripHeroEyebrow($markup, $key, $repairs, $warnings);
         $markup = GeneratedMarkup::stripEyebrowChipChrome($markup, $key, $repairs);
-        $markup = GeneratedMarkup::stripHeroSeparators($markup, $key, $repairs);
+        $markup = GeneratedMarkup::headlineFirstHeroCopy($markup, $key, $repairs, $warnings);
         if ((string) HeroComposition::metadata($context['recipe'])['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
         }
         $markup = GeneratedMarkup::centerHeroCopy(
             $markup,
             (string) ($context['blueprint']['text_anchor'] ?? ''),
+            (string) ($context['contract']['writing_direction'] ?? ''),
             $key,
-            $repairs
+            $repairs,
+            $warnings,
         );
         $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
         $before = $markup;
