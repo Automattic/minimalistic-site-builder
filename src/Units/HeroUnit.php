@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroComposition;
 
 /**
@@ -100,6 +101,9 @@ final class HeroUnit extends AbstractPageSectionUnit
         $markup = GeneratedMarkup::stripHeroSeparators($markup, $key, $repairs, $warnings);
         $markup = GeneratedMarkup::stripHeroEyebrow($markup, $key, $repairs, $warnings);
         $markup = GeneratedMarkup::stripEyebrowChipChrome($markup, $key, $repairs);
+        $budget = HeroCopyBudget::enforce($markup, $context['primary_action'], $key);
+        $markup = $budget['markup'];
+        array_push($warnings, ...$budget['warnings']);
         $markup = GeneratedMarkup::headlineFirstHeroCopy($markup, $key, $repairs, $warnings);
         if ((string) HeroComposition::metadata($context['recipe'])['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);

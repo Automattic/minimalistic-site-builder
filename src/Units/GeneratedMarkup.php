@@ -2122,7 +2122,7 @@ final class GeneratedMarkup
         array &$warnings = [],
     ): string {
         $document = BlockMarkup::parse($markup);
-        $spans = [];
+        $candidates = [];
         foreach ($document->indices() as $index) {
             if ($document->name($index) !== 'separator') {
                 continue;
@@ -2132,25 +2132,36 @@ final class GeneratedMarkup
                 continue;
             }
             $offset = $document->openingOffset($index);
-            $spans[] = [
+            $candidates[] = [
                 'index' => $index,
                 'start' => $offset,
                 'end' => $end,
+                'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
             ];
         }
-        if ($spans === []) {
+        if ($candidates === []) {
             return $markup;
         }
 
-        // A malformed generation can nest a separator inside another
-        // separator. Publishing both source spans would make the enclosing
-        // length stale after the inner deletion and consume the following
-        // sibling. Keep only outermost transactions; one complete block is
-        // the smallest safe removal boundary for every covered separator.
-        $spans = self::outermostRemovalSpans($spans);
-        foreach ($spans as $span) {
+        $safe = self::heroNestedRemovalSafety($document, $candidates);
+        $safeCandidates = self::outermostRemovalSpans(array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => $safe[$candidate['index']],
+        )));
+        $unsafeCandidates = self::outermostRemovalSpans(array_values(array_filter(
+            $candidates,
+            static fn (array $candidate): bool => !$safe[$candidate['index']],
+        )));
+        $removals = self::outermostRemovalSpans($safeCandidates);
+        $out = self::removeSpans($markup, $removals);
+        $deliveredPaths = self::heroBlockPathsByOffset(BlockMarkup::parse($out));
+
+        $warningRows = [];
+        foreach ($safeCandidates as $span) {
             $index = $span['index'];
-            $warnings[] = "file='theme/parts/{$part}.html'; block='"
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='"
                 . self::blockPath($document, $index)
                 . "'; authored=" . Warnings::value(substr(
                     $markup,
@@ -2158,9 +2169,27 @@ final class GeneratedMarkup
                     $span['end'] - $span['start'],
                 ))
                 . '; delivered=removed; disposition=the generated hero separator was removed at its complete '
-                . 'block boundary so the reviewed separator-free copy stack could be delivered';
+                . 'block boundary so the reviewed separator-free copy stack could be delivered',
+            ];
         }
-        return self::removeSpans($markup, $spans);
+        foreach ($unsafeCandidates as $span) {
+            $index = $span['index'];
+            $authored = substr($markup, $span['start'], $span['end'] - $span['start']);
+            $deliveredOffset = self::heroOffsetAfterRemovals($span['start'], $removals);
+            $path = $deliveredPaths[$deliveredOffset] ?? self::blockPath($document, $index);
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
+                    . self::heroRemovalWarningValue($authored)
+                    . '; delivered=' . self::heroRemovalWarningValue($authored)
+                    . '; disposition=the generated separator boundary owns raw/non-block payload or a non-target '
+                    . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
+                    . 'and the residual separator was queued for later repair',
+            ];
+        }
+        usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
+        array_push($warnings, ...array_column($warningRows, 'warning'));
+        return $out;
     }
 
     /**
@@ -2193,7 +2222,7 @@ final class GeneratedMarkup
         $h1Offset = null;
         foreach ($document->indices() as $index) {
             if ($document->name($index) === 'heading'
-                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+                && self::heroHeadingLevel(($document->attrs($index) ?? [])['level'] ?? 2) === 1
             ) {
                 $h1Offset = $document->openingOffset($index);
                 break;
@@ -2210,8 +2239,14 @@ final class GeneratedMarkup
                 continue;
             }
             $attrs = $document->attrs($index) ?? [];
-            if ($name === 'heading' && (int) ($attrs['level'] ?? 2) < 4) {
-                continue;
+            if ($name === 'heading') {
+                $level = self::heroHeadingLevel($attrs['level'] ?? 2);
+                if ($level === null || $level < 4) {
+                    // A malformed generated level is not evidence that this
+                    // heading is disposable eyebrow copy. Retain the whole
+                    // block instead of coercing arrays/objects to an integer.
+                    continue;
+                }
             }
             // endOffset is exclusive: an eyebrow closing exactly where the H1
             // opens has end == h1Offset and still sits entirely before it.
@@ -2224,13 +2259,26 @@ final class GeneratedMarkup
                 continue;
             }
             $style = $attrs['style'] ?? [];
-            $typography = is_array($style) && is_array($style['typography'] ?? [])
+            $typography = is_array($style) && is_array($style['typography'] ?? null)
                 ? $style['typography']
                 : [];
+            $fontSize = $attrs['fontSize'] ?? '';
+            $textTransform = $typography['textTransform'] ?? '';
+            $letterSpacing = $typography['letterSpacing'] ?? '';
+            if (!is_string($fontSize)
+                || !is_string($textTransform)
+                || !is_string($letterSpacing)
+            ) {
+                // Generated array/object leaves are not eyebrow evidence. In
+                // particular, never coerce them through `(string)`: embedding
+                // error handlers may promote PHP's conversion warning into an
+                // exception and abort the paid-for build.
+                continue;
+            }
             $signals = $name === 'heading'
-                || in_array((string) ($attrs['fontSize'] ?? ''), ['caption', 'small', 'x-small', 'tiny'], true)
-                || strtolower((string) ($typography['textTransform'] ?? '')) === 'uppercase'
-                || trim((string) ($typography['letterSpacing'] ?? '')) !== '';
+                || in_array($fontSize, ['caption', 'small', 'x-small', 'tiny'], true)
+                || strtolower($textTransform) === 'uppercase'
+                || trim($letterSpacing) !== '';
             if (!$signals) {
                 continue;
             }
@@ -2240,20 +2288,31 @@ final class GeneratedMarkup
                 'start' => $offset,
                 'end' => $end,
                 'text' => self::visibleText($document->innerHtml($index)),
+                'raw_survivor' => self::heroRemovalCandidateHasRawSurvivor($document, $index),
             ];
         }
         if ($spans === []) {
             return $markup;
         }
 
-        // Nested candidate blocks are one loss boundary. Removing the inner
-        // block first would invalidate the enclosing source length and can
-        // eat the H1 or the root closer that follows it.
-        $spans = self::outermostRemovalSpans($spans);
-        $candidateSet = array_fill_keys(array_column($spans, 'index'), true);
+        $safe = self::heroNestedRemovalSafety($document, $spans);
+        $safeSpans = array_values(array_filter(
+            $spans,
+            static fn (array $span): bool => $safe[$span['index']],
+        ));
+        $unsafeSpans = self::outermostRemovalSpans(array_values(array_filter(
+            $spans,
+            static fn (array $span): bool => !$safe[$span['index']],
+        )));
+        // Nested safe candidates are one loss boundary. Removing the inner
+        // block first would invalidate the enclosing source length and can eat
+        // the H1 or root closer that follows it.
+        $outermostSafe = self::outermostRemovalSpans($safeSpans);
+        $candidateSet = array_fill_keys(array_column($safeSpans, 'index'), true);
         $wrapperMemo = [];
         $removals = [];
-        foreach ($spans as $span) {
+        $warningRows = [];
+        foreach ($outermostSafe as $span) {
             $index = $span['index'];
             $wrapper = self::outermostDedicatedRemovalWrapper(
                 $document,
@@ -2282,12 +2341,35 @@ final class GeneratedMarkup
                     . self::blockPath($document, $wrapper)
                     . ' was removed in the same transaction without touching sibling blocks';
             }
-            $warnings[] = "file='theme/parts/{$part}.html'; block='"
-                . self::blockPath($document, $index)
-                . "'; authored=" . Warnings::value($span['text'])
-                . "; delivered=removed; disposition={$disposition}";
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='"
+                    . self::blockPath($document, $index)
+                    . "'; authored=" . Warnings::value($span['text'])
+                    . "; delivered=removed; disposition={$disposition}",
+            ];
         }
-        return self::removeSpans($markup, self::outermostRemovalSpans($removals));
+        $removals = self::outermostRemovalSpans($removals);
+        $out = self::removeSpans($markup, $removals);
+        $deliveredPaths = self::heroBlockPathsByOffset(BlockMarkup::parse($out));
+        foreach ($unsafeSpans as $span) {
+            $index = $span['index'];
+            $authored = substr($markup, $span['start'], $span['end'] - $span['start']);
+            $deliveredOffset = self::heroOffsetAfterRemovals($span['start'], $removals);
+            $path = $deliveredPaths[$deliveredOffset] ?? self::blockPath($document, $index);
+            $warningRows[] = [
+                'start' => $span['start'],
+                'warning' => "file='theme/parts/{$part}.html'; block='{$path}'; authored="
+                    . self::heroRemovalWarningValue($authored)
+                    . '; delivered=' . self::heroRemovalWarningValue($authored)
+                    . '; disposition=the eyebrow candidate boundary owns raw/non-block payload or a non-target '
+                    . 'descendant selected to survive; its complete nested transaction was retained byte-for-byte '
+                    . 'and the residual pre-headline copy was queued for later repair',
+            ];
+        }
+        usort($warningRows, static fn (array $left, array $right): int => $left['start'] <=> $right['start']);
+        array_push($warnings, ...array_column($warningRows, 'warning'));
+        return $out;
     }
 
     /**
@@ -2315,7 +2397,7 @@ final class GeneratedMarkup
         $h1 = null;
         foreach ($document->indices() as $index) {
             if ($document->name($index) === 'heading'
-                && (int) (($document->attrs($index) ?? [])['level'] ?? 2) === 1
+                && self::heroHeadingLevel(($document->attrs($index) ?? [])['level'] ?? 2) === 1
             ) {
                 $h1 = $index;
                 break;
@@ -2425,6 +2507,22 @@ final class GeneratedMarkup
             'disposition' => 'repaired',
         ];
         return $out;
+    }
+
+    /** Return a valid generated hero heading level without scalar coercion. */
+    private static function heroHeadingLevel(mixed $level): ?int
+    {
+        if (is_int($level)) {
+            $normalized = $level;
+        } elseif (is_float($level) && is_finite($level) && floor($level) === $level) {
+            $normalized = (int) $level;
+        } elseif (is_string($level) && preg_match('/^[1-6]$/', $level) === 1) {
+            $normalized = (int) $level;
+        } else {
+            return null;
+        }
+
+        return $normalized >= 1 && $normalized <= 6 ? $normalized : null;
     }
 
     /**
@@ -2659,9 +2757,13 @@ final class GeneratedMarkup
     private static function insideCopyRegion(BlockMarkup $document, int $index): bool
     {
         for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+            $className = ($document->attrs($parent) ?? [])['className'] ?? '';
+            if (!is_string($className)) {
+                continue;
+            }
             $classes = preg_split(
                 '/\s+/',
-                trim((string) (($document->attrs($parent) ?? [])['className'] ?? '')),
+                trim($className),
                 -1,
                 PREG_SPLIT_NO_EMPTY,
             ) ?: [];
@@ -2763,6 +2865,172 @@ final class GeneratedMarkup
             $markup = substr_replace($markup, '', $span['start'], $span['end'] - $span['start']);
         }
         return $markup;
+    }
+
+    /** Inline phrasing belongs to an eyebrow text leaf rather than raw payload. */
+    private const HERO_REMOVAL_INLINE_TAGS = [
+        'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'del', 'em', 'i',
+        'ins', 'kbd', 'mark', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'small',
+        'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr',
+        'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    ];
+
+    /**
+     * Candidate safety is transactional across the whole nested component.
+     * One raw/non-target survivor freezes its candidate, every containing
+     * candidate, and then every candidate contained by that ancestor.
+     *
+     * @param list<array{index:int,start:int,end:int,raw_survivor:bool}> $candidates
+     * @return array<int,bool> candidate node index => safe to remove
+     */
+    private static function heroNestedRemovalSafety(BlockMarkup $document, array $candidates): array
+    {
+        $candidateSet = array_fill_keys(array_column($candidates, 'index'), true);
+        $safe = [];
+        foreach ($candidates as $candidate) {
+            $safe[$candidate['index']] = !$candidate['raw_survivor']
+                && !self::heroRemovalCandidateContainsSurvivor(
+                    $document,
+                    $candidate['index'],
+                    $candidateSet,
+                );
+        }
+
+        do {
+            $changed = false;
+            $unsafe = array_keys(array_filter($safe, static fn (bool $isSafe): bool => !$isSafe));
+            foreach ($candidates as $candidate) {
+                $index = $candidate['index'];
+                if (!$safe[$index]) {
+                    continue;
+                }
+                foreach ($unsafe as $unsafeIndex) {
+                    if (self::heroRemovalIsDescendantOf($document, $index, $unsafeIndex)
+                        || self::heroRemovalIsDescendantOf($document, $unsafeIndex, $index)
+                    ) {
+                        $safe[$index] = false;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+        } while ($changed);
+
+        return $safe;
+    }
+
+    /** @param array<int,bool> $candidateSet */
+    private static function heroRemovalCandidateContainsSurvivor(
+        BlockMarkup $document,
+        int $candidate,
+        array $candidateSet,
+    ): bool {
+        foreach ($document->indices() as $index) {
+            if ($index === $candidate || isset($candidateSet[$index])) {
+                continue;
+            }
+            if (self::heroRemovalIsDescendantOf($document, $index, $candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function heroRemovalIsDescendantOf(
+        BlockMarkup $document,
+        int $index,
+        int $ancestor,
+    ): bool {
+        for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+            if ($parent === $ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a separator/eyebrow leaf owns visible raw media or structure. */
+    private static function heroRemovalCandidateHasRawSurvivor(BlockMarkup $document, int $index): bool
+    {
+        if ($document->isVoid($index)) {
+            return false;
+        }
+        $shell = self::heroRemovalShellWithoutChildBlocks($document, $index);
+        if ($shell === null) {
+            return true;
+        }
+        $shell = preg_replace('/<!--(?!\s*\/?wp:).*?-->/s', '', $shell) ?? $shell;
+        if (trim($shell) === '') {
+            return false;
+        }
+        if (preg_match(
+            '~\A\s*<(?<tag>div|section|article|main|aside|header|footer|nav)\b[^>]*>\s*</\k<tag>>\s*\z~is',
+            $shell,
+        ) === 1) {
+            return false;
+        }
+        if ($document->name($index) === 'separator') {
+            return preg_match('~\A\s*<hr\b[^>]*\/?>\s*\z~is', $shell) !== 1;
+        }
+        if (!preg_match_all('/<\s*\/?\s*([a-z][a-z0-9-]*)\b[^>]*>/i', $shell, $tags)) {
+            return false;
+        }
+        foreach ($tags[1] as $tag) {
+            if (!in_array(strtolower($tag), self::HERO_REMOVAL_INLINE_TAGS, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function heroRemovalShellWithoutChildBlocks(
+        BlockMarkup $document,
+        int $index,
+    ): ?string {
+        $innerStart = $document->openingOffset($index) + $document->openingLength($index);
+        $shell = $document->innerHtml($index);
+        $children = $document->children($index);
+        for ($position = count($children) - 1; $position >= 0; $position--) {
+            $child = $children[$position];
+            $end = $document->endOffset($child);
+            if ($end === null) {
+                return null;
+            }
+            $start = $document->openingOffset($child);
+            $shell = substr_replace($shell, '', $start - $innerStart, $end - $start);
+        }
+        return $shell;
+    }
+
+    /** @return array<int,string> opening byte offset => hierarchical delivered path */
+    private static function heroBlockPathsByOffset(BlockMarkup $document): array
+    {
+        $paths = [];
+        foreach ($document->indices() as $index) {
+            $paths[$document->openingOffset($index)] = self::blockPath($document, $index);
+        }
+        return $paths;
+    }
+
+    /** @param list<array{start:int,end:int}> $removals */
+    private static function heroOffsetAfterRemovals(int $offset, array $removals): int
+    {
+        $shift = 0;
+        foreach ($removals as $removal) {
+            if ($removal['end'] > $offset) {
+                break;
+            }
+            $shift += $removal['end'] - $removal['start'];
+        }
+        return $offset - $shift;
+    }
+
+    private static function heroRemovalWarningValue(mixed $value): string
+    {
+        return (string) json_encode(
+            $value,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+        );
     }
 
     /**

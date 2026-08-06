@@ -758,6 +758,49 @@ test('stripHeroSeparators removes one outer transaction when generated separator
     assert_contains('delivered=removed', $warnings[0]);
 });
 
+test('stripHeroSeparators retains a nested component that owns an image', function () {
+    $image = '<!-- wp:image --><figure class="wp-block-image">'
+        . '<img src="theme:./assets/keep-separator-image.jpg" alt="Keep separator image">'
+        . '</figure><!-- /wp:image -->';
+    $unsafeInner = '<!-- wp:separator {"className":"unsafe-inner"} --><div class="unsafe-inner">'
+        . $image . '</div><!-- /wp:separator -->';
+    $plainInner = '<!-- wp:separator {"className":"plain-inner"} -->'
+        . '<hr class="wp-block-separator plain-inner"/><!-- /wp:separator -->';
+    $outer = '<!-- wp:separator {"className":"outer-rule"} --><div class="outer-rule">'
+        . $unsafeInner . $plainInner . '</div><!-- /wp:separator -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">' . $outer
+        . '<!-- wp:paragraph --><p>Following sibling stays.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $out = GeneratedMarkup::stripHeroSeparators(
+        $doc,
+        'unsafe-nested-separator',
+        $repairs,
+        $warnings,
+    );
+
+    assert_eq($doc, $out, 'the safe-looking sibling is frozen with its unsafe nested component');
+    assert_eq([], $repairs);
+    assert_eq(1, count($warnings));
+    foreach (['outer-rule', 'keep-separator-image.jpg', 'delivered=', 'retained byte-for-byte'] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
+    $againRepairs = [];
+    $againWarnings = [];
+    assert_eq(
+        $out,
+        GeneratedMarkup::stripHeroSeparators(
+            $out,
+            'unsafe-nested-separator',
+            $againRepairs,
+            $againWarnings,
+        ),
+    );
+    assert_eq($warnings, $againWarnings, 'the retained warning is fixed-point stable');
+});
+
 test('stripHeroEyebrow removes tracked caption lines and minor headings above the H1 only (BIGR-775)', function () {
     // Regression: tbilisi7/naturaleza7/hearth7 opened on an uppercase tracked
     // caption line and lumen7 on a level-5 heading — three or four copy lines
@@ -855,6 +898,106 @@ test('stripHeroEyebrow coalesces nested candidates and removes only a dedicated 
     assert_contains('now-empty dedicated wrapper', implode("\n", $warnings));
     $parsed = BlockMarkup::parse($out);
     assert_true($parsed->endOffset((int) $parsed->topLevel()) !== null, 'the root delimiter remains complete');
+});
+
+test('stripHeroEyebrow retains a nested candidate component that owns a button', function () {
+    $button = '<!-- wp:button --><div class="wp-block-button">'
+        . '<a class="wp-block-button__link" href="/keep/">Keep nested action</a>'
+        . '</div><!-- /wp:button -->';
+    $unsafeInner = '<!-- wp:paragraph {"fontSize":"caption"} --><div class="has-caption-font-size">'
+        . 'Unsafe inner label' . $button . '</div><!-- /wp:paragraph -->';
+    $plainInner = '<!-- wp:paragraph {"fontSize":"caption"} -->'
+        . '<p class="has-caption-font-size">Plain sibling label</p><!-- /wp:paragraph -->';
+    $outer = '<!-- wp:paragraph {"fontSize":"caption"} --><div class="has-caption-font-size">'
+        . 'Outer label' . $unsafeInner . $plainInner . '</div><!-- /wp:paragraph -->';
+    $headline = '<!-- wp:heading {"level":1} --><h1>Headline stays</h1><!-- /wp:heading -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">'
+        . $outer . $headline . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $out = GeneratedMarkup::stripHeroEyebrow($doc, 'unsafe-nested-eyebrow', $repairs, $warnings);
+
+    assert_eq($doc, $out, 'no nested candidate is edited inside the retained outer transaction');
+    assert_eq([], $repairs);
+    assert_eq(1, count($warnings));
+    foreach (['Outer label', '/keep/', 'Keep nested action', 'retained byte-for-byte'] as $context) {
+        assert_contains($context, $warnings[0]);
+    }
+    $againRepairs = [];
+    $againWarnings = [];
+    assert_eq(
+        $out,
+        GeneratedMarkup::stripHeroEyebrow(
+            $out,
+            'unsafe-nested-eyebrow',
+            $againRepairs,
+            $againWarnings,
+        ),
+    );
+    assert_eq($warnings, $againWarnings, 'the retained warning is fixed-point stable');
+});
+
+test('stripHeroEyebrow treats malformed signal leaves as non-signals without PHP warnings', function () {
+    $malformed = '<!-- wp:paragraph {"fontSize":["caption"],"style":{"typography":'
+        . '{"textTransform":["uppercase"],"letterSpacing":{"value":"0.2em"}}}} -->'
+        . '<p>Malformed signal leaves stay</p><!-- /wp:paragraph -->';
+    $headline = '<!-- wp:heading {"level":1} --><h1>Real headline</h1><!-- /wp:heading -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">'
+        . $malformed . $headline . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    set_error_handler(static function (int $severity, string $message): never {
+        throw new ErrorException($message, 0, $severity);
+    });
+    try {
+        $out = GeneratedMarkup::stripHeroEyebrow($doc, 'malformed-eyebrow-signals', $repairs, $warnings);
+    } finally {
+        restore_error_handler();
+    }
+
+    assert_eq($doc, $out);
+    assert_eq([], $repairs);
+    assert_eq([], $warnings);
+});
+
+test('hero copy-order repairs do not coerce malformed heading levels into the H1', function () {
+    $malformed = '<!-- wp:heading {"level":[1]} --><h2>Malformed level stays</h2><!-- /wp:heading -->';
+    $eyebrow = '<!-- wp:heading {"level":5} --><h5>Generated eyebrow</h5><!-- /wp:heading -->';
+    $headline = '<!-- wp:heading {"level":1} --><h1>Actual headline</h1><!-- /wp:heading -->';
+    $doc = '<!-- wp:group --><div class="wp-block-group">'
+        . $malformed . $eyebrow . $headline
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+
+    $withoutEyebrow = GeneratedMarkup::stripHeroEyebrow($doc, 'strict-level', $repairs, $warnings);
+
+    assert_contains($malformed, $withoutEyebrow, 'the malformed heading is retained byte-for-byte');
+    assert_true(!str_contains($withoutEyebrow, $eyebrow), 'the valid H1 still bounds eyebrow detection');
+    assert_contains($headline, $withoutEyebrow);
+    assert_eq([], $repairs);
+    assert_eq(1, count($warnings));
+    assert_contains('Generated eyebrow', $warnings[0]);
+
+    $support = '<!-- wp:paragraph --><p>Support must not move behind a fake H1.</p><!-- /wp:paragraph -->';
+    $ordered = '<!-- wp:group --><div class="wp-block-group">'
+        . $support . $malformed . $headline
+        . '</div><!-- /wp:group -->';
+    $moveRepairs = [];
+    $moveWarnings = [];
+    $out = GeneratedMarkup::headlineFirstHeroCopy(
+        $ordered,
+        'strict-level',
+        $moveRepairs,
+        $moveWarnings,
+    );
+
+    assert_eq($ordered, $out, 'ambiguous bytes stay intact when the earlier heading level is malformed');
+    assert_eq([], $moveRepairs);
+    assert_eq(1, count($moveWarnings));
+    assert_contains('original pre-headline position', $moveWarnings[0]);
 });
 
 test('headlineFirstHeroCopy moves one adjacent support paragraph after the H1 byte-for-byte', function () {
@@ -1074,6 +1217,41 @@ test('centerHeroCopy isolates malformed style shapes and continues centering saf
     );
     assert_eq([], $againRepairs);
     assert_eq($warnings, $againWarnings, 'residual warnings remain stable for a later repair pass');
+});
+
+test('centerHeroCopy ignores non-string ancestor className values without losing the outer copy region', function () {
+    $heading = '<!-- wp:heading {"level":1} --><h1>Safe nested headline</h1><!-- /wp:heading -->';
+    $malformedGroupOpen = '<!-- wp:group {"className":["generated-shape"]} -->'
+        . '<div class="wp-block-group">';
+    $doc = '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . $malformedGroupOpen . $heading . '</div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+    $repairs = [];
+    $warnings = [];
+    $phpWarnings = [];
+    set_error_handler(static function (int $severity, string $message) use (&$phpWarnings): bool {
+        $phpWarnings[] = [$severity, $message];
+        return true;
+    });
+    try {
+        $out = GeneratedMarkup::centerHeroCopy(
+            $doc,
+            'center',
+            'ltr',
+            'malformed-class-name',
+            $repairs,
+            $warnings,
+        );
+    } finally {
+        restore_error_handler();
+    }
+
+    assert_eq([], $phpWarnings, 'generated array attributes must not cause PHP conversion warnings');
+    assert_contains('"className":["generated-shape"]', $out, 'the malformed ancestor attribute is preserved');
+    assert_contains('"typography":{"textAlign":"center"}', $out, 'the valid outer copy marker is still found');
+    assert_true(in_array('hero-copy-centered', array_column($repairs, 'code'), true));
+    assert_eq([], $warnings);
 });
 
 test('centerHeroCopy enforces the resolved physical side on the cover center row', function () {

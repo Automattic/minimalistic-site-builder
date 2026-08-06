@@ -250,7 +250,8 @@ test('HeroUnit rejects partial blueprints and contradictory portable contract pr
 test('HeroUnit generate returns a JSON-serializable repairs and warnings envelope', function () {
     $llm = new FakeLlm();
     $llm->queueText(hero_unit_root(
-        '<!-- wp:buttons --><div class="wp-block-buttons">'
+        '<!-- wp:heading {"level":1} --><h1>Generated hero headline</h1><!-- /wp:heading -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
         . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Explore the work</a></div><!-- /wp:button -->'
         . '</div><!-- /wp:buttons -->'
     ));
@@ -309,7 +310,9 @@ test('HeroUnit normalizes recipe and mobile root markers while preserving unrela
     $input = hero_unit_contract_input('editorial-split', null);
     $raw = '<!-- wp:group {"className":"keep hero-composition--old hero-mobile--old hero-mobile--stale","layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group keep hero-composition--old hero-mobile--old">'
-        . '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">Hero</div><!-- /wp:group -->'
+        . '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1>Hero</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->'
         . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
         . '<!-- wp:image --><figure class="wp-block-image"><img src="AI_IMAGE: subject | home | editorial | 4:3" alt="" /></figure><!-- /wp:image -->'
         . '</div><!-- /wp:group -->'
@@ -337,7 +340,7 @@ test('HeroUnit wraps complete roots without changing their bytes and reaches a f
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $input = hero_unit_contract_input('focal-subject-stage', null);
     $raw = '<!-- wp:group {"className":"hero-composition__copy"} --><div class="wp-block-group hero-composition__copy">'
-        . '<!-- wp:heading --><h1>Hero survives.</h1><!-- /wp:heading -->'
+        . '<!-- wp:heading {"level":1} --><h1>Hero survives.</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->'
         . '<!-- wp:group {"className":"hero-composition__media"} --><div class="wp-block-group hero-composition__media">'
         . '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/subject.jpg" alt="AI_IMAGE: One exhibit subject | hero media column | photorealistic | landscape" /></figure><!-- /wp:image -->'
@@ -386,7 +389,8 @@ test('HeroUnit preserves safe recipe-internal defects and warns with repair-read
 test('HeroUnit restores an identifiable paraphrased primary-action label exactly', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $raw = hero_unit_root(
-        '<!-- wp:buttons --><div class="wp-block-buttons">'
+        '<!-- wp:heading {"level":1} --><h1>Generated hero headline</h1><!-- /wp:heading -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
         . '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">See our projects</a></div><!-- /wp:button -->'
         . '</div><!-- /wp:buttons -->'
     );
@@ -404,18 +408,53 @@ test('HeroUnit restores an identifiable paraphrased primary-action label exactly
     assert_eq([], $second->warnings);
 });
 
+test('HeroUnit enforces the uniform copy-and-action budget without disturbing the cleaned hero', function () {
+    $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $headline = '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">One clear promise</h1><!-- /wp:heading -->';
+    $standfirst = '<!-- wp:paragraph --><p>The one supporting thought stays.</p><!-- /wp:paragraph -->';
+    $overflow = '<!-- wp:paragraph --><p>This generated overflow line goes.</p><!-- /wp:paragraph -->';
+    $secondary = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/contact/">Contact us</a></div><!-- /wp:button -->';
+    $primary = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Explore the work</a></div><!-- /wp:button -->';
+    $raw = hero_unit_root(
+        $headline . $standfirst . $overflow
+        . '<!-- wp:buttons --><div class="wp-block-buttons">'
+        . $secondary . $primary
+        . '</div><!-- /wp:buttons -->',
+    );
+
+    $first = $unit->finish($raw, hero_unit_contract_input());
+
+    foreach ([$headline, $standfirst, $primary] as $survivor) {
+        assert_contains($survivor, $first->markup);
+    }
+    assert_true(!str_contains($first->markup, $overflow));
+    assert_true(!str_contains($first->markup, $secondary));
+    assert_eq(2, count($first->warnings));
+    $joined = implode("\n", $first->warnings);
+    assert_contains('This generated overflow line goes.', $joined);
+    assert_contains('Contact us', $joined);
+    assert_contains('delivered=removed', $joined);
+
+    $second = $unit->finish($first->markup, hero_unit_contract_input());
+    assert_eq($first->markup, $second->markup);
+    assert_eq([], $second->repairs);
+    assert_eq([], $second->warnings);
+});
+
 test('HeroUnit removes only an identifiable wrong-destination action and warns actionably', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $sibling = '<!-- wp:paragraph --><p>Sibling content stays byte-for-byte.</p><!-- /wp:paragraph -->';
+    $headline = '<!-- wp:heading {"level":1} --><h1>Generated hero headline</h1><!-- /wp:heading -->';
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/invented/">Explore the work</a></div><!-- /wp:button -->';
-    $raw = hero_unit_root($sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->');
+    $raw = hero_unit_root($headline . $sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->');
 
     $result = $unit->finish($raw, hero_unit_contract_input());
 
     assert_contains($sibling, $result->markup);
     assert_true(!str_contains($result->markup, $button), 'only the identified harmful button block is excised');
+    assert_true(!str_contains($result->markup, 'wp:buttons'), 'the now-empty action row is excised too');
     assert_eq([], $result->repairs);
-    assert_eq(1, count($result->warnings));
+    assert_eq(2, count($result->warnings));
     $warning = $result->warnings[0];
     foreach ([
         "file='parts/page-home--hero.html'",
@@ -427,6 +466,8 @@ test('HeroUnit removes only an identifiable wrong-destination action and warns a
     ] as $context) {
         assert_contains($context, $warning);
     }
+    assert_contains("block='wp:buttons[1]'", $result->warnings[1]);
+    assert_contains('delivered=removed', $result->warnings[1]);
 
     $second = $unit->finish($result->markup, hero_unit_contract_input());
     assert_eq($result->markup, $second->markup);
@@ -436,15 +477,17 @@ test('HeroUnit removes only an identifiable wrong-destination action and warns a
 test('HeroUnit removes unplanned button blocks when the authoritative action is null', function () {
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
     $sibling = '<!-- wp:paragraph --><p>Authorized sibling copy survives byte-for-byte.</p><!-- /wp:paragraph -->';
+    $headline = '<!-- wp:heading {"level":1} --><h1>Generated hero headline</h1><!-- /wp:heading -->';
     $button = '<!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="/work/">Invented CTA</a></div><!-- /wp:button -->';
-    $raw = hero_unit_root($sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->');
+    $raw = hero_unit_root($headline . $sibling . '<!-- wp:buttons --><div class="wp-block-buttons">' . $button . '</div><!-- /wp:buttons -->');
 
     $first = $unit->finish($raw, hero_unit_contract_input('editorial-split', null));
 
     assert_contains($sibling, $first->markup);
     assert_true(!str_contains($first->markup, $button));
+    assert_true(!str_contains($first->markup, 'wp:buttons'));
     assert_eq([], $first->repairs);
-    assert_eq(1, count($first->warnings));
+    assert_eq(2, count($first->warnings));
     foreach ([
         "file='parts/page-home--hero.html'",
         "block='wp:button[1]'",
@@ -455,6 +498,7 @@ test('HeroUnit removes unplanned button blocks when the authoritative action is 
     ] as $context) {
         assert_contains($context, $first->warnings[0]);
     }
+    assert_contains("block='wp:buttons[1]'", $first->warnings[1]);
 
     $second = $unit->finish($first->markup, hero_unit_contract_input('editorial-split', null));
     assert_eq($first->markup, $second->markup);
