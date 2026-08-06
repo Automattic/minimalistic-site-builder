@@ -217,6 +217,7 @@ final class ScaffoldThemeStep implements Step
             overflow: hidden;
             padding: 0 !important;
             align-items: stretch;
+            flex-wrap: nowrap !important;
             gap: 0;
         }
         /* Generators drift into verticalAlignment:center on these rows, and
@@ -224,6 +225,18 @@ final class ScaffoldThemeStep implements Step
            would collapse the stretched thumb back to a floating strip. */
         .wp-block-columns.list-thumb-flush > .wp-block-column {
             align-self: stretch;
+        }
+        /* The recipe authors isStackedOnMobile:false, but keep the behavior
+           hook safe when generated attributes drift. Core forces both columns
+           to flex-basis:100% at <=781px, so restore this recipe's reviewed
+           media/text proportions with greater specificity and importance. */
+        @media (max-width: 781px) {
+            .wp-block-columns.list-thumb-flush > .wp-block-column:first-child {
+                flex-basis: 18% !important;
+            }
+            .wp-block-columns.list-thumb-flush > .wp-block-column:last-child {
+                flex-basis: 82% !important;
+            }
         }
         /* At wide viewports the square thumb can out-measure a short text
            stack; the row then takes the thumb's height and top-pinned copy

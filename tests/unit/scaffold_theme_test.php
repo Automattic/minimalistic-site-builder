@@ -39,12 +39,14 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     // left padding as the whole image-to-text distance — the default md gap
     // would stack with it and push the text farther from its own thumb than
     // the md rhythm separating rows. Column-level align-self pins the stretch
-    // against generator-authored verticalAlignment:center.
+    // against generator-authored verticalAlignment:center. The row also stays
+    // horizontal when generated isStackedOnMobile:false attributes drift.
     assert_contains(
         ".wp-block-columns.list-thumb-flush {\n"
             . "    overflow: hidden;\n"
             . "    padding: 0 !important;\n"
             . "    align-items: stretch;\n"
+            . "    flex-wrap: nowrap !important;\n"
             . "    gap: 0;\n"
             . '}',
         $css,
@@ -52,6 +54,20 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains(
         ".wp-block-columns.list-thumb-flush > .wp-block-column {\n"
             . "    align-self: stretch;\n"
+            . '}',
+        $css,
+    );
+    // Core forces ordinary columns to 100% at its <=781px stacking breakpoint.
+    // The behavior hook restores the recipe's 18/82 split even if the model
+    // omitted isStackedOnMobile:false.
+    assert_contains(
+        "@media (max-width: 781px) {\n"
+            . "    .wp-block-columns.list-thumb-flush > .wp-block-column:first-child {\n"
+            . "        flex-basis: 18% !important;\n"
+            . "    }\n"
+            . "    .wp-block-columns.list-thumb-flush > .wp-block-column:last-child {\n"
+            . "        flex-basis: 82% !important;\n"
+            . "    }\n"
             . '}',
         $css,
     );
