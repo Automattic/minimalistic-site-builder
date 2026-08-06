@@ -441,7 +441,9 @@ test('PhpBlockFixer isolates an unsupported block-support family to its file', f
 });
 
 test('PhpBlockFixer isolates unreviewed layout variants to their file', function () {
-    $original = '<!-- wp:group {"layout":{"type":"grid"}} -->'
+    // 'masonry' is an unreviewed layout type outside the guard's allowlist
+    // (grid is now supported); the fixer must isolate it to its own file.
+    $original = '<!-- wp:group {"layout":{"type":"masonry"}} -->'
         . '<div class="wp-block-group"></div><!-- /wp:group -->';
     $theme = php_block_fixer_test_theme(['parts/unsupported.html' => $original]);
     $writer = new PhpBlockFixerTestWriter();
