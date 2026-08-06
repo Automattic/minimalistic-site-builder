@@ -606,3 +606,139 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     assert_eq(null, $degraded['header']['tagline_text']);
     assert_eq(1, $degraded['header']['text_rows']);
 });
+
+test('final header text-shape facts reflect whether the promised tagline was delivered', function () {
+    $pages = above_fold_pages(null, 'base', 'base');
+    $contract = above_fold_resolve(
+        $pages,
+        recipe: 'editorial-split',
+        forced: 'standard-row',
+        tagline: 'Handmade ceramic lamps from Copenhagen',
+    );
+    $hero = above_fold_solid_part('hero', 'base');
+    $headerWithoutTagline = above_fold_solid_part(
+        'header',
+        'base',
+        '<!-- wp:site-title /-->',
+        'header-archetype--standard-row',
+    );
+    $missingFacts = AboveFoldPartFacts::inspect($pages, [
+        'header' => $headerWithoutTagline,
+        'page-home--hero' => $hero,
+    ], $contract);
+
+    $missing = AboveFoldContract::finalizeMarkup($contract, $pages, $missingFacts);
+
+    assert_eq(false, $missing['header']['displays_tagline']);
+    assert_eq(null, $missing['header']['tagline_text']);
+    assert_eq(1, $missing['header']['text_rows']);
+    $degradation = array_values(array_filter(
+        $missing['degradations'],
+        static fn (array $row): bool => ($row['code'] ?? '') === 'header-tagline-not-delivered',
+    ));
+    assert_eq(1, count($degradation));
+    assert_contains('header-tagline-not-delivered', implode("\n", AboveFoldContract::warningRows($missing)));
+
+    $identityStack = '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--><!-- wp:site-tagline /--></div><!-- /wp:group -->';
+    $headerWithTagline = str_replace('<!-- wp:site-title /-->', $identityStack, $headerWithoutTagline);
+    $deliveredFacts = AboveFoldPartFacts::inspect($pages, [
+        'header' => $headerWithTagline,
+        'page-home--hero' => $hero,
+    ], $contract);
+    $delivered = AboveFoldContract::finalizeMarkup($contract, $pages, $deliveredFacts);
+
+    assert_eq(true, $delivered['header']['displays_tagline']);
+    assert_eq('Handmade ceramic lamps from Copenhagen', $delivered['header']['tagline_text']);
+    assert_eq(2, $delivered['header']['text_rows']);
+    assert_eq([], array_values(array_filter(
+        $delivered['degradations'],
+        static fn (array $row): bool => ($row['code'] ?? '') === 'header-tagline-not-delivered',
+    )));
+
+    $rawIdentity = str_replace(
+        '<div class="wp-block-group">',
+        '<div class="wp-block-group">Unexpected identity copy',
+        $identityStack,
+    );
+    $rawHeader = str_replace('<!-- wp:site-title /-->', $rawIdentity, $headerWithoutTagline);
+    $rawFacts = AboveFoldPartFacts::inspect($pages, [
+        'header' => $rawHeader,
+        'page-home--hero' => $hero,
+    ], $contract);
+    assert_eq(1, $rawFacts['header']['site_tagline_blocks']);
+    assert_eq(0, $rawFacts['header']['malformed_site_tagline_blocks']);
+    assert_eq(1, $rawFacts['header']['invalid_site_tagline_topology']);
+    $rawFinal = AboveFoldContract::finalizeMarkup($contract, $pages, $rawFacts);
+    assert_eq(false, $rawFinal['header']['displays_tagline']);
+    assert_eq(1, $rawFinal['header']['text_rows']);
+    assert_contains(
+        'header-tagline-not-delivered',
+        implode("\n", AboveFoldContract::warningRows($rawFinal)),
+    );
+    $rawAgain = $rawFinal;
+    $rawAgain['phase'] = AboveFoldContract::PHASE_DELIVERY;
+    assert_eq($rawFinal, AboveFoldContract::finalizeMarkup($rawAgain, $pages, $rawFacts));
+
+    $duplicateIdentity = str_replace(
+        '<!-- wp:site-tagline /-->',
+        '<!-- wp:site-tagline /--><!-- wp:site-tagline /-->',
+        $identityStack,
+    );
+    $duplicateHeader = str_replace('<!-- wp:site-title /-->', $duplicateIdentity, $headerWithoutTagline);
+    $duplicateFacts = AboveFoldPartFacts::inspect($pages, [
+        'header' => $duplicateHeader,
+        'page-home--hero' => $hero,
+    ], $contract);
+    $duplicate = AboveFoldContract::finalizeMarkup($contract, $pages, $duplicateFacts);
+    assert_eq(false, $duplicate['header']['displays_tagline']);
+    assert_contains(
+        'header-tagline-not-delivered',
+        implode("\n", AboveFoldContract::warningRows($duplicate)),
+    );
+
+    $nestedIdentity = '<!-- wp:site-title --><span class="wp-block-site-title">'
+        . '<!-- wp:site-tagline /--></span><!-- /wp:site-title -->';
+    $nestedHeader = str_replace('<!-- wp:site-title /-->', $nestedIdentity, $headerWithoutTagline);
+    $nestedFacts = AboveFoldPartFacts::inspect($pages, [
+        'header' => $nestedHeader,
+        'page-home--hero' => $hero,
+    ], $contract);
+    assert_eq(0, $nestedFacts['header']['site_tagline_blocks']);
+    assert_eq(1, $nestedFacts['header']['malformed_site_tagline_blocks']);
+    $nested = AboveFoldContract::finalizeMarkup($contract, $pages, $nestedFacts);
+    assert_eq(false, $nested['header']['displays_tagline']);
+    $nestedAgain = $nested;
+    $nestedAgain['phase'] = AboveFoldContract::PHASE_DELIVERY;
+    assert_eq($nested, AboveFoldContract::finalizeMarkup($nestedAgain, $pages, $nestedFacts));
+
+    $separateIdentity = '<!-- wp:site-title /-->'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-tagline /--></div><!-- /wp:group -->';
+    $separateHeader = str_replace('<!-- wp:site-title /-->', $separateIdentity, $headerWithoutTagline);
+    $separateFacts = AboveFoldPartFacts::inspect($pages, [
+        'header' => $separateHeader,
+        'page-home--hero' => $hero,
+    ], $contract);
+    assert_eq(1, $separateFacts['header']['invalid_site_tagline_topology']);
+    $separateFinal = AboveFoldContract::finalizeMarkup($contract, $pages, $separateFacts);
+    assert_eq(false, $separateFinal['header']['displays_tagline']);
+    $separateAgain = $separateFinal;
+    $separateAgain['phase'] = AboveFoldContract::PHASE_DELIVERY;
+    assert_eq($separateFinal, AboveFoldContract::finalizeMarkup($separateAgain, $pages, $separateFacts));
+
+    $noTaglineContract = above_fold_resolve(
+        $pages,
+        recipe: 'editorial-split',
+        forced: 'standard-row',
+    );
+    $residualFacts = AboveFoldPartFacts::inspect($pages, [
+        'header' => $headerWithTagline,
+        'page-home--hero' => $hero,
+    ], $noTaglineContract);
+    $residual = AboveFoldContract::finalizeMarkup($noTaglineContract, $pages, $residualFacts);
+    assert_contains(
+        'header-tagline-unplanned-delivery',
+        implode("\n", AboveFoldContract::warningRows($residual)),
+    );
+});

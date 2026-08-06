@@ -270,14 +270,35 @@ final class AboveFoldPartFacts
             return [
                 'present' => false, 'mode' => null, 'archetype' => null,
                 'background' => null, 'gradient' => null, 'custom_background' => false,
+                'site_tagline_blocks' => 0, 'malformed_site_tagline_blocks' => 0,
+                'invalid_site_tagline_topology' => 0,
             ];
         }
         $document = BlockMarkup::parse($markup);
+        $siteTaglineBlocks = 0;
+        $malformedSiteTaglineBlocks = 0;
+        $invalidSiteTaglineTopology = 0;
+        foreach ($document->indices() as $index) {
+            if ($document->name($index) !== 'site-tagline') {
+                continue;
+            }
+            if ($document->endOffset($index) === null || self::insideDynamicIdentityBlock($document, $index)) {
+                $malformedSiteTaglineBlocks++;
+                continue;
+            }
+            $siteTaglineBlocks++;
+            if (!self::isStackedTagline($document, $index)) {
+                $invalidSiteTaglineTopology++;
+            }
+        }
         $root = $document->topLevel();
         if ($root === null || $document->name($root) !== 'group') {
             return [
                 'present' => true, 'mode' => null, 'archetype' => null,
                 'background' => null, 'gradient' => null, 'custom_background' => false,
+                'site_tagline_blocks' => $siteTaglineBlocks,
+                'malformed_site_tagline_blocks' => $malformedSiteTaglineBlocks,
+                'invalid_site_tagline_topology' => $invalidSiteTaglineTopology,
             ];
         }
         $attrs = $document->attrs($root) ?? [];
@@ -298,7 +319,76 @@ final class AboveFoldPartFacts
             'custom_background' => isset($attrs['style']['color']['background'])
                 || isset($attrs['style']['color']['gradient']),
             'foreground' => $attrs['textColor'] ?? null,
+            'site_tagline_blocks' => $siteTaglineBlocks,
+            'malformed_site_tagline_blocks' => $malformedSiteTaglineBlocks,
+            'invalid_site_tagline_topology' => $invalidSiteTaglineTopology,
         ];
+    }
+
+    private static function insideDynamicIdentityBlock(BlockMarkup $document, int $index): bool
+    {
+        for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+            if (in_array($document->name($parent), ['site-title', 'site-tagline'], true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function isStackedTagline(BlockMarkup $document, int $tagline): bool
+    {
+        $parent = $document->parent($tagline);
+        if ($parent === null || $document->name($parent) !== 'group') {
+            return false;
+        }
+        $children = $document->children($parent);
+        if (count($children) !== 2
+            || $document->name($children[0]) !== 'site-title'
+            || $children[1] !== $tagline
+            || self::identityGroupHasRawPayload($document, $parent)
+        ) {
+            return false;
+        }
+        $attrs = $document->attrs($parent) ?? [];
+        $style = $attrs['style'] ?? [];
+        $spacing = is_array($style) ? ($style['spacing'] ?? []) : null;
+        $layout = $attrs['layout'] ?? [];
+        if (!is_array($style) || !is_array($spacing) || !is_array($layout)) {
+            return false;
+        }
+        $gap = $spacing['blockGap'] ?? null;
+        $zeroGap = $gap === 0
+            || (is_string($gap) && preg_match('/^0(?:[a-z%]+)?$/i', trim($gap)) === 1);
+        $type = $layout['type'] ?? null;
+        $vertical = $type === null
+            || $type === 'constrained'
+            || ($type === 'flex' && ($layout['orientation'] ?? null) === 'vertical');
+        return $zeroGap && $vertical;
+    }
+
+    /** Whether a title/tagline group's saved-HTML shell owns extra content. */
+    private static function identityGroupHasRawPayload(BlockMarkup $document, int $group): bool
+    {
+        $innerStart = $document->openingOffset($group) + $document->openingLength($group);
+        $shell = $document->innerHtml($group);
+        $children = $document->children($group);
+        for ($position = count($children) - 1; $position >= 0; $position--) {
+            $child = $children[$position];
+            $end = $document->endOffset($child);
+            if ($end === null) {
+                return true;
+            }
+            $start = $document->openingOffset($child);
+            $shell = substr_replace($shell, '', $start - $innerStart, $end - $start);
+        }
+        $shell = preg_replace('/<!--(?!\s*\/?wp:).*?-->/s', '', $shell) ?? $shell;
+        if (trim($shell) === '') {
+            return false;
+        }
+        return preg_match(
+            '~\A\s*<(?<tag>div|section|article|main|aside|header|footer|nav)\b[^>]*>\s*</\k<tag>>\s*\z~is',
+            $shell,
+        ) !== 1;
     }
 
     /** @return list<float> */

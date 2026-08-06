@@ -46,9 +46,18 @@ final class HeaderFallback
             $classes[] = 'has-background';
         }
 
+        $tagline = ($header['displays_tagline'] ?? false) === true
+            ? '<!-- wp:site-tagline {"textColor":"' . self::escapeJson($foreground)
+                . '","fontSize":"caption"} /-->'
+            : '';
+        $title = '<!-- wp:site-title {"textColor":"' . self::escapeJson($foreground) . '"} /-->';
+        $identity = $tagline === ''
+            ? $title
+            : '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}} -->'
+                . '<div class="wp-block-group">' . $title . $tagline . '</div><!-- /wp:group -->';
         $markup = '<!-- wp:group ' . self::encode($attrs) . ' -->' . "\n"
             . '<div class="' . implode(' ', $classes) . '">'
-            . '<!-- wp:site-title {"textColor":"' . self::escapeJson($foreground) . '"} /-->'
+            . $identity
             . '</div>' . "\n<!-- /wp:group -->";
 
         return new MarkupResult(

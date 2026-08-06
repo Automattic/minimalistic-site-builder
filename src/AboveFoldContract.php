@@ -376,6 +376,47 @@ final class AboveFoldContract
     {
         self::assertPhase($delivery, self::PHASE_DELIVERY);
         $contract = self::finalizeDelivery($delivery, $deliveredPages, $facts);
+        $headerFacts = is_array($facts['header'] ?? null) ? $facts['header'] : [];
+        if (($contract['header']['displays_tagline'] ?? false) === true
+            && (($headerFacts['site_tagline_blocks'] ?? 0) !== 1
+                || ($headerFacts['malformed_site_tagline_blocks'] ?? 0) !== 0
+                || ($headerFacts['invalid_site_tagline_topology'] ?? 0) !== 0)
+        ) {
+            $authored = $contract['header']['tagline_text'] ?? null;
+            $contract['header']['displays_tagline'] = false;
+            $contract['header']['tagline_text'] = null;
+            $contract['header']['text_rows'] = 1;
+            $contract['degradations'][] = self::degradation(
+                'header-tagline-not-delivered',
+                'theme/parts/header.html',
+                'wp:site-tagline',
+                $authored,
+                null,
+                'the finalized header does not contain exactly one structurally complete wp:site-tagline block; '
+                    . 'the delivered text-shape facts were narrowed instead of claiming an identity row count '
+                    . 'that visitors do not receive',
+            );
+            $contract['degradations'] = self::uniqueDegradations((array) $contract['degradations']);
+        }
+        if (($contract['header']['displays_tagline'] ?? false) !== true
+            && (($headerFacts['site_tagline_blocks'] ?? 0) > 0
+                || ($headerFacts['malformed_site_tagline_blocks'] ?? 0) > 0)
+        ) {
+            $contract['degradations'][] = self::degradation(
+                'header-tagline-unplanned-delivery',
+                'theme/parts/header.html',
+                'wp:site-tagline',
+                false,
+                [
+                    'complete_blocks' => $headerFacts['site_tagline_blocks'] ?? 0,
+                    'malformed_blocks' => $headerFacts['malformed_site_tagline_blocks'] ?? 0,
+                ],
+                'the finalized header retained dynamic tagline markup even though the authoritative contract '
+                    . 'does not display one; contract facts remain narrowed and the residual block was queued '
+                    . 'for isolated removal',
+            );
+            $contract['degradations'] = self::uniqueDegradations((array) $contract['degradations']);
+        }
         $contract['phase'] = self::PHASE_FINAL;
         return $contract;
     }
