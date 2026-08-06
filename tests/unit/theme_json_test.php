@@ -467,6 +467,51 @@ test('theme-json forces useRootPaddingAwareAlignments when root side padding is 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('theme-json provisions a root inline gutter when the model omits root padding', function () {
+    // SectionLayoutStep strips each section's own inline left/right padding on
+    // the expectation that the theme root gutter owns the inline axis. Without a
+    // provisioned gutter, useRootPaddingAwareAlignments stays off and every
+    // constrained section butts the viewport edge with no side inset.
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $llm = new FakeLlm();
+    $llm->queueJson(valid_theme_payload()); // no styles.spacing.padding anywhere
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $theme = $project->readJson('theme/theme.json');
+    $padding = $theme['styles']['spacing']['padding'] ?? [];
+    assert_eq('var:preset|spacing|md', $padding['left'] ?? null, 'left gutter provisioned from the spacing scale');
+    assert_eq('var:preset|spacing|md', $padding['right'] ?? null, 'right gutter provisioned from the spacing scale');
+    assert_eq('0', $padding['top'] ?? null, 'root vertical padding stays zero — sections own the rhythm');
+    assert_eq('0', $padding['bottom'] ?? null, 'root vertical padding stays zero — sections own the rhythm');
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments'], 'the provisioned gutter is aware-aligned');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('theme-json keeps a model-authored root gutter instead of double-padding it', function () {
+    $tmp = sys_get_temp_dir() . '/builder_tj_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('meta.json', ['prompt' => 'A cozy neighborhood bakery']);
+    $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+    seed_test_design_direction($project);
+
+    $payload = valid_theme_payload();
+    $payload['styles'] = ['spacing' => ['padding' => ['left' => '3rem', 'right' => '3rem']]];
+
+    $llm = new FakeLlm();
+    $llm->queueJson($payload);
+    (new ThemeJsonStep($llm, new PromptRenderer(repo_path('prompts'))))->run($project);
+
+    $padding = $project->readJson('theme/theme.json')['styles']['spacing']['padding'] ?? [];
+    assert_eq('3rem', $padding['left'] ?? null, 'a real authored gutter is preserved');
+    assert_eq('3rem', $padding['right'] ?? null, 'a real authored gutter is preserved');
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('normalizeRootPadding only sets the flag on a non-zero side padding', function () {
     // No styles at all — untouched.
     $theme = ThemeJsonStep::normalizeRootPadding([]);

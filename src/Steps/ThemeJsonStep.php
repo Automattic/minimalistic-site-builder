@@ -211,6 +211,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             ],
         ],
     ];
+    /**
+     * The provisioned root inline gutter, from the canonical spacing scale.
+     * md is a component-level inset (~1.5–2rem), matching the ~1rem-per-side
+     * page gutter the designs author on their outermost container.
+     */
+    private const ROOT_GUTTER = 'var:preset|spacing|md';
+
     private const REQ = 'theme-json';
 
     public function __construct(
@@ -352,6 +359,13 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $theme['styles']['spacing'] = [];
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
+
+        // Guarantee a root inline gutter so useRootPaddingAwareAlignments gives
+        // constrained/wide content a side inset. SectionLayoutStep strips each
+        // section's own inline left/right padding expecting this root gutter to
+        // own the inline axis; without it constrained sections butt the edge.
+        $theme = self::provisionRootGutter($theme);
+        $theme = self::normalizeRootPadding($theme);
 
         // Missing required slugs are filled deterministically instead of
         // aborting the build: the direction's committed hexes first, neutral
@@ -498,6 +512,35 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
                 return $theme;
             }
         }
+        return $theme;
+    }
+
+    /**
+     * Ensure the theme carries a root inline gutter. Fills only an absent or
+     * zero left/right side, so a real model-authored gutter is preserved and
+     * sections (whose own inline padding SectionLayoutStep strips) never
+     * double-pad. Vertical sides and the aware-alignment flag are settled by
+     * normalizeRootPadding, which runs immediately after. Pure — unit-testable.
+     *
+     * @param array<mixed> $theme
+     * @return array<mixed>
+     */
+    public static function provisionRootGutter(array $theme): array
+    {
+        if (!isset($theme['styles']['spacing']) || !is_array($theme['styles']['spacing'])) {
+            $theme['styles']['spacing'] = [];
+        }
+        $padding = $theme['styles']['spacing']['padding'] ?? null;
+        if (!is_array($padding)) {
+            $padding = [];
+        }
+        foreach (['left', 'right'] as $side) {
+            $value = is_string($padding[$side] ?? null) ? trim($padding[$side]) : '';
+            if ($value === '' || preg_match('/^0(?:[a-z%]+)?$/i', $value) === 1) {
+                $padding[$side] = self::ROOT_GUTTER;
+            }
+        }
+        $theme['styles']['spacing']['padding'] = $padding;
         return $theme;
     }
 
