@@ -170,7 +170,10 @@ final class HeroComposition
             'height_profiles' => ['standard', 'immersive'],
             'defaults' => [
                 'media_mode' => 'cover-image', 'headline_register' => 'poster',
-                'text_anchor' => 'top-start',
+                // BIGR-775 follow-up: a top-pinned safe zone left a dead band
+                // under the copy on the viewport-scale stage (lumen8) — the
+                // zone rides the cover's vertical center.
+                'text_anchor' => 'center-start',
                 'headline_line_target' => ['desktop' => [1, 4], 'mobile' => [2, 6]],
                 'focal_region' => 'end', 'text_safe_region' => 'start',
                 'height_profile' => 'immersive', 'cta_treatment' => 'prominent',

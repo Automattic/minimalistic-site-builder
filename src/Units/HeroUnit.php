@@ -101,6 +101,12 @@ final class HeroUnit extends AbstractPageSectionUnit
         if ((string) HeroComposition::metadata($context['recipe'])['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
         }
+        $markup = GeneratedMarkup::centerHeroCopy(
+            $markup,
+            (string) ($context['blueprint']['text_anchor'] ?? ''),
+            $key,
+            $repairs
+        );
         $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
         $before = $markup;
         $markup = GeneratedMarkup::constrainedPart($markup);

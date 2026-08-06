@@ -2224,6 +2224,132 @@ final class GeneratedMarkup
     }
 
     /**
+     * Center the copy of a center-anchored hero.
+     *
+     * BIGR-775 follow-up: models execute a centered blueprint unevenly — the
+     * standfirst and buttons get centered while the H1 keeps its default
+     * start alignment (audited: pulso8), or a cover is authored with a top
+     * content position that pins the whole copy block against the top edge
+     * of a viewport-scale stage (audited: lumen8). When the blueprint's text
+     * anchor sits on the vertical center, the cover's content position is
+     * rewritten onto the center row; when the anchor is fully centered
+     * (`center`), each heading/paragraph in the copy region is also aligned
+     * center, the copy group's constrained layout centers, and the buttons
+     * row centers. Attribute-only edit per the shared convention — stale
+     * saved-HTML classes are corrected by fix-blocks re-serialization; the
+     * contradictory position class tokens are removed here.
+     *
+     * @param list<array<string,mixed>> $repairs
+     */
+    public static function centerHeroCopy(
+        string $markup,
+        string $textAnchor,
+        string $part,
+        array &$repairs = [],
+    ): string {
+        $verticallyCentered = $textAnchor === 'center' || str_starts_with($textAnchor, 'center-');
+        if (!$verticallyCentered) {
+            return $markup;
+        }
+        $horizontallyCentered = $textAnchor === 'center';
+
+        $document = BlockMarkup::parse($markup);
+        $adjusted = 0;
+        foreach ($document->indices() as $index) {
+            $name = $document->name($index);
+            $attrs = $document->attrs($index) ?? [];
+            if ($name === 'cover') {
+                $position = trim((string) ($attrs['contentPosition'] ?? ''));
+                if (preg_match('/^(top|center|bottom) (left|center|right)$/', $position, $match) !== 1) {
+                    continue;
+                }
+                $horizontal = $horizontallyCentered ? 'center' : $match[2];
+                $centered = "center {$horizontal}";
+                if ($position === $centered && $match[1] === 'center') {
+                    continue;
+                }
+                $document->removeClassTokenInOwnHtml($index, 'is-position-' . str_replace(' ', '-', $position));
+                if ($centered === 'center center') {
+                    // The all-center position is the cover default: drop the
+                    // attribute and its custom-position marker entirely.
+                    unset($attrs['contentPosition']);
+                    $document->removeClassTokenInOwnHtml($index, 'has-custom-content-position');
+                } else {
+                    $attrs['contentPosition'] = $centered;
+                }
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+                continue;
+            }
+            if (!$horizontallyCentered) {
+                continue;
+            }
+            $classes = preg_split(
+                '/\s+/',
+                trim((string) ($attrs['className'] ?? '')),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            $isCopyRoot = in_array('hero-composition__copy', $classes, true);
+            if (!$isCopyRoot && !self::insideCopyRegion($document, $index)) {
+                continue;
+            }
+            if ($name === 'heading' && (string) ($attrs['textAlign'] ?? '') !== 'center') {
+                $attrs['textAlign'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+            } elseif ($name === 'paragraph' && (string) ($attrs['align'] ?? '') !== 'center') {
+                $attrs['align'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+            } elseif ($name === 'buttons'
+                && (string) (($attrs['layout'] ?? [])['justifyContent'] ?? '') !== 'center'
+            ) {
+                $attrs['layout'] = ['type' => 'flex'] + (array) ($attrs['layout'] ?? []);
+                $attrs['layout']['justifyContent'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+            } elseif ($name === 'group'
+                && $isCopyRoot
+                && (string) (($attrs['layout'] ?? [])['type'] ?? '') === 'constrained'
+                && (string) (($attrs['layout'] ?? [])['justifyContent'] ?? '') !== 'center'
+            ) {
+                $attrs['layout']['justifyContent'] = 'center';
+                $document->setAttrs($index, $attrs);
+                $adjusted++;
+            }
+        }
+        if ($adjusted === 0) {
+            return $markup;
+        }
+        $repairs[] = [
+            'code' => 'hero-copy-centered',
+            'part' => $part,
+            'authored' => "{$adjusted} block(s) off the blueprint's centered anchor",
+            'delivered' => "cover position and copy alignment on the '{$textAnchor}' anchor",
+            'disposition' => 'repaired',
+        ];
+        return $document->render();
+    }
+
+    /** Whether a block sits inside a marked hero copy region. */
+    private static function insideCopyRegion(BlockMarkup $document, int $index): bool
+    {
+        for ($parent = $document->parent($index); $parent !== null; $parent = $document->parent($parent)) {
+            $classes = preg_split(
+                '/\s+/',
+                trim((string) (($document->attrs($parent) ?? [])['className'] ?? '')),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [];
+            if (in_array('hero-composition__copy', $classes, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Force a cover-band hero to span the full viewport width.
      *
      * The page-opening hero is exempt from the framed canvas: the mat begins

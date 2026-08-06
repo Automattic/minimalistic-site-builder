@@ -743,6 +743,77 @@ test('stripHeroEyebrow removes tracked caption lines and minor headings above th
     assert_eq([], $r);
 });
 
+test('centerHeroCopy aligns the H1 and buttons a model left at start on a fully centered anchor (BIGR-775)', function () {
+    // Regression: pulso8 centered the standfirst and left the H1 and buttons
+    // at their default start alignment inside the centered copy group.
+    $doc = '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--cinematic-safe-zone" id="hero">'
+        . '<!-- wp:cover {"url":"theme:./assets/x.jpg","minHeight":80,"minHeightUnit":"vh","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-cover hero-composition__media" style="min-height:80vh"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","contentSize":"860px","justifyContent":"left"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Neon Bloom</h1><!-- /wp:heading -->'
+        . '<!-- wp:paragraph {"align":"center"} --><p class="has-text-align-center">Two nights of DJ performances.</p><!-- /wp:paragraph -->'
+        . '<!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link" href="#registration">Claim Your Ticket</a></div>'
+        . '<!-- /wp:button --></div><!-- /wp:buttons -->'
+        . '</div><!-- /wp:group --></div></div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'center', 'p', $repairs);
+    assert_contains('"textAlign":"center"', $out, 'H1 centered in attrs');
+    assert_contains('"justifyContent":"center"', $out, 'buttons and copy group centered');
+    assert_true(!str_contains($out, '"justifyContent":"left"'), 'copy group start alignment replaced');
+    assert_contains('"align":"center"', $out, 'already-centered paragraph untouched');
+    assert_true(in_array('hero-copy-centered', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($out, 'center', 'p', $again));
+    assert_eq([], $again);
+
+    // A non-centered anchor leaves the composition alone.
+    $r = [];
+    assert_eq($doc, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'bottom-start', 'p', $r));
+    assert_eq([], $r);
+});
+
+test('centerHeroCopy moves a top-pinned cover onto the center row without touching horizontal alignment', function () {
+    // Regression: lumen8's layered-poster pinned the copy block to the top of
+    // an 80vh stage via contentPosition "top left", opening a dead band below.
+    $doc = '<!-- wp:group {"anchor":"hero","className":"hero-composition--layered-poster","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--layered-poster" id="hero">'
+        . '<!-- wp:cover {"url":"theme:./assets/x.jpg","minHeight":80,"minHeightUnit":"vh","contentPosition":"top left","className":"hero-composition__media","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-cover has-custom-content-position is-position-top-left hero-composition__media" style="min-height:80vh"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","justifyContent":"left"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Light shaped by hand</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group --></div></div><!-- /wp:cover --></div><!-- /wp:group -->';
+    $repairs = [];
+    $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'center-start', 'p', $repairs);
+    assert_contains('"contentPosition":"center left"', $out, 'cover rides the center row');
+    assert_true(!str_contains($out, 'is-position-top-left'), 'stale position class removed');
+    assert_true(!str_contains($out, '"textAlign"'), 'start-anchored copy keeps its horizontal alignment');
+    assert_contains('"justifyContent":"left"', $out, 'copy group horizontal alignment untouched');
+    assert_true(in_array('hero-copy-centered', array_column($repairs, 'code'), true));
+
+    // Idempotent.
+    $again = [];
+    assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($out, 'center-start', 'p', $again));
+    assert_eq([], $again);
+
+    // A fully centered anchor collapses the position to the cover default.
+    $bottom = str_replace(
+        ['"contentPosition":"top left"', 'has-custom-content-position is-position-top-left '],
+        ['"contentPosition":"bottom right"', 'has-custom-content-position is-position-bottom-right '],
+        $doc
+    );
+    $r = [];
+    $centered = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($bottom, 'center', 'p', $r);
+    assert_true(!str_contains($centered, 'contentPosition'), 'all-center position drops the attribute');
+    assert_true(!str_contains($centered, 'has-custom-content-position'), 'custom-position marker removed');
+    assert_true(!str_contains($centered, 'is-position-bottom-right'), 'stale position class removed');
+});
+
 test('fullBleedCoverAlignment upgrades a wide-capped cover-band hero to align:full', function () {
     // Regression: portfolio26's framed canvas capped the layered-poster cover
     // at alignwide, insetting the hero band from both viewport edges. The
