@@ -368,6 +368,56 @@ test('FixBlocksStep degrades reviewed paragraph styles and records actionable wa
     }
 });
 
+test('FixBlocksStep isolates malformed legacy alignment containers with actionable warnings', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_legacy_alignment_shape_' . uniqid();
+    $project = new Project($tmp);
+    $badStyle = '<!-- wp:heading {"textAlign":"center","style":"keep-style"} -->'
+        . '<h2 class="wp-block-heading has-text-align-center">Title</h2>'
+        . '<!-- /wp:heading -->';
+    $badTypography = '<!-- wp:paragraph {"textAlign":"center",'
+        . '"style":{"typography":"keep-typography"}} -->'
+        . '<p class="has-text-align-center">Copy</p><!-- /wp:paragraph -->';
+    $safe = '<!-- wp:heading {"textAlign":"center","level":2,'
+        . '"style":{"typography":{"lineHeight":"1.1"}}} -->'
+        . '<h2 class="wp-block-heading has-text-align-center" style="line-height:1.1">'
+        . 'Safe sibling</h2><!-- /wp:heading -->';
+    $project->writeText('theme/parts/a-bad-style.html', $badStyle);
+    $project->writeText('theme/parts/b-bad-typography.html', $badTypography);
+    $project->writeText('theme/parts/c-safe.html', $safe);
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        assert_eq(
+            $badStyle,
+            $project->readText('theme/parts/a-bad-style.html'),
+            'a malformed style container is delivered byte-for-byte',
+        );
+        assert_eq(
+            $badTypography,
+            $project->readText('theme/parts/b-bad-typography.html'),
+            'a malformed typography container is delivered byte-for-byte',
+        );
+        assert_contains(
+            '"typography":{"lineHeight":"1.1","textAlign":"center"}',
+            $project->readText('theme/parts/c-safe.html'),
+            'a valid sibling still receives the safe legacy alignment fold',
+        );
+
+        $joined = implode("\n", $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('left parts/a-bad-style.html unmodified', $joined);
+        assert_contains('core/heading at 0: authored style "keep-style" is not an object', $joined);
+        assert_contains('left parts/b-bad-typography.html unmodified', $joined);
+        assert_contains(
+            'core/paragraph at 0: authored style.typography "keep-typography" is not an object',
+            $joined,
+        );
+        assert_contains('pre-step markup delivered byte-for-byte', $joined);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
 test('FixBlocksStep isolates unreviewed validation failures per file with a durable warning', function () {
     $cases = [
         'unsupported-block' => '<!-- wp:query --><div class="wp-block-query"></div><!-- /wp:query -->',
