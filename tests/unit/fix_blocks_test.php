@@ -134,15 +134,17 @@ test('FixBlocksStep warns but does not fail when block repair drops vertical rhy
 test('FixBlocksStep records a heading that lost its centering', function () {
     $tmp = sys_get_temp_dir() . '/fix-blocks-alignment-' . uniqid();
     $project = new Project($tmp);
-    // A legacy top-level textAlign plus an inline colour no attribute backs:
-    // the deprecated save cannot match either, so the recovered alignment class
-    // is dropped and the heading renders left-aligned instead of centred.
+    // An alignment class that lives ONLY in the saved HTML while the comment
+    // attrs carry an authored style: the deprecation adapter's migration is
+    // clobbered by the raw style overlay, so the class is dropped and the
+    // heading renders left-aligned instead of centred. (A legacy top-level
+    // textAlign attribute no longer loses — the reviewed canonicalization
+    // folds it into style.typography.textAlign.)
     $project->writeText(
         'theme/parts/signature.html',
-        '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
-            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
-            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
-            . 'style="color:var(--wp--preset--color--base)">Signature Flavours</h2>'
+        '<!-- wp:heading {"level":2,"style":{"typography":{"lineHeight":"1.1"}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center" '
+            . 'style="line-height:1.1">Signature Flavours</h2>'
             . '<!-- /wp:heading -->',
     );
 
@@ -178,10 +180,9 @@ test('a paragraph opacity repair does not hide a heading alignment loss in the s
     $project->writeText(
         'theme/parts/mixed.html',
         '<!-- wp:paragraph --><p style="opacity:0.4">Readable</p><!-- /wp:paragraph -->'
-            . '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
-            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
-            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
-            . 'style="color:var(--wp--preset--color--base)">Still centred</h2>'
+            . '<!-- wp:heading {"level":2,"style":{"typography":{"lineHeight":"1.1"}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center" '
+            . 'style="line-height:1.1">Still centred</h2>'
             . '<!-- /wp:heading -->',
     );
 

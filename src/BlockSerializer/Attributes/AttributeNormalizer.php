@@ -51,6 +51,47 @@ final class AttributeNormalizer
             );
         }
 
+        // Legacy top-level text alignment — models author core's historical
+        // {"textAlign":"center"} on blocks whose pinned registry only knows
+        // style.typography.textAlign. The heading deprecation adapter can
+        // migrate it, but the later raw-comment overlay clobbers the migrated
+        // style whenever the block ALSO authored other style keys, and the
+        // unmirrored has-text-align-* class is then dropped (audited:
+        // lumen10's centered H1 with typography.lineHeight). Fold the legacy
+        // key into the authored style up front so sourcing, validation, and
+        // the overlay all see one canonical form. Reviewed scope: only the
+        // two reading-copy blocks — button and the site-identity blocks keep
+        // their own pinned textAlign deprecations, and blocks that genuinely
+        // register a top-level textAlign (e.g. core/quote) are left alone.
+        // An authored typography.textAlign always wins over the legacy key.
+        if ($node->attributes !== null
+            && in_array($node->name, ['core/heading', 'core/paragraph'], true)
+            && !array_key_exists('textAlign', $schemas)
+        ) {
+            $legacyAlign = $node->attributes->get('textAlign');
+            if ($legacyAlign instanceof JsonString
+                && in_array($legacyAlign->toNative(), ['left', 'center', 'right'], true)
+            ) {
+                $style = $node->attributes->get('style');
+                if (!$style instanceof JsonObject) {
+                    $style = new JsonObject();
+                    $node->attributes->set('style', $style);
+                }
+                $typography = $style->get('typography');
+                if (!$typography instanceof JsonObject) {
+                    $typography = new JsonObject();
+                    $style->set('typography', $typography);
+                }
+                if (!$typography->has('textAlign')) {
+                    // Reviewed canonicalization, not a repair: like the
+                    // deprecation adapters it replaces, it does not count
+                    // toward the fixer's K.
+                    $typography->set('textAlign', new JsonString($legacyAlign->toNative()));
+                }
+                $node->attributes->remove('textAlign');
+            }
+        }
+
         // Invented style keys — authored paths that exist neither in the
         // reviewed tree nor in the pinned runtime — are deleted from the raw
         // comment state before sourcing and validation, so the serialized
