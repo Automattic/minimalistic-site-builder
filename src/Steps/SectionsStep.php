@@ -14,6 +14,7 @@ use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\PageOpeningFallback;
+use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\SectionRole;
@@ -651,6 +652,10 @@ final class SectionsStep implements Step
                 'stable_id' => (string) ($siteSpecData['slug'] ?? $project->slug()),
                 'writing_direction' => (string) ($siteSpecData['writing_direction'] ?? 'ltr'),
                 'page_count' => count($pages),
+                // The one text wp:site-tagline will render at runtime — the
+                // contract exposes it so neither above-fold author discovers
+                // it by surprise on the live site (BIGR-773).
+                'tagline' => PlaygroundArtifact::blogDescription($siteSpecData),
             ],
             footerContext: [
                 'archetype' => $footerArchetype,

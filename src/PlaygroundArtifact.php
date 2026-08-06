@@ -246,6 +246,22 @@ final class PlaygroundArtifact
     }
 
     /**
+     * The one rendered text for wp:site-tagline (WP's blogdescription): the
+     * user's stated tagline, or nothing. The spec's `topic` is deliberately
+     * NOT a fallback (BIGR-773): it is a factual description of the whole
+     * site — the same semantic content every hero eyebrow/standfirst carries
+     * — so rendering it in the header guarantees a near-duplicate small line
+     * ~100px above the hero's. A blank tagline is strictly better; header
+     * generation drops the block when this is empty.
+     *
+     * @param array<string,mixed> $spec
+     */
+    public static function blogDescription(array $spec): string
+    {
+        return trim((string) ($spec['tagline'] ?? ''));
+    }
+
+    /**
      * WP site identity for a Blueprint's setSiteOptions step: the header's
      * site-title/site-tagline blocks read these options, not the theme.
      * A malformed siteSpec.json falls back to the theme header/slug.
@@ -265,9 +281,7 @@ final class PlaygroundArtifact
                 $spec = [];
             }
             $blogname = (string) ($spec['name'] ?? $blogname);
-            // The spec carries a tagline only when the user stated one; fall back
-            // to the factual topic so the site-tagline block is never blank.
-            $blogdescription = (string) ($spec['tagline'] ?? $spec['topic'] ?? '');
+            $blogdescription = self::blogDescription($spec);
         }
 
         return [

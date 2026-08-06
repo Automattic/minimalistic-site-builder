@@ -199,6 +199,7 @@ final class AboveFoldContract
         if ($archetype === 'minimal-overlay') {
             $mode = self::MODE_OVERLAY;
         }
+        $tagline = trim((string) ($siteContext['tagline'] ?? ''));
         $foreground = $mode === self::MODE_OVERLAY ? 'base' : 'contrast';
         $protection = $mode === self::MODE_OVERLAY ? 'contrast' : 'base';
         foreach ($openings as &$opening) {
@@ -239,7 +240,7 @@ final class AboveFoldContract
                 'protection_orientation' => 'top-edge',
                 'protect_top_edge' => $mode === self::MODE_OVERLAY,
                 'safe_top_px' => $mode === self::MODE_OVERLAY ? 80 : 0,
-            ],
+            ] + self::headerTextFacts($archetype, $tagline),
             'viewport' => [
                 'height_profile' => (string) ($blueprint['height_profile'] ?? 'standard'),
                 'headline_register' => (string) ($blueprint['headline_register'] ?? 'display'),
@@ -509,6 +510,28 @@ final class AboveFoldContract
         return $pages[0];
     }
 
+    /**
+     * Canonical header text-shape facts (BIGR-773), shared byte-for-byte by
+     * both above-fold authors. `displays_tagline` is true only when the
+     * archetype's catalog form includes wp:site-tagline AND a stated tagline
+     * exists to render (branded-lockup with an empty tagline is a logo+title
+     * lockup — the blank block is stripped deterministically). `text_rows`
+     * counts the header's stacked text lines: a two-row header bans the hero
+     * eyebrow, because a third caption-scale line ~100px below reads as a
+     * masthead row, not hero copy.
+     *
+     * @return array{displays_tagline:bool,tagline_text:?string,text_rows:int}
+     */
+    private static function headerTextFacts(string $archetype, string $tagline): array
+    {
+        $displays = $archetype === 'branded-lockup' && $tagline !== '';
+        return [
+            'displays_tagline' => $displays,
+            'tagline_text' => $displays ? $tagline : null,
+            'text_rows' => $displays || $archetype === 'centered-masthead' ? 2 : 1,
+        ];
+    }
+
     /** @return list<string> */
     private static function headerPool(
         string $mode,
@@ -680,7 +703,7 @@ final class AboveFoldContract
             'protection_orientation' => 'top-edge',
             'protect_top_edge' => false,
             'safe_top_px' => 0,
-        ];
+        ] + self::headerTextFacts('standard-row', '');
         $contract['viewport']['stacked_cover_max_vh'] = 80;
         $contract['degradations'][] = self::degradation(
             $code,

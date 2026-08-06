@@ -10,6 +10,7 @@ use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
 use Automattic\SiteBuild\Narrator;
+use Automattic\SiteBuild\PlaygroundArtifact;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
@@ -334,11 +335,26 @@ final class HeaderHeroStep implements Step
 
             // With the hero's delivered copy and action known, drop the
             // header's duplicates of them (echoed caption lines, same-label
-            // CTA) — the ownership split gives both to the hero.
+            // CTA, a tagline block that renders blank or paraphrases a hero
+            // line) — the ownership split gives copy and action to the hero.
             $dedupe = self::dedupeAgainstHero(
                 $writes[$headerRel],
                 $writes[$heroRel],
                 is_array($delivery['primary_action'] ?? null) ? $delivery['primary_action'] : null,
+                PlaygroundArtifact::blogDescription($siteSpec),
+            );
+            $writes[$headerRel] = $dedupe['markup'];
+            foreach ($dedupe['notes'] as $note) {
+                $report[] = "[{$headerRel}] {$note}";
+            }
+        } else {
+            // No contract-owned hero part to compare against, but a blank
+            // tagline block still renders a dead line — strip it here too.
+            $dedupe = self::dedupeAgainstHero(
+                $writes[$headerRel],
+                '',
+                null,
+                PlaygroundArtifact::blogDescription($siteSpec),
             );
             $writes[$headerRel] = $dedupe['markup'];
             foreach ($dedupe['notes'] as $note) {
@@ -1426,15 +1442,24 @@ final class HeaderHeroStep implements Step
      *  2. Duplicate CTA — a header button whose label repeats the contract's
      *     primary action; the ownership split gives the primary action to the
      *     hero, so the header copy is the redundant one.
+     *  3. Tagline collision (BIGR-773) — wp:site-tagline is a dynamic block,
+     *     so its rendered text is invisible in the markup; the caller passes
+     *     the one string WordPress will render (the blogdescription). A blank
+     *     tagline renders as a dead line inside the lockup, and a stated one
+     *     that paraphrases a hero eyebrow/short line duplicates copy the
+     *     ownership split gives to the hero — identity is the site NAME, so
+     *     the tagline block is the one removed in both cases.
      * Pure — unit-testable.
      *
      * @param array{label:string,intent:string,destination:string}|null $primaryAction
+     * @param string $taglineText the text wp:site-tagline renders at runtime
      * @return array{markup:string, notes:string[]}
      */
     public static function dedupeAgainstHero(
         string $headerMarkup,
         string $heroMarkup,
         ?array $primaryAction,
+        string $taglineText = '',
     ): array {
         $heroLines = [];
         $hero = BlockMarkup::parse($heroMarkup);
@@ -1455,12 +1480,36 @@ final class HeaderHeroStep implements Step
         $actionLabel = $primaryAction === null
             ? []
             : self::textTokens((string) ($primaryAction['label'] ?? ''));
+        $taglineText = trim($taglineText);
+        $taglineTokens = self::contentTokens(self::textTokens($taglineText));
 
         $doc = BlockMarkup::parse($headerMarkup);
         $notes = [];
         $removals = [];
         foreach ($doc->indices() as $i) {
             $name = $doc->name($i);
+            if ($name === 'site-tagline') {
+                // Void block: the whole thing is its opening comment.
+                $start = $doc->openingOffset($i);
+                $length = ($doc->endOffset($i) ?? ($start + $doc->openingLength($i))) - $start;
+                if ($taglineText === '') {
+                    $removals[$start] = $length;
+                    $notes[] = 'wp:site-tagline removed: the site spec states no tagline, so the '
+                        . 'block renders as a blank line inside the masthead lockup';
+                    continue;
+                }
+                foreach ($heroLines as $line) {
+                    if (!self::linesParaphrase($taglineTokens, self::contentTokens($line))) {
+                        continue;
+                    }
+                    $removals[$start] = $length;
+                    $notes[] = 'wp:site-tagline removed: its rendered text "' . $taglineText . '" '
+                        . 'paraphrases the hero line "' . implode(' ', $line) . '" directly beneath it '
+                        . '(the hero owns the proposition; header identity is the site name)';
+                    break;
+                }
+                continue;
+            }
             $end = $doc->endOffset($i);
             if ($end === null) {
                 continue;
@@ -1546,6 +1595,86 @@ final class HeaderHeroStep implements Step
         }
         $shared = count(array_intersect($a, $b));
         return $shared >= 2 && $shared / min(count($a), count($b)) >= 0.8;
+    }
+
+    /**
+     * Common function words that carry no meaning for the paraphrase check.
+     * Tokens shorter than four characters are dropped outright, which also
+     * covers most non-English articles and prepositions.
+     */
+    private const STOP_TOKENS = [
+        'about', 'across', 'after', 'against', 'also', 'among', 'and', 'are',
+        'been', 'before', 'being', 'between', 'during', 'each', 'every',
+        'from', 'have', 'into', 'more', 'most', 'only', 'onto', 'other',
+        'over', 'since', 'some', 'than', 'that', 'their', 'them', 'then',
+        'they', 'this', 'through', 'toward', 'towards', 'under', 'until',
+        'upon', 'very', 'were', 'what', 'when', 'where', 'while', 'will',
+        'with', 'within', 'without', 'your',
+    ];
+
+    /**
+     * The meaning-bearing subset of a token line: function words and tokens
+     * shorter than four characters removed, duplicates collapsed.
+     *
+     * @param list<string> $tokens
+     * @return list<string>
+     */
+    private static function contentTokens(array $tokens): array
+    {
+        return array_values(array_unique(array_filter(
+            $tokens,
+            static fn (string $token): bool => mb_strlen($token, 'UTF-8') >= 4
+                && !in_array($token, self::STOP_TOKENS, true),
+        )));
+    }
+
+    /**
+     * Whether two lines say the same thing once function words are ignored
+     * and near-identical word forms count as the same word ("argentine" ~
+     * "argentina", "photography" ~ "photographs"). Looser than linesEcho on
+     * purpose: a header tagline and a hero eyebrow are independently written
+     * paraphrases of the same spec fact, never byte-identical.
+     *
+     * @param list<string> $a content tokens
+     * @param list<string> $b content tokens
+     */
+    private static function linesParaphrase(array $a, array $b): bool
+    {
+        if (count($a) < 2 || count($b) < 2) {
+            return false;
+        }
+        [$small, $large] = count($a) <= count($b) ? [$a, $b] : [$b, $a];
+        $shared = 0;
+        foreach ($small as $x) {
+            foreach ($large as $y) {
+                if (self::tokenKin($x, $y)) {
+                    $shared++;
+                    break;
+                }
+            }
+        }
+        return $shared >= 2 && $shared / count($small) >= 0.6;
+    }
+
+    /**
+     * Whether two tokens are inflections of the same word: identical, or
+     * sharing a prefix of at least five characters that reaches within two
+     * characters of the shorter token's end. "argentina"/"argentine" and
+     * "photography"/"photographs" match; "station"/"state" does not.
+     */
+    private static function tokenKin(string $a, string $b): bool
+    {
+        if ($a === $b) {
+            return true;
+        }
+        $limit = min(mb_strlen($a, 'UTF-8'), mb_strlen($b, 'UTF-8'));
+        $shared = 0;
+        while ($shared < $limit
+            && mb_substr($a, $shared, 1, 'UTF-8') === mb_substr($b, $shared, 1, 'UTF-8')
+        ) {
+            $shared++;
+        }
+        return $shared >= 5 && $shared >= $limit - 2;
     }
 
     /**

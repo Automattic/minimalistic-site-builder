@@ -1070,6 +1070,67 @@ test('dedupeAgainstHero leaves distinct chrome, partial overlap, and other-label
     assert_eq($header, $none['markup']);
 });
 
+test('dedupeAgainstHero strips a tagline block whose rendered text paraphrases a hero line (BIGR-773)', function () {
+    // The audited portfolio build: the dynamic tagline renders the spec topic,
+    // and the hero eyebrow independently paraphrases the same fact. Neither
+    // line is byte-identical, so the strict linesEcho path can never fire.
+    $hero = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p>Documentary photography from Argentina</p><!-- /wp:paragraph -->'
+        . '<!-- wp:heading {"level":1} --><h1>Twenty years at the edge of the crowd</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:site-title /-->'
+        . '<!-- wp:site-tagline {"fontSize":"caption"} /-->'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p>Open Tuesday to Sunday</p><!-- /wp:paragraph -->'
+    );
+    $tagline = 'documentary photography of Argentine social and political events';
+    $result = HeaderHeroStep::dedupeAgainstHero($header, $hero, null, $tagline);
+    assert_true(!str_contains($result['markup'], 'wp:site-tagline'), 'paraphrased tagline block removed');
+    assert_contains('wp:site-title', $result['markup'], 'identity chrome untouched');
+    assert_contains('Open Tuesday to Sunday', $result['markup'], 'unrelated chrome line survives');
+    assert_eq(1, count($result['notes']));
+    assert_contains('paraphrases', $result['notes'][0]);
+
+    // Idempotent.
+    $again = HeaderHeroStep::dedupeAgainstHero($result['markup'], $hero, null, $tagline);
+    assert_eq($result['markup'], $again['markup']);
+    assert_eq([], $again['notes']);
+});
+
+test('dedupeAgainstHero keeps a stated tagline that says something the hero does not', function () {
+    $hero = '<!-- wp:group {"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">'
+        . '<!-- wp:paragraph {"fontSize":"caption"} --><p>Open Tue–Fri · 24 Market Street</p><!-- /wp:paragraph -->'
+        . '<!-- wp:heading {"level":1} --><h1>Bread Made Slowly, Shared Daily</h1><!-- /wp:heading -->'
+        . '</div><!-- /wp:group -->';
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:site-title /--><!-- wp:site-tagline {"fontSize":"caption"} /-->'
+    );
+    // A brand-register tagline sharing no meaning-bearing words with the hero.
+    $result = HeaderHeroStep::dedupeAgainstHero($header, $hero, null, 'Naturally leavened since 1998');
+    assert_eq($header, $result['markup']);
+    assert_eq([], $result['notes']);
+});
+
+test('dedupeAgainstHero strips a tagline block that would render blank', function () {
+    $header = hh_header(
+        '{"backgroundColor":"base","layout":{"type":"constrained"}}',
+        '<!-- wp:site-title /--><!-- wp:site-tagline {"textColor":"secondary","fontSize":"caption"} /-->'
+    );
+    // The spec states no tagline; the dynamic block would paint a dead line.
+    $result = HeaderHeroStep::dedupeAgainstHero($header, '', null, '');
+    assert_true(!str_contains($result['markup'], 'wp:site-tagline'), 'blank-rendering tagline block removed');
+    assert_contains('wp:site-title', $result['markup'], 'identity chrome untouched');
+    assert_eq(1, count($result['notes']));
+    assert_contains('blank line', $result['notes'][0]);
+
+    $again = HeaderHeroStep::dedupeAgainstHero($result['markup'], '', null, '');
+    assert_eq($result['markup'], $again['markup']);
+});
+
 test('the step repairs header and hero parts without promoting successful repairs to warnings', function () {
     $tmp = sys_get_temp_dir() . '/builder_hh_' . uniqid();
     $project = (new ProjectStore($tmp))->create('demo');
