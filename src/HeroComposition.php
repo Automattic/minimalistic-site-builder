@@ -468,10 +468,11 @@ final class HeroComposition
                 'safe parseable hero was retained; replace only the background cover with the assigned foreground-media block',
             );
         }
-        // BIGR-775 advisory copy-budget check: capacity maps to a hard count
-        // of reading-text blocks (headings + paragraphs) inside the copy
-        // region — compact is a headline plus one supporting line, standard
-        // adds one more. Overrun keeps the safe hero and stays actionable.
+        // BIGR-775 advisory copy-budget check: every hero holds at most the
+        // headline plus ONE supporting paragraph (naturaleza9's three stacked
+        // bodies read as clutter even inside the old standard budget).
+        // copy_capacity stays a selection-only dimension. Overrun keeps the
+        // safe hero and stays actionable.
         $copyTextBlocks = 0;
         foreach ($document->indices() as $index) {
             if (!in_array($document->name($index), ['heading', 'paragraph'], true)) {
@@ -490,11 +491,7 @@ final class HeroComposition
                 }
             }
         }
-        $textBudget = match ((string) $meta['copy_capacity']) {
-            'compact' => 2,
-            'standard' => 3,
-            default => 4,
-        };
+        $textBudget = 2;
         if ($copyTextBlocks > $textBudget) {
             $warnings[] = self::markupWarning(
                 $part,

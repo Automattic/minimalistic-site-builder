@@ -882,7 +882,7 @@ test('wrapper repair leaves stray closers and content-bearing shells alone', fun
     assert_eq([], $n);
 });
 
-test('clampHeroTopPadding lowers xl to sm on media-led and to md on copy-led hero roots', function () {
+test('clampHeroTopPadding lowers xl to sm on media-led and to lg on copy-led hero roots', function () {
     // Regression: lumen4's panorama-rail (recipe since retired) root carried padding-top:xl, opening
     // a dead band under the header that pushed the whole rail below the fold.
     $mediaLed = '<!-- wp:group {"tagName":"section","anchor":"hero","className":"hero-composition--focal-subject-stage","style":{"spacing":{"padding":{"top":"var:preset|spacing|xl","bottom":"var:preset|spacing|xl"}}},"layout":{"type":"constrained"}} -->'
@@ -911,8 +911,8 @@ test('clampHeroTopPadding lowers xl to sm on media-led and to md on copy-led her
     );
     $r2 = [];
     $copyOut = Automattic\SiteBuild\Units\GeneratedMarkup::clampHeroTopPadding($copyLed, 'p', $r2);
-    assert_contains('"top":"var:preset|spacing|md"', $copyOut, 'copy-led xl clamps to md');
-    assert_contains('padding-top:var(--wp--preset--spacing--md)', $copyOut);
+    assert_contains('"top":"var:preset|spacing|lg"', $copyOut, 'copy-led xl clamps to lg');
+    assert_contains('padding-top:var(--wp--preset--spacing--lg)', $copyOut);
     assert_true(in_array('hero-top-padding-clamped', array_column($r2, 'code'), true));
 
     // A copy-led root already at md keeps its padding.

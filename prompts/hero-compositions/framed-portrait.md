@@ -9,8 +9,8 @@ turn the image into a full-bleed background or overlap text across a face.
 
 - Structure: use an unequal columns or media-text frame with one offset
   `hero-composition__copy` region and one contained `hero-composition__media`.
-- Copy budget: the copy region is one level-1 heading, at most TWO supporting
-  paragraphs, and at most one planned button — no further caption or credit
+- Copy budget: the copy region is one level-1 heading, at most ONE supporting
+  paragraph, and at most one planned button — no further caption or credit
   lines, and no hairline rules between the copy lines.
 - Identity: the one root group carries exactly `.hero-composition--framed-portrait`.
 - Media: exactly one portrait-oriented foreground image; its block ratio and

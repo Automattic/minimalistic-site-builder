@@ -2662,8 +2662,10 @@ final class GeneratedMarkup
                 (string) (($document->attrs($first) ?? [])['className'] ?? ''),
                 'hero-composition__media'
             );
-        $cap = $mediaLed ? 'sm' : 'md';
-        $oversized = $mediaLed ? 'md|lg|xl|xxl' : 'lg|xl|xxl';
+        // Copy-led heroes cap at lg, not md (BIGR-775 follow-up): the tighter
+        // cap sat solid split heroes ~1.5rem under the header (lumen9/atlas9).
+        $cap = $mediaLed ? 'sm' : 'lg';
+        $oversized = $mediaLed ? 'md|lg|xl|xxl' : 'xl|xxl';
 
         $attrs = $document->attrs($root) ?? [];
         $top = $attrs['style']['spacing']['padding']['top'] ?? null;
