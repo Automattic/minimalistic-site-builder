@@ -760,10 +760,11 @@ test('centerHeroCopy aligns the H1 and buttons a model left at start on a fully 
         . '</div><!-- /wp:group --></div></div><!-- /wp:cover --></div><!-- /wp:group -->';
     $repairs = [];
     $out = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'center', 'p', $repairs);
-    assert_contains('"textAlign":"center"', $out, 'H1 centered in attrs');
+    // Alignment must land in style.typography.textAlign — the one form the
+    // block re-serializer preserves and turns into has-text-align-center.
+    assert_contains('"typography":{"textAlign":"center"}', $out, 'H1 centered via typography style');
     assert_contains('"justifyContent":"center"', $out, 'buttons and copy group centered');
     assert_true(!str_contains($out, '"justifyContent":"left"'), 'copy group start alignment replaced');
-    assert_contains('"align":"center"', $out, 'already-centered paragraph untouched');
     assert_true(in_array('hero-copy-centered', array_column($repairs, 'code'), true));
 
     // Idempotent.
@@ -775,6 +776,24 @@ test('centerHeroCopy aligns the H1 and buttons a model left at start on a fully 
     $r = [];
     assert_eq($doc, Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($doc, 'bottom-start', 'p', $r));
     assert_eq([], $r);
+
+    // Regression (lumen10): a top-level textAlign attribute is NOT accepted
+    // as centered — the serializer's raw-comment overlay loses it whenever
+    // other style keys are authored. The pass rewrites it into the
+    // typography form and drops the legacy key.
+    $legacy = '<!-- wp:group {"anchor":"hero","className":"hero-composition--cinematic-safe-zone","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group hero-composition--cinematic-safe-zone" id="hero">'
+        . '<!-- wp:group {"className":"hero-composition__copy","layout":{"type":"constrained","justifyContent":"center"}} -->'
+        . '<div class="wp-block-group hero-composition__copy">'
+        . '<!-- wp:heading {"textAlign":"center","level":1,"style":{"typography":{"lineHeight":"1.1"}}} -->'
+        . '<h1 class="wp-block-heading has-text-align-center" style="line-height:1.1">Handmade sculptural lamps</h1>'
+        . '<!-- /wp:heading -->'
+        . '</div><!-- /wp:group --></div><!-- /wp:group -->';
+    $r2 = [];
+    $rewritten = Automattic\SiteBuild\Units\GeneratedMarkup::centerHeroCopy($legacy, 'center', 'p', $r2);
+    assert_contains('"typography":{"lineHeight":"1.1","textAlign":"center"}', $rewritten, 'legacy attr folded into typography');
+    assert_true(!str_contains($rewritten, '"textAlign":"center","level"'), 'legacy top-level textAlign removed');
+    assert_true(in_array('hero-copy-centered', array_column($r2, 'code'), true));
 });
 
 test('centerHeroCopy moves a top-pinned cover onto the center row without touching horizontal alignment', function () {

@@ -2344,12 +2344,20 @@ final class GeneratedMarkup
             if (!$isCopyRoot && !self::insideCopyRegion($document, $index)) {
                 continue;
             }
-            if ($name === 'heading' && (string) ($attrs['textAlign'] ?? '') !== 'center') {
-                $attrs['textAlign'] = 'center';
-                $document->setAttrs($index, $attrs);
-                $adjusted++;
-            } elseif ($name === 'paragraph' && (string) ($attrs['align'] ?? '') !== 'center') {
-                $attrs['align'] = 'center';
+            // Text alignment is written as style.typography.textAlign — the
+            // one form the block re-serializer preserves. A top-level
+            // textAlign/align attribute is NOT sufficient: the serializer's
+            // raw-comment overlay clobbers the migrated style whenever the
+            // block also authored other style keys, and fix-blocks then drops
+            // the has-text-align-center class as unmirrored (audited:
+            // lumen10's H1 with typography.lineHeight lost its centering).
+            if (in_array($name, ['heading', 'paragraph'], true)
+                && (string) (($attrs['style']['typography'] ?? [])['textAlign'] ?? '') !== 'center'
+            ) {
+                $attrs['style']['typography']['textAlign'] = 'center';
+                if ($name === 'heading') {
+                    unset($attrs['textAlign']);
+                }
                 $document->setAttrs($index, $attrs);
                 $adjusted++;
             } elseif ($name === 'buttons'
