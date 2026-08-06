@@ -1,5 +1,14 @@
 [
     {
+        "project": "lumen5",
+        "slug": "lumen5",
+        "asset": "lumen5-playground-20260806T050017Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/lumen5-playground-20260806T050017Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Flumen5-playground-20260806T050017Z.zip",
+        "size_bytes": 16640466,
+        "created_at": "2026-08-06T05:00:25+00:00"
+    },
+    {
         "project": "hearth25",
         "slug": "hearth25",
         "asset": "hearth25-playground-20260805T040857Z.zip",
