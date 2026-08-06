@@ -283,7 +283,7 @@ function assemble_overlay_prepared_header(\Automattic\SiteBuild\Project $project
         ['slug' => 'contrast', 'color' => '#111111', 'name' => 'Contrast'],
     ]]]]);
     $classes = 'header-behavior-overlay-to-solid header-start-transparent '
-        . 'header-scrolled-contrast header-foreground-base';
+        . 'header-scrolled-contrast header-foreground-base header-top-transparent site-brand-lockup';
     $project->writeText(
         'theme/parts/header.html',
         '<!-- wp:group {"className":"' . $classes . '","textColor":"base","layout":{"type":"constrained"}} -->' . "\n"
@@ -306,6 +306,8 @@ test('assemble-pages solidifies an overlay-prepared header when the behavior art
     $header = $project->readText('theme/parts/header.html');
     assert_true(!str_contains($header, 'header-start-transparent'), 'transparent-start class removed');
     assert_true(!str_contains($header, 'header-behavior-overlay-to-solid'), 'behavior class removed');
+    assert_true(!str_contains($header, 'header-top-transparent'), 'earned transparent treatment class removed');
+    assert_eq(2, substr_count($header, 'site-brand-lockup'), 'unrelated classes survive in attrs and saved HTML');
     assert_contains('"backgroundColor":"base"', $header);
     assert_contains('"textColor":"contrast"', $header);
     assert_contains('has-base-background-color', $header);
