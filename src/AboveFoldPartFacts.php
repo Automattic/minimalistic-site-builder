@@ -31,10 +31,14 @@ final class AboveFoldPartFacts
                 ? self::openingSurface($markup, $plannedSurface)
                 : $plannedSurface;
             $surfaces[$part] = $actualSurface;
+            $protectionToken = (string) ($contract['header']['protection_token'] ?? 'contrast');
             $support[$part] = is_string($markup) && self::supportsOverlay(
                 $markup,
                 $actualSurface,
-                (string) ($contract['header']['protection_token'] ?? 'contrast'),
+                $protectionToken,
+                is_string($contract['theme_tokens'][$protectionToken]['hex'] ?? null)
+                    ? (string) $contract['theme_tokens'][$protectionToken]['hex']
+                    : null,
             );
         }
 
@@ -58,8 +62,12 @@ final class AboveFoldPartFacts
         ];
     }
 
-    public static function supportsOverlay(string $markup, string $surface, string $protectionToken): bool
-    {
+    public static function supportsOverlay(
+        string $markup,
+        string $surface,
+        string $protectionToken,
+        ?string $protectionHex = null,
+    ): bool {
         if (str_contains($markup, 'site-build-section-rhythm-degraded-image')) {
             return false;
         }
@@ -89,11 +97,18 @@ final class AboveFoldPartFacts
             $dim = $attrs['dimRatio'] ?? 50;
             // WordPress's implicit dim color is black, which cannot be
             // equated with a semantic "contrast" token (the palette may be
-            // inverted). Require both the exact assigned token and enough
+            // inverted). Require the assigned token — by slug, or as a
+            // custom hex that is byte-for-byte the same color — and enough
             // opacity to protect the persisted foreground pair.
-            return is_numeric($dim)
-                && (float) $dim >= 40
-                && trim((string) ($attrs['overlayColor'] ?? '')) === $protectionToken;
+            if (!is_numeric($dim) || (float) $dim < 40) {
+                return false;
+            }
+            if (trim((string) ($attrs['overlayColor'] ?? '')) === $protectionToken) {
+                return true;
+            }
+            $custom = ContrastMath::hexToRgb(trim((string) ($attrs['customOverlayColor'] ?? '')));
+            $token = $protectionHex === null ? null : ContrastMath::hexToRgb($protectionHex);
+            return $custom !== null && $token !== null && $custom === $token;
         }
         if ($surface !== $protectionToken) {
             return false;

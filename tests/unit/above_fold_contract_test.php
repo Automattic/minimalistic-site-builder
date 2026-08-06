@@ -580,3 +580,65 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     assert_eq(null, $degraded['header']['tagline_text']);
     assert_eq(1, $degraded['header']['text_rows']);
 });
+
+test('a custom cover dim matching the protection color keeps overlay support (BIGR-778)', function () {
+    $part = static fn (string $hex): string => '<!-- wp:group {"anchor":"hero","layout":{"type":"constrained"}} -->'
+        . '<div id="hero" class="wp-block-group">'
+        . '<!-- wp:cover {"dimRatio":60,"customOverlayColor":"' . $hex . '","isUserOverlayColor":true} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" class="wp-block-cover__background"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+        . '</div><!-- /wp:group -->';
+
+    // The exact protection hex is the protection token, however spelled.
+    assert_true(AboveFoldPartFacts::supportsOverlay($part('#161513'), 'image', 'contrast', '#161513'));
+    assert_true(AboveFoldPartFacts::supportsOverlay($part('#161513'), 'image', 'contrast', '161513'));
+    assert_true(AboveFoldPartFacts::supportsOverlay($part('#111'), 'image', 'contrast', '#111111'));
+
+    // A genuinely different color, an unparseable hex, or an unknown token
+    // hex still fail: color equality is proven, never assumed.
+    assert_true(!AboveFoldPartFacts::supportsOverlay($part('#141414'), 'image', 'contrast', '#161513'));
+    assert_true(!AboveFoldPartFacts::supportsOverlay($part('not-a-color'), 'image', 'contrast', '#161513'));
+    assert_true(!AboveFoldPartFacts::supportsOverlay($part('#161513'), 'image', 'contrast'));
+
+    // inspect() feeds the contract's own token hex into the comparison.
+    $pages = [above_fold_pages()[0]];
+    $contract = above_fold_resolve($pages, theme: ['base' => '#FFFFFF', 'contrast' => '#161513']);
+    assert_eq('overlay', $contract['header']['mode']);
+    $facts = AboveFoldPartFacts::inspect(
+        $pages,
+        ['page-home--hero' => $part('#161513'), 'page-home--proof' => above_fold_solid_part('proof', 'base')],
+        $contract,
+    );
+    assert_eq(true, $facts['opening_overlay_support']['page-home--hero']);
+});
+
+test('overlay token roles follow luminance so dark palettes stay overlay-eligible (BIGR-778)', function () {
+    // Dark theme: base is near-black, contrast is cream. The foreground must
+    // be the light token and the protection dim the dark one — the reverse
+    // of the light-theme assignment, which previously demanded a cream
+    // scrim over the hero image and guaranteed overlay-support loss.
+    $pages = [above_fold_pages()[0]];
+    $dark = above_fold_resolve($pages, theme: ['base' => '#14090C', 'contrast' => '#F2E6DC']);
+    assert_eq('overlay', $dark['header']['mode']);
+    assert_eq('contrast', $dark['header']['foreground_token']);
+    assert_eq('base', $dark['header']['protection_token']);
+    assert_eq('base', $dark['openings'][0]['top_protection_token']);
+
+    // Light theme keeps the historical assignment byte-for-byte.
+    $light = above_fold_resolve($pages);
+    assert_eq('overlay', $light['header']['mode']);
+    assert_eq('base', $light['header']['foreground_token']);
+    assert_eq('contrast', $light['header']['protection_token']);
+
+    // A dark theme's solid interior opening supports overlay only on the
+    // dark protection surface, not on a name-fixed 'contrast'.
+    $twoPages = above_fold_pages(menuSurface: 'base');
+    assert_eq('overlay', above_fold_resolve(
+        $twoPages,
+        theme: ['base' => '#14090C', 'contrast' => '#F2E6DC'],
+    )['header']['mode']);
+    assert_eq('stacked', above_fold_resolve(
+        above_fold_pages(menuSurface: 'contrast'),
+        theme: ['base' => '#14090C', 'contrast' => '#F2E6DC'],
+    )['header']['mode']);
+});

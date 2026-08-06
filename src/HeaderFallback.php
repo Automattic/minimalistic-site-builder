@@ -46,9 +46,25 @@ final class HeaderFallback
             $classes[] = 'has-background';
         }
 
+        // The title rides in an align:wide row so even worst-case chrome
+        // shares the page's wide band: a bare site-title in a constrained
+        // root sits at contentSize while every section row sits at wideSize,
+        // which reads as a misaligned header (BIGR-778).
+        $row = [
+            'align' => 'wide',
+            'layout' => [
+                'type' => 'flex',
+                'flexWrap' => 'nowrap',
+                'justifyContent' => 'space-between',
+                'verticalAlignment' => 'center',
+            ],
+        ];
         $markup = '<!-- wp:group ' . self::encode($attrs) . ' -->' . "\n"
             . '<div class="' . implode(' ', $classes) . '">'
+            . '<!-- wp:group ' . self::encode($row) . ' -->' . "\n"
+            . '<div class="wp-block-group alignwide">'
             . '<!-- wp:site-title {"textColor":"' . self::escapeJson($foreground) . '"} /-->'
+            . '</div>' . "\n" . '<!-- /wp:group -->'
             . '</div>' . "\n<!-- /wp:group -->";
 
         return new MarkupResult(
