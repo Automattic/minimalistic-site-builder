@@ -1,9 +1,10 @@
 # Design-quality loop state
 
 ## Current position
-- **2026-08-07**: Cohort ✓, Triage ✓ (6 issues filed), Fix BIGR-779 ✓ — **PR #231 open** (branch fix/bigr-779-preserve-text-align). Repair pass in FixBlocksStep folds detected has-text-align-* losses into style.typography.textAlign and re-serializes; 1700/1700 tests; before/after evidence from cohort replay (pulso kicker, tbilisi story/wine/prices) in gist 307d7fe013c99d42e816e3913c10884d.
-- **LOOP PAUSED — stop condition hit**: 3 design-quality PRs open unreviewed (#228 BIGR-776, #230 BIGR-778, #231 BIGR-779). Resume with /loop /design-quality-loop after reviews land.
-- Next fix when resumed: **BIGR-780** (root padding synthesis in ThemeJsonStep::normalizeRootPadding — 3/7 sites P0 on mobile), then BIGR-782 (screenshot motion race — fixes the measuring instrument), BIGR-784 (contrast blind spots).
+- **2026-08-07 (iter 4)**: Fix BIGR-784 caption half ✓ — **PR #235 open** (branch fix/bigr-784-contrast-blind-spots). ContrastFix walk now records image/gallery figcaption rows (gallery caption matched only in the tail after its last child) and repairs failures via caption-text-* className hooks; ScaffoldThemeStep ships the matching `figcaption` CSS hooks; 1757/1757 tests. Evidence: lumen step-boundary replay (one real band recolored to contrast in both copies, trunk step vs branch step, fixer re-serialized) — gist 4815382fe2abe300ceca0ff5f95832d7. Remaining BIGR-784 scope (kickers/preset-pairs/double classes/mobile scrim) split to **BIGR-786** — needs a fresh cohort; the cited instances no longer exist on disk.
+- Same day earlier: BIGR-780 → PR #233, BIGR-782 → PR #234; #230/#227 merged.
+- **Stop-condition override**: 5 design-quality PRs open unreviewed (#228, #231, #233, #234, #235) — maintainer explicitly told the loop to keep going (2026-08-07). Evidence conflicts are growing though: prefer instrument/prompt work over markup-repair fixes until reviews land.
+- Next: **BIGR-781** (painted-in fake signage in images — prompt+pipeline) or **BIGR-783** (repeated copy line across sections — pipeline); both untouched by open PRs. BIGR-786 blocked on fresh cohort (build after #234 merges — deterministic screenshots).
 - Full per-site critique reports: scratchpad `reports/<slug>.md`; crops: scratchpad `crops/<slug>/` (note: scratchpad is session-scoped; the cohort projects/ + logs remain the durable evidence source).
 - Evidence replay trick (deterministic fixes): copy projects/<slug> → <slug>NNN, apply the fix output to plugin/pages/home.html, `sed s#themes/<slug>/#themes/<slug>NNN/#`, screenshot — identical geometry to the cohort shot, crops pair 1:1.
 
