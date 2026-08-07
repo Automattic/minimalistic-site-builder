@@ -3,11 +3,9 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockFixers;
 use Automattic\SiteBuild\BuildReport;
-use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\Steps\CoverContrastStep;
-use Automattic\SiteBuild\Steps\GenerateImagesStep;
 
 /**
  * Build a site from a prompt.
@@ -87,25 +85,20 @@ if ($prompt === null || trim($prompt) === '') {
     usage();
 }
 
-// --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
-// exist at all, so a list without the flag is a contradiction — fail loud
-// rather than silently ignore either.
-if ($pagesArg !== null && !$multiPage) {
-    Narrator::write("--pages requires --multi-page.\n");
+try {
+    require_multi_page_for_pages($pagesArg, $multiPage);
+    $pages = $pagesArg === null ? [] : split_csv_flag($pagesArg);
+} catch (InvalidArgumentException $e) {
+    Narrator::write($e->getMessage() . "\n");
     exit(1);
 }
-$pages = $pagesArg === null ? []
-    : array_values(array_filter(array_map('trim', explode(',', $pagesArg)), static fn (string $t): bool => $t !== ''));
 
 $designConstraints = [];
 if ($heroCanvas !== null) {
     $designConstraints['hero_canvas'] = $heroCanvas;
 }
 if ($heroMediaModesArg !== null) {
-    $designConstraints['allowed_hero_media_modes'] = array_values(array_filter(
-        array_map('trim', explode(',', $heroMediaModesArg)),
-        static fn (string $mode): bool => $mode !== '',
-    ));
+    $designConstraints['allowed_hero_media_modes'] = split_csv_flag($heroMediaModesArg);
 }
 if ($maxHeroImagesArg !== null) {
     if (preg_match('/^\d+$/', $maxHeroImagesArg) !== 1) {
@@ -120,16 +113,16 @@ if ($heroCopyCapacity !== null) {
 
 // --provider selects the model set for the whole run. It just sets LLM_PROVIDER
 // (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
-// overrides still apply on top. Validate here for a friendly early error.
+// overrides still apply on top. Keep this after the design-constraint checks so
+// a command with multiple invalid flags reports the same first error as before.
+try {
+    $provider = normalize_provider($provider);
+} catch (InvalidArgumentException $e) {
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
+}
 if ($provider !== null) {
-    $provider = strtolower(trim($provider));
-    if (!ModelConfig::hasProvider($provider)) {
-        Narrator::write("Unknown --provider '{$provider}'. Known: "
-            . implode(', ', ModelConfig::providerNames()) . "\n");
-        exit(1);
-    }
     putenv("LLM_PROVIDER={$provider}");
-    $_ENV['LLM_PROVIDER'] = $provider;
 }
 
 $llm = make_llm();
@@ -228,7 +221,7 @@ if ($withImages && $until === null) {
     // Image generation goes through the Vertex proxy, not the LLM — its only
     // model use is the Llm rewriting safety-filtered prompts (small tier) and
     // regenerating. The tally comes from images.json below.
-    $runExtraStep(new GenerateImagesStep(make_image_client(), $llm, $models['image-prompt-repair'] ?? null));
+    $runExtraStep(make_generate_images_step($llm));
 
     // Now that the real pixels exist, re-check cover text against the actual
     // (dimmed) images and raise dimRatio / flip text colors where needed.

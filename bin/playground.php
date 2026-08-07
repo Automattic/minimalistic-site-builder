@@ -153,19 +153,8 @@ exit($exit);
 function usage(): never
 {
     fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
-    $themes = glob(repo_path('projects/*/theme/style.css')) ?: [];
-    if ($themes !== []) {
-        fwrite(STDERR, "Available themes:\n");
-        foreach ($themes as $f) {
-            fwrite(STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
-        }
-    }
+    print_built_projects(STDERR, 'Available themes:');
     exit(1);
-}
-
-function command_exists(string $bin): bool
-{
-    return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
 }
 
 /** Return the first free TCP port at or after $start (fails after 50 tries). */

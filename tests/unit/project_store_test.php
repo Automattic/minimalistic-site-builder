@@ -77,6 +77,27 @@ test('freeSlug slugifies its input before checking, like create()', function () 
     rmdir($base);
 });
 
+test('builtSlugs lists only the projects that have a theme stylesheet', function () {
+    $base = sys_get_temp_dir() . '/builder-store-' . getmypid() . '-' . uniqid();
+    $store = new ProjectStore($base);
+    $store->create('tbilisi-tavern')->writeText('theme/style.css', '/* Theme Name: Tavern */');
+    $store->create('amber-otter')->writeText('theme/style.css', '/* Theme Name: Otter */');
+    // Started but never finished: a folder, no stylesheet — not previewable.
+    $store->create('half-built')->writeText('meta.json', '{}');
+
+    assert_eq(['amber-otter', 'tbilisi-tavern'], ProjectStore::builtSlugs($base));
+
+    exec('rm -rf ' . escapeshellarg($base));
+});
+
+test('builtSlugs is empty, not fatal, when nothing has been built yet', function () {
+    $base = sys_get_temp_dir() . '/builder-store-' . getmypid() . '-' . uniqid();
+
+    // Usage messages call this before any build has created projects/.
+    assert_eq([], ProjectStore::builtSlugs($base));
+    assert_true(!is_dir($base), 'listing must not create the projects directory');
+});
+
 test('markupFiles collects theme parts, templates, and plugin pages', function () {
     $base = sys_get_temp_dir() . '/builder-store-' . getmypid() . '-' . uniqid();
     $project = (new ProjectStore($base))->create('demo');

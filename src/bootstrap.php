@@ -14,8 +14,10 @@ use Automattic\SiteBuild\Llm;
 use Automattic\SiteBuild\ModelConfig;
 use Automattic\SiteBuild\OpenAiCompatibleClient;
 use Automattic\SiteBuild\Package;
+use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\WpcomImageClient;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -44,6 +46,59 @@ function step_temperatures(): array
 function llm_temperature(string $envSuffix, ?float $default): ?float
 {
     return StepDefaults::temperature($envSuffix, $default);
+}
+
+/**
+ * Split a comma-separated CLI flag value into its trimmed, non-blank items.
+ *
+ * Blanks left by a trailing or doubled comma are dropped and the keys are
+ * re-indexed, so position stays meaningful (--pages' first title is the
+ * homepage).
+ *
+ * @return list<string>
+ */
+function split_csv_flag(string $value): array
+{
+    return array_values(array_filter(
+        array_map('trim', explode(',', $value)),
+        static fn (string $item): bool => $item !== '',
+    ));
+}
+
+/**
+ * Reject a `--pages` list handed over without `--multi-page`.
+ *
+ * --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
+ * exist at all, so a list without the flag is a contradiction — it throws
+ * rather than let either flag be silently ignored.
+ */
+function require_multi_page_for_pages(?string $pagesArg, bool $multiPage): void
+{
+    if ($pagesArg !== null && !$multiPage) {
+        throw new InvalidArgumentException('--pages requires --multi-page.');
+    }
+}
+
+/**
+ * Validate a `--provider` flag against config/models.json, returning it
+ * lowercased and trimmed (null when the flag was not given).
+ *
+ * Validating only: it throws so every entry point gives the same friendly early
+ * error instead of failing later, deep in the transport.
+ */
+function normalize_provider(?string $provider): ?string
+{
+    if ($provider === null) {
+        return null;
+    }
+
+    $provider = strtolower(trim($provider));
+    if (!ModelConfig::hasProvider($provider)) {
+        throw new InvalidArgumentException("Unknown --provider '{$provider}'. Known: "
+            . implode(', ', ModelConfig::providerNames()));
+    }
+
+    return $provider;
 }
 
 /** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
@@ -138,6 +193,17 @@ function make_image_client(): ImageClient
     );
 }
 
+/**
+ * Wire the opt-in image-generation step: the Vertex transport, the Llm that
+ * rewrites prompts the safety filter rejects, and that repair's model.
+ *
+ * A null $llm still generates images, minus the prompt repair.
+ */
+function make_generate_images_step(?Llm $llm): GenerateImagesStep
+{
+    return new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
+}
+
 /** Project root path helper. */
 function repo_path(string $rel = ''): string
 {
@@ -214,6 +280,49 @@ function parse_cli_args(array $argv, array $spec, int $maxPositionals = 0): arra
 }
 
 /**
+ * Resolved path of an executable on PATH, or null when it isn't installed.
+ *
+ * Memoized per process: a single run can ask about the same binary several
+ * times (publish-playground checks `gh` before resolving the repo and again
+ * before pushing), and each miss costs a fork. A CLI process is short-lived,
+ * so PATH changing under us is not a concern.
+ */
+function command_path(string $bin): ?string
+{
+    static $cache = [];
+    if (!array_key_exists($bin, $cache)) {
+        $path = trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
+        $cache[$bin] = $path === '' ? null : $path;
+    }
+    return $cache[$bin];
+}
+
+/** Is this external tool available to shell out to? */
+function command_exists(string $bin): bool
+{
+    return command_path($bin) !== null;
+}
+
+/**
+ * Print the "available projects" list CLI usage messages end with — every
+ * project in this repo that has a built theme. Prints nothing at all when
+ * there is none, so a fresh checkout does not advertise an empty list.
+ *
+ * @param resource $stream
+ */
+function print_built_projects($stream, string $header = 'Available projects:'): void
+{
+    $slugs = ProjectStore::builtSlugs(repo_path('projects'));
+    if ($slugs === []) {
+        return;
+    }
+    fwrite($stream, $header . "\n");
+    foreach ($slugs as $slug) {
+        fwrite($stream, "  - {$slug}\n");
+    }
+}
+
+/**
  * Build a shell command for a PHP child with this executable and temp dir.
  *
  * A fresh `php` command does not inherit CLI `-d` overrides, and PATH may
@@ -250,6 +359,26 @@ function php_child_command(string $script, array $args = []): string
 function playground_blueprint_path(string $slug, int $pid): string
 {
     return sys_get_temp_dir() . "/playground-blueprint-{$slug}.{$pid}.json";
+}
+
+/**
+ * The site URL from Playground's readiness line, or null until it appears.
+ *
+ * Playground prints this exact line once it is actually serving, and it carries
+ * the real port (playground.php auto-bumps a busy one). Spawners rely on it
+ * because the site's `/` answers 302, not 200 — polling for a 200 would never
+ * succeed. Colour escapes are stripped first: the CLI wraps "Ready!" and the
+ * URL in them when stdout is a TTY (and some envs force colour even when it
+ * isn't, e.g. FORCE_COLOR), and they sit between the two, breaking the \s+
+ * match. $log may be the whole log or a single streamed line.
+ */
+function playground_ready_url(string $log): ?string
+{
+    $plain = preg_replace('~\x1b\[[0-9;]*m~', '', $log) ?? $log;
+    if (!preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $plain, $m)) {
+        return null;
+    }
+    return $m[1] . '/';
 }
 
 /**
