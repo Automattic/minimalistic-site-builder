@@ -131,15 +131,20 @@ final class ImagePromptComposer
         // A subject naming a text carrier gets a render instruction stating how
         // such surfaces appear (BIGR-781). Conditional: on a clean subject the
         // clause would plant the very signage concept it constrains. Transparent
-        // assets skip it — they are isolated subjects with no scene to dress.
-        $letteringClause = (!$transparent && self::subjectNamesTextCarrier($subject))
-            ? 'Any sign, board, screen or printed surface in the scene is quiet'
-                . ' set dressing: its face is unmarked — bare wood, clear glass,'
-                . ' dark glass or blank chalk — or kept so distant, obliquely angled'
-                . ' or softly out of focus that it reads as simple shapes, glare and'
-                . ' texture, and the image tells its story through form, light and'
-                . ' color alone.'
-            : '';
+        // assets use a dedicated clause because their carrier is the isolated
+        // focal subject rather than set dressing in a scene.
+        $letteringClause = '';
+        if (self::subjectNamesTextCarrier($subject)) {
+            $letteringClause = $transparent
+                ? 'The isolated subject has a plain, unmarked material surface; its'
+                    . ' form is conveyed only through shape, color and texture.'
+                : 'Any sign, board, screen or printed surface in the scene is quiet'
+                    . ' set dressing: its face is unmarked — bare wood, clear glass,'
+                    . ' dark glass or blank chalk — or kept so distant, obliquely angled'
+                    . ' or softly out of focus that it reads as simple shapes, glare and'
+                    . ' texture, and the image tells its story through form, light and'
+                    . ' color alone.';
+        }
 
         // Page and site context only steer mood/composition — they are NOT
         // drawn, so they are framed as guidance and omitted entirely when

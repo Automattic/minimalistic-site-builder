@@ -330,7 +330,7 @@ test('compose omits the lettering clause for subjects without text carriers', fu
     }
 });
 
-test('compose omits the lettering clause for transparent assets', function () {
+test('compose protects transparent text carriers without adding scene instructions', function () {
     $out = ImagePromptComposer::compose(
         'A hand-painted wooden sign shape',
         'isolated accent',
@@ -339,7 +339,9 @@ test('compose omits the lettering clause for transparent assets', function () {
         '',
         true
     );
+    assert_contains('plain, unmarked material surface', $out);
     assert_true(!str_contains($out, 'quiet set dressing'), 'transparent asset has no scene to dress');
+    assert_contains('plain solid pure white background', $out);
 });
 
 test('compose with no page or site context is just the subject + style', function () {
