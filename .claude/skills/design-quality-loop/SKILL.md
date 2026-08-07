@@ -12,9 +12,10 @@ evidence, not "fixed" by hand-editing a generated project.
 
 ## Standing constraints (do not re-litigate)
 
-- Taste, from the maintainer: no eyebrows/kickers or decorative separators in heroes; max 2–3 text bodies
-  in a hero; centered, cinematic hero copy is preferred; no em dashes in headlines; visual "signature
-  devices"/motif ornaments are noise, not personality.
+- Taste, from the maintainer: no eyebrows/kickers or decorative separators in heroes; hero copy is exactly
+  one H1 plus at most one supporting paragraph and at most one planned CTA; centered, cinematic hero copy
+  is preferred; no em dashes in headlines; visual "signature devices"/motif ornaments are noise, not
+  personality.
 - Conventions from AGENTS.md (read it if you haven't): issues live in Linear (`BIGR-…`), branch names carry
   the key, PR titles end with `(BIGR-XXX)`, PR bodies carry `Fixes BIGR-XXX` + the Linear URL. Screenshots
   go in **gists referenced from PR comments/description** — never committed to the repo.
@@ -193,11 +194,13 @@ site, so a mediocre addition pollutes the generator permanently. Steps:
    one-line description could describe an existing entry, it's a variation, not an archetype — reject it.
 5. **Evidence: render it, don't describe it.** Force-select the new entry (find the selection mechanism's
    override, or pin it temporarily — never commit the pin) and build **at least 2 demos with different
-   brand personalities** (e.g. one editorial like lumen, one loud like pulso), `--with-images`, desktop +
-   `SHOT_WIDTH=390`. Judge every render against the full rubric: the proposal must score strongly on
-   conviction/impact AND pass craft, hierarchy, and contrast — a stylish composition that clips text on
-   mobile is a rejected proposal, not a caveat. Also render the nearest existing entry on one of the same
-   brands and include it side by side, so the PR shows the new entry earns its slot.
+   brand personalities** (e.g. one editorial like lumen, one loud like pulso), `--with-images`, desktop,
+   and mobile. For every mobile render, reuse phase 1's complete `SHOT_WIDTH=390` command, including its
+   distinct `--out=projects/<slug>/logs/home-mobile.png` path. Judge every render against the full rubric:
+   the proposal must score strongly on conviction/impact AND pass craft, hierarchy, and contrast — a
+   stylish composition that clips text on mobile is a rejected proposal, not a caveat. Also render the
+   nearest existing entry on one of the same brands and include it side by side, so the PR shows the new
+   entry earns its slot.
 6. **Open the PR** using phase 6's title/body/state conventions. Describe in plain language: the gap
    ("every generated hero currently looks like X"), what the new archetype looks like (the renders carry
    this), the inspiration credit, and confirmation of the mobile/no-image checks. Label the renders by demo
