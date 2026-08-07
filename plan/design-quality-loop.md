@@ -1,9 +1,9 @@
 # Design-quality loop state
 
 ## Current position
-- **2026-08-07**: Cohort ✓, Triage ✓ (6 issues filed), Fix BIGR-779 ✓ — **PR #231 open** (branch fix/bigr-779-preserve-text-align). Repair pass in FixBlocksStep folds detected has-text-align-* losses into style.typography.textAlign and re-serializes; 1700/1700 tests; before/after evidence from cohort replay (pulso kicker, tbilisi story/wine/prices) in gist 307d7fe013c99d42e816e3913c10884d.
-- **LOOP PAUSED — stop condition hit**: 3 design-quality PRs open unreviewed (#228 BIGR-776, #230 BIGR-778, #231 BIGR-779). Resume with /loop /design-quality-loop after reviews land.
-- Next fix when resumed: **BIGR-780** (root padding synthesis in ThemeJsonStep::normalizeRootPadding — 3/7 sites P0 on mobile), then BIGR-782 (screenshot motion race — fixes the measuring instrument), BIGR-784 (contrast blind spots).
+- **2026-08-07 (later)**: Reconciled — #230 (BIGR-778) and #227 (BIGR-775) merged to trunk. Fix BIGR-780 ✓ — **PR #233 open** (branch fix/bigr-780-mobile-root-padding). normalizeRootPadding now always synthesizes missing/zero left-right root gutters to spacing|md, always sets useRootPaddingAwareAlignments, call moved after writeTheme's shape repairs; 1751/1751 tests; evidence via pulso→pulso7 replay (theme.json only re-normalized) in gist 5ca9fea5b13f93287bb778bf8fd602c5. Cohort atlas/hearth theme.json were found already hand-touched by earlier evidence work — pulso was the clean before-instance.
+- **LOOP PAUSED — stop condition hit again**: 3 design-quality PRs open unreviewed (#228 BIGR-776, #231 BIGR-779, #233 BIGR-780). (#232 is the loop-skill PR itself, not counted.) Resume with /loop /design-quality-loop after reviews land.
+- Next fix when resumed: **BIGR-782** (screenshot motion race — fixes the measuring instrument), then BIGR-784 (contrast blind spots). Note: BIGR-780's merge invalidates the cohort's mobile shots for gutter-adjacent findings; prefer replays or targeted rebuilds.
 - Full per-site critique reports: scratchpad `reports/<slug>.md`; crops: scratchpad `crops/<slug>/` (note: scratchpad is session-scoped; the cohort projects/ + logs remain the durable evidence source).
 - Evidence replay trick (deterministic fixes): copy projects/<slug> → <slug>NNN, apply the fix output to plugin/pages/home.html, `sed s#themes/<slug>/#themes/<slug>NNN/#`, screenshot — identical geometry to the cohort shot, crops pair 1:1.
 
@@ -16,7 +16,7 @@
 | # | Cluster | Incidence | Class | Status |
 |---|---------|-----------|-------|--------|
 | A | fix-blocks drops authored `has-text-align-*` (not mirrored in comment JSON) → off-axis eyebrows/prices | 5/7 | deterministic | **filed BIGR-779 — NEXT FIX** |
-| B | No root padding synthesized when model omits it → zero mobile gutters (normalizeRootPadding early-return) | 3/7 P0 | deterministic | filed BIGR-780 |
+| B | No root padding synthesized when model omits it → zero mobile gutters (normalizeRootPadding early-return) | 3/7 P0 | deterministic | **pr-open #233** (BIGR-780) |
 | F | Contrast repair misses captions/kickers/preset-pairs/double-classes/mobile scrim (1.2–2.1:1 shipped) | 4/7 | deterministic | filed BIGR-784 |
 | C | Painted-in fake signage/text in images (wrong-brand storefront etc.) — recurrence after BIGR-768 | 6/7, 4×P0 | prompt+pipeline | filed BIGR-781 |
 | D | Screenshot races motion reveal (blank images in captures) + motion.js lacks user-facing fallback | 1/7 + instrument | deterministic | filed BIGR-782 |
