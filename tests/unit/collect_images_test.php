@@ -298,3 +298,56 @@ test('collect-images keeps subject pipes and parses the three trailing fields', 
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('collect-images renames a cross-part filename collision with a different subject (BIGR-793)', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--about.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: An aged stone doorway at dusk, door slightly ajar | about band photo | photorealistic | landscape"/></figure><!-- /wp:image -->'
+    );
+    $project->writeText('theme/parts/page-home--visit.html',
+        '<!-- wp:image --><figure class="wp-block-image"><img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: A weathered wooden door with iron studs in a plaster wall | location card photo | photorealistic | card-portrait"/></figure><!-- /wp:image -->'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(2, count($images), 'the collision yields two independent specs');
+    $byName = array_column($images, null, 'filename');
+    assert_true(isset($byName['street-doorway.jpg']), 'first claimant keeps the name');
+    $variant = null;
+    foreach ($images as $img) {
+        if ($img['filename'] !== 'street-doorway.jpg') {
+            $variant = $img;
+        }
+    }
+    assert_true($variant !== null && str_starts_with($variant['filename'], 'street-doorway-'), 'newcomer renamed to a variant');
+    assert_contains('iron studs', $variant['subject']);
+    // The later part's markup follows its renamed asset.
+    $visit = $project->readText('theme/parts/page-home--visit.html');
+    assert_contains($variant['filename'], $visit);
+    assert_true(!str_contains($visit, '"theme:./assets/street-doorway.jpg"'), 'old reference rewritten');
+    $warnings = $project->readJson('warnings.json')['collect-images'] ?? [];
+    assert_contains('renamed', implode(' ', $warnings));
+
+    // Deterministic: a rerun of the parse yields the same variant name.
+    assert_eq($variant['filename'], CollectImagesStep::variantFilename('street-doorway.jpg', $variant['subject']));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images still merges a genuinely shared same-subject asset', function () {
+    [$project, $tmp] = collect_fixture();
+    $tag = '<img src="theme:./assets/logo-mark.jpg" alt="AI_IMAGE: A clean ceramic mark | site logo | minimalist | square"/>';
+    $project->writeText('theme/parts/header.html', $tag);
+    $project->writeText('theme/parts/footer.html', $tag);
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(1, count($images));
+    assert_eq(2, count($images[0]['sources']));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});

@@ -76,9 +76,9 @@ final class CollectImagesStep implements Step
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
             $parsed = self::parseAndNormalize($content);
-            if ($parsed['content'] !== $content) {
-                $project->writeText('theme/' . $rel, $parsed['content']);
-            }
+            // Renames applied to THIS part when one of its filenames collides
+            // with a different subject already collected from another part.
+            $renames = [];
             foreach ($parsed['images'] as $img) {
                 $cappedForFooter = false;
                 $authoredRatio = $img['aspectRatio'] ?? null;
@@ -97,18 +97,45 @@ final class CollectImagesStep implements Step
 
                 $filename = $img['filename'];
                 if (isset($byFilename[$filename])) {
-                    // Same asset referenced from another file — just record the source.
-                    $byFilename[$filename]['sources'][] = $rel;
-                    if ($cappedForFooter) {
-                        // A shared asset must use the footer-safe shape even if
-                        // an earlier non-footer source introduced it first.
-                        $byFilename[$filename]['aspectRatio'] = 'square';
+                    $sameSubject = self::normalizeSubject((string) $img['subject'])
+                        === self::normalizeSubject((string) $byFilename[$filename]['subject']);
+                    if ($sameSubject || in_array($rel, $byFilename[$filename]['sources'], true)) {
+                        // The same asset genuinely shared (or re-referenced
+                        // within one part) — just record the source.
+                        $byFilename[$filename]['sources'][] = $rel;
+                        if ($cappedForFooter) {
+                            // A shared asset must use the footer-safe shape even
+                            // if a non-footer source introduced it first.
+                            $byFilename[$filename]['aspectRatio'] = 'square';
+                        }
+                        continue;
                     }
-                    continue;
+                    // Concurrently authored sections cannot see each other's
+                    // asset names, so two of them sometimes coin the SAME
+                    // descriptive filename for DIFFERENT subjects. Merging on
+                    // the name would render one photo in both slots
+                    // (BIGR-793); give the newcomer a deterministic variant
+                    // name and its own spec instead.
+                    $variant = self::variantFilename($filename, (string) $img['subject']);
+                    $renames['theme:./assets/' . $filename] = 'theme:./assets/' . $variant;
+                    $warnings[] = "file='theme/{$rel}'; asset=" . Warnings::value($filename)
+                        . '; delivered as ' . Warnings::value($variant)
+                        . '; disposition=another section already claimed this filename for a different '
+                        . 'subject, so this reference was renamed to generate its own image instead of '
+                        . 'repeating that photo';
+                    $img['filename'] = $variant;
+                    $img['src'] = 'theme:./assets/' . $variant;
+                    $filename = $variant;
                 }
                 $img['sources'] = [$rel];
                 $img['status']  = 'pending';
                 $byFilename[$filename] = $img;
+            }
+            $updated = $renames === []
+                ? $parsed['content']
+                : strtr($parsed['content'], $renames);
+            if ($updated !== $content) {
+                $project->writeText('theme/' . $rel, $updated);
             }
         }
 
@@ -347,6 +374,19 @@ final class CollectImagesStep implements Step
     private static function normalizeSubject(string $subject): string
     {
         return strtolower((string) preg_replace('/\s+/', ' ', trim($subject)));
+    }
+
+    /**
+     * A deterministic variant name for a filename another section already
+     * claimed for a different subject: the stem plus a short hash of this
+     * subject, so re-runs and retries produce the same variant.
+     */
+    public static function variantFilename(string $filename, string $subject): string
+    {
+        $dot = strrpos($filename, '.');
+        $stem = $dot === false ? $filename : substr($filename, 0, $dot);
+        $ext = $dot === false ? '' : substr($filename, $dot);
+        return $stem . '-' . substr(sha1(self::normalizeSubject($subject)), 0, 6) . $ext;
     }
 
     /**
