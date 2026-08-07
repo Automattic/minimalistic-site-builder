@@ -13,6 +13,7 @@ function section_unit_input(): array
         'language'         => 'unit-language-sentinel',
         'theme_json'       => '{"unit-theme-sentinel":true}',
         'design_direction' => 'UNIT-DIRECTION-SENTINEL',
+        'card_style'       => 'flush',
         'outline'          => '1. UNIT-OUTLINE-SENTINEL (hero)',
         'site_pages'       => '- "Home" — / (front page): UNIT-PAGES-SENTINEL',
         'page'             => [
@@ -72,6 +73,7 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq(2, count($sent['cached_prefixes'] ?? []), 'direct execution forwards both cache layers');
     $prompt = section_unit_request_text($sent);
     assert_contains('Role:     hero', $prompt);
+    assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): flush', $prompt);
     foreach ([
         'UNIT-SPEC-SENTINEL',
         'unit-language-sentinel',
@@ -100,6 +102,32 @@ test('SectionUnit generates normalized markup from self-contained input', functi
     assert_eq($result->toArray(), json_decode((string) json_encode($result), true));
 });
 
+test('SectionUnit deterministically normalizes list-thumb delivery', function () {
+    $llm = new FakeLlm();
+    $llm->queueText(
+        '<!-- wp:columns {"className":"list-thumb-flush"} -->'
+        . '<div class="wp-block-columns list-thumb-flush">'
+        . '<!-- wp:column {"width":"18%"} --><div class="wp-block-column" style="flex-basis:18%">'
+        . '<!-- wp:image {"className":"card-media-thumb"} -->'
+        . '<figure class="wp-block-image card-media-thumb"><img src="thumb.jpg" alt=""/></figure>'
+        . '<!-- /wp:image --></div><!-- /wp:column -->'
+        . '<!-- wp:column {"width":"82%"} --><div class="wp-block-column" style="flex-basis:82%">'
+        . '<!-- wp:heading {"level":3} --><h3 class="wp-block-heading">Item</h3><!-- /wp:heading -->'
+        . '<!-- wp:paragraph --><p>One line.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:column -->'
+        . '</div><!-- /wp:columns -->',
+    );
+    $unit = new SectionUnit($llm, new PromptRenderer(repo_path('prompts')));
+
+    $result = $unit->generate(section_unit_input());
+
+    assert_contains('"isStackedOnMobile":false', $result->markup);
+    assert_contains('is-not-stacked-on-mobile', $result->markup);
+    assert_contains('"blockGap":"var:preset|spacing|xs"', $result->markup);
+    assert_true(in_array('list-thumb-row-normalized', array_column($result->repairs, 'code'), true));
+    assert_eq([], $result->warnings);
+});
+
 test('SectionUnit rejects a response without block markup', function () {
     $llm = new FakeLlm();
     $llm->queueText('plain text');
@@ -123,6 +151,108 @@ test('SectionUnit request preparation does not call the LLM', function () {
     assert_contains('decoded-theme-sentinel', $prompt);
     assert_eq(0, $llm->completeCalls);
     assert_eq(0, $llm->completeBatchCalls);
+});
+
+test('SectionUnit documents the nested flush-card body contract', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+
+    assert_contains(
+        'ONE inner `wp:group` with `"className":"card-body"`',
+        $prompt,
+        'flush cards give their padded text group the stable flex-body hook',
+    );
+    assert_contains(
+        '`"className":"card-body overlap-up"`',
+        $prompt,
+        'overlap cards retain both the flex-body and overlap hooks',
+    );
+    assert_contains(
+        'a nested `cta-bottom` can align with sibling cards',
+        $prompt,
+        'the placement requirement explains why the body hook is structural',
+    );
+    assert_contains(
+        'put ALL of that content in ONE such wrapper and give it `"className":"card-body"` regardless of treatment',
+        $prompt,
+        'every optional nested card text wrapper receives the shared structural hook',
+    );
+    assert_contains(
+        'REQUIRED for `flush` and `overlap`; it is OPTIONAL for `framed` and `borderless`',
+        $prompt,
+        'framed and borderless cards may stay flat but cannot create an unhooked nested body',
+    );
+    foreach (['flush', 'framed', 'overlap', 'borderless'] as $treatment) {
+        assert_contains(
+            '`card-style--' . $treatment . '`',
+            $prompt,
+            "the {$treatment} construction has one universal treatment marker",
+        );
+    }
+    assert_contains(
+        '`"className":"card-style--overlap card-flush"`',
+        $prompt,
+        'overlap cards carry the universal marker and flush behavior hook together',
+    );
+    assert_contains(
+        'ONE uniform literal pixel value for all four padding sides',
+        $prompt,
+        'framed geometry remains deterministic enough for the delivery contract to verify',
+    );
+});
+
+test('SectionUnit documents the complete list-thumb delivery contract', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+
+    assert_contains(
+        'One `wp:columns` per row with `"isStackedOnMobile":false`',
+        $prompt,
+        'the dense two-column row is kept horizontal at Core\'s mobile breakpoint',
+    );
+    assert_contains(
+        '`isStackedOnMobile:false` is MANDATORY for BOTH flush and framed rows',
+        $prompt,
+    );
+    assert_contains(
+        '`"style":{"spacing":{"blockGap":"var:preset|spacing|xs"}}`',
+        $prompt,
+        'the text column owns a tight intra-row rhythm',
+    );
+    assert_contains('`"className":"list-thumb-flush"`', $prompt);
+});
+
+test('SectionUnit gives standalone requests the authoritative machine card style', function () {
+    $input = section_unit_input();
+    $input['design_direction'] = 'Direction prose with no card-treatment commitment.';
+    $input['card_style'] = 'framed';
+
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request($input);
+    $prompt = section_unit_request_text($request);
+
+    assert_contains('ASSIGNED CARD STYLE (authoritative machine contract): framed', $prompt);
+    assert_contains(
+        'overrides absent or conflicting prose in the DESIGN DIRECTION',
+        $prompt,
+    );
+    assert_true(
+        !str_contains($prompt, 'when the direction carries no card-treatment line, default to `flush`'),
+        'standalone non-flush input is not contradicted by a prose-derived default',
+    );
+    assert_contains(
+        'ASSIGNED CARD STYLE (authoritative machine contract): framed',
+        $request['cached_prefixes'][0] ?? '',
+        'the site-wide machine assignment remains in the stable build cache layer',
+    );
 });
 
 test('SectionUnit keeps front-page hero topology out of the general prompt', function () {
@@ -173,6 +303,7 @@ test('SectionUnit layered request loses only cache marker separators', function 
         'language'          => $input['language'],
         'theme_json'        => $input['theme_json'],
         'design_direction'  => $input['design_direction'],
+        'card_style'        => $input['card_style'],
         'outline'           => $input['outline'],
         'site_pages'        => $input['site_pages'],
         'page_title'        => $input['page']['title'],

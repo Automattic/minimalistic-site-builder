@@ -420,7 +420,7 @@ You're done when a fresh build visibly clears the "AI slop" bar Telex targets:
 
 **builder2 invariants to preserve:**
 - Five color slugs `base/contrast/primary/secondary/accent`; two font slugs
-  `heading/body`; theme.json version 3; spacing scale `sm/md/lg/xl/xxl`.
+  `heading/body`; theme.json version 3; spacing scale `xs/sm/md/lg/xl/xxl`.
 - Sections reference presets **by slug**; markup is **core blocks only**; output
   starts with `<!-- wp:`; no `<style>` tags in parts.
 - Every `{{placeholder}}` in a prompt must be wired in its `Step`.

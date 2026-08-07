@@ -135,6 +135,20 @@ test('header fallback is readable and exactly marked in stacked and overlay mode
     }
 });
 
+test('header fallback delivers a dynamic tagline whenever the contract promises one', function () {
+    $contract = hero_fallback_contract('stacked');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+
+    $result = HeaderFallback::render([], $contract, 'bad header');
+    $facts = AboveFoldPartFacts::headerFacts($result->markup);
+
+    assert_eq(1, $facts['site_tagline_blocks']);
+    assert_eq(0, $facts['invalid_site_tagline_topology']);
+    assert_eq(1, substr_count($result->markup, '<!-- wp:site-tagline'));
+});
+
 test('interior opening fallback uses the real page title and no hero recipe context', function () {
     $input = [
         'page' => ['slug' => 'about', 'title' => 'About the Studio', 'front' => false],
@@ -161,4 +175,19 @@ test('interior opening fallback uses the dynamic post title instead of inventing
 
     assert_contains('<!-- wp:post-title {"level":1,"isLink":false,"fontSize":"section-title"} /-->', $markup);
     assert_true(!str_contains($markup, '>Page<'));
+});
+
+test('header fallback rides its title in a wide row so worst-case chrome stays band-aligned (BIGR-778)', function () {
+    foreach (['stacked', 'overlay'] as $mode) {
+        $contract = hero_fallback_contract($mode);
+        $markup = HeaderFallback::render(['site_spec' => ['name' => 'Northlight']], $contract, 'bad header')->markup;
+        assert_contains('"align":"wide"', $markup, $mode);
+        assert_contains('alignwide', $markup, $mode);
+        // The row wraps the title: a bare site-title in a constrained root
+        // would sit at contentSize while every section row sits at wideSize.
+        assert_true(
+            strpos($markup, 'alignwide') < strpos($markup, 'wp:site-title'),
+            'the site-title sits inside the wide row',
+        );
+    }
 });
