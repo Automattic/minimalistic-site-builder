@@ -1,9 +1,10 @@
 # Design-quality loop state
 
 ## Current position
-- **2026-08-07**: Cohort ✓, Triage ✓ (6 issues filed), Fix BIGR-779 ✓ — **PR #231 open** (branch fix/bigr-779-preserve-text-align). Repair pass in FixBlocksStep folds detected has-text-align-* losses into style.typography.textAlign and re-serializes; 1700/1700 tests; before/after evidence from cohort replay (pulso kicker, tbilisi story/wine/prices) in gist 307d7fe013c99d42e816e3913c10884d.
-- **LOOP PAUSED — stop condition hit**: 3 design-quality PRs open unreviewed (#228 BIGR-776, #230 BIGR-778, #231 BIGR-779). Resume with /loop /design-quality-loop after reviews land.
-- Next fix when resumed: **BIGR-780** (root padding synthesis in ThemeJsonStep::normalizeRootPadding — 3/7 sites P0 on mobile), then BIGR-782 (screenshot motion race — fixes the measuring instrument), BIGR-784 (contrast blind spots).
+- **2026-08-07 (iter 3)**: Fix BIGR-782 ✓ — **PR #234 open** (branch fix/bigr-782-screenshot-motion-race). screenshot.js now captures under emulated prefers-reduced-motion (rides motion.css's accessibility contract → deterministic, fully visible captures); motion.js gains a 4s observer watchdog (IO always delivers an initial batch, so silence while visible = broken observer → fail open; hidden pages re-arm). Harness: silent/healthy/hidden watchdog tests. Evidence: pulso→pulso8 replay, IO stubbed silent via addInitScript, 6s captures, motion.js swapped between shots — gist cad2b2541fd05256950a4f55ab076ccc.
+- Earlier same day: BIGR-780 ✓ — **PR #233 open** (see below); #230 (BIGR-778) + #227 merged; cohort atlas/hearth theme.json were already hand-touched by prior evidence work (pulso was the clean before).
+- **Stop-condition note**: 4 design-quality PRs now open unreviewed (#228, #231, #233, #234) — the maintainer explicitly told the loop to keep going despite it (2026-08-07). Continue fix iterations; prefer replay evidence since cohort artifacts increasingly diverge from trunk.
+- Next fix: **BIGR-784** (contrast blind spots: captions/kickers/preset-pairs/double-classes/mobile scrim), then BIGR-781 (fake signage in images), BIGR-783 (repeated copy). Instrument note: after #234 merges, cohort screenshots become deterministic — rebuild cohort before the next Triage.
 - Full per-site critique reports: scratchpad `reports/<slug>.md`; crops: scratchpad `crops/<slug>/` (note: scratchpad is session-scoped; the cohort projects/ + logs remain the durable evidence source).
 - Evidence replay trick (deterministic fixes): copy projects/<slug> → <slug>NNN, apply the fix output to plugin/pages/home.html, `sed s#themes/<slug>/#themes/<slug>NNN/#`, screenshot — identical geometry to the cohort shot, crops pair 1:1.
 
