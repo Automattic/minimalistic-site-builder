@@ -151,6 +151,10 @@ final class AboveFoldContract
         $recipeHeaderModes = is_array($recipeMeta['header_modes'] ?? null)
             ? $recipeMeta['header_modes']
             : [self::MODE_STACKED];
+        // A solid interior opening only supports overlay when it IS the
+        // prospective protection surface — the luminance-ordered dark token,
+        // not a name-fixed 'contrast'.
+        [$overlayForeground, $overlayProtection] = self::overlayTokenRoles($tokens);
         $overlaySupported = $imageLed
             && $canvas !== 'framed'
             && in_array(self::MODE_OVERLAY, $recipeHeaderModes, true)
@@ -158,7 +162,7 @@ final class AboveFoldContract
             && array_reduce(
                 $openings,
                 static fn (bool $ok, array $opening): bool => $ok
-                    && in_array($opening['surface'], ['image', 'contrast'], true),
+                    && in_array($opening['surface'], ['image', $overlayProtection], true),
                 true,
             );
         $mode = $overlaySupported ? self::MODE_OVERLAY : self::MODE_STACKED;
@@ -200,8 +204,8 @@ final class AboveFoldContract
             $mode = self::MODE_OVERLAY;
         }
         $tagline = trim((string) ($siteContext['tagline'] ?? ''));
-        $foreground = $mode === self::MODE_OVERLAY ? 'base' : 'contrast';
-        $protection = $mode === self::MODE_OVERLAY ? 'contrast' : 'base';
+        $foreground = $mode === self::MODE_OVERLAY ? $overlayForeground : 'contrast';
+        $protection = $mode === self::MODE_OVERLAY ? $overlayProtection : 'base';
         foreach ($openings as &$opening) {
             $opening['top_protection_token'] = $opening['surface'] === 'image'
                 || $opening['surface'] === $protection
@@ -652,6 +656,28 @@ final class AboveFoldContract
         return ['logical' => $logical, 'physical' => $physical];
     }
 
+    /**
+     * The overlay pair is luminance-ordered, not name-ordered: the header
+     * text sits on a dimmed image, so the foreground must be whichever of
+     * the two verified tokens is lighter and the protection dim whichever
+     * is darker. Light themes keep the historical base/contrast assignment;
+     * a dark theme's inverted palette previously demanded a light scrim
+     * over the image that no hero author could sensibly deliver.
+     *
+     * @param array<string,mixed> $tokens
+     * @return array{0:string,1:string} [foreground, protection]
+     */
+    private static function overlayTokenRoles(array $tokens): array
+    {
+        $base = ContrastMath::hexToRgb((string) ($tokens['base']['hex'] ?? ''));
+        $contrast = ContrastMath::hexToRgb((string) ($tokens['contrast']['hex'] ?? ''));
+        if ($base === null || $contrast === null
+            || ContrastMath::luminance($base) >= ContrastMath::luminance($contrast)) {
+            return ['base', 'contrast'];
+        }
+        return ['contrast', 'base'];
+    }
+
     private static function tokensContrast(array $tokens): bool
     {
         $base = ContrastMath::hexToRgb((string) ($tokens['base']['hex'] ?? ''));
@@ -841,11 +867,14 @@ final class AboveFoldContract
             throw new \RuntimeException('aboveFold.json has invalid header protection facts');
         }
         $overlay = $header['mode'] === self::MODE_OVERLAY;
+        [$overlayForeground, $overlayProtection] = self::overlayTokenRoles(
+            is_array($contract['theme_tokens'] ?? null) ? $contract['theme_tokens'] : [],
+        );
         $expectedHeader = $overlay
             ? [
                 'archetype' => 'minimal-overlay',
-                'foreground_token' => 'base',
-                'protection_token' => 'contrast',
+                'foreground_token' => $overlayForeground,
+                'protection_token' => $overlayProtection,
                 'protect_top_edge' => true,
                 'safe_top_px' => 80,
             ]

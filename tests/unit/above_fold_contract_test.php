@@ -130,10 +130,16 @@ function above_fold_image_part(
     if ($overlayColor !== null) {
         $cover['overlayColor'] = $overlayColor;
     }
+    $dimClass = $dimRatio === 50 ? '' : ' has-background-dim-' . (10 * (int) round($dimRatio / 10));
+    $overlayClass = $overlayColor === null ? '' : ' has-' . trim($overlayColor) . '-background-color';
+    $gradientClasses = $gradient === null
+        ? ''
+        : ' wp-block-cover__gradient-background has-background-gradient has-' . $gradient . '-gradient-background';
     return '<!-- wp:group ' . json_encode($root, JSON_UNESCAPED_SLASHES) . ' -->'
         . '<div id="' . $anchor . '" class="wp-block-group ' . $className . '">'
         . '<!-- wp:cover ' . json_encode($cover, JSON_UNESCAPED_SLASHES) . ' -->'
-        . '<div class="wp-block-cover"><span aria-hidden="true" class="wp-block-cover__background"></span>'
+        . '<div class="wp-block-cover"><span aria-hidden="true" class="wp-block-cover__background'
+        . $overlayClass . $dimClass . ' has-background-dim' . $gradientClasses . '"></span>'
         . '<div class="wp-block-cover__inner-container">' . $body . '</div></div><!-- /wp:cover -->'
         . '</div><!-- /wp:group -->';
 }
@@ -303,6 +309,7 @@ test('delivery and markup phases reject misuse and reach a fixed point without r
 test('overlay inspection accepts protected image and solid fallback roots but rejects objective drift', function () {
     $image = above_fold_image_part('hero', 50);
     assert_true(AboveFoldPartFacts::supportsOverlay($image, 'image', 'contrast'));
+    assert_true(AboveFoldPartFacts::supportsClearOverlayTop($image, 'image', 'contrast'));
     assert_true(!AboveFoldPartFacts::supportsOverlay(above_fold_image_part('hero', 20), 'image', 'contrast'));
     assert_true(!AboveFoldPartFacts::supportsOverlay(
         above_fold_image_part('hero', 0, gradient: 'contrast-fade'),
@@ -319,6 +326,33 @@ test('overlay inspection accepts protected image and solid fallback roots but re
         'image',
         'contrast',
     ));
+    $gradientImage = above_fold_image_part(
+        'hero',
+        50,
+        gradient: 'contrast-fade',
+        overlayColor: 'contrast',
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($gradientImage, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($gradientImage, 'image', 'contrast'));
+    $customGradientImage = str_replace(
+        '"overlayColor":"contrast"',
+        '"overlayColor":"contrast","customGradient":"linear-gradient(#fff,#fff)"',
+        $image,
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($customGradientImage, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($customGradientImage, 'image', 'contrast'));
+    $safeDimImage = above_fold_image_part('hero', 60);
+    assert_true(AboveFoldPartFacts::supportsClearOverlayTop($safeDimImage, 'image', 'contrast'));
+    $staleDimImage = str_replace('has-background-dim-60', 'has-background-dim-40', $safeDimImage);
+    assert_true(AboveFoldPartFacts::supportsOverlay($staleDimImage, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($staleDimImage, 'image', 'contrast'));
+    $stalePaintImage = str_replace(
+        'has-background-dim-60 has-background-dim"',
+        'has-background-dim-60 has-background-dim" style="background:linear-gradient(#fff,#fff)"',
+        $safeDimImage,
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($stalePaintImage, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($stalePaintImage, 'image', 'contrast'));
     assert_true(!AboveFoldPartFacts::supportsOverlay(
         above_fold_image_part('hero', 50, overlayColor: null),
         'image',
@@ -332,6 +366,39 @@ test('overlay inspection accepts protected image and solid fallback roots but re
 
     $fallback = above_fold_solid_part('hero', 'contrast');
     assert_true(AboveFoldPartFacts::supportsOverlay($fallback, 'image', 'contrast'));
+    assert_true(AboveFoldPartFacts::supportsClearOverlayTop($fallback, 'image', 'contrast'));
+    $gradientFallback = str_replace(
+        '"layout":{"type":"constrained"}',
+        '"gradient":"contrast-fade","layout":{"type":"constrained"}',
+        $fallback,
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($gradientFallback, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($gradientFallback, 'image', 'contrast'));
+    $customPaintFallback = str_replace(
+        '"layout":{"type":"constrained"}',
+        '"style":{"color":{"background":"#ffffff"}},"layout":{"type":"constrained"}',
+        $fallback,
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($customPaintFallback, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($customPaintFallback, 'image', 'contrast'));
+    $classPaintFallback = str_replace(
+        '"layout":{"type":"constrained"}',
+        '"className":"has-base-gradient-background","layout":{"type":"constrained"}',
+        $fallback,
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($classPaintFallback, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($classPaintFallback, 'image', 'contrast'));
+    $htmlClassPaintFallback = str_replace(
+        'has-background"',
+        'has-background has-base-gradient-background"',
+        $fallback,
+    );
+    assert_true(AboveFoldPartFacts::supportsOverlay($htmlClassPaintFallback, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($htmlClassPaintFallback, 'image', 'contrast'));
+    $unquotedClassPaintFallback = '<!-- wp:group {"backgroundColor":"contrast","layout":{"type":"constrained"}} -->'
+        . '<div class=has-base-gradient-background></div><!-- /wp:group -->';
+    assert_true(AboveFoldPartFacts::supportsOverlay($unquotedClassPaintFallback, 'image', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($unquotedClassPaintFallback, 'image', 'contrast'));
     $classOnly = '<!-- wp:group {"className":"has-contrast-background-color"} -->'
         . '<div class="wp-block-group has-contrast-background-color"></div><!-- /wp:group -->';
     assert_true(AboveFoldPartFacts::supportsOverlay($classOnly, 'image', 'contrast'));
@@ -605,6 +672,241 @@ test('header text-shape facts follow the archetype and the stated tagline (BIGR-
     assert_eq(false, $degraded['header']['displays_tagline']);
     assert_eq(null, $degraded['header']['tagline_text']);
     assert_eq(1, $degraded['header']['text_rows']);
+});
+
+test('a custom cover dim matching the protection color keeps overlay support (BIGR-778)', function () {
+    $part = static function (string $hex, array $extra = []): string {
+        $attrs = array_replace([
+            'dimRatio' => 60,
+            'customOverlayColor' => $hex,
+            'isUserOverlayColor' => true,
+        ], $extra);
+        return '<!-- wp:group {"anchor":"hero","layout":{"type":"constrained"}} -->'
+            . '<div id="hero" class="wp-block-group">'
+            . '<!-- wp:cover ' . json_encode($attrs, JSON_UNESCAPED_SLASHES) . ' -->'
+            . '<div class="wp-block-cover"><span aria-hidden="true" '
+            . 'class="wp-block-cover__background has-background-dim-60 has-background-dim" '
+            . 'style="background-color:' . $hex . '"></span>'
+            . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->'
+            . '</div><!-- /wp:group -->';
+    };
+
+    // The exact protection hex is the protection token, however spelled.
+    assert_true(AboveFoldPartFacts::supportsOverlay($part('#161513'), 'image', 'contrast', '#161513'));
+    assert_true(AboveFoldPartFacts::supportsOverlay($part('#161513'), 'image', 'contrast', '161513'));
+    assert_true(AboveFoldPartFacts::supportsOverlay($part('#111'), 'image', 'contrast', '#111111'));
+    assert_true(AboveFoldPartFacts::supportsClearOverlayTop($part('#161513'), 'image', 'contrast', '#161513'));
+    assert_true(AboveFoldPartFacts::supportsOverlay(
+        $part('#161513', ['overlayColor' => '']),
+        'image',
+        'contrast',
+        '#161513',
+    ), 'a blank preset slug leaves the exact custom overlay color authoritative');
+    assert_true(!AboveFoldPartFacts::supportsOverlay(
+        $part('#161513', ['overlayColor' => ' ']),
+        'image',
+        'contrast',
+        '#161513',
+    ), 'a whitespace preset slug suppresses the custom color in Core but paints no usable preset');
+
+    // A nonblank preset slug is Core's effective color even if a stale custom
+    // value still happens to match the protection token.
+    $wrongPreset = $part('#161513', ['overlayColor' => 'base']);
+    assert_true(!AboveFoldPartFacts::supportsOverlay($wrongPreset, 'image', 'contrast', '#161513'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($wrongPreset, 'image', 'contrast', '#161513'));
+
+    // A genuinely different color, an unparseable hex, or an unknown token
+    // hex still fail: color equality is proven, never assumed.
+    assert_true(!AboveFoldPartFacts::supportsOverlay($part('#141414'), 'image', 'contrast', '#161513'));
+    assert_true(!AboveFoldPartFacts::supportsOverlay($part('not-a-color'), 'image', 'contrast', '#161513'));
+    assert_true(!AboveFoldPartFacts::supportsOverlay($part('#161513'), 'image', 'contrast'));
+
+    $implicitFullDim = str_replace(
+        ['"dimRatio":60,', 'has-background-dim-60'],
+        ['', 'has-background-dim-100'],
+        $part('#161513'),
+    );
+    assert_true(AboveFoldPartFacts::supportsClearOverlayTop(
+        $implicitFullDim,
+        'image',
+        'contrast',
+        '#161513',
+    ), 'Core Cover defaults an omitted dimRatio to its fully opaque 100% class');
+    assert_eq(100.0, AboveFoldPartFacts::clearOverlayTopDimRatio(
+        $implicitFullDim,
+        'image',
+        'contrast',
+        '#161513',
+    ));
+
+    // Familiar paint classes do not prove a surface the browser suppresses,
+    // nor may arbitrary saved inline CSS ride beside Core's one custom-color
+    // declaration when the clear header depends on that exact paint.
+    $hidden = str_replace('aria-hidden="true"', 'aria-hidden="true" hidden', $part('#161513'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($hidden, 'image', 'contrast', '#161513'));
+    $displayNone = str_replace(
+        'style="background-color:#161513"',
+        'style="background-color:#161513;display:none"',
+        $part('#161513'),
+    );
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($displayNone, 'image', 'contrast', '#161513'));
+    $extraClass = str_replace(
+        'has-background-dim-60 has-background-dim',
+        'has-background-dim-60 has-background-dim generated-hidden-overlay',
+        $part('#161513'),
+    );
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop($extraClass, 'image', 'contrast', '#161513'));
+    $missingCoverBox = str_replace('<div class="wp-block-cover">', '<div>', $part('#161513'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $missingCoverBox,
+        'image',
+        'contrast',
+        '#161513',
+    ));
+    $missingGroupBox = str_replace('class="wp-block-group"', 'class="generated-group"', $part('#161513'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $missingGroupBox,
+        'image',
+        'contrast',
+        '#161513',
+    ));
+    foreach ([
+        'style="opacity:.5"',
+        'style="filter:opacity(0)"',
+        'style="display:none/**/"',
+        'style="display/*;*/:none"',
+        'style="-webkit-filter:opacity(0)"',
+        'style="-webkit-clip-path:inset(100%)"',
+        'style="-webkit-mask-image:linear-gradient(transparent,transparent)"',
+        'style="height:0;overflow:hidden"',
+        'style="max-height:0;overflow:clip"',
+    ] as $rootEffect) {
+        $attenuated = str_replace(
+            '<div class="wp-block-cover">',
+            '<div class="wp-block-cover" ' . $rootEffect . '>',
+            $part('#161513'),
+        );
+        assert_true(AboveFoldPartFacts::supportsOverlay(
+            $attenuated,
+            'image',
+            'contrast',
+            '#161513',
+        ), 'saved wrapper effects keep the protective header scrim available');
+        assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+            $attenuated,
+            'image',
+            'contrast',
+            '#161513',
+        ));
+    }
+    foreach ([
+        'screen-reader-text',
+        'hero-entrance',
+        'ambient-drift',
+        'custom-motion',
+        'hover-lift',
+    ] as $rootEffectClass) {
+        $suppressed = str_replace(
+            'class="wp-block-group"',
+            'class="wp-block-group ' . $rootEffectClass . '"',
+            $part('#161513'),
+        );
+        assert_true(AboveFoldPartFacts::supportsOverlay(
+            $suppressed,
+            'image',
+            'contrast',
+            '#161513',
+        ), 'wrapper effects keep the ordinary scrimmed overlay relation');
+        assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+            $suppressed,
+            'image',
+            'contrast',
+            '#161513',
+        ));
+    }
+
+    $attenuatedSolid = str_replace(
+        'has-contrast-background-color has-background"',
+        'has-contrast-background-color has-background" style="opacity:.5"',
+        above_fold_solid_part('proof', 'contrast'),
+    );
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $attenuatedSolid,
+        'contrast',
+        'contrast',
+        '#161513',
+    ));
+    $clippedSolid = str_replace(
+        'has-contrast-background-color has-background"',
+        'has-contrast-background-color has-background" style="height:0;overflow:hidden"',
+        above_fold_solid_part('proof', 'contrast'),
+    );
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $clippedSolid,
+        'contrast',
+        'contrast',
+        '#161513',
+    ));
+    $resetSolid = str_replace(
+        'has-contrast-background-color has-background"',
+        'has-contrast-background-color has-background" style="all:initial"',
+        above_fold_solid_part('proof', 'contrast'),
+    );
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $resetSolid,
+        'contrast',
+        'contrast',
+        '#161513',
+    ));
+    $missingSolidBox = str_replace('wp-block-group', 'generated-group', above_fold_solid_part('proof', 'contrast'));
+    assert_true(!AboveFoldPartFacts::supportsClearOverlayTop(
+        $missingSolidBox,
+        'contrast',
+        'contrast',
+        '#161513',
+    ));
+
+    // inspect() feeds the contract's own token hex into the comparison.
+    $pages = [above_fold_pages()[0]];
+    $contract = above_fold_resolve($pages, theme: ['base' => '#FFFFFF', 'contrast' => '#161513']);
+    assert_eq('overlay', $contract['header']['mode']);
+    $facts = AboveFoldPartFacts::inspect(
+        $pages,
+        ['page-home--hero' => $part('#161513'), 'page-home--proof' => above_fold_solid_part('proof', 'base')],
+        $contract,
+    );
+    assert_eq(true, $facts['opening_overlay_support']['page-home--hero']);
+});
+
+test('overlay token roles follow luminance so dark palettes stay overlay-eligible (BIGR-778)', function () {
+    // Dark theme: base is near-black, contrast is cream. The foreground must
+    // be the light token and the protection dim the dark one — the reverse
+    // of the light-theme assignment, which previously demanded a cream
+    // scrim over the hero image and guaranteed overlay-support loss.
+    $pages = [above_fold_pages()[0]];
+    $dark = above_fold_resolve($pages, theme: ['base' => '#14090C', 'contrast' => '#F2E6DC']);
+    assert_eq('overlay', $dark['header']['mode']);
+    assert_eq('contrast', $dark['header']['foreground_token']);
+    assert_eq('base', $dark['header']['protection_token']);
+    assert_eq('base', $dark['openings'][0]['top_protection_token']);
+
+    // Light theme keeps the historical assignment byte-for-byte.
+    $light = above_fold_resolve($pages);
+    assert_eq('overlay', $light['header']['mode']);
+    assert_eq('base', $light['header']['foreground_token']);
+    assert_eq('contrast', $light['header']['protection_token']);
+
+    // A dark theme's solid interior opening supports overlay only on the
+    // dark protection surface, not on a name-fixed 'contrast'.
+    $twoPages = above_fold_pages(menuSurface: 'base');
+    assert_eq('overlay', above_fold_resolve(
+        $twoPages,
+        theme: ['base' => '#14090C', 'contrast' => '#F2E6DC'],
+    )['header']['mode']);
+    assert_eq('stacked', above_fold_resolve(
+        above_fold_pages(menuSurface: 'contrast'),
+        theme: ['base' => '#14090C', 'contrast' => '#F2E6DC'],
+    )['header']['mode']);
 });
 
 test('final header text-shape facts reflect whether the promised tagline was delivered', function () {

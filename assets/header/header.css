@@ -122,6 +122,23 @@ html.header-state-js .site-header-shell--overlay-to-solid {
 
 /* Canonical five-color theme vocabulary plus transparent overlay tops. */
 .site-header-shell .header-start-transparent { --header-start-surface: var(--header-overlay-scrim); }
+
+/* An earned clear resting state (BIGR-778): the build proved the foreground
+ * against each opening cover's own dim, so the kit scrim would only double
+ * the darkening. Driver-scoped like every treatment rule — without the
+ * state driver the header fails closed to the scrim veil — and the scrolled
+ * surface still arrives via header-is-scrolled exactly as with the veil. */
+html.header-state-js
+    .site-header-shell
+    .header-behavior-overlay-to-solid.header-top-transparent {
+    --header-start-surface: transparent;
+
+    /* The fixed header can move over a different section between frames.
+     * Snap the protective solid paint on/off so a timed transparent-to-solid
+     * interpolation never exposes that changing underlay; the shadow remains
+     * the smooth visual cue for motion-enabled themes. */
+    transition-property: box-shadow;
+}
 .site-header-shell .header-start-base { --header-start-solid: var(--wp--preset--color--base, #ffffff); }
 .site-header-shell .header-start-contrast { --header-start-solid: var(--wp--preset--color--contrast, #111111); }
 .site-header-shell .header-start-primary { --header-start-solid: var(--wp--preset--color--primary, #333333); }
@@ -257,6 +274,13 @@ html.header-state-js
         --header-start-surface: var(--header-start-solid);
     }
 
+    /* The clear overlay start returns to the verified scrim veil. */
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-overlay-to-solid.header-top-transparent {
+        --header-start-surface: var(--header-overlay-scrim);
+    }
+
     html.header-state-js
         .site-header-shell
         .header-behavior-sticky-soft.header-scrolled-glass {
@@ -299,6 +323,15 @@ html.header-state-js
         .site-header-shell
         .header-behavior-overlay-to-solid::before,
     .site-header-shell--force-solid .header-behavior-overlay-to-solid::before {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+
+    /* A clear resting state must actually be clear: no frosted blur band
+     * over the hero while the surface is transparent. */
+    html.header-state-js
+        .site-header-shell
+        .header-behavior-overlay-to-solid.header-top-transparent::before {
         -webkit-backdrop-filter: none;
         backdrop-filter: none;
     }
