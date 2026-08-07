@@ -74,6 +74,27 @@ final class ProjectStore
     }
 
     /**
+     * Slugs of the projects under $baseDir that already carry a built theme,
+     * alphabetically. style.css is the marker: a project folder exists from the
+     * first pipeline step, but only a finished theme can be previewed,
+     * screenshotted or published.
+     *
+     * Static, and quiet about a missing $baseDir, because the callers are usage
+     * messages — listing what is available must not create projects/ (nor fail)
+     * on a checkout that has never built anything.
+     *
+     * @return list<string>
+     */
+    public static function builtSlugs(string $baseDir): array
+    {
+        $slugs = [];
+        foreach (glob($baseDir . '/*/theme/style.css') ?: [] as $stylesheet) {
+            $slugs[] = basename(dirname($stylesheet, 2));
+        }
+        return $slugs;
+    }
+
+    /**
      * A short, arbitrary, human-friendly slug like "amber-otter" or
      * "brisk-harbor". Used when a project is created from a prompt without an
      * explicit slug, so the folder name stays short and memorable instead of

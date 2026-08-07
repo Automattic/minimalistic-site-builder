@@ -469,15 +469,7 @@ function serve_all(array $slugs, int $basePort, int $exitCode): void
     while ($servers !== []) {
         pump_children($servers, static function (int $idx, int $fd, string $line) use (&$servers): void {
             echo "[{$servers[$idx]['slug']}] " . $line;
-            // Playground prints this exact line once it is actually serving; it
-            // carries the real port (playground.php auto-bumps busy ones). The
-            // CLI may wrap it in ANSI colour codes — strip them before matching.
-            if ($servers[$idx]['url'] === null) {
-                $plain = preg_replace('~\x1b\[[0-9;]*m~', '', $line) ?? $line;
-                if (preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $plain, $m)) {
-                    $servers[$idx]['url'] = $m[1] . '/';
-                }
-            }
+            $servers[$idx]['url'] ??= playground_ready_url($line);
         });
 
         $allReady = $servers !== [];
