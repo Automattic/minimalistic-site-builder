@@ -884,6 +884,34 @@ test('normalizeRootPadding zeroes vertical root padding — sections own the rhy
     assert_eq('1rem', $theme['styles']['spacing']['blockGap'], 'blockGap untouched');
 });
 
+test('normalizeRootPadding repairs malformed shapes and side values itself', function () {
+    // Scalar styles.spacing — must not fatal on the string offset write; the
+    // full stanza is synthesized regardless of caller-side shape repairs.
+    $theme = ThemeJsonStep::normalizeRootPadding(['styles' => ['spacing' => '2rem']]);
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'scalar spacing: left');
+    assert_eq('0', $theme['styles']['spacing']['padding']['top'], 'scalar spacing: top');
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments'], 'scalar spacing: flag');
+
+    // Scalar styles — same guarantee one level up.
+    $theme = ThemeJsonStep::normalizeRootPadding(['styles' => 'oops']);
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'scalar styles: left');
+
+    // Non-scalar side values would serialize as garbage in theme.json —
+    // synthesized instead of copied through.
+    $theme = ThemeJsonStep::normalizeRootPadding(
+        ['styles' => ['spacing' => ['padding' => ['left' => ['1rem'], 'right' => '1.5rem']]]]
+    );
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'array side replaced');
+    assert_eq('1.5rem', $theme['styles']['spacing']['padding']['right'], 'scalar sibling kept');
+
+    // Numeric zero is still the zero-gutter defect; numeric non-zero survives.
+    $theme = ThemeJsonStep::normalizeRootPadding(
+        ['styles' => ['spacing' => ['padding' => ['left' => 0, 'right' => 16]]]]
+    );
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'numeric zero replaced');
+    assert_eq(16, $theme['styles']['spacing']['padding']['right'], 'numeric non-zero kept');
+});
+
 test('normalizeGroupBlockPadding removes recursive vertical defaults and preserves siblings', function () {
     $theme = ['styles' => ['blocks' => [
         'core/group' => [

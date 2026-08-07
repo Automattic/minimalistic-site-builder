@@ -357,8 +357,8 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
             $theme['styles']['spacing'] = [];
         }
         $theme['styles']['spacing']['blockGap'] ??= 'var:preset|spacing|md';
-        // After the shape repairs above so the synthesized padding lands in a
-        // guaranteed styles.spacing array rather than a malformed scalar.
+        // After the shape repairs above so a malformed styles.spacing records
+        // its warning before normalizeRootPadding's silent guard repairs it.
         $theme = self::normalizeRootPadding($theme);
 
         // Missing required slugs are filled deterministically instead of
@@ -505,23 +505,34 @@ final class ThemeJsonStep implements GeneratedJsonFallbackStep
      *   and the vertical rhythm belongs to the header/sections/footer, which
      *   all bring their own padding.
      *
-     * Pure — unit-testable. Callers must pass array-shaped styles.spacing
-     * (writeTheme runs its shape repairs first).
+     * Pure and total — malformed styles/styles.spacing shapes are repaired
+     * here too (silently; writeTheme's earlier shape repairs own the warning),
+     * so no caller order can fatal.
      *
      * @param array<mixed> $theme
      * @return array<mixed>
      */
     public static function normalizeRootPadding(array $theme): array
     {
+        if (!is_array($theme['styles'] ?? null)) {
+            $theme['styles'] = [];
+        }
+        if (!is_array($theme['styles']['spacing'] ?? null)) {
+            $theme['styles']['spacing'] = [];
+        }
         $padding = $theme['styles']['spacing']['padding'] ?? null;
         if (!is_array($padding)) {
             $padding = [];
         }
         $normalized = ['top' => '0', 'bottom' => '0'];
         foreach (['left', 'right'] as $side) {
-            $value = trim((string) ($padding[$side] ?? ''));
-            $zero = $value === '' || preg_match('/^0(?:[a-z%]+)?$/i', $value) === 1;
-            $normalized[$side] = $zero ? 'var:preset|spacing|md' : $padding[$side];
+            $value = $padding[$side] ?? '';
+            // Only scalar CSS-length candidates survive; arrays/objects/bools
+            // would serialize as garbage in theme.json.
+            $usable = (is_string($value) || is_int($value) || is_float($value))
+                && trim((string) $value) !== ''
+                && preg_match('/^0(?:[a-z%]+)?$/i', trim((string) $value)) !== 1;
+            $normalized[$side] = $usable ? $value : 'var:preset|spacing|md';
         }
         $theme['styles']['spacing']['padding'] = $normalized;
         $theme['settings']['useRootPaddingAwareAlignments'] = true;
