@@ -1,9 +1,10 @@
 # Design-quality loop state
 
 ## Current position
-- **2026-08-07 (later)**: Reconciled — #230 (BIGR-778) and #227 (BIGR-775) merged to trunk. Fix BIGR-780 ✓ — **PR #233 open** (branch fix/bigr-780-mobile-root-padding). normalizeRootPadding now always synthesizes missing/zero left-right root gutters to spacing|md, always sets useRootPaddingAwareAlignments, call moved after writeTheme's shape repairs; 1751/1751 tests; evidence via pulso→pulso7 replay (theme.json only re-normalized) in gist 5ca9fea5b13f93287bb778bf8fd602c5. Cohort atlas/hearth theme.json were found already hand-touched by earlier evidence work — pulso was the clean before-instance.
-- **LOOP PAUSED — stop condition hit again**: 3 design-quality PRs open unreviewed (#228 BIGR-776, #231 BIGR-779, #233 BIGR-780). (#232 is the loop-skill PR itself, not counted.) Resume with /loop /design-quality-loop after reviews land.
-- Next fix when resumed: **BIGR-782** (screenshot motion race — fixes the measuring instrument), then BIGR-784 (contrast blind spots). Note: BIGR-780's merge invalidates the cohort's mobile shots for gutter-adjacent findings; prefer replays or targeted rebuilds.
+- **2026-08-07 (iter 4)**: Fix BIGR-784 caption half ✓ — **PR #235 open** (branch fix/bigr-784-contrast-blind-spots). ContrastFix walk now records image/gallery figcaption rows (gallery caption matched only in the tail after its last child) and repairs failures via caption-text-* className hooks; ScaffoldThemeStep ships the matching `figcaption` CSS hooks; 1757/1757 tests. Evidence: lumen step-boundary replay (one real band recolored to contrast in both copies, trunk step vs branch step, fixer re-serialized) — gist 4815382fe2abe300ceca0ff5f95832d7. Remaining BIGR-784 scope (kickers/preset-pairs/double classes/mobile scrim) split to **BIGR-786** — needs a fresh cohort; the cited instances no longer exist on disk.
+- Same day earlier: BIGR-780 → **PR #233 merged to trunk** (fb4ae2f), BIGR-782 → PR #234; #230/#227 merged.
+- **Stop-condition override**: design-quality PRs open unreviewed (#228, #231, #234, #235) — maintainer explicitly told the loop to keep going (2026-08-07). Evidence conflicts are growing though: prefer instrument/prompt work over markup-repair fixes until reviews land.
+- Next: **BIGR-781** (painted-in fake signage in images — prompt+pipeline) or **BIGR-783** (repeated copy line across sections — pipeline); both untouched by open PRs. BIGR-786 blocked on fresh cohort (build after #234 merges — deterministic screenshots).
 - Full per-site critique reports: scratchpad `reports/<slug>.md`; crops: scratchpad `crops/<slug>/` (note: scratchpad is session-scoped; the cohort projects/ + logs remain the durable evidence source).
 - Evidence replay trick (deterministic fixes): copy projects/<slug> → <slug>NNN, apply the fix output to plugin/pages/home.html, `sed s#themes/<slug>/#themes/<slug>NNN/#`, screenshot — identical geometry to the cohort shot, crops pair 1:1.
 
@@ -16,7 +17,7 @@
 | # | Cluster | Incidence | Class | Status |
 |---|---------|-----------|-------|--------|
 | A | fix-blocks drops authored `has-text-align-*` (not mirrored in comment JSON) → off-axis eyebrows/prices | 5/7 | deterministic | **filed BIGR-779 — NEXT FIX** |
-| B | No root padding synthesized when model omits it → zero mobile gutters (normalizeRootPadding early-return) | 3/7 P0 | deterministic | **pr-open #233** (BIGR-780) |
+| B | No root padding synthesized when model omits it → zero mobile gutters (normalizeRootPadding early-return) | 3/7 P0 | deterministic | **merged #233** (BIGR-780) |
 | F | Contrast repair misses captions/kickers/preset-pairs/double-classes/mobile scrim (1.2–2.1:1 shipped) | 4/7 | deterministic | filed BIGR-784 |
 | C | Painted-in fake signage/text in images (wrong-brand storefront etc.) — recurrence after BIGR-768 | 6/7, 4×P0 | prompt+pipeline | filed BIGR-781 |
 | D | Screenshot races motion reveal (blank images in captures) + motion.js lacks user-facing fallback | 1/7 + instrument | deterministic | filed BIGR-782 |
