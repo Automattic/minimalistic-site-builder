@@ -168,8 +168,8 @@ final class CollectImagesStep implements Step
      *
      * @param list<string> $sources theme-relative markup paths referencing the texture
      * @param int $attempt 0 for the first generation; retries pass 1, 2, … to
-     *        rotate to the next material, since both the recitation filter and
-     *        the busyness gate reject stochastically per material
+     *        rotate to the next material, since the recitation filter rejects
+     *        stochastically per material
      * @return array<string,mixed>
      */
     public static function stageTextureSpec(array $sources, ?string $targetColor = null, int $attempt = 0): array
@@ -184,26 +184,25 @@ final class CollectImagesStep implements Step
         // vocabulary: a "seamless tone-on-tone surface texture" prompt is
         // stock-photo title language and trips the image model's
         // IMAGE_RECITATION filter, while a specific flat-lit head-on surface
-        // generates reliably and still passes the busyness gate.
-        // (Macro/close-up wording is deliberately absent too — it invites
-        // deep relief and oblique shadows that fail the gate.) The pick keys
-        // on the delivered surface color so reruns stay stable.
+        // generates reliably. The pick keys on the delivered surface color so
+        // reruns stay stable; retries rotate to the next material.
         $materials = [
-            ['handmade cold-pressed paper', 'flattened fiber grain'],
-            ['finely troweled lime plaster', 'fine trowel marks'],
-            ['tightly woven natural linen', 'flat even weave'],
-            ['smoothly honed limestone', 'soft mineral speckle'],
+            ['handmade cold-pressed paper', 'fiber grain and gentle pressed relief'],
+            ['finely troweled lime plaster', 'trowel marks and soft mineral mottling'],
+            ['tightly woven natural linen', 'visible thread weave'],
+            ['smoothly honed limestone', 'mineral speckle and faint veining'],
         ];
         [$material, $grain] = $materials[(crc32($targetColor ?? '') + $attempt) % count($materials)];
         return [
             'filename' => basename(GeneratedMarkup::STAGE_TEXTURE_ASSET),
             'src' => GeneratedMarkup::STAGE_TEXTURE_ASSET,
-            'subject' => "A flat expanse of {$material} photographed head-on in perfectly even"
-                . ' diffuse light, one continuous unbroken surface filling the entire frame and'
-                . " continuing uniformly past every edge. The whole surface is {$tone}, its"
-                . " {$grain} soft but clearly visible: gentle low-contrast material grain that"
-                . ' readable text can sit directly on. No deep relief, no cast shadows, no'
-                . ' objects, no lettering, no folds, no cracks, no stains, no vignette.',
+            'subject' => "A flat expanse of {$material} photographed head-on in even diffuse"
+                . ' light, one continuous surface filling the entire frame and continuing'
+                . " uniformly past every edge. The whole surface is {$tone}, and its"
+                . " {$grain} must be clearly visible — a rich tactile material texture that"
+                . ' reads as textured at a glance from normal viewing distance — while'
+                . ' staying even and calm enough that readable text can sit directly on it.'
+                . ' No objects, no lettering, no folds, no stains, no vignette.',
             'pageContext' => 'tiled page-canvas texture running behind the site header and the hero copy;'
                 . ' it must stay quiet enough that readable text sits directly on it',
             'style' => 'photorealistic',
@@ -261,9 +260,10 @@ final class CollectImagesStep implements Step
     }
 
     /**
-     * Exact delivered hero tone that keeps the opaque tile inside the surface
-     * and contrast contracts. Different hero targets are incompatible: the
-     * generator then rejects the texture and delivers the solid fallbacks.
+     * Delivered hero surface tone the generated tile should match. Best
+     * effort by design: when the hero surfaces disagree or none resolves,
+     * fall back to the theme palette's base tone rather than blocking the
+     * texture — the image prompt owns visual fitness, not this resolver.
      */
     public static function stageTextureTargetColor(Project $project, bool $allMarkup = false): ?string
     {
@@ -272,8 +272,6 @@ final class CollectImagesStep implements Step
         }
         $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
         $targets = [];
-        $sawHeroBackdrop = false;
-        $unresolvedHeroSurface = false;
         $files = $allMarkup
             ? $project->markupFiles()
             : (glob($project->themePath('parts/*.html')) ?: []);
@@ -311,19 +309,16 @@ final class CollectImagesStep implements Step
                 ) {
                     continue;
                 }
-                $sawHeroBackdrop = true;
                 $color = self::stageSurfaceColor($attrs, $palette);
-                if ($color === null) {
-                    $unresolvedHeroSurface = true;
-                } else {
+                if ($color !== null) {
                     $targets[strtoupper($color)] = true;
                 }
             }
         }
-        if (!$sawHeroBackdrop) {
-            return null;
+        if ($targets !== []) {
+            return array_key_first($targets);
         }
-        return !$unresolvedHeroSurface && count($targets) === 1 ? array_key_first($targets) : null;
+        return ContrastFixStep::paletteHex($palette, 'base');
     }
 
     /** @param array<string,mixed> $attrs */
