@@ -105,17 +105,9 @@ if ($prompt === null || trim($prompt) === '') {
 try {
     require_multi_page_for_pages($pagesArg, $multiPage);
     $pages = $pagesArg === null ? [] : split_csv_flag($pagesArg);
-    $provider = normalize_provider($provider);
 } catch (InvalidArgumentException $e) {
     Narrator::write($e->getMessage() . "\n");
     exit(1);
-}
-
-// --provider selects the model set for the whole run. It just sets LLM_PROVIDER
-// (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
-// overrides still apply on top.
-if ($provider !== null) {
-    putenv("LLM_PROVIDER={$provider}");
 }
 
 $designConstraints = [];
@@ -134,6 +126,20 @@ if ($maxHeroImagesArg !== null) {
 }
 if ($heroCopyCapacity !== null) {
     $designConstraints['hero_copy_capacity'] = $heroCopyCapacity;
+}
+
+// --provider selects the model set for the whole run. It just sets LLM_PROVIDER
+// (which make_llm() and StepDefaults both read), so per-step LLM_MODEL_<STEP>
+// overrides still apply on top. Keep this after the design-constraint checks so
+// a command with multiple invalid flags reports the same first error as before.
+try {
+    $provider = normalize_provider($provider);
+} catch (InvalidArgumentException $e) {
+    Narrator::write($e->getMessage() . "\n");
+    exit(1);
+}
+if ($provider !== null) {
+    putenv("LLM_PROVIDER={$provider}");
 }
 
 $llm = make_llm();

@@ -76,3 +76,18 @@ test('normalize_provider rejects an empty provider rather than silently ignoring
     assert_throws(static fn () => normalize_provider(''));
     assert_throws(static fn () => normalize_provider('   '));
 });
+
+test('build CLI preserves design-constraint error precedence over provider validation', function () {
+    $command = php_child_command(repo_path('bin/build.php'), [
+        'demo',
+        '--provider=not-configured',
+        '--max-hero-images=not-an-integer',
+        '--no-serve',
+    ]);
+    $output = [];
+    $exit = 0;
+    exec($command . ' 2>&1', $output, $exit);
+
+    assert_eq(1, $exit);
+    assert_eq('--max-hero-images must be an integer from 1 through 2.', implode("\n", $output));
+});

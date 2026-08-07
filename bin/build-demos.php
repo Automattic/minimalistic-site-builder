@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\ProjectStore;
 
 /**
@@ -99,7 +100,7 @@ try {
     require_multi_page_for_pages($pagesArg, $multiPage);
     $provider = normalize_provider($provider);
 } catch (InvalidArgumentException $e) {
-    fwrite(STDERR, $e->getMessage() . "\n");
+    Narrator::write($e->getMessage() . "\n");
     exit(1);
 }
 
