@@ -689,9 +689,9 @@ test('every code-owned hero recipe has a section-rhythm-compatible root skeleton
         if ($background === 'image') {
             assert_eq('var:preset|spacing|xl', sr_first_attrs($result['markups'][0], 'cover')['style']['spacing']['padding']['top']);
         } else {
-            // The opening hero's top edge is capped at md (copy-led skeleton
+            // The opening hero's top edge is capped at lg (copy-led skeleton
             // here); the bottom keeps the plain density map.
-            assert_eq('var:preset|spacing|md', sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['top']);
+            assert_eq('var:preset|spacing|lg', sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['top']);
             assert_eq('var:preset|spacing|xl', sr_root_attrs($result['markups'][0])['style']['spacing']['padding']['bottom']);
         }
     }
@@ -702,7 +702,7 @@ test('the opening hero top cap is sm for media-led roots and leaves later sectio
     // media-led heroes after HeroUnit had already clamped them (naturaleza8's
     // panorama band opened ~160px under the header, rail below the fold).
     $mediaHero = sr_section([
-        'className' => 'hero-composition--panorama-rail',
+        'className' => 'hero-composition--focal-subject-stage',
         'layout' => ['type' => 'constrained'],
     ], '<!-- wp:image {"className":"hero-composition__media"} -->'
         . '<figure class="wp-block-image hero-composition__media"><img src="theme:./assets/x.jpg" alt=""/></figure>'
@@ -730,4 +730,31 @@ test('the opening hero top cap is sm for media-led roots and leaves later sectio
         ['slug' => 'opening', 'markup' => $plain, 'density' => 'standard', 'background' => 'base'],
     ]);
     assert_eq('var:preset|spacing|xl', sr_root_attrs($plainFirst['markups'][0])['style']['spacing']['padding']['top']);
+});
+
+test('the opening hero keeps a lg bottom floor on a shared seam; other seams still collapse', function () {
+    // Regression: lumen9/atlas9 shared a base surface with the next section,
+    // so the hero's bottom collapsed to 0 and the whole below-hero gap was
+    // the next section's compact top — the hero crowded the following band.
+    $copyHero = sr_section([
+        'className' => 'hero-composition--editorial-split',
+        'layout' => ['type' => 'constrained'],
+    ], '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Split headline</h1><!-- /wp:heading -->');
+    $plain = sr_section(['layout' => ['type' => 'constrained']],
+        '<!-- wp:paragraph --><p>Body</p><!-- /wp:paragraph -->');
+
+    $result = SectionRhythm::rewrite([
+        ['slug' => 'hero', 'markup' => $copyHero, 'density' => 'standard', 'background' => 'base'],
+        ['slug' => 'features', 'markup' => $plain, 'density' => 'compact', 'background' => 'base'],
+        ['slug' => 'story', 'markup' => $plain, 'density' => 'compact', 'background' => 'base'],
+    ]);
+    $heroAttrs = sr_root_attrs($result['markups'][0]);
+    assert_eq('var:preset|spacing|lg', $heroAttrs['style']['spacing']['padding']['top'], 'copy-led hero top capped at lg');
+    assert_eq('var:preset|spacing|lg', $heroAttrs['style']['spacing']['padding']['bottom'], 'hero bottom floors at lg on a shared seam');
+    assert_eq(
+        '0',
+        sr_root_attrs($result['markups'][1])['style']['spacing']['padding']['bottom'],
+        'a non-hero shared seam still collapses to 0'
+    );
+    assert_contains('bottom=lg', implode("\n", $result['notes']));
 });

@@ -5,6 +5,7 @@ namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\HeroBlueprint;
+use Automattic\SiteBuild\HeroCopyBudget;
 use Automattic\SiteBuild\HeroComposition;
 
 /**
@@ -95,10 +96,26 @@ final class HeroUnit extends AbstractPageSectionUnit
         array_push($repairs, ...$actionResult['repairs']);
         array_push($warnings, ...$actionResult['warnings']);
         $markup = GeneratedMarkup::dedupeHeadlineEcho($markup, $key, $repairs);
+        // Remove non-copy children first so an eyebrow-only decorated shell
+        // is visible as empty to the fresh parse in stripHeroEyebrow().
+        $markup = GeneratedMarkup::stripHeroSeparators($markup, $key, $repairs, $warnings);
+        $markup = GeneratedMarkup::stripHeroEyebrow($markup, $key, $repairs, $warnings);
         $markup = GeneratedMarkup::stripEyebrowChipChrome($markup, $key, $repairs);
+        $budget = HeroCopyBudget::enforce($markup, $context['primary_action'], $key);
+        $markup = $budget['markup'];
+        array_push($warnings, ...$budget['warnings']);
+        $markup = GeneratedMarkup::headlineFirstHeroCopy($markup, $key, $repairs, $warnings);
         if ((string) HeroComposition::metadata($context['recipe'])['layout_archetype'] === 'full-bleed-cover') {
             $markup = GeneratedMarkup::fullBleedCoverAlignment($markup, $key, $repairs);
         }
+        $markup = GeneratedMarkup::centerHeroCopy(
+            $markup,
+            (string) ($context['blueprint']['text_anchor'] ?? ''),
+            (string) ($context['contract']['writing_direction'] ?? ''),
+            $key,
+            $repairs,
+            $warnings,
+        );
         $markup = GeneratedMarkup::clampHeroTopPadding($markup, $key, $repairs);
         $before = $markup;
         $markup = GeneratedMarkup::constrainedPart($markup);

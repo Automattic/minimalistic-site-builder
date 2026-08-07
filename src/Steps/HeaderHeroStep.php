@@ -347,6 +347,7 @@ final class HeaderHeroStep implements Step
             foreach ($dedupe['notes'] as $note) {
                 $report[] = "[{$headerRel}] {$note}";
             }
+            array_push($warnings, ...$dedupe['warnings']);
         } else {
             // No contract-owned hero part to compare against, but a blank
             // tagline block still renders a dead line — strip it here too.
@@ -360,6 +361,7 @@ final class HeaderHeroStep implements Step
             foreach ($dedupe['notes'] as $note) {
                 $report[] = "[{$headerRel}] {$note}";
             }
+            array_push($warnings, ...$dedupe['warnings']);
         }
 
 
@@ -489,7 +491,7 @@ final class HeaderHeroStep implements Step
      * @param array<mixed> $theme generated theme.json; used only to neutralize
      *                            recursive core/group padding on structural
      *                            header descendants
-     * @return array{markup:string, notes:string[]}
+     * @return array{markup:string,notes:string[]}
      */
     public static function fixHeader(
         string $markup,
@@ -1453,7 +1455,7 @@ final class HeaderHeroStep implements Step
      *
      * @param array{label:string,intent:string,destination:string}|null $primaryAction
      * @param string $taglineText the text wp:site-tagline renders at runtime
-     * @return array{markup:string, notes:string[]}
+     * @return array{markup:string,notes:string[],warnings:string[]}
      */
     public static function dedupeAgainstHero(
         string $headerMarkup,
@@ -1481,31 +1483,114 @@ final class HeaderHeroStep implements Step
             ? []
             : self::textTokens((string) ($primaryAction['label'] ?? ''));
         $taglineText = trim($taglineText);
-        $taglineTokens = self::contentTokens(self::textTokens($taglineText));
+        $taglineLeafTokens = self::textTokens($taglineText);
+        $taglineTokens = self::contentTokens($taglineLeafTokens);
 
         $doc = BlockMarkup::parse($headerMarkup);
-        $notes = [];
-        $removals = [];
+        /**
+         * Discover every duplicate before deciding which generated boundary
+         * can be removed. A candidate may contain another candidate, and an
+         * outer candidate is only removable when every descendant block is
+         * also covered by this transaction.
+         *
+         * @var list<array{
+         *     index:int,
+         *     block_start:int,
+         *     target:int,
+         *     start:int,
+         *     end:?int,
+         *     raw_survivor:bool,
+         *     path:string,
+         *     authored:mixed,
+         *     wrapper?:array{index:int,path:string,markup:string},
+         *     removal_note:string,
+         *     removal_disposition:string,
+         *     retained_note:string,
+         *     retained_disposition:string
+         * }> $candidates
+         */
+        $candidates = [];
+        $ordinals = [];
         foreach ($doc->indices() as $i) {
             $name = $doc->name($i);
+            $ordinals[$name] = ($ordinals[$name] ?? 0) + 1;
+            $path = "wp:{$name}[{$ordinals[$name]}]";
             if ($name === 'site-tagline') {
-                // Void block: the whole thing is its opening comment.
                 $start = $doc->openingOffset($i);
-                $length = ($doc->endOffset($i) ?? ($start + $doc->openingLength($i))) - $start;
+                $end = $doc->endOffset($i);
+                $capturedEnd = $end ?? ($start + $doc->openingLength($i));
+                $wrapperIndex = $end === null ? null : self::dedupeDedicatedTaglineWrapper($doc, $i);
+                $target = $wrapperIndex ?? $i;
+                $targetStart = $doc->openingOffset($target);
+                $targetEnd = $doc->endOffset($target);
+                $wrapper = null;
+                if ($wrapperIndex !== null && $targetEnd !== null) {
+                    $wrapper = [
+                        'index' => $wrapperIndex,
+                        'path' => self::dedupeBlockPath($doc, $wrapperIndex),
+                        'markup' => substr($headerMarkup, $targetStart, $targetEnd - $targetStart),
+                    ];
+                }
+                $authored = [
+                    'rendered_text' => $taglineText,
+                    'markup' => substr($headerMarkup, $start, $capturedEnd - $start),
+                ];
                 if ($taglineText === '') {
-                    $removals[$start] = $length;
-                    $notes[] = 'wp:site-tagline removed: the site spec states no tagline, so the '
-                        . 'block renders as a blank line inside the masthead lockup';
+                    $candidates[] = [
+                        'index' => $i,
+                        'block_start' => $start,
+                        'target' => $target,
+                        'start' => $targetStart,
+                        'end' => $targetEnd,
+                        'raw_survivor' => self::dedupeTaglineHasRawSurvivor(
+                            $doc,
+                            $i,
+                            $taglineLeafTokens,
+                        ),
+                        'path' => $path,
+                        'authored' => $authored,
+                        'wrapper' => $wrapper,
+                        'removal_note' => 'wp:site-tagline removed: the site spec states no tagline, so the '
+                            . 'block renders as a blank line inside the masthead lockup',
+                        'removal_disposition' => 'the dynamic tagline rendered blank and left dead masthead '
+                            . 'space, so its complete block boundary was removed',
+                        'retained_note' => 'wp:site-tagline retained: it would render blank, but its generated '
+                            . 'boundary also contains nested or raw header content selected to survive; original '
+                            . 'bytes delivered',
+                        'retained_disposition' => 'the dynamic tagline rendered blank, but its generated boundary '
+                            . 'could not be isolated from nested or raw header content selected to survive',
+                    ];
                     continue;
                 }
                 foreach ($heroLines as $line) {
                     if (!self::linesParaphrase($taglineTokens, self::contentTokens($line))) {
                         continue;
                     }
-                    $removals[$start] = $length;
-                    $notes[] = 'wp:site-tagline removed: its rendered text "' . $taglineText . '" '
-                        . 'paraphrases the hero line "' . implode(' ', $line) . '" directly beneath it '
-                        . '(the hero owns the proposition; header identity is the site name)';
+                    $candidates[] = [
+                        'index' => $i,
+                        'block_start' => $start,
+                        'target' => $target,
+                        'start' => $targetStart,
+                        'end' => $targetEnd,
+                        'raw_survivor' => self::dedupeTaglineHasRawSurvivor(
+                            $doc,
+                            $i,
+                            $taglineLeafTokens,
+                        ),
+                        'path' => $path,
+                        'authored' => $authored,
+                        'wrapper' => $wrapper,
+                        'removal_note' => 'wp:site-tagline removed: its rendered text "' . $taglineText . '" '
+                            . 'paraphrases the hero line "' . implode(' ', $line) . '" directly beneath it '
+                            . '(the hero owns the proposition; header identity is the site name)',
+                        'removal_disposition' => 'the tagline paraphrased hero-owned copy directly beneath it, '
+                            . 'so the duplicate header identity line was removed',
+                        'retained_note' => 'wp:site-tagline retained: its rendered text "' . $taglineText . '" '
+                            . 'paraphrases hero-owned copy, but its generated boundary also contains nested or '
+                            . 'raw header content selected to survive; original bytes delivered',
+                        'retained_disposition' => 'the tagline paraphrased hero-owned copy, but its generated '
+                            . 'boundary could not be isolated from nested or raw header content selected to survive',
+                    ];
                     break;
                 }
                 continue;
@@ -1520,10 +1605,30 @@ final class HeaderHeroStep implements Step
                     if (!self::linesEcho($tokens, $line)) {
                         continue;
                     }
-                    $removals[$doc->openingOffset($i)] = $end - $doc->openingOffset($i);
-                    $notes[] = 'authored header line "' . implode(' ', $tokens) . '" removed: it echoes a '
-                        . 'hero eyebrow/headline line rendered directly beneath the header '
-                        . '(the hero owns that copy; the same words twice within one viewport read as a mistake)';
+                    $start = $doc->openingOffset($i);
+                    $candidates[] = [
+                        'index' => $i,
+                        'block_start' => $start,
+                        'target' => $i,
+                        'start' => $start,
+                        'end' => $end,
+                        'raw_survivor' => self::dedupeTextLeafHasRawSurvivor($doc, $i),
+                        'path' => $path,
+                        'authored' => [
+                            'text' => implode(' ', $tokens),
+                            'markup' => substr($headerMarkup, $start, $end - $start),
+                        ],
+                        'removal_note' => 'authored header line "' . implode(' ', $tokens) . '" removed: it echoes a '
+                            . 'hero eyebrow/headline line rendered directly beneath the header '
+                            . '(the hero owns that copy; the same words twice within one viewport read as a mistake)',
+                        'removal_disposition' => 'the generated header line echoed hero-owned copy in the same '
+                            . 'viewport, so only the duplicate paragraph block was removed',
+                        'retained_note' => 'authored header line "' . implode(' ', $tokens) . '" retained: it echoes '
+                            . 'hero-owned copy, but its generated boundary also contains nested or raw header '
+                            . 'content selected to survive; original bytes delivered',
+                        'retained_disposition' => 'the generated header line echoed hero-owned copy, but its '
+                            . 'boundary could not be isolated from nested or raw header content selected to survive',
+                    ];
                     break;
                 }
                 continue;
@@ -1532,33 +1637,433 @@ final class HeaderHeroStep implements Step
                 && self::textTokens($doc->innerHtml($i)) === $actionLabel
             ) {
                 // Remove the enclosing wp:buttons wrapper when this is its
-                // only button, so no empty container survives.
+                // only child and its saved-HTML shell becomes empty, so no
+                // empty container survives and no non-button sibling is lost.
                 $target = $i;
                 $parent = $doc->parent($i);
-                if ($parent !== null && $doc->name($parent) === 'buttons' && $doc->endOffset($parent) !== null) {
-                    $siblings = array_filter(
-                        $doc->children($parent),
-                        fn (int $child): bool => $doc->name($child) === 'button',
-                    );
-                    if (count($siblings) === 1) {
-                        $target = $parent;
-                    }
+                if ($parent !== null
+                    && $doc->name($parent) === 'buttons'
+                    && self::dedupeButtonsWrapperBecomesEmpty($doc, $parent, $i)
+                ) {
+                    $target = $parent;
                 }
-                $targetEnd = (int) $doc->endOffset($target);
-                $removals[$doc->openingOffset($target)] = $targetEnd - $doc->openingOffset($target);
-                $notes[] = 'header button "' . implode(' ', $actionLabel) . '" removed: its label duplicates '
-                    . "the contract's primary action, which the hero delivers ~200px below "
-                    . '(two identical calls to action within one viewport compete instead of converting)';
+                $targetEnd = $doc->endOffset($target);
+                $targetStart = $doc->openingOffset($target);
+                $capturedEnd = $targetEnd ?? ($targetStart + $doc->openingLength($target));
+                $candidates[] = [
+                    'index' => $i,
+                    'block_start' => $doc->openingOffset($i),
+                    'target' => $target,
+                    'start' => $targetStart,
+                    'end' => $targetEnd,
+                    'raw_survivor' => self::dedupeButtonHasRawSurvivor($doc, $i),
+                    'path' => $path,
+                    'authored' => [
+                        'label' => implode(' ', $actionLabel),
+                        'markup' => substr($headerMarkup, $targetStart, $capturedEnd - $targetStart),
+                    ],
+                    'removal_note' => 'header button "' . implode(' ', $actionLabel) . '" removed: its label '
+                        . "duplicates the contract's primary action, which the hero delivers ~200px below "
+                        . '(two identical calls to action within one viewport compete instead of converting)',
+                    'removal_disposition' => 'the header control duplicated the authoritative hero primary '
+                        . 'action in the same viewport, so the duplicate control'
+                        . ($target !== $i ? ' and its now-empty wp:buttons wrapper were' : ' was')
+                        . ' removed',
+                    'retained_note' => 'header button "' . implode(' ', $actionLabel) . '" retained: it duplicates '
+                        . 'the hero primary action, but its generated boundary also contains nested or raw header '
+                        . 'content selected to survive; original bytes delivered',
+                    'retained_disposition' => 'the header control duplicated the authoritative hero primary '
+                        . 'action, but its generated boundary could not be isolated from nested or raw header '
+                        . 'content selected to survive',
+                ];
             }
         }
-        if ($removals === []) {
-            return ['markup' => $headerMarkup, 'notes' => []];
+        if ($candidates === []) {
+            return ['markup' => $headerMarkup, 'notes' => [], 'warnings' => []];
         }
-        krsort($removals);
-        foreach ($removals as $offset => $length) {
-            $headerMarkup = substr_replace($headerMarkup, '', $offset, $length);
+
+        // A target owns every descendant that is itself scheduled by this
+        // pass. Any other descendant is surviving content, so deleting the
+        // target would exceed the smallest safe unit.
+        $covered = [];
+        foreach ($candidates as $candidate) {
+            $covered[$candidate['index']] = true;
+            $covered[$candidate['target']] = true;
         }
-        return ['markup' => $headerMarkup, 'notes' => $notes];
+        $safe = [];
+        foreach ($candidates as $offset => $candidate) {
+            $safe[$offset] = $candidate['end'] !== null
+                && !$candidate['raw_survivor']
+                && !self::dedupeTargetContainsSurvivor($doc, $candidate['target'], $covered);
+        }
+
+        // Keep an unsafe generated containment component byte-for-byte. The
+        // closure runs in both directions: editing a nested candidate would
+        // partially mutate its retained ancestor, while deleting an ancestor
+        // would erase the unsafe descendant that caused this transaction to
+        // be abandoned in the first place.
+        do {
+            $changed = false;
+            $unsafeTargets = [];
+            foreach ($candidates as $offset => $candidate) {
+                if (!$safe[$offset]) {
+                    $unsafeTargets[$candidate['target']] = true;
+                }
+            }
+            foreach ($candidates as $offset => $candidate) {
+                if (!$safe[$offset]) {
+                    continue;
+                }
+                foreach (array_keys($unsafeTargets) as $unsafeTarget) {
+                    if ($candidate['target'] === $unsafeTarget
+                        || self::dedupeIsDescendantOf($doc, $candidate['target'], $unsafeTarget)
+                        || self::dedupeIsDescendantOf($doc, $unsafeTarget, $candidate['target'])
+                    ) {
+                        $safe[$offset] = false;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+        } while ($changed);
+
+        $notes = [];
+        $removals = [];
+        foreach ($candidates as $offset => $candidate) {
+            if (!$safe[$offset]) {
+                $notes[] = $candidate['retained_note'];
+                continue;
+            }
+            $notes[] = $candidate['removal_note'];
+            $removals[] = ['start' => $candidate['start'], 'end' => (int) $candidate['end']];
+        }
+
+        usort($removals, static function (array $left, array $right): int {
+            $start = $left['start'] <=> $right['start'];
+            return $start !== 0 ? $start : $right['end'] <=> $left['end'];
+        });
+        $outermost = [];
+        foreach ($removals as $removal) {
+            $last = array_key_last($outermost);
+            if ($last === null || $removal['start'] >= $outermost[$last]['end']) {
+                $outermost[] = $removal;
+                continue;
+            }
+            if ($removal['end'] > $outermost[$last]['end']) {
+                $outermost[$last]['end'] = $removal['end'];
+            }
+        }
+        foreach (array_reverse($outermost) as $removal) {
+            $headerMarkup = substr_replace(
+                $headerMarkup,
+                '',
+                $removal['start'],
+                $removal['end'] - $removal['start'],
+            );
+        }
+
+        // Retained paths describe the delivered artifact, not the pre-repair
+        // input. Rebind their original offsets after earlier safe removals so
+        // a mixed safe/unsafe pass and its fixed-point rerun identify the same
+        // residual block ordinal.
+        $delivered = BlockMarkup::parse($headerMarkup);
+        $deliveredPaths = self::dedupePathsByOffset($delivered);
+        $warnings = [];
+        $removedWrappers = [];
+        foreach ($candidates as $offset => $candidate) {
+            if ($safe[$offset]) {
+                $warnings[] = "file='theme/parts/header.html'; block='{$candidate['path']}'; authored="
+                    . Warnings::value($candidate['authored'])
+                    . '; delivered=removed; disposition=' . $candidate['removal_disposition'];
+                $wrapper = $candidate['wrapper'] ?? null;
+                if (is_array($wrapper)) {
+                    $removedWrappers[$wrapper['index']] = $wrapper;
+                }
+                continue;
+            }
+            $deliveredOffset = self::dedupeOffsetAfterRemovals(
+                $candidate['block_start'],
+                $outermost,
+            );
+            $path = $deliveredPaths[$deliveredOffset] ?? $candidate['path'];
+            $warnings[] = "file='theme/parts/header.html'; block='{$path}'; authored="
+                . Warnings::value($candidate['authored'])
+                . '; delivered="original block bytes"; disposition='
+                . $candidate['retained_disposition']
+                . ($candidate['raw_survivor']
+                    ? '; removing the target leaf would also discard visible raw/non-block payload'
+                    : '')
+                . '; the complete generated unit was retained transactionally without partial edits, and '
+                . 'the residual duplicate is queued for repair';
+        }
+        foreach ($removedWrappers as $wrapper) {
+            $warnings[] = "file='theme/parts/header.html'; block='{$wrapper['path']}'; authored="
+                . (string) json_encode(
+                    $wrapper['markup'],
+                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE,
+                )
+                . '; delivered=removed; disposition=the dedicated generated wp:group became empty after its '
+                . 'duplicate tagline child was removed in the same transaction; its complete painted/layout '
+                . 'boundary was removed so it could not leave dead header UI, while sibling blocks were preserved';
+        }
+        return ['markup' => $headerMarkup, 'notes' => $notes, 'warnings' => $warnings];
+    }
+
+    /**
+     * Find the outermost complete group shell dedicated only to one tagline.
+     * Header roots are objective delivery boundaries and are never widened
+     * through, even when the tagline is their sole generated child.
+     */
+    private static function dedupeDedicatedTaglineWrapper(BlockMarkup $doc, int $tagline): ?int
+    {
+        $wrapper = null;
+        $child = $tagline;
+        $top = $doc->topLevel();
+        for ($parent = $doc->parent($child); $parent !== null; $parent = $doc->parent($parent)) {
+            $classes = ($doc->attrs($parent) ?? [])['className'] ?? '';
+            $objectiveRoot = $parent === $top
+                || (is_string($classes) && preg_match('/(?:^|\s)header-archetype--/', $classes) === 1);
+            if ($objectiveRoot
+                || $doc->name($parent) !== 'group'
+                || $doc->children($parent) !== [$child]
+                || !self::dedupeGroupBecomesEmptyAroundChild($doc, $parent, $child)
+            ) {
+                break;
+            }
+            $wrapper = $parent;
+            $child = $parent;
+        }
+        return $wrapper;
+    }
+
+    /** Whether removing the sole child leaves one inert saved-HTML shell. */
+    private static function dedupeGroupBecomesEmptyAroundChild(
+        BlockMarkup $doc,
+        int $group,
+        int $child,
+    ): bool {
+        $groupEnd = $doc->endOffset($group);
+        $childEnd = $doc->endOffset($child);
+        if ($groupEnd === null || $childEnd === null) {
+            return false;
+        }
+        $innerStart = $doc->openingOffset($group) + $doc->openingLength($group);
+        $childStart = $doc->openingOffset($child);
+        $shell = substr_replace(
+            $doc->innerHtml($group),
+            '',
+            $childStart - $innerStart,
+            $childEnd - $childStart,
+        );
+        $shell = preg_replace('/<!--(?!\s*\/?wp:).*?-->/s', '', $shell) ?? $shell;
+        return preg_match(
+            '~\A\s*<(?<tag>div|section|article|main|aside|header|footer|nav)\b[^>]*>\s*</\k<tag>>\s*\z~is',
+            $shell,
+        ) === 1;
+    }
+
+    /** Stable one-based block path in the pre-repair header artifact. */
+    private static function dedupeBlockPath(BlockMarkup $doc, int $index): string
+    {
+        $name = $doc->name($index);
+        $ordinal = 0;
+        foreach ($doc->indices() as $candidate) {
+            if ($doc->name($candidate) === $name) {
+                $ordinal++;
+            }
+            if ($candidate === $index) {
+                break;
+            }
+        }
+        return "wp:{$name}[{$ordinal}]";
+    }
+
+    /** @return array<int,string> opening byte offset to delivered block path */
+    private static function dedupePathsByOffset(BlockMarkup $doc): array
+    {
+        $paths = [];
+        $ordinals = [];
+        foreach ($doc->indices() as $index) {
+            $name = $doc->name($index);
+            $ordinals[$name] = ($ordinals[$name] ?? 0) + 1;
+            $paths[$doc->openingOffset($index)] = "wp:{$name}[{$ordinals[$name]}]";
+        }
+        return $paths;
+    }
+
+    /** @param list<array{start:int,end:int}> $removals */
+    private static function dedupeOffsetAfterRemovals(int $offset, array $removals): int
+    {
+        $originalOffset = $offset;
+        $shift = 0;
+        foreach ($removals as $removal) {
+            if ($removal['end'] > $originalOffset) {
+                break;
+            }
+            $shift += $removal['end'] - $removal['start'];
+        }
+        return $originalOffset - $shift;
+    }
+
+    /** @param array<int,true> $covered */
+    private static function dedupeTargetContainsSurvivor(
+        BlockMarkup $doc,
+        int $target,
+        array $covered,
+    ): bool {
+        foreach ($doc->indices() as $index) {
+            if ($index === $target || isset($covered[$index])) {
+                continue;
+            }
+            if (self::dedupeIsDescendantOf($doc, $index, $target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function dedupeIsDescendantOf(BlockMarkup $doc, int $index, int $ancestor): bool
+    {
+        for ($parent = $doc->parent($index); $parent !== null; $parent = $doc->parent($parent)) {
+            if ($parent === $ancestor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Inline phrasing tags belong to a text/control leaf rather than a raw survivor. */
+    private const DEDUPE_INLINE_TAGS = [
+        'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'del', 'em', 'i',
+        'ins', 'kbd', 'mark', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'small',
+        'span', 'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr',
+    ];
+
+    /** @param list<string> $renderedTokens */
+    private static function dedupeTaglineHasRawSurvivor(
+        BlockMarkup $doc,
+        int $tagline,
+        array $renderedTokens,
+    ): bool {
+        if ($doc->isVoid($tagline)) {
+            return false;
+        }
+        $shell = self::dedupeShellWithoutChildBlocks($doc, $tagline);
+        if ($shell === null) {
+            return true;
+        }
+        $shell = self::dedupeWithoutInertComments($shell);
+        if (trim($shell) === '') {
+            return false;
+        }
+        if (preg_match('/<\s*\/?\s*[a-z][a-z0-9-]*\b/i', $shell) !== 1) {
+            return self::textTokens($shell) !== $renderedTokens;
+        }
+        if (preg_match(
+            '/\A\s*<(?<root>p|div|span)\b[^>]*>(?<body>.*)<\/\k<root>>\s*\z/is',
+            $shell,
+            $match,
+        ) !== 1) {
+            return true;
+        }
+        $body = (string) ($match['body'] ?? '');
+        return self::dedupeHasNonTextPayload($body)
+            || self::textTokens($body) !== $renderedTokens;
+    }
+
+    private static function dedupeTextLeafHasRawSurvivor(BlockMarkup $doc, int $paragraph): bool
+    {
+        $shell = self::dedupeShellWithoutChildBlocks($doc, $paragraph);
+        if ($shell === null) {
+            return true;
+        }
+        $shell = self::dedupeWithoutInertComments($shell);
+        if (preg_match('/\A\s*<p\b[^>]*>(?<body>.*)<\/p>\s*\z/is', $shell, $match) !== 1) {
+            return true;
+        }
+        return self::dedupeHasNonTextPayload((string) ($match['body'] ?? ''));
+    }
+
+    private static function dedupeButtonHasRawSurvivor(BlockMarkup $doc, int $button): bool
+    {
+        $shell = self::dedupeShellWithoutChildBlocks($doc, $button);
+        if ($shell === null) {
+            return true;
+        }
+        $shell = self::dedupeWithoutInertComments($shell);
+        if (preg_match(
+            '/\A\s*<div\b[^>]*>\s*<a\b[^>]*>(?<body>.*)<\/a>\s*<\/div>\s*\z/is',
+            $shell,
+            $match,
+        ) !== 1) {
+            return true;
+        }
+        return self::dedupeHasNonTextPayload((string) ($match['body'] ?? ''));
+    }
+
+    private static function dedupeHasNonTextPayload(string $html): bool
+    {
+        if (!preg_match_all('/<\s*\/?\s*([a-z][a-z0-9-]*)\b[^>]*>/i', $html, $tags)) {
+            return false;
+        }
+        foreach ($tags[1] as $tag) {
+            if (!in_array(strtolower($tag), self::DEDUPE_INLINE_TAGS, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function dedupeWithoutInertComments(string $html): string
+    {
+        return preg_replace('/<!--(?!\s*\/?wp:).*?-->/s', '', $html) ?? $html;
+    }
+
+    private static function dedupeShellWithoutChildBlocks(BlockMarkup $doc, int $index): ?string
+    {
+        $innerStart = $doc->openingOffset($index) + $doc->openingLength($index);
+        $shell = $doc->innerHtml($index);
+        $children = $doc->children($index);
+        for ($position = count($children) - 1; $position >= 0; $position--) {
+            $child = $children[$position];
+            $end = $doc->endOffset($child);
+            if ($end === null) {
+                return null;
+            }
+            $start = $doc->openingOffset($child);
+            $shell = substr_replace($shell, '', $start - $innerStart, $end - $start);
+        }
+        return $shell;
+    }
+
+    /**
+     * Whether removing one button leaves only an inert empty wrapper shell.
+     * Requiring the exact child list prevents a paragraph/navigation sibling
+     * from being discarded just because it is not another wp:button.
+     */
+    private static function dedupeButtonsWrapperBecomesEmpty(
+        BlockMarkup $doc,
+        int $wrapper,
+        int $button,
+    ): bool {
+        $wrapperEnd = $doc->endOffset($wrapper);
+        $buttonEnd = $doc->endOffset($button);
+        if ($wrapperEnd === null || $buttonEnd === null || $doc->children($wrapper) !== [$button]) {
+            return false;
+        }
+
+        $innerStart = $doc->openingOffset($wrapper) + $doc->openingLength($wrapper);
+        $buttonStart = $doc->openingOffset($button);
+        $shell = substr_replace(
+            $doc->innerHtml($wrapper),
+            '',
+            $buttonStart - $innerStart,
+            $buttonEnd - $buttonStart,
+        );
+        // Plain comments and whitespace are inert; a real saved-HTML node is
+        // a survivor, even when the parser sees no additional child block.
+        $shell = preg_replace('/<!--(?!\s*\/?wp:).*?-->/s', '', $shell) ?? $shell;
+        return preg_match('/\A\s*<div\b[^>]*>\s*<\/div>\s*\z/is', $shell) === 1;
     }
 
     /**

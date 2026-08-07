@@ -252,7 +252,7 @@ final class ScaffoldThemeStep implements Step
             margin: 0;
         }
         /* The text column defines the row height; the thumb follows it instead
-           of imposing the square crop (same stretch pattern as panorama-rail). */
+           of imposing the square crop (the reviewed full-height media pattern). */
         .list-thumb-flush .card-media-thumb img {
             aspect-ratio: auto;
             height: 100%;
@@ -327,25 +327,6 @@ final class ScaffoldThemeStep implements Step
             aspect-ratio: 3 / 4;
             object-fit: cover;
         }
-        .hero-composition--panorama-rail .hero-composition__media img {
-            width: 100%;
-            aspect-ratio: 16 / 7;
-            object-fit: cover;
-        }
-        /* A generated rail authored beside the media (instead of the recipe's
-           band-then-rail rows) would bottom-align a short image against a
-           taller copy column and open dead canvas above it; stretching the
-           media to the row keeps even that deviation composed. */
-        .hero-composition--panorama-rail .wp-block-columns:has(> .hero-composition__media) {
-            align-items: stretch;
-        }
-        .hero-composition--panorama-rail .wp-block-column.hero-composition__media .wp-block-image,
-        .hero-composition--panorama-rail .wp-block-column.hero-composition__media img {
-            height: 100%;
-        }
-        .hero-composition--panorama-rail .wp-block-column.hero-composition__media img {
-            aspect-ratio: auto;
-        }
         .hero-composition--layered-poster {
             overflow: hidden;
         }
@@ -363,24 +344,20 @@ final class ScaffoldThemeStep implements Step
            quiet image region or changes the selected recipe at runtime. */
         @media (max-width: 781.98px) {
             .hero-mobile--stack-copy-first .wp-block-columns,
-            .hero-mobile--stack-media-first .wp-block-columns,
-            .hero-mobile--rail-below .wp-block-columns {
+            .hero-mobile--stack-media-first .wp-block-columns {
                 flex-direction: column;
             }
             .hero-mobile--stack-copy-first .wp-block-media-text,
-            .hero-mobile--stack-media-first .wp-block-media-text,
-            .hero-mobile--rail-below .wp-block-media-text {
+            .hero-mobile--stack-media-first .wp-block-media-text {
                 grid-template-columns: minmax(0, 1fr) !important;
             }
             .hero-mobile--stack-copy-first .wp-block-media-text__content,
-            .hero-mobile--stack-media-first .wp-block-media-text__media,
-            .hero-mobile--rail-below .wp-block-media-text__media {
+            .hero-mobile--stack-media-first .wp-block-media-text__media {
                 grid-column: 1;
                 grid-row: 1;
             }
             .hero-mobile--stack-copy-first .wp-block-media-text__media,
-            .hero-mobile--stack-media-first .wp-block-media-text__content,
-            .hero-mobile--rail-below .wp-block-media-text__content {
+            .hero-mobile--stack-media-first .wp-block-media-text__content {
                 grid-column: 1;
                 grid-row: 2;
             }
@@ -390,12 +367,10 @@ final class ScaffoldThemeStep implements Step
             .hero-mobile--stack-copy-first .hero-composition__media {
                 order: 2;
             }
-            .hero-mobile--stack-media-first .hero-composition__media,
-            .hero-mobile--rail-below .hero-composition__media {
+            .hero-mobile--stack-media-first .hero-composition__media {
                 order: 1;
             }
-            .hero-mobile--stack-media-first .hero-composition__copy,
-            .hero-mobile--rail-below .hero-composition__copy {
+            .hero-mobile--stack-media-first .hero-composition__copy {
                 order: 2;
             }
             /* A cover owns both the media and copy DOM, so flex order cannot
