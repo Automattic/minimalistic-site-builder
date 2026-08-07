@@ -261,6 +261,8 @@ test('SectionUnit documents canonical Jetpack Forms markup', function () {
     assert_contains('"tagName":"button","type":"submit"', $prompt);
     assert_contains('NEVER use `wp:jetpack/button` for a form submit control', $prompt);
     assert_contains('never emit raw `<form>`', $prompt);
+    assert_contains("omit the form's `to` attribute", $prompt);
+    assert_contains("Jetpack's standard success response", $prompt);
 });
 
 test('SectionUnit documents the complete list-thumb delivery contract', function () {

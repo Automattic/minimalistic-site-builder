@@ -29,6 +29,8 @@ Tailor the section choice to the site's `site_type` / `area` and THIS page's pur
 - blog / news → latest posts, categories, featured story
 Pick what genuinely fits THIS page rather than a rigid template.
 
+Plan a form only when the user prompt, site spec, or THIS page's purpose genuinely calls for contact, booking, RSVP, newsletter signup, or another submission. Put it in exactly one appropriate section, give that section a specific semantic `type` such as `contact`, `booking`, `rsvp`, or `newsletter-signup`, and state in `content_notes` that it needs a Jetpack Form plus the exact fields, choices, and required behavior supported by the spec. Otherwise, do not plan decorative or non-functional form controls.
+
 You are also the page's art director: each section will be built independently and concurrently by a different author who sees only its own brief, so YOU own the page-level visual rhythm. Assign every section a layout archetype and a background treatment, and describe its seams, so adjacent sections never repeat compositions and the background bands pace the page deliberately.
 
 Return a single JSON object with this exact shape:

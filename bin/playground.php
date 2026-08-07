@@ -86,6 +86,7 @@ $steps = [
     ['step' => 'setSiteOptions', 'options' => PlaygroundArtifact::siteOptions($project)],
     ['step' => 'activateTheme', 'themeFolderName' => $slug],
 ];
+$steps = PlaygroundArtifact::withJetpackFormsPlugin($project, $steps);
 $pluginDir = repo_path("projects/{$slug}/plugin");
 $hasPlugin = is_file($pluginDir . '/site-content.php');
 if ($hasPlugin) {

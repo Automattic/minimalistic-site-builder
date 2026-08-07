@@ -166,6 +166,8 @@ final class PlaygroundArtifact
             ],
         ];
 
+        $steps = self::withJetpackFormsPlugin($project, $steps);
+
         // The companion content plugin ships next to the theme and activates
         // AFTER it: the seeder resolves theme:./assets/ refs against the
         // ACTIVE stylesheet when it creates the pages.
@@ -188,6 +190,39 @@ final class PlaygroundArtifact
             'login'       => true,
             'steps'       => $steps,
         ];
+    }
+
+    /**
+     * Install Jetpack before seeded content is created when the generated site
+     * contains a Jetpack Form. The unchanged list keeps form-free previews
+     * lightweight.
+     *
+     * @param array<int,array<string,mixed>> $steps
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withJetpackFormsPlugin(Project $project, array $steps): array
+    {
+        foreach ($project->markupFiles() as $file) {
+            $markup = @file_get_contents($file);
+            if ($markup === false) {
+                throw new \RuntimeException("Could not read file: {$file}");
+            }
+            if (!str_contains($markup, '<!-- wp:jetpack/contact-form')) {
+                continue;
+            }
+
+            $steps[] = [
+                'step'       => 'installPlugin',
+                'pluginData' => [
+                    'resource' => 'wordpress.org/plugins',
+                    'slug'     => 'jetpack',
+                ],
+                'options'    => ['activate' => true],
+            ];
+            break;
+        }
+
+        return $steps;
     }
 
     /**

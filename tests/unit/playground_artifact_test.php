@@ -84,6 +84,36 @@ test('blueprint installs and activates the content plugin after the theme', func
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
+test('Jetpack Forms previews install Jetpack before seeding content', function () {
+    $tmp = sys_get_temp_dir() . '/builder_playground_jetpack_forms_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo-site');
+    $project->writeText('theme/style.css', "/*\nTheme Name: Demo Theme\n*/\n");
+    $project->writeText('plugin/site-content.php', "<?php\n// seeder\n");
+    $project->writeText(
+        'plugin/pages/contact.html',
+        '<!-- wp:jetpack/contact-form --><div class="wp-block-jetpack-contact-form"></div><!-- /wp:jetpack/contact-form -->'
+    );
+
+    $blueprint = PlaygroundArtifact::blueprint($project);
+    $steps = $blueprint['steps'];
+
+    assert_eq(
+        ['setSiteOptions', 'mkdir', 'unzip', 'mv', 'activateTheme', 'installPlugin', 'mv', 'activatePlugin'],
+        array_column($steps, 'step')
+    );
+    assert_eq('wordpress.org/plugins', $steps[5]['pluginData']['resource']);
+    assert_eq('jetpack', $steps[5]['pluginData']['slug']);
+    assert_eq(true, $steps[5]['options']['activate']);
+
+    $localSteps = PlaygroundArtifact::withJetpackFormsPlugin($project, [
+        PlaygroundArtifact::offlineGuardStep(),
+        ['step' => 'activateTheme', 'themeFolderName' => 'demo-site'],
+    ]);
+    assert_eq(['writeFile', 'activateTheme', 'installPlugin'], array_column($localSteps, 'step'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
 test('offline guard step fails outbound HTTP fast for local CLI previews', function () {
     $step = PlaygroundArtifact::offlineGuardStep();
 
