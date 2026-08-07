@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BareListItemLift;
 use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
@@ -76,6 +77,7 @@ final class FixBlocksStep implements Step
         $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
         $shapeChanges = [];
         try {
+            $listNotes = self::liftBareListItems($project);
             $layoutNotes = self::normalizeLayouts($project);
             $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
@@ -85,6 +87,7 @@ final class FixBlocksStep implements Step
             self::appendFailures($failedFiles, $initialOutcome);
             self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
+            $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
         } catch (\RuntimeException $e) {
             self::restoreThemeFiles($project, $beforeInitialPass);
             $project->writeText('logs/' . self::LOG_FILE, $e->getMessage() . "\n");
@@ -115,6 +118,7 @@ final class FixBlocksStep implements Step
                 self::appendFailures($failedFiles, $followUpOutcome);
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
+                $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
             }
         } catch (\RuntimeException $e) {
             // The public step is one transaction even though structural
@@ -129,6 +133,9 @@ final class FixBlocksStep implements Step
             }
             $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
             throw $e;
+        }
+        if ($listNotes !== []) {
+            $summary .= "\n[list] " . count($listNotes) . " bare list-item lift(s):\n  " . implode("\n  ", $listNotes);
         }
         if ($layoutNotes !== []) {
             $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  " . implode("\n  ", $layoutNotes);
@@ -322,6 +329,35 @@ final class FixBlocksStep implements Step
      *        failed this step and must remain at their step-entry bytes
      * @return string[]
      */
+    /**
+     * Mirror bare `<li>` children of authored wp:list blocks into
+     * wp:list-item inner blocks before the fixer regenerates save output
+     * from block structure alone (which would drop every bare item).
+     *
+     * @param list<string> $excluded fixer-relative paths whose step
+     *        transaction has already been abandoned
+     * @return list<string>
+     */
+    public static function liftBareListItems(Project $project, array $excluded = []): array
+    {
+        $notes = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = BareListItemLift::fix($markup);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['notes'] as $note) {
+                $notes[] = "{$rel}: {$note}";
+            }
+        }
+        return $notes;
+    }
+
     public static function normalizeLayouts(Project $project, array $excluded = []): array
     {
         $notes = [];

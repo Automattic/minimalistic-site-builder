@@ -1,6 +1,59 @@
 # Design-quality loop state
 
-## Current position
+## Iteration counter
+- **18** (2026-08-07, Triage iteration — backlog validated, root-caused, filed BIGR-797…802, ranked below). Variety cadence: every 4th iteration → next variety-cadence turn is iteration **20**. Variety PR slot currently OCCUPIED by #228 (BIGR-776, open unreviewed) — a cadence turn while it stays open parks its proposal on the Linear issue instead of opening a second PR.
+
+## Next iteration (20 — VARIETY CADENCE TURN)
+Iteration 20 is the 4th-iteration variety turn. BIGR-798 (H1 mid-word snap) is an unfixed P0/craft finding → per the cadence rule it defers variety to iteration 21: **fix BIGR-798 first** (deterministic text-fit where H1 + hero recipe are both known: HeroUnit/HeaderHeroStep; evidence replay on pulso2 hero). Then iteration 21 runs the variety turn (gap from cohort: centered-cinematic underused, no type-led/no-image hero; #228 still occupies the slot → park proposal on its Linear issue if unreviewed). Queue after: BIGR-799 (one-line validator fix), BIGR-800, BIGR-801, BIGR-802.
+
+## Fresh cohort (iteration 17) — trunk 1d27e76, built 2026-08-07
+- Slugs (build-demos auto-suffixed): **portfolio6, tbilisi4, naturaleza6, lumen4, atlas3, pulso2, hearth2**. 7/7 built, 0 image-generation failures. Desktop `logs/home.png` (1366px) + mobile `logs/home-mobile.png` (390px) captured for all 7.
+- Critique reports: scratchpad `reports/<slug>.md` + `reports/_cohort-synthesis.md` (session-scoped; projects/ + this table are the durable record).
+
+### Graded scores (BASELINE — first scored cohort, anchor 1=template / 3=competent / 5=designer-claimed)
+| site | conviction | impact |
+|---|---|---|
+| portfolio6 | 4 | 3.5 |
+| tbilisi4 | 4.5 | 4 |
+| naturaleza6 | 3 | 2.5 |
+| lumen4 | 4 | 3.5 |
+| atlas3 | 3.5 | 3.5 |
+| pulso2 | 4.5 | 4.5 |
+| hearth2 | 4 | 3 |
+| **mean** | **4.0** | **3.5** |
+
+### Ranked backlog (TRIAGED iteration 18, 2026-08-07 — all root-caused in code/logs, filed in Linear)
+| rank | BIGR | Cluster | Incidence | Class | Status |
+|---|---|---|---|---|---|
+| 1 | **BIGR-797** | bare `<li>` items dropped at re-serialization → empty `<ul>` ships (pulso2 3 ticket-tier lists, atlas3 schedule bullets; LLM logs prove authored content). Fixed by BareListItemLift pre-fixer pass in FixBlocksStep. Evidence gist 57df7f9d224cb14b796df55524cfbd42; replays pulso21/atlas31 in projects/. | 2/7, 4 lists | deterministic | **pr-open** (iter 19) |
+| 2 | **BIGR-798** | pulso2 desktop H1 "ELECTRONI/C" mid-word snap; display clamp max 104px vs ~610px layered-poster column; style.css:257 guard violated its dormancy contract. Fix: text-fit where H1 + recipe are both known (HeroUnit/HeaderHeroStep). | 1/7 P0 | deterministic | filed |
+| 3 | **BIGR-799** | validator misreads EVERY overlay header as "stacked" — AboveFoldPartFacts.php:456 checks literal `header-overlay` class HeaderBehavior never emits; 4/7 false drift warnings; masks real downgrades. One-line + test. (Header markup verified overlay-correct on all 4.) | 4/7 warnings | deterministic | filed |
+| 4 | **BIGR-800** | primary-action retarget keeps stale label ("EXPLORE OUR MENU" → reservations band, naturaleza6). Fix in page-plan repair step. | 1/7 | deterministic | filed |
+| 5 | **BIGR-801** | page-plan authored a ONE-section front page for a restaurant (padding saved it; 3150px page, no menu). Coverage-obligation wording in page-plan.md; ≥3-rebuild evidence. | 1/7 | prompt | filed |
+| 6 | **BIGR-802** | wrong-locale imagery under location captions (Florence as Plaza de Mayo etc.) + legible ghost-sign wordmarks "GROCERY SMITH & CO" (portfolio6). Locale plumbing in ImagePromptComposer + ghost-sign clause; ≥3 image rebuilds. | 1-2/7 | prompt/image | filed |
+| — | unfiled | Polish: lumen4 masonry dead zone; portfolio6 gate-picket dead space; atlas3 floating accent line + dark-band caption contrast; hearth2 orphan label; contrast-fix site-title 1.00 noise (fold into BIGR-799 investigation). | 1/7 each | mixed | recorded only |
+
+Score trend: no previous scored cohort — this table is the baseline (conviction 4.0 / impact 3.5). No restriction-driven dullness signal applicable.
+
+### Original critique clusters (iteration 17, superseded by ranked table above)
+| # | Cluster | Incidence | Class | Status |
+|---|---------|-----------|-------|--------|
+| A | Authored `<li>` items without wp:list-item comments dropped at re-serialization → empty `<ul>` ships (atlas3 schedule bullets ×1; pulso2 ticket-tier inclusions ×3 — tiers read undifferentiated). LLM logs prove real content authored. Fix: synthesize wp:list-item from bare li (BIGR-779 pattern). | 2/7, 4 lists | deterministic | new — TOP |
+| B | pulso2 desktop hero H1 snaps mid-word "ELECTRONI/C", no hyphen, first screen. Display preset too large for hero column; style.css word-break guard engaged against its stated dormancy contract. Mobile fine. | 1/7 P0 | deterministic/CSS+sizing | new |
+| C | header.mode authored "overlay" → delivered "stacked" (portfolio6, tbilisi4, atlas3, pulso2). Renders acceptably but overlay intent lost on majority; validate-theme flags it for repair. Root cause not yet dug. | 4/7 | pipeline | new — investigate |
+| D | CTA retarget keeps stale label: naturaleza6 "EXPLORE OUR MENU" retargeted #menu-signature→#closing (reservations) but label kept promising a menu. | 1/7 | deterministic | new |
+| E | page-plan authored ONE section for a restaurant; padded to 3; page 3150px, no menu section at all. | 1/7 | prompt (plan) | new |
+| F | portfolio6 wrong-locale imagery (Florence captioned Plaza de Mayo; NYC/UK streets as BA) + legible fake ghost-sign "GROCERY SMITH & CO"; baked-in frame on About photo. Residual BIGR-781 class. | 1-2/7 | image prompt | new (moderate) |
+| G | Polish: lumen4 collection masonry ~350×760 dead zone; portfolio6 gate-picket dead space; atlas3 floating accent line + borderline dark-band captions; hearth2 orphan label "Since fermentation begins..." | 4×1/7 | mixed | new (polish) |
+| H | warnings noise: contrast-fix "site-title base on base 1.00" on 3 sites whose headers render fine — false-positive rows pollute warnings.json. | 3/7 | deterministic | new (polish) |
+
+### Positive regressions-held checks (evidence the recent PRs work)
+Centered body paragraphs: none observed (789 ✓). Heading em-dashes: none (790 ✓). Standfirsts short (791 ✓). Emails body-scale (792 ✓). No photo reuse collisions (793 ✓). Headline registers strong everywhere (794 ✓). No stranded media-row quadrants (795 ✓). Mobile hero H1s legible on all 7 (788 ✓). Gutters present on all 7 mobiles (780 ✓). hearth storefront clean of signage (781 ✓ on former worst offender; residual class only on portfolio6).
+
+### Variety observation (for iteration-20 cadence turn)
+Hero families: 3× left-copy-over-photo, 3× split copy|media, 1× centered cinematic (tbilisi4) — centered-cinematic underused despite stated taste preference; no type-led/no-image hero exists in cohort.
+
+## Current position (history)
 - **2026-08-07 (iters 14-16, DIRECTIVE COMPLETE)**: 10 PRs opened since the maintainer's 10-PR directive: #237 (BIGR-783 copy dedupe), #238 (BIGR-787 broken placeholder), #240 (BIGR-788 mobile hero color), #241 (BIGR-789 centered paragraphs), #242 (BIGR-790 heading dashes), #243 (BIGR-791 standfirst length), #244 (BIGR-792 display email), #245 (BIGR-793 filename collision), #246 (BIGR-794 headline register, gist 38d40d083d01e5edf5e76e3ba76567ac), #247 (BIGR-795 column balance, gist c1a442588bd854829f6e8bb4a1f62abd). Plus #236 (BIGR-781) just before the directive. Loop STOPPED after this iteration; restart with /loop /design-quality-loop. Next when resumed: reconcile merges, fresh cohort (2 consecutive-quiet-cohorts stop check), BIGR-786 watch item, variety track blocked on #228 review.
 - Rebuild projects kept in projects/ as evidence: portfolio2-5, naturaleza2-5, lumen2-3, tbilisi2-3, atlas2; _old-* dirs are the pre-cohort archive (deletable).
 - **2026-08-07 (iter 9)**: Fix BIGR-789 ✓ — **PR #241 merged to trunk** (095dfc6): alignment discipline in section.md + centered-stack rewording (section-composition.md, page-plan.md). Incidence 5/7 sites before → 0/3 branch rebuilds (portfolio2/naturaleza2/lumen2 in projects/, kept as rebuild evidence); centered display blocks retained. Gist 6b2f2577583cb1f6b1052731f5b0b57a. PR count since 10-PR directive: 4 (#237, #238, #240, #241).
@@ -23,7 +76,7 @@
 - **2026-08-07 (iter 7)**: Fix BIGR-787 ✓ — **PR #238 merged to trunk** (95eedf5). CollectImagesStep removes theme: asset references no placeholder declares (mangled AI_IMAGE markers); media removal extracted to shared MediaReferenceRemoval; unsafe blocks stay byte-identical, CSS-only cover sources are recognized, and orphaned caption removal records actionable loss evidence. 1858/1858 tests. Evidence: hearth2 replay, gist 83e2c663b64f19cd22592daeef37a868. PR count since 10-PR directive: 2 (#237, #238).
 - **2026-08-07 (iter 6)**: Fix BIGR-783 ✓ — **PR #237 merged to trunk** (0447f8e). New deterministic copy-dedupe step after section-rhythm: label-styled paragraphs (exact or strict echo: >=3 shared tokens, >=0.8 containment, no supersets) + quote bodies (6-token shared opening); earliest wins, footer is read-only canon at the closing seam, sole-child removals widen to the emptied wrapper, planned sections anchor-only, pages exceeding the 4-removal safety cap are preserved transactionally with actionable warnings. Malformed pages remain byte-identical; ordered quote prefixes retain repeated tokens. 1850/1850 tests. Cohort verification: only tbilisi triggers (its 2 real dups); 6/7 pages untouched. Evidence: tbilisi26/27 replay, gist ab570fe63d792b4d45c5cba0245f899f. **Maintainer directive 2026-08-07: keep looping until 10 more PRs are open (ignore the 3-open-PR stop condition).** PR count since directive: 1 (#237).
 - **2026-08-07 (iter 5)**: Fix BIGR-781 ✓ — **PR #236 merged to trunk** (f7d94d4). Two-part fix: image-generation.md subject guidance no longer blesses incidental storefront/menu text (describe unavoidable text surfaces as BARE — naming lettering even to negate it came back as mirrored glyphs in an interim rebuild); ImagePromptComposer adds a conditional positively-phrased lettering clause when the subject names a text carrier (EN+ES allowlist, new {{lettering_clause}} template slot; conditional so clean prompts never get the concept planted), including a dedicated unmarked-surface clause for transparent carrier assets. 1833/1833 tests before review fix; 1833/1833 after. Evidence: 3 affected demos rebuilt on-branch (atlas2, naturaleza2, hearth4 in projects/, before copies in projects/_before-bigr781/) — 0 fake/garbled painted text in 36 images vs 6/7 sites before; gist 36b052212eabb7330809614d097d59c2. Residual minor class noted in PR: real tool-brand wordmark (tape measure). Side-finding filed: **BIGR-787** (malformed AI_IMAGE alt → unresolved theme: src ships broken img; 1/4 hearth rebuilds).
-- Reconciled 2026-08-07: #229 (BIGR-777), #230 (BIGR-778), #234 (BIGR-782), #235 (BIGR-784 caption half), #236 (BIGR-781), #237 (BIGR-783), #238 (BIGR-787), #240 (BIGR-788), #241 (BIGR-789), #242 (BIGR-790), #243 (BIGR-791), #244 (BIGR-792), #245 (BIGR-793), #246 (BIGR-794) all MERGED. Open unreviewed: #228, #247.
+- Reconciled 2026-08-07 (iter 17): #229–#248 design-quality PRs all MERGED including #247 (BIGR-795) and #248 (BIGR-796). Open unreviewed: **#228 only** (BIGR-776 variety). Linear issues BIGR-779/780/781/782/783/784/787/788/789/790/791/792/793/794/795 moved to Done (had merged PRs but sat In Progress).
 - **2026-08-07 (iter 4)**: Fix BIGR-784 caption half ✓ — **PR #235 merged to trunk** (e9796cb). ContrastFix walk now records image/gallery figcaption rows (gallery caption matched only in the tail after its last child) and repairs failures via caption-text-* className hooks (scoped `> figcaption` selectors); ScaffoldThemeStep ships the matching CSS hooks; 1758/1758 tests. Evidence: lumen step-boundary replay — gist 4815382fe2abe300ceca0ff5f95832d7. Remaining BIGR-784 scope (kickers/preset-pairs/double classes/mobile scrim) split to **BIGR-786** — needs a fresh cohort; the cited instances no longer exist on disk.
 - **2026-08-07 (iter 3)**: Fix BIGR-782 ✓ — **PR #234** (this branch, reviewed 2026-08-07, merging). screenshot.js now captures under emulated prefers-reduced-motion (rides motion.css's accessibility contract → deterministic, fully visible captures); motion.js gains a 4s observer watchdog (IO always delivers an initial batch, so silence while visible = broken observer → fail open; hidden pages re-arm). Harness: silent/healthy/hidden watchdog tests. Evidence: pulso→pulso8 replay, IO stubbed silent via addInitScript, 6s captures, motion.js swapped between shots — gist cad2b2541fd05256950a4f55ab076ccc.
 - Earlier same day: BIGR-779 → **#231 merged** (e89288f); BIGR-780 → **#233 merged** (fb4ae2f); #230 (BIGR-778) + #227 merged; cohort atlas/hearth theme.json were already hand-touched by prior evidence work (pulso was the clean before).
