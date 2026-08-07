@@ -293,6 +293,30 @@ final class CssChecks
     }
 
     /**
+     * Split a declaration value from its CSS priority using identifier
+     * semantics, including escaped spellings such as `!\69mportant`.
+     * Comments are trivia in both the value and priority.
+     *
+     * @return array{value:string,important:bool}
+     */
+    public static function splitDeclarationPriority(string $value): array
+    {
+        $plain = trim(self::withoutComments($value));
+        $bang = strrpos($plain, '!');
+        if ($bang === false) {
+            return ['value' => $plain, 'important' => false];
+        }
+        $priority = trim(substr($plain, $bang + 1));
+        if (strtolower(self::decodeIdentifier($priority)) !== 'important') {
+            return ['value' => $plain, 'important' => false];
+        }
+        return [
+            'value' => trim(substr($plain, 0, $bang)),
+            'important' => true,
+        ];
+    }
+
+    /**
      * Drop declarations selected by a caller policy. The predicate receives
      * the complete scan row, including selector/keyframe context. Replacements
      * are applied from the end by exact source span, so every untouched byte is
@@ -900,8 +924,8 @@ final class CssChecks
         return strtolower($property);
     }
 
-    /** Decode the CSS identifier escapes needed to recognize owned properties. */
-    private static function decodeIdentifier(string $identifier): string
+    /** Decode CSS identifier escapes without otherwise normalizing the token. */
+    public static function decodeIdentifier(string $identifier): string
     {
         return (string) preg_replace_callback(
             '/\\\\(?:([0-9a-fA-F]{1,6})[ \t\r\n\f]?|([^\r\n\f]))/',
