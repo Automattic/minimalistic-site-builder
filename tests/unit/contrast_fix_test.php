@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\ContrastFix;
 
 /** A black-on-white palette with a failing mid-tone secondary and a link-safe primary. */
@@ -330,6 +331,29 @@ test('the dimRatio floor swaps the stale has-background-dim-N class', function (
     assert_contains('"dimRatio":40', $res['markup']);
     assert_contains('has-background-dim-40', $res['markup']);
     assert_true(!str_contains($res['markup'], 'has-background-dim-10'), 'stale dim class must be gone');
+});
+
+test('a dimRatio repair raised from the 50 default adds the numbered saved-HTML class', function () {
+    $src = '<!-- wp:cover {"dimRatio":50} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->';
+    $doc = BlockMarkup::parse($src);
+    ContrastFix::swapDimClass($doc, 0, 50, 60);
+    $out = $doc->render();
+    assert_contains('has-background-dim-60 has-background-dim', $out);
+});
+
+test('a dimRatio repair moved to the 50 default removes only the numbered class', function () {
+    $src = '<!-- wp:cover {"dimRatio":40} -->'
+        . '<div class="wp-block-cover"><span aria-hidden="true" '
+        . 'class="wp-block-cover__background has-background-dim-40 has-background-dim"></span>'
+        . '<div class="wp-block-cover__inner-container"></div></div><!-- /wp:cover -->';
+    $doc = BlockMarkup::parse($src);
+    ContrastFix::swapDimClass($doc, 0, 40, 50);
+    $out = $doc->render();
+    assert_true(!str_contains($out, 'has-background-dim-40'));
+    assert_eq(1, substr_count($out, 'has-background-dim'));
 });
 
 test('a gradient co-authored with a solid backgroundColor is not ignored', function () {

@@ -391,7 +391,7 @@ final class AssemblePagesStep implements Step
         $previousForeground = trim((string) ($attrs['textColor'] ?? ''));
 
         $isOwned = static fn (string $token): bool => $token === 'header-transition-instant'
-            || (bool) preg_match('/^header-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+$/', $token);
+            || (bool) preg_match('/^header-(?:behavior|start|scrolled|foreground|top)-[a-z0-9-]+$/', $token);
         $kept = array_values(array_filter($tokens, static fn (string $token): bool => !$isOwned($token)));
         if ($kept === []) {
             unset($attrs['className']);
@@ -403,7 +403,7 @@ final class AssemblePagesStep implements Step
         $doc->setAttrs($top, $attrs);
 
         if (preg_match_all(
-            '/\bheader-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+\b|\bheader-transition-instant\b/',
+            '/\bheader-(?:behavior|start|scrolled|foreground|top)-[a-z0-9-]+\b|\bheader-transition-instant\b/',
             $doc->ownHtml($top),
             $matches,
         )) {

@@ -6,6 +6,8 @@ namespace Automattic\SiteBuild\Steps;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\AboveFoldContract;
 use Automattic\SiteBuild\AboveFoldPartFacts;
+use Automattic\SiteBuild\ContrastFix;
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\HeaderBehavior;
 use Automattic\SiteBuild\HeaderFallback;
 use Automattic\SiteBuild\HeroFallback;
@@ -199,7 +201,7 @@ final class HeaderHeroStep implements Step
         // relation here — they are injected into the contract facts below so
         // the finalizer records the downgrade through its one reviewed path.
         $openingProblems = $mode === AboveFoldContract::MODE_OVERLAY
-            ? self::overlayOpeningProblems($project, $pages)
+            ? self::overlayOpeningProblems($project, $pages, $protection)
             : [];
         $withOverlayEvidence = static function (array $facts) use ($openingProblems): array {
             if ($openingProblems === []) {
@@ -427,6 +429,40 @@ final class HeaderHeroStep implements Step
         // stacked cover cap as a build that started stacked.
         if (($final['header']['mode'] ?? null) === AboveFoldContract::MODE_STACKED) {
             self::capOpeningCovers($project, $pages, $writes, $report);
+        }
+
+        // An overlay that survived to the final relation may earn a truly
+        // transparent resting state: when every delivered opening cover's own
+        // dim proves the persisted foreground, the kit scrim is redundant
+        // double darkening over an already-protected image (BIGR-778). A
+        // just-short dim is raised as a recorded repair; any unprovable
+        // opening keeps the scrim veil. The clear treatment snaps its
+        // background paint on scroll (while its shadow may still transition),
+        // because a fixed header's underlay can change between frames.
+        if ($behavior['behavior'] === HeaderBehavior::OVERLAY_TO_SOLID
+            && ($final['header']['mode'] ?? null) === AboveFoldContract::MODE_OVERLAY
+            && self::grantClearOverlayTop($project, $final, $behavior, $palette, $writes, $report)
+        ) {
+            $behavior['topTreatment'] = HeaderBehavior::TREATMENT_TRANSPARENT;
+            $headerResult = self::fixHeader(
+                $writes[$headerRel],
+                $mode,
+                $siteName,
+                $pageTitles,
+                $archetype === 'oversized-wordmark',
+                $archetype,
+                $foreground,
+                $protection,
+                $behavior,
+                $theme,
+            );
+            $writes[$headerRel] = $headerResult['markup'];
+            foreach ($headerResult['notes'] as $note) {
+                $report[] = "[{$headerRel}] {$note}";
+            }
+            $report[] = "[{$headerRel}] overlay resting scrim dropped: every opening cover's own dim "
+                . 'proves the foreground, so the header starts truly transparent and gains its '
+                . 'surface immediately when scrolled (the shadow retains the configured transition)';
         }
 
         if (is_array($delivery['primary_action'] ?? null) && !is_array($final['primary_action'] ?? null)) {
@@ -667,7 +703,7 @@ final class HeaderHeroStep implements Step
      * @param array<int,array<string,mixed>> $pages
      * @return list<array{file:string,authored:string,reason:string}>
      */
-    private static function overlayOpeningProblems(Project $project, array $pages): array
+    private static function overlayOpeningProblems(Project $project, array $pages, string $protection = 'contrast'): array
     {
         $problems = [];
         foreach ($pages as $page) {
@@ -691,12 +727,12 @@ final class HeaderHeroStep implements Step
                 ];
                 continue;
             }
-            $evidence = self::overlayOpeningEvidence($project->readText($rel));
+            $evidence = self::overlayOpeningEvidence($project->readText($rel), $protection);
             if ($evidence === null) {
                 $problems[] = [
                     'file' => $rel,
                     'authored' => "overlay-to-solid for page '{$pageSlug}'",
-                    'reason' => 'does not begin with an image-backed cover or a contrast surface',
+                    'reason' => 'does not begin with an image-backed cover or a protection-token surface',
                 ];
             }
         }
@@ -704,7 +740,7 @@ final class HeaderHeroStep implements Step
     }
 
     /** Return the qualifying first-band evidence, or null when none exists. */
-    private static function overlayOpeningEvidence(string $markup): ?string
+    private static function overlayOpeningEvidence(string $markup, string $protection = 'contrast'): ?string
     {
         $doc = BlockMarkup::parse($markup);
         $i = $doc->topLevel();
@@ -721,14 +757,14 @@ final class HeaderHeroStep implements Step
                 if ($hasMedia) {
                     return ($attrs['align'] ?? null) === 'full' ? 'image-backed cover' : null;
                 }
-                if (($attrs['overlayColor'] ?? null) === 'contrast'
-                    || ($attrs['backgroundColor'] ?? null) === 'contrast') {
-                    return 'contrast cover';
+                if (($attrs['overlayColor'] ?? null) === $protection
+                    || ($attrs['backgroundColor'] ?? null) === $protection) {
+                    return 'protection-token cover';
                 }
                 return null;
             }
-            if (($attrs['backgroundColor'] ?? null) === 'contrast') {
-                return 'contrast surface';
+            if (($attrs['backgroundColor'] ?? null) === $protection) {
+                return 'protection-token surface';
             }
             if (!self::isTransparentZeroOffsetWrapper($doc, $i, $attrs)) {
                 return null;
@@ -1143,7 +1179,7 @@ final class HeaderHeroStep implements Step
         $tokens = preg_split('/\s+/', trim((string) ($attrs['className'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $isOwned = static fn (string $token): bool => $token === self::LEGACY_OVERLAY_CLASS
             || $token === 'header-transition-instant'
-            || (bool) preg_match('/^header-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+$/', $token);
+            || (bool) preg_match('/^header-(?:behavior|start|scrolled|foreground|top)-[a-z0-9-]+$/', $token);
         $kept = array_values(array_filter($tokens, static fn (string $token): bool => !$isOwned($token)));
         $canonical = array_values(array_unique(array_merge($kept, $expected)));
         $changed = $canonical !== $tokens;
@@ -1158,7 +1194,7 @@ final class HeaderHeroStep implements Step
 
         $removedHtml = [];
         if (preg_match_all(
-            '/\bheader-(?:behavior|start|scrolled|foreground)-[a-z0-9-]+\b'
+            '/\bheader-(?:behavior|start|scrolled|foreground|top)-[a-z0-9-]+\b'
                 . '|\bheader-transition-instant\b|\bheader-overlay\b/',
             $doc->ownHtml($top),
             $matches,
@@ -2290,6 +2326,122 @@ final class HeaderHeroStep implements Step
             $width += self::CLUSTER_GAP_PX;
         }
         return $width;
+    }
+
+    /**
+     * Prove — and where a small dim raise makes it provable, repair — the
+     * clear overlay resting state against every delivered opening. Returns
+     * true only when each opening either passes clearOverlayTopIsSafe at its
+     * delivered cover dim or is raised to the minimal passing dim; edits are
+     * applied transactionally so a failing opening leaves every part
+     * untouched and the scrim veil in place.
+     *
+     * @param array<string,mixed>  $final    delivery-final contract
+     * @param array<string,mixed>  $behavior resolved behavior artifact
+     * @param array<string,string> $palette  slug => hex map
+     * @param array<string,string> $writes
+     * @param list<string>         $report
+     */
+    private static function grantClearOverlayTop(
+        Project $project,
+        array $final,
+        array $behavior,
+        array $palette,
+        array &$writes,
+        array &$report,
+    ): bool {
+        $foreground = ContrastMath::hexToRgb((string) ($palette[(string) $behavior['foreground']] ?? ''));
+        $scrolled = ContrastMath::hexToRgb((string) ($palette[(string) $behavior['scrolledSurface']] ?? ''));
+        $protectionToken = (string) ($final['header']['protection_token'] ?? '');
+        $protectionHex = (string) (
+            $final['theme_tokens'][$protectionToken]['hex'] ?? ($palette[$protectionToken] ?? '')
+        );
+        $protection = ContrastMath::hexToRgb($protectionHex);
+        if ($foreground === null || $scrolled === null || $protection === null) {
+            return false;
+        }
+        // CSS switches background paint immediately for an earned-clear
+        // fixed header: a timed transparent transition cannot prove a page
+        // section that may scroll underneath it. Motion-enabled themes keep
+        // their smooth shadow transition, which does not affect contrast.
+        $smooth = false;
+        $minimalDim = HeaderBehavior::minimalClearOverlayDim($foreground, $protection, $scrolled, $smooth);
+
+        $edits = [];
+        foreach ((array) ($final['openings'] ?? []) as $opening) {
+            if (!is_array($opening)) {
+                return false;
+            }
+            $rel = 'parts/' . (string) ($opening['part'] ?? '') . '.html';
+            $markup = $writes[$rel]
+                ?? ($project->exists('theme/' . $rel) ? $project->readText('theme/' . $rel) : null);
+            if ($markup === null) {
+                return false;
+            }
+            $surface = (string) ($opening['surface'] ?? '');
+            if (!AboveFoldPartFacts::supportsClearOverlayTop(
+                $markup,
+                $surface,
+                $protectionToken,
+                $protectionHex,
+            )) {
+                return false;
+            }
+            $doc = BlockMarkup::parse($markup);
+            $root = $doc->topLevel();
+            if ($root === null) {
+                return false;
+            }
+            $cover = null;
+            foreach ($doc->children($root) as $child) {
+                if ($doc->name($child) === 'cover' && $doc->endOffset($child) !== null) {
+                    if ($cover !== null) {
+                        return false;
+                    }
+                    $cover = $child;
+                }
+            }
+            if ($cover === null) {
+                // A solid protection-token band: the clear state reveals that
+                // solid directly (a full-opacity dim is the same composite).
+                if (!HeaderBehavior::clearOverlayTopIsSafe($foreground, $protection, 100.0, $scrolled, $smooth)) {
+                    return false;
+                }
+                continue;
+            }
+            $attrs = $doc->attrs($cover) ?? [];
+            $authoredDim = $attrs['dimRatio'] ?? 100;
+            if (!is_int($authoredDim) && !is_float($authoredDim)) {
+                return false;
+            }
+            $dim = (float) $authoredDim;
+            $renderedDim = HeaderBehavior::renderedCoverDim($dim);
+            if ($renderedDim === null) {
+                return false;
+            }
+            if (HeaderBehavior::clearOverlayTopIsSafe($foreground, $protection, $dim, $scrolled, $smooth)) {
+                continue;
+            }
+            if ($minimalDim === null || $renderedDim >= $minimalDim) {
+                return false;
+            }
+            $attrs['dimRatio'] = $minimalDim;
+            $doc->setAttrs($cover, $attrs);
+            // Keep the file safe even if the later fix-blocks transaction has
+            // to retain its input bytes: the clear header and the repaired
+            // Cover opacity become effective in the same unit.
+            ContrastFix::swapDimClass($doc, $cover, $renderedDim, $minimalDim);
+            $edits[$rel] = [
+                'markup' => $doc->render(),
+                'note' => "cover dimRatio {$dim} raised to {$minimalDim} (the smallest dim whose own "
+                    . 'composite proves the foreground, letting the overlay header rest without its scrim)',
+            ];
+        }
+        foreach ($edits as $rel => $edit) {
+            $writes[$rel] = $edit['markup'];
+            $report[] = "[{$rel}] {$edit['note']}";
+        }
+        return true;
     }
 
     /**
