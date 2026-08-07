@@ -212,6 +212,74 @@ function repo_path(string $rel = ''): string
 }
 
 /**
+ * Parse a bin/ script's arguments against a spec of the flags it accepts.
+ *
+ * $spec maps a flag token — written exactly as it is typed, dashes included —
+ * to how it carries its value:
+ *   'value'  `--name=x`, recorded as the string x (`--name=` records '').
+ *   'bool'   `--name`, recorded as true.
+ *   'toggle' `--name` or `--no-name`, recorded under `--name` as true or
+ *            false; the last spelling on the line wins.
+ *
+ * An argument that does not start with `--` fills the next positional slot
+ * while slots remain; $maxPositionals is how many the script takes (the prompt
+ * for build.php, a slug for playground.php, none for build-demos.php).
+ *
+ * The first argument that fits nothing — an undeclared flag, a value flag
+ * written without its `=value`, a positional past the last slot — comes back
+ * as 'unknown' so the caller can print ITS OWN usage text and exit: the shape
+ * of the line is this function's business, what to say about a bad one is the
+ * script's. Parsing STOPS at that argument rather than running to the end, so
+ * the results describe exactly what was understood BEFORE it and nothing
+ * after: a script that acts on a flag before reporting the bad one still reads
+ * the line strictly left to right.
+ *
+ * @param list<string>                          $argv Raw $argv; element 0, the script path, is skipped.
+ * @param array<string,'value'|'bool'|'toggle'> $spec
+ * @return array{flags: array<string,string|bool>, positionals: list<string>, unknown: ?string}
+ */
+function parse_cli_args(array $argv, array $spec, int $maxPositionals = 0): array
+{
+    $flags = [];
+    $positionals = [];
+
+    foreach (array_slice($argv, 1) as $arg) {
+        $kind = $spec[$arg] ?? null;
+        if ($kind === 'bool' || $kind === 'toggle') {
+            $flags[$arg] = true;
+            continue;
+        }
+
+        if (str_starts_with($arg, '--no-')) {
+            $positive = '--' . substr($arg, 5);
+            if (($spec[$positive] ?? null) === 'toggle') {
+                $flags[$positive] = false;
+                continue;
+            }
+        }
+
+        if (str_contains($arg, '=')) {
+            // The limit of 2 splits on the first '=' only, so the value keeps
+            // any of its own (--out=/tmp/a=b.png).
+            [$name, $value] = explode('=', $arg, 2);
+            if (($spec[$name] ?? null) === 'value') {
+                $flags[$name] = $value;
+                continue;
+            }
+        }
+
+        if (!str_starts_with($arg, '--') && count($positionals) < $maxPositionals) {
+            $positionals[] = $arg;
+            continue;
+        }
+
+        return ['flags' => $flags, 'positionals' => $positionals, 'unknown' => $arg];
+    }
+
+    return ['flags' => $flags, 'positionals' => $positionals, 'unknown' => null];
+}
+
+/**
  * Resolved path of an executable on PATH, or null when it isn't installed.
  *
  * Memoized per process: a single run can ask about the same binary several

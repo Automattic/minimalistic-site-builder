@@ -46,60 +46,43 @@ use Automattic\SiteBuild\Steps\CoverContrastStep;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$args = array_slice($argv, 1);
-$prompt = null;
-$slug = null;
-$until = null;
-$withImages = false;
-$multiPage = false;
-$pagesArg = null;
-$port = null;
-$serve = true;
-$provider = null;
-$writingDirection = null;
-$heroCanvas = null;
-$heroMediaModesArg = null;
-$maxHeroImagesArg = null;
-$heroCopyCapacity = null;
-foreach ($args as $a) {
-    if (str_starts_with($a, '--slug=')) {
-        $slug = substr($a, 7);
-    } elseif (str_starts_with($a, '--provider=')) {
-        $provider = substr($a, 11);
-    } elseif (str_starts_with($a, '--until=')) {
-        $until = substr($a, 8);
-    } elseif (str_starts_with($a, '--pages=')) {
-        $pagesArg = substr($a, 8);
-    } elseif (str_starts_with($a, '--port=')) {
-        $port = (int) substr($a, 7);
-    } elseif (str_starts_with($a, '--writing-direction=')) {
-        $writingDirection = substr($a, 20);
-    } elseif (str_starts_with($a, '--hero-canvas=')) {
-        $heroCanvas = substr($a, 14);
-    } elseif (str_starts_with($a, '--hero-media-modes=')) {
-        $heroMediaModesArg = substr($a, 19);
-    } elseif (str_starts_with($a, '--max-hero-images=')) {
-        $maxHeroImagesArg = substr($a, 18);
-    } elseif (str_starts_with($a, '--hero-copy-capacity=')) {
-        $heroCopyCapacity = substr($a, 21);
-    } elseif ($a === '--no-serve') {
-        $serve = false;
-    } elseif ($a === '--with-images') {
-        $withImages = true;
-    } elseif ($a === '--multi-page') {
-        $multiPage = true;
-    } elseif ($prompt === null && !str_starts_with($a, '--')) {
-        $prompt = $a;
-    } else {
-        Narrator::write("Unknown argument: {$a}\n");
-        Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--port=9400] [--no-serve]\n");
-        exit(1);
-    }
+$args = parse_cli_args($argv, [
+    '--slug'               => 'value',
+    '--provider'           => 'value',
+    '--until'              => 'value',
+    '--pages'              => 'value',
+    '--port'               => 'value',
+    '--writing-direction'  => 'value',
+    '--hero-canvas'        => 'value',
+    '--hero-media-modes'   => 'value',
+    '--max-hero-images'    => 'value',
+    '--hero-copy-capacity' => 'value',
+    '--with-images'        => 'bool',
+    '--multi-page'         => 'bool',
+    '--serve'              => 'toggle',
+], maxPositionals: 1);
+if ($args['unknown'] !== null) {
+    Narrator::write("Unknown argument: {$args['unknown']}\n");
+    usage();
 }
+$flags = $args['flags'];
+$prompt = $args['positionals'][0] ?? null;
+$slug = $flags['--slug'] ?? null;
+$until = $flags['--until'] ?? null;
+$withImages = $flags['--with-images'] ?? false;
+$multiPage = $flags['--multi-page'] ?? false;
+$pagesArg = $flags['--pages'] ?? null;
+$port = isset($flags['--port']) ? (int) $flags['--port'] : null;
+$serve = $flags['--serve'] ?? true;
+$provider = $flags['--provider'] ?? null;
+$writingDirection = $flags['--writing-direction'] ?? null;
+$heroCanvas = $flags['--hero-canvas'] ?? null;
+$heroMediaModesArg = $flags['--hero-media-modes'] ?? null;
+$maxHeroImagesArg = $flags['--max-hero-images'] ?? null;
+$heroCopyCapacity = $flags['--hero-copy-capacity'] ?? null;
 
 if ($prompt === null || trim($prompt) === '') {
-    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
-    exit(1);
+    usage();
 }
 
 try {
@@ -293,4 +276,11 @@ if ($serve && $until === null) {
     }
     passthru($cmd, $exit);
     exit($exit);
+}
+
+/** The one invocation summary, shared by every path that rejects the line. */
+function usage(): never
+{
+    Narrator::write("Usage: php bin/build.php \"<prompt>\" [--provider=anthropic|openai|xai|openrouter] [--slug=...] [--until=step-id] [--multi-page] [--pages=\"Home, Menu, About\"] [--writing-direction=ltr|rtl] [--hero-canvas=full-bleed|framed] [--hero-media-modes=cover-image,foreground-image] [--max-hero-images=1..2] [--hero-copy-capacity=compact|standard|expanded] [--with-images] [--port=9400] [--no-serve]\n");
+    exit(1);
 }

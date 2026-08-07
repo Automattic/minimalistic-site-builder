@@ -63,35 +63,35 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$withImages = false;
-$multiPage = false;
-$pagesArg = null;
-$only = null;
-$serve = false;
-$screenshot = true;
-$parallel = 0; // 0 = provider-aware default (all entries; OpenRouter <= 3)
-$port = 9400;
-$provider = null;
-$file = repo_path('eval/theme-prompts.json');
-foreach (array_slice($argv, 1) as $a) {
-    if ($a === '--with-images') { $withImages = true; }
-    elseif ($a === '--multi-page') { $multiPage = true; }
-    elseif (str_starts_with($a, '--pages=')) { $pagesArg = substr($a, 8); }
-    elseif (str_starts_with($a, '--only=')) { $only = substr($a, 7); }
-    elseif (str_starts_with($a, '--provider=')) { $provider = substr($a, 11); }
-    elseif (str_starts_with($a, '--parallel=')) { $parallel = max(1, (int) substr($a, 11)); }
-    elseif (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
-    elseif (str_starts_with($a, '--file=')) { $file = substr($a, 7); }
-    elseif ($a === '--no-serve') { $serve = false; }
-    elseif ($a === '--serve') { $serve = true; }
-    elseif ($a === '--no-screenshot') { $screenshot = false; }
-    elseif ($a === '--screenshot') { $screenshot = true; }
-    else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
-        exit(1);
-    }
+$args = parse_cli_args($argv, [
+    '--with-images' => 'bool',
+    '--multi-page'  => 'bool',
+    '--pages'       => 'value',
+    '--only'        => 'value',
+    '--provider'    => 'value',
+    '--parallel'    => 'value',
+    '--port'        => 'value',
+    '--file'        => 'value',
+    '--serve'       => 'toggle',
+    '--screenshot'  => 'toggle',
+]);
+if ($args['unknown'] !== null) {
+    fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
+    fwrite(STDERR, "Usage: php bin/build-demos.php [--multi-page] [--pages=\"Home, Menu, About\"] [--with-images] [--only=<slug>] [--provider=anthropic|openai|xai|openrouter] [--parallel=<n>] [--no-screenshot] [--serve] [--port=9400] [--no-serve] [--file=<path>]\n");
+    exit(1);
 }
+$flags = $args['flags'];
+$withImages = $flags['--with-images'] ?? false;
+$multiPage = $flags['--multi-page'] ?? false;
+$pagesArg = $flags['--pages'] ?? null;
+$only = $flags['--only'] ?? null;
+$serve = $flags['--serve'] ?? false;
+$screenshot = $flags['--screenshot'] ?? true;
+// 0 = provider-aware default (all entries; OpenRouter <= 3)
+$parallel = isset($flags['--parallel']) ? max(1, (int) $flags['--parallel']) : 0;
+$port = (int) ($flags['--port'] ?? 9400);
+$provider = $flags['--provider'] ?? null;
+$file = $flags['--file'] ?? repo_path('eval/theme-prompts.json');
 
 // Both flags are forwarded to the children, so check them once here rather than
 // let every child build fail with the same message. The page list goes over

@@ -23,22 +23,18 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$slug = null;
-$port = 9400;
-$workers = '2';
-foreach (array_slice($argv, 1) as $a) {
-    if (str_starts_with($a, '--port=')) {
-        $port = (int) substr($a, 7);
-    } elseif (str_starts_with($a, '--workers=')) {
-        $workers = substr($a, 10);
-    } elseif ($slug === null && !str_starts_with($a, '--')) {
-        $slug = $a;
-    } else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
-        exit(1);
-    }
+$args = parse_cli_args($argv, [
+    '--port'    => 'value',
+    '--workers' => 'value',
+], maxPositionals: 1);
+if ($args['unknown'] !== null) {
+    fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
+    usage();
 }
+$flags = $args['flags'];
+$slug = $args['positionals'][0] ?? null;
+$port = (int) ($flags['--port'] ?? 9400);
+$workers = $flags['--workers'] ?? '2';
 
 if ($workers !== 'auto' && (int) $workers < 1) {
     fwrite(STDERR, "--workers must be a positive integer or \"auto\".\n");
@@ -46,9 +42,7 @@ if ($workers !== 'auto' && (int) $workers < 1) {
 }
 
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
-    print_built_projects(STDERR, 'Available themes:');
-    exit(1);
+    usage();
 }
 
 $slug = ProjectStore::slugify($slug);
@@ -154,6 +148,14 @@ echo "  (first run downloads WordPress; Ctrl-C to stop)\n\n";
 
 passthru($cmd, $exit);
 exit($exit);
+
+/** The one invocation summary, shared by every path that rejects the line. */
+function usage(): never
+{
+    fwrite(STDERR, "Usage: php bin/playground.php <slug> [--port=9400] [--workers=2]\n");
+    print_built_projects(STDERR, 'Available themes:');
+    exit(1);
+}
 
 /** Return the first free TCP port at or after $start (fails after 50 tries). */
 function find_free_port(int $start): int

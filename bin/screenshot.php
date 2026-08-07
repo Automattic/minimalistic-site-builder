@@ -33,29 +33,27 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$slug = null;
-$port = 9400;
-$out = null;
-$timeout = 240;
-$keepAlive = false;
-$workers = null;
-foreach (array_slice($argv, 1) as $a) {
-    if (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
-    elseif (str_starts_with($a, '--out=')) { $out = substr($a, 6); }
-    elseif (str_starts_with($a, '--timeout=')) { $timeout = (int) substr($a, 10); }
-    elseif (str_starts_with($a, '--workers=')) { $workers = substr($a, 10); }
-    elseif ($a === '--keep-alive') { $keepAlive = true; }
-    elseif ($slug === null && !str_starts_with($a, '--')) { $slug = $a; }
-    else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
-        exit(1);
-    }
+$args = parse_cli_args($argv, [
+    '--port'       => 'value',
+    '--out'        => 'value',
+    '--timeout'    => 'value',
+    '--workers'    => 'value',
+    '--keep-alive' => 'bool',
+], maxPositionals: 1);
+if ($args['unknown'] !== null) {
+    fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
+    usage();
 }
+$flags = $args['flags'];
+$slug = $args['positionals'][0] ?? null;
+$port = (int) ($flags['--port'] ?? 9400);
+$out = $flags['--out'] ?? null;
+$timeout = (int) ($flags['--timeout'] ?? 240);
+$keepAlive = $flags['--keep-alive'] ?? false;
+$workers = $flags['--workers'] ?? null;
 
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
-    exit(1);
+    usage();
 }
 
 $store = new ProjectStore(repo_path('projects'));
@@ -164,6 +162,13 @@ if ($keepAlive && is_resource($proc) && $baseUrl !== null) {
 }
 
 exit($exit);
+
+/** The one invocation summary, shared by every path that rejects the line. */
+function usage(): never
+{
+    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
+    exit(1);
+}
 
 /** First working Chrome/Chromium binary (CHROME_BIN wins), or null. */
 function chrome_binary(): ?string
