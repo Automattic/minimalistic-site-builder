@@ -163,6 +163,17 @@ test('HeroUnit prompt bounds the standfirst without absorbing overflow', functio
     assert_true(!str_contains($prompt, 'fold it into the one standfirst'), 'the contradictory overflow option is absent');
 });
 
+test('HeroUnit prompt rejects generic headline registers without inventing differentiation', function () {
+    $prompt = (new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->request(hero_unit_contract_input())['prompt'];
+
+    assert_contains('Never open with "Welcome to" (in any language)', $prompt);
+    assert_contains('never let the headline be a bare category label', $prompt);
+    assert_contains('grounded in the supplied SITE SPEC and section brief', $prompt);
+    assert_contains('Specificity is not permission to invent a differentiator', $prompt);
+    assert_contains('history, provenance, awards, superlatives', $prompt);
+});
+
 test('HeroUnit keeps portable identity and exact action facts in self-contained input', function () {
     $input = hero_unit_contract_input();
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
