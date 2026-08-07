@@ -1014,7 +1014,7 @@ final class GenerateImagesStep implements Step
                         )
                         || !in_array(GeneratedMarkup::STAGE_TEXTURE_CLASS, $savedClasses, true)
                         || ($background['backgroundPosition'] ?? null) !== '0% 0%'
-                        || ($background['backgroundSize'] ?? null) !== '420px'
+                        || ($background['backgroundSize'] ?? null) !== GeneratedMarkup::STAGE_TEXTURE_TILE_SIZE
                         || ($background['backgroundRepeat'] ?? null) !== 'repeat'
                         || ($background['backgroundAttachment'] ?? null) !== 'fixed'
                         || array_key_exists('gradient', $attrs)
@@ -1257,7 +1257,7 @@ final class GenerateImagesStep implements Step
             'image_grade'       => '',
         ];
         try {
-            $bytes = self::synthesizeStageTextureBytes($targetColor);
+            $bytes = self::makeSeamlessStageTile(self::synthesizeStageTextureBytes($targetColor));
             $this->assertDeliveryMime($bytes, 'image/jpeg');
         } catch (\Throwable $error) {
             Narrator::write("    FAILED {$filename}: synthesized fallback rejected: {$error->getMessage()}\n");
@@ -1283,6 +1283,46 @@ final class GenerateImagesStep implements Step
                 . 'the procedural tone-on-tone fallback tile was delivered instead',
         ]);
         $project->writeJsonAtomic('images.json', $specs);
+    }
+
+    /**
+     * Mirror-stitch a tile into a 2×2 sheet — right half flopped, bottom
+     * half flipped — so every sheet edge continues its opposite edge exactly
+     * and CSS background-repeat shows no seams. The model cannot be trusted
+     * to render genuinely seamless edges (and "seamless texture" wording
+     * trips its recitation filter), so seamlessness is enforced here as a
+     * transform, not a gate: with no Imagick, or on any processing problem,
+     * the original bytes ship unchanged.
+     */
+    private static function makeSeamlessStageTile(string $bytes): string
+    {
+        if (!extension_loaded('imagick')) {
+            return $bytes;
+        }
+        try {
+            $tile = new \Imagick();
+            $tile->readImageBlob($bytes);
+            $tile->setIteratorIndex(0);
+            $width = $tile->getImageWidth();
+            $height = $tile->getImageHeight();
+            $flopped = clone $tile;
+            $flopped->flopImage();
+            $sheet = new \Imagick();
+            $sheet->newImage($width * 2, $height * 2, new \ImagickPixel('black'));
+            $sheet->compositeImage($tile, \Imagick::COMPOSITE_COPY, 0, 0);
+            $sheet->compositeImage($flopped, \Imagick::COMPOSITE_COPY, $width, 0);
+            $flipped = clone $tile;
+            $flipped->flipImage();
+            $sheet->compositeImage($flipped, \Imagick::COMPOSITE_COPY, 0, $height);
+            $flipped->flopImage();
+            $sheet->compositeImage($flipped, \Imagick::COMPOSITE_COPY, $width, $height);
+            $sheet->setImageFormat('jpeg');
+            $sheet->setImageCompressionQuality(92);
+            $stitched = (string) $sheet->getImageBlob();
+            return $stitched === '' ? $bytes : $stitched;
+        } catch (\Throwable) {
+            return $bytes;
+        }
     }
 
     /**
@@ -1422,6 +1462,9 @@ final class GenerateImagesStep implements Step
             // than introducing a second conversion path.
             $bytes = (string) $result['bytes'];
             $this->assertDeliveryMime($bytes, $genSpec['mime']);
+            if (CollectImagesStep::isStageTextureSpec($specs[$i])) {
+                $bytes = self::makeSeamlessStageTile($bytes);
+            }
             if ($genSpec['mime'] === 'image/png') {
                 // The image model cannot render real alpha: the prompt asked for a flat
                 // solid white background instead, keyed out here so the asset

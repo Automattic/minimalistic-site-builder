@@ -42,10 +42,10 @@ function stage_texture_markup_fixture(string $source, string $surface): string
     return '<!-- wp:group {"className":"has-stage-texture-backdrop","backgroundColor":"' . $surface
         . '","textColor":"contrast","style":{"spacing":{"padding":{"top":"7px"}},"background":{'
         . '"backgroundImage":{"url":"' . $source . '"},"backgroundPosition":"0% 0%",'
-        . '"backgroundSize":"420px","backgroundRepeat":"repeat","backgroundAttachment":"fixed"}}} -->'
+        . '"backgroundSize":"840px","backgroundRepeat":"repeat","backgroundAttachment":"fixed"}}} -->'
         . '<div class="wp-block-group has-stage-texture-backdrop has-' . $surface
         . '-background-color has-contrast-color" style="--proof:\'a;b\';padding-top:7px;'
-        . 'background-image:url(' . $source . ');background-position:0% 0%;background-size:420px;'
+        . 'background-image:url(' . $source . ');background-position:0% 0%;background-size:840px;'
         . 'background-repeat:repeat;background-attachment:fixed">'
         . '<!-- wp:paragraph --><p class="keep  spacing">Keep this copy.</p><!-- /wp:paragraph -->'
         . '</div><!-- /wp:group -->';
@@ -55,9 +55,9 @@ function unsafe_stage_texture_markup_fixture(string $source, string $surface = '
 {
     return '<!-- wp:group {"className":"has-stage-texture-backdrop","backgroundColor":"' . $surface
         . '","style":{"background":{"backgroundImage":{"url":"' . $source
-        . '"},"backgroundPosition":"0% 0%","backgroundSize":"420px","backgroundRepeat":"repeat",'
+        . '"},"backgroundPosition":"0% 0%","backgroundSize":"840px","backgroundRepeat":"repeat",'
         . '"backgroundAttachment":"fixed"}}} --><div class="wp-block-group has-stage-texture-backdrop" '
-        . 'style="background-image:url(' . $source . ');background-position:0% 0%;background-size:420px;'
+        . 'style="background-image:url(' . $source . ');background-position:0% 0%;background-size:840px;'
         . 'background-repeat:repeat;background-attachment:fixed">unsafe';
 }
 
@@ -75,6 +75,19 @@ function stage_texture_checker_jpeg(string $dark = '#000000', string $light = '#
         }
         $iterator->syncIterator();
     }
+    $image->setImageFormat('jpeg');
+    $image->setImageCompressionQuality(100);
+    return $image->getImagesBlob();
+}
+
+function stage_texture_gradient_jpeg(): string
+{
+    if (!extension_loaded('imagick')) {
+        skip_test('stage texture pixel validation needs Imagick');
+    }
+    $image = new Imagick();
+    $image->newPseudoImage(32, 32, 'gradient:#000000-#FFFFFF');
+    $image->rotateImage(new ImagickPixel('#000000'), 90); // dark left → light right
     $image->setImageFormat('jpeg');
     $image->setImageCompressionQuality(100);
     return $image->getImagesBlob();
@@ -1364,7 +1377,7 @@ test('generate-images retains a wrapperless stage marker and warns without an im
     $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
     $wrapperless = '<!-- wp:group {"className":"has-stage-texture-backdrop","backgroundColor":"base",'
         . '"style":{"background":{"backgroundImage":{"url":"' . $source . '"},'
-        . '"backgroundPosition":"0% 0%","backgroundSize":"420px","backgroundRepeat":"repeat",'
+        . '"backgroundPosition":"0% 0%","backgroundSize":"840px","backgroundRepeat":"repeat",'
         . '"backgroundAttachment":"fixed"}}} -->Keep wrapperless copy.<!-- /wp:group -->';
     $project->writeText('plugin/pages/home.html', $wrapperless);
 
@@ -1455,7 +1468,9 @@ test('generate-images keeps one stage manifest writer and degrades malformed col
     assert_eq(1, count($specs));
     assert_true(CollectImagesStep::isStageTextureSpec($specs[0]));
     assert_eq('completed', $specs[0]['status']);
-    assert_eq($bytes, $project->readText('theme/assets/stage_backdrop-texture.jpg'));
+    $sheet = new Imagick();
+    $sheet->readImageBlob($project->readText('theme/assets/stage_backdrop-texture.jpg'));
+    assert_eq(64, $sheet->getImageWidth(), 'the delivered asset is the mirror-stitched sheet');
     $page = $project->readText('plugin/pages/home.html');
     assert_contains('Keep sibling.', $page);
     assert_true(!str_contains($page, 'wp:image'));
@@ -1662,6 +1677,53 @@ test('generate-images trusts a completed served stage asset and re-slugs its ref
     assert_contains('/wp-content/themes/demo/assets/stage_backdrop-texture.jpg',
         $project->readText('plugin/pages/home.html'), 'a copied project receives its current theme slug');
     assert_true(!str_contains($project->readText('plugin/pages/home.html'), '/old-theme/'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('the delivered stage tile is a seamless 2x2 mirror-stitched sheet (BIGR-776)', function () {
+    // The model cannot be trusted to render seamless edges, so the delivered
+    // asset is the generated tile mirror-stitched into a 2×2 sheet whose
+    // opposite edges continue each other exactly under background-repeat.
+    [$project, $tmp] = generate_fixture();
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'secondary', 'color' => '#F8F8F8'],
+        ['slug' => 'contrast', 'color' => '#000000'],
+    ]]]]);
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture(
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+        'base',
+    ));
+    $project->writeText('plugin/pages/home.html', stage_texture_markup_fixture(
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+        'secondary',
+    ));
+
+    $images = new FakeImageClient('JPEGDATA');
+    $images->bytesByPromptSubstring = ['photographed head-on' => stage_texture_gradient_jpeg()];
+    (new GenerateImagesStep($images))->run($project);
+
+    $delivered = new Imagick();
+    $delivered->readImageBlob($project->readText('theme/assets/stage_backdrop-texture.jpg'));
+    assert_eq(64, $delivered->getImageWidth(), 'sheet doubles the source width');
+    assert_eq(64, $delivered->getImageHeight(), 'sheet doubles the source height');
+    // The source is a strong left-dark → right-light gradient: an unmirrored
+    // repeat would jump ~255 at the wrap edges; the mirrored sheet's opposite
+    // edges must match within JPEG tolerance, and the two halves must mirror.
+    foreach ([8, 24, 40, 56] as $y) {
+        $left = $delivered->getImagePixelColor(0, $y)->getColor();
+        $right = $delivered->getImagePixelColor(63, $y)->getColor();
+        assert_true(abs($left['r'] - $right['r']) <= 16, 'horizontal wrap edge is continuous');
+        $a = $delivered->getImagePixelColor(10, $y)->getColor();
+        $b = $delivered->getImagePixelColor(53, $y)->getColor();
+        assert_true(abs($a['r'] - $b['r']) <= 16, 'right half mirrors the left half');
+    }
+    foreach ([8, 24, 40, 56] as $x) {
+        $top = $delivered->getImagePixelColor($x, 0)->getColor();
+        $bottom = $delivered->getImagePixelColor($x, 63)->getColor();
+        assert_true(abs($top['r'] - $bottom['r']) <= 16, 'vertical wrap edge is continuous');
+    }
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

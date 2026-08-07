@@ -18,11 +18,11 @@ function collect_stage_markup(string $surface = 'base'): string
     $source = GeneratedMarkup::STAGE_TEXTURE_ASSET;
     return '<!-- wp:group {"className":"has-stage-texture-backdrop","backgroundColor":"' . $surface
         . '","style":{"background":{"backgroundImage":{"url":"' . $source
-        . '"},"backgroundPosition":"0% 0%","backgroundSize":"420px","backgroundRepeat":"repeat",'
+        . '"},"backgroundPosition":"0% 0%","backgroundSize":"840px","backgroundRepeat":"repeat",'
         . '"backgroundAttachment":"fixed"}},"layout":{"type":"constrained"}} -->'
         . '<div class="wp-block-group has-stage-texture-backdrop has-' . $surface
         . '-background-color has-background" style="background-image:url(' . $source
-        . ');background-position:0% 0%;background-size:420px;background-repeat:repeat;'
+        . ');background-position:0% 0%;background-size:840px;background-repeat:repeat;'
         . 'background-attachment:fixed"><!-- wp:site-title /--></div><!-- /wp:group -->';
 }
 

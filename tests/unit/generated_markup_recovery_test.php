@@ -1650,14 +1650,14 @@ test('withStageTextureBackdrop tiles a root group and stays idempotent (BIGR-776
     ), 'a competing image layer cannot satisfy the one-tile contract');
     assert_true(!Automattic\SiteBuild\Units\GeneratedMarkup::hasExactStageTextureInlineStyle(
         'background-image:url(theme:./assets/stage_backdrop-texture.jpg);'
-            . 'background-position:50% 50%;background-size:420px;background-repeat:repeat;'
+            . 'background-position:50% 50%;background-size:840px;background-repeat:repeat;'
             . 'background-attachment:fixed',
         Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
     ), 'wrong saved geometry cannot satisfy the exact stage contract');
     $scalarCleanup = '<!-- wp:group {"className":"has-stage-texture-backdrop","style":"oops"} -->'
         . '<div class="wp-block-group has-stage-texture-backdrop" style="background-image:url('
         . Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET
-        . ');background-position:0% 0%;background-size:420px;background-repeat:repeat;'
+        . ');background-position:0% 0%;background-size:840px;background-repeat:repeat;'
         . 'background-attachment:fixed"></div><!-- /wp:group -->';
     assert_eq(
         null,
@@ -1717,7 +1717,7 @@ test('stage texture saved paint is restored only from the complete trusted attrs
 
     foreach ([
         str_replace('has-stage-texture-backdrop', 'missing-stage-marker', $missingSavedPaint),
-        str_replace('"backgroundSize":"420px"', '"backgroundSize":"cover"', $missingSavedPaint),
+        str_replace('"backgroundSize":"840px"', '"backgroundSize":"cover"', $missingSavedPaint),
         str_replace('"style":{"background":', '"style":"unsafe","ignored":', $missingSavedPaint),
     ] as $untrusted) {
         $untrustedPaths = [];

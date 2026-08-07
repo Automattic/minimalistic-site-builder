@@ -2539,6 +2539,14 @@ final class GeneratedMarkup
     public const STAGE_TEXTURE_CLASS = 'has-stage-texture-backdrop';
 
     /**
+     * CSS background-size of the stage tile. The delivered asset is a 2×2
+     * mirror-stitched sheet (seamless by construction), so this shows each
+     * source quadrant at half this size — 840px keeps the on-page grain
+     * scale of the previous single 420px tile.
+     */
+    public const STAGE_TEXTURE_TILE_SIZE = '840px';
+
+    /**
      * Whether a block background URL names the one code-owned stage tile.
      *
      * The underscore makes the code-owned purpose visually explicit;
@@ -2835,7 +2843,7 @@ final class GeneratedMarkup
         $expected = [
             'background-image' => null,
             'background-position' => '0% 0%',
-            'background-size' => '420px',
+            'background-size' => self::STAGE_TEXTURE_TILE_SIZE,
             'background-repeat' => 'repeat',
             'background-attachment' => 'fixed',
         ];
@@ -2873,7 +2881,7 @@ final class GeneratedMarkup
         if (!self::isStageTextureSource($source)
             || !in_array(self::STAGE_TEXTURE_CLASS, $tokens, true)
             || ($background['backgroundPosition'] ?? null) !== '0% 0%'
-            || ($background['backgroundSize'] ?? null) !== '420px'
+            || ($background['backgroundSize'] ?? null) !== self::STAGE_TEXTURE_TILE_SIZE
             || ($background['backgroundRepeat'] ?? null) !== 'repeat'
             || ($background['backgroundAttachment'] ?? null) !== 'fixed'
             || array_key_exists('gradient', $attrs)
@@ -3036,7 +3044,8 @@ final class GeneratedMarkup
             return null;
         }
         $owned = 'background-image:url(' . $source . ');background-position:0% 0%;'
-            . 'background-size:420px;background-repeat:repeat;background-attachment:fixed';
+            . 'background-size:' . self::STAGE_TEXTURE_TILE_SIZE
+            . ';background-repeat:repeat;background-attachment:fixed';
         if ($styles === []) {
             $end = strrpos($tag, '>');
             return $end === false ? null : substr_replace($tag, ' style="' . $owned . '"', $end, 0);
@@ -3335,7 +3344,7 @@ final class GeneratedMarkup
         $background = array_replace($background, [
             'backgroundImage' => ['url' => $textureUrl],
             'backgroundPosition' => '0% 0%',
-            'backgroundSize' => '420px',
+            'backgroundSize' => self::STAGE_TEXTURE_TILE_SIZE,
             'backgroundRepeat' => 'repeat',
             'backgroundAttachment' => 'fixed',
         ]);
