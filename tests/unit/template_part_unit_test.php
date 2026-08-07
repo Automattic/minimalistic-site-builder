@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Automattic\SiteBuild\FooterComposition;
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\HeaderTagline;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\PromptRenderer;
@@ -62,6 +63,424 @@ test('HeaderUnit generates a constrained header from self-contained input', func
         array_column($result->repairs, 'code'),
         'objective header repairs stay out of durable warnings',
     );
+});
+
+test('HeaderUnit restores the contract-owned tagline beside the site title idempotently', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $contract = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => $contract,
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}}} --><div class="wp-block-group"><!-- wp:site-title /--></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $first = $unit->finish($raw, $input);
+
+    assert_eq(1, substr_count($first->markup, '<!-- wp:site-tagline'));
+    assert_contains('<!-- wp:site-title /--><!-- wp:site-tagline', $first->markup);
+    assert_eq(['header-tagline-restored'], array_column($first->repairs, 'code'));
+    assert_eq([], $first->warnings);
+
+    $second = $unit->finish($first->markup, $input);
+    assert_eq($first->markup, $second->markup);
+    assert_eq([], $second->repairs);
+    assert_eq([], $second->warnings);
+});
+
+test('HeaderUnit retains an unanchorable missing tagline and reports the contract defect', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $contract = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => $contract,
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">Identity unavailable</div><!-- /wp:group -->';
+
+    $result = $unit->finish($raw, $input);
+
+    assert_eq($raw, $result->markup);
+    assert_eq([], $result->repairs);
+    assert_eq(1, count($result->warnings));
+    foreach ([
+        "file='theme/parts/header.html'",
+        "block='wp:site-tagline'",
+        'Handmade ceramic lamps from Copenhagen',
+        'delivered=removed',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $result->warnings[0]);
+    }
+});
+
+test('HeaderUnit keeps title and tagline one stacked identity item in a flex row', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $contract = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => $contract,
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"flex","justifyContent":"space-between"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . '<!-- wp:site-title /--><!-- wp:navigation /-->'
+        . '</div><!-- /wp:group -->';
+
+    $result = $unit->finish($raw, $input);
+    $document = BlockMarkup::parse($result->markup);
+    $byName = [];
+    foreach ($document->indices() as $index) {
+        $byName[$document->name($index)][] = $index;
+    }
+    $title = $byName['site-title'][0] ?? null;
+    $tagline = $byName['site-tagline'][0] ?? null;
+    $navigation = $byName['navigation'][0] ?? null;
+    assert_true(is_int($title) && is_int($tagline) && is_int($navigation));
+    assert_eq($document->parent($title), $document->parent($tagline));
+    assert_true($document->parent($title) !== $document->parent($navigation));
+    $identity = (int) $document->parent($title);
+    assert_eq('group', $document->name($identity));
+    assert_eq('0', $document->attrs($identity)['style']['spacing']['blockGap'] ?? null);
+    assert_eq(
+        ['header-tagline-restored', 'header-tagline-stack-normalized'],
+        array_column($result->repairs, 'code'),
+    );
+    assert_eq([], $result->warnings);
+});
+
+test('HeaderUnit removes duplicate or contract-forbidden taglines with durable warnings', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $baseInput = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $tagline = '<!-- wp:site-tagline {"fontSize":"caption"} /-->';
+    $identity = '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /-->' . $tagline . $tagline
+        . '</div><!-- /wp:group -->';
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">' . $identity . '</div><!-- /wp:group -->';
+
+    $withTagline = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $withTagline['header']['displays_tagline'] = true;
+    $withTagline['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $withTagline['header']['text_rows'] = 2;
+    $deduped = $unit->finish($raw, $baseInput + ['above_fold_contract' => $withTagline]);
+    assert_eq(1, substr_count($deduped->markup, '<!-- wp:site-tagline'));
+    assert_eq(1, count($deduped->warnings));
+    assert_contains('duplicate identity row', $deduped->warnings[0]);
+    assert_contains('delivered=removed', $deduped->warnings[0]);
+    $dedupedAgain = $unit->finish($deduped->markup, $baseInput + ['above_fold_contract' => $withTagline]);
+    assert_eq($deduped->markup, $dedupedAgain->markup);
+    assert_eq([], $dedupedAgain->warnings);
+
+    $withoutTagline = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $stripped = $unit->finish($raw, $baseInput + ['above_fold_contract' => $withoutTagline]);
+    assert_true(!str_contains($stripped->markup, 'wp:site-tagline'));
+    assert_eq(2, count($stripped->warnings));
+    assert_contains('does not display a tagline', implode("\n", $stripped->warnings));
+    assert_contains('delivered=removed', implode("\n", $stripped->warnings));
+});
+
+test('HeaderUnit keeps the duplicate tagline already paired with the chosen site title', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $contract = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => $contract,
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . '<!-- wp:site-tagline {"className":"orphan-tagline"} /-->'
+        . '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /-->'
+        . '<!-- wp:site-tagline {"className":"paired-tagline"} /--></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $first = $unit->finish($raw, $input);
+
+    assert_true(!str_contains($first->markup, 'orphan-tagline'));
+    assert_contains('paired-tagline', $first->markup);
+    assert_eq(1, substr_count($first->markup, '<!-- wp:site-tagline'));
+    assert_eq([], $first->repairs);
+    assert_eq(1, count($first->warnings));
+    assert_contains('duplicate identity row', $first->warnings[0]);
+    assert_contains('delivered=removed', $first->warnings[0]);
+
+    $second = $unit->finish($first->markup, $input);
+    assert_eq($first->markup, $second->markup);
+    assert_eq([], $second->repairs);
+    assert_eq([], $second->warnings);
+});
+
+test('HeaderUnit preserves raw tagline payload and rebinds its path after removing an earlier duplicate', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $contract = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => $contract,
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $safeOrphan = '<!-- wp:site-tagline {"className":"safe-orphan"} /-->';
+    $preferred = '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /-->'
+        . '<!-- wp:site-tagline {"className":"preferred-tagline"} /--></div><!-- /wp:group -->';
+    $rawSurvivor = '<!-- wp:site-tagline {"className":"raw-survivor"} -->'
+        . '<div class="wp-block-site-tagline">Handmade ceramic lamps from Copenhagen</div>'
+        . '<img src="keep.jpg" alt=""><!-- /wp:site-tagline -->';
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . $safeOrphan . $preferred . $rawSurvivor
+        . '</div><!-- /wp:group -->';
+
+    $first = $unit->finish($raw, $input);
+
+    assert_true(!str_contains($first->markup, 'safe-orphan'));
+    assert_contains('preferred-tagline', $first->markup, 'the title-paired tagline remains authoritative');
+    assert_contains($rawSurvivor, $first->markup, 'visible raw media freezes its complete tagline boundary');
+    assert_eq(2, count($first->warnings));
+    assert_contains('delivered=removed', $first->warnings[0]);
+    foreach ([
+        "block='wp:site-tagline[2]'",
+        'raw/non-block payload',
+        'retained transactionally',
+    ] as $context) {
+        assert_contains($context, $first->warnings[1]);
+    }
+
+    $second = $unit->finish($first->markup, $input);
+    assert_eq($first->markup, $second->markup);
+    assert_eq([$first->warnings[1]], $second->warnings, 'delivered path and residual warning are fixed-point stable');
+});
+
+test('HeaderUnit retains unsafe nested tagline boundaries and their surviving identity blocks', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'standard-row'),
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $nested = '<!-- wp:site-tagline --><div class="bad-tagline">'
+        . '<!-- wp:site-title /--><!-- wp:navigation /-->'
+        . '</div><!-- /wp:site-tagline -->';
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">' . $nested . '</div><!-- /wp:group -->';
+
+    $first = $unit->finish($raw, $input);
+
+    assert_eq($raw, $first->markup);
+    assert_contains('wp:site-title', $first->markup);
+    assert_contains('wp:navigation', $first->markup);
+    assert_eq(1, count($first->warnings));
+    assert_contains('retained transactionally', $first->warnings[0]);
+    assert_contains('delivered=', $first->warnings[0]);
+    $second = $unit->finish($first->markup, $input);
+    assert_eq($first->markup, $second->markup);
+    assert_eq($first->repairs, $second->repairs);
+    assert_eq($first->warnings, $second->warnings);
+});
+
+test('HeaderUnit retains an outer stray tagline that contains an unsafe raw-media tagline', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'standard-row'),
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $inner = '<!-- wp:site-tagline --><div class="inner-tagline">'
+        . 'Generated tagline<img src="keep.jpg" alt="Keep">'
+        . '</div><!-- /wp:site-tagline -->';
+    $nested = '<!-- wp:site-tagline --><div class="outer-tagline">'
+        . $inner . '</div><!-- /wp:site-tagline -->';
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . $nested . '</div><!-- /wp:group -->';
+
+    $first = $unit->finish($raw, $input);
+
+    assert_eq($raw, $first->markup, 'the nested candidate component stays byte-for-byte intact');
+    assert_contains('keep.jpg', $first->markup);
+    assert_eq(2, count($first->warnings));
+    assert_contains('retained transactionally', implode("\n", $first->warnings));
+
+    $second = $unit->finish($first->markup, $input);
+    assert_eq($first->markup, $second->markup);
+    assert_eq($first->repairs, $second->repairs);
+    assert_eq($first->warnings, $second->warnings, 'ancestor and raw-survivor warnings reach one fixed point');
+});
+
+test('HeaderTagline freezes complete descendants inside an incomplete tagline for either contract state', function () {
+    $markup = '<!-- wp:site-tagline --><div class="incomplete-tagline">'
+        . '<!-- wp:site-tagline {"className":"complete-child"} /-->';
+    $header = test_above_fold_contract('focal-subject-stage', 'standard-row')['header'];
+
+    $first = HeaderTagline::ensure($markup, $header, 'header');
+
+    assert_eq($markup, $first['markup']);
+    assert_eq([], $first['repairs']);
+    assert_eq(1, count($first['warnings']));
+    assert_contains('incomplete boundary', $first['warnings'][0]);
+    assert_contains('original header bytes', $first['warnings'][0]);
+    assert_eq($first, HeaderTagline::ensure($first['markup'], $header, 'header'));
+
+    $header['displays_tagline'] = true;
+    $header['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $header['text_rows'] = 2;
+    $promised = HeaderTagline::ensure($markup, $header, 'header');
+    assert_eq($markup, $promised['markup']);
+    assert_eq(1, count($promised['warnings']));
+    assert_contains('final contract must narrow', $promised['warnings'][0]);
+});
+
+test('HeaderTagline retains raw payload in an apparent two-row identity stack at a fixed point', function () {
+    $header = test_above_fold_contract('focal-subject-stage', 'standard-row')['header'];
+    $header['displays_tagline'] = true;
+    $header['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $header['text_rows'] = 2;
+    $identity = '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group">Unexpected identity copy'
+        . '<!-- wp:site-title /--><!-- wp:site-tagline /-->'
+        . '</div><!-- /wp:group -->';
+    $markup = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . $identity . '</div><!-- /wp:group -->';
+
+    $first = HeaderTagline::ensure($markup, $header, 'header');
+
+    assert_eq($markup, $first['markup']);
+    assert_eq([], $first['repairs']);
+    assert_eq(1, count($first['warnings']));
+    foreach ([
+        "file='theme/parts/header.html'",
+        "block='wp:group[2] header identity stack'",
+        'Unexpected identity copy',
+        'delivered="original identity group bytes"',
+        'retained transactionally',
+    ] as $context) {
+        assert_contains($context, $first['warnings'][0]);
+    }
+    assert_eq($first, HeaderTagline::ensure($first['markup'], $header, 'header'));
+});
+
+test('HeaderTagline removes and reports a painted wrapper emptied with a forbidden tagline', function () {
+    $header = test_above_fold_contract('focal-subject-stage', 'standard-row')['header'];
+    $tagline = '<!-- wp:site-tagline {"fontSize":"caption"} /-->';
+    $painted = '<!-- wp:group {"backgroundColor":"accent","style":{"spacing":{"padding":{"top":"20px"}}}} -->'
+        . '<div class="wp-block-group has-accent-background-color has-background" style="padding-top:20px">'
+        . $tagline . '</div><!-- /wp:group -->';
+    $markup = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . '<!-- wp:site-title /-->' . $painted
+        . '</div><!-- /wp:group -->';
+
+    $first = HeaderTagline::ensure($markup, $header, 'header');
+
+    assert_contains('wp:site-title', $first['markup']);
+    assert_true(!str_contains($first['markup'], 'wp:site-tagline'));
+    assert_true(!str_contains($first['markup'], 'backgroundColor'));
+    assert_eq(2, count($first['warnings']));
+    assert_contains("block='wp:site-tagline[1]'", $first['warnings'][0]);
+    foreach ([
+        "block='wp:group[2]'",
+        'backgroundColor',
+        'padding-top:20px',
+        'delivered=removed',
+        'dead header UI',
+    ] as $context) {
+        assert_contains($context, $first['warnings'][1]);
+    }
+    assert_eq(
+        ['markup' => $first['markup'], 'repairs' => [], 'warnings' => []],
+        HeaderTagline::ensure($first['markup'], $header, 'header'),
+    );
+});
+
+test('HeaderUnit never widens stray-tagline removal through the required header root', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => test_above_fold_contract('focal-subject-stage', 'standard-row'),
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $raw = '<!-- wp:group {"className":"header-archetype--standard-row","backgroundColor":"base","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row has-base-background-color has-background">'
+        . '<!-- wp:site-tagline /--></div><!-- /wp:group -->';
+
+    $result = $unit->finish($raw, $input);
+
+    assert_true($result->markup !== '');
+    assert_contains('header-archetype--standard-row', $result->markup);
+    assert_contains('"backgroundColor":"base"', $result->markup);
+    assert_true(!str_contains($result->markup, 'wp:site-tagline'));
+    assert_eq(1, count($result->warnings));
+});
+
+test('HeaderUnit repairs grid identity pairs but does not move taglines across parent branches', function () {
+    $unit = new HeaderUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));
+    $contract = test_above_fold_contract('focal-subject-stage', 'standard-row');
+    $contract['header']['displays_tagline'] = true;
+    $contract['header']['tagline_text'] = 'Handmade ceramic lamps from Copenhagen';
+    $contract['header']['text_rows'] = 2;
+    $input = array_merge(template_part_unit_input(), [
+        'hero_brief' => 'PART-HERO-SENTINEL',
+        'nav_rule' => '- PART-NAV-SENTINEL',
+        'above_fold_contract' => $contract,
+        'header_behavior' => 'PART-BEHAVIOR-SENTINEL',
+    ]);
+    $gridIdentity = '<!-- wp:group {"style":{"spacing":{"blockGap":"0"}},"layout":{"type":"grid","columnCount":2}} -->'
+        . '<div class="wp-block-group"><!-- wp:site-title /--><!-- wp:site-tagline /--></div><!-- /wp:group -->';
+    $grid = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">' . $gridIdentity . '</div><!-- /wp:group -->';
+
+    $gridResult = $unit->finish($grid, $input);
+    assert_true(!str_contains($gridResult->markup, '"type":"grid"'));
+    assert_contains('"layout":{"type":"constrained"}', $gridResult->markup);
+    assert_eq(['header-tagline-stack-normalized'], array_column($gridResult->repairs, 'code'));
+    assert_eq([], $gridResult->warnings);
+
+    $separate = '<!-- wp:group {"className":"header-archetype--standard-row","layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group header-archetype--standard-row">'
+        . '<!-- wp:site-title /-->'
+        . '<!-- wp:group {"backgroundColor":"accent","style":{"spacing":{"padding":{"top":"20px"}}}} -->'
+        . '<div class="wp-block-group has-accent-background-color has-background"><!-- wp:site-tagline /--></div><!-- /wp:group -->'
+        . '</div><!-- /wp:group -->';
+
+    $separateResult = $unit->finish($separate, $input);
+    assert_eq($separate, $separateResult->markup);
+    assert_eq([], $separateResult->repairs);
+    assert_eq(1, count($separateResult->warnings));
+    assert_contains('different structural parents', $separateResult->warnings[0]);
+    assert_contains('has-accent-background-color', $separateResult->markup);
 });
 
 test('FooterUnit generates a constrained footer from self-contained input', function () {

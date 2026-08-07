@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonValue;
 
 test('parse builds the block tree with attributes', function () {
     $doc = BlockMarkup::parse(
@@ -209,6 +211,74 @@ test('removeClassTokenInOwnHtml tokenizes: any whitespace, exact tokens, both qu
     assert_contains('class="wp-block-group reveal-up"', $out, "longer token survives; separators normalized");
     assert_contains("class='x'", $out, 'single-quoted attribute handled');
     assert_contains('Mention reveal here', $out, 'text content untouched');
+});
+
+test('replaceClassTokenInOwnHtml can expand one exact token without touching prefixes or text', function () {
+    $src = '<!-- wp:group -->'
+        . '<div class="wp-block-group has-background-dim has-background-dimmed">'
+        . 'Mention has-background-dim here</div><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $doc->replaceClassTokenInOwnHtml(
+        0,
+        'has-background-dim',
+        'has-background-dim-60 has-background-dim',
+    );
+    $out = $doc->render();
+    assert_contains('class="wp-block-group has-background-dim-60 has-background-dim has-background-dimmed"', $out);
+    assert_contains('Mention has-background-dim here', $out);
+});
+
+test('bounded class-token edits ignore class-like text inside sourced attributes', function () {
+    $href = "https://example.test/?class='no-border-radius'";
+    $src = '<!-- wp:button -->'
+        . '<div class="wp-block-button"><a class="wp-block-button__link no-border-radius wp-element-button" '
+        . 'href="' . $href . '">Go</a></div>'
+        . '<!-- /wp:button -->';
+    $doc = BlockMarkup::parse($src);
+    $ownHtml = $doc->ownHtml(0);
+    $linkStart = strpos($ownHtml, '<a ');
+    $linkEnd = strpos($ownHtml, '>', $linkStart);
+    assert_true(is_int($linkStart) && is_int($linkEnd));
+
+    $doc->removeClassTokenInOwnHtmlRange(0, 'no-border-radius', $linkStart, $linkEnd + 1);
+    $out = $doc->render();
+
+    assert_contains('class="wp-block-button__link wp-element-button"', $out);
+    assert_contains('href="' . $href . '"', $out, 'the sourced URL stays byte-for-byte intact');
+});
+
+test('attribute edits preserve sourced empty object and empty array identity', function () {
+    $src = '<!-- wp:group {"metadata":{},"allowedBlocks":[],"numericObject":{"0":"zero"},'
+        . '"tagName":"section"} -->'
+        . '<section class="wp-block-group"></section><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $attrs = $doc->attrs(0);
+    $attrs['tagName'] = 'main';
+    $doc->setAttrs(0, $attrs);
+
+    $out = $doc->render();
+    assert_contains('"metadata":{}', $out);
+    assert_contains('"allowedBlocks":[]', $out);
+    assert_contains('"numericObject":{"0":"zero"}', $out);
+    assert_contains('"tagName":"main"', $out);
+});
+
+test('typed attribute edits preserve JSON object and array identity', function () {
+    $src = '<!-- wp:group {"metadata":{},"allowedBlocks":[],"numericObject":{"0":"zero"},'
+        . '"tagName":"section"} -->'
+        . '<section class="wp-block-group"></section><!-- /wp:group -->';
+    $doc = BlockMarkup::parse($src);
+    $attrs = JsonValue::parse(
+        '{"metadata":{},"allowedBlocks":[],"numericObject":{"0":"zero"},"tagName":"main"}',
+    );
+    assert_true($attrs instanceof JsonObject);
+    $doc->setTypedAttrs(0, $attrs);
+
+    $out = $doc->render();
+    assert_contains('"metadata":{}', $out);
+    assert_contains('"allowedBlocks":[]', $out);
+    assert_contains('"numericObject":{"0":"zero"}', $out);
+    assert_contains('"tagName":"main"', $out);
 });
 
 test('ownHtml covers the root tag only, not descendants', function () {

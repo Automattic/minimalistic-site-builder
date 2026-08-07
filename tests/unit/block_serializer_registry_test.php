@@ -191,6 +191,83 @@ test('reviewed legacy button textAlign follows the pinned drop', function () {
     )));
 });
 
+test('legacy heading textAlign safely folds beside authored typography', function () {
+    $input = '<!-- wp:heading {"textAlign":"center","level":2,'
+        . '"style":{"typography":{"lineHeight":"1.1"}}} -->'
+        . '<h2 class="wp-block-heading has-text-align-center" style="line-height:1.1">'
+        . 'Centered title</h2><!-- /wp:heading -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($input)->html;
+
+    assert_eq(
+        '<!-- wp:heading {"style":{"typography":{"lineHeight":"1.1",'
+            . '"textAlign":"center"}}} -->' . "\n"
+            . '<h2 class="wp-block-heading has-text-align-center" style="line-height:1.1">'
+            . 'Centered title</h2>' . "\n"
+            . '<!-- /wp:heading -->',
+        $result,
+    );
+    assert_eq($result, $serializer->transform($result)->html);
+});
+
+test('registered align migration wins over a conflicting legacy textAlign', function () {
+    $input = '<!-- wp:heading {"align":"right","textAlign":"center","level":2} -->'
+        . '<h2 class="wp-block-heading has-text-align-right">Right title</h2>'
+        . '<!-- /wp:heading -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($input)->html;
+
+    assert_eq(
+        '<!-- wp:heading {"align":"right","style":{"typography":{'
+            . '"textAlign":"right"}}} -->' . "\n"
+            . '<h2 class="wp-block-heading has-text-align-right">Right title</h2>' . "\n"
+            . '<!-- /wp:heading -->',
+        $result,
+    );
+    assert_true(!str_contains($result, 'has-text-align-center'));
+    assert_eq($result, $serializer->transform($result)->html);
+});
+
+test('authored alignment class wins without a conflicting folded class', function () {
+    $input = '<!-- wp:heading {"textAlign":"center","level":2,'
+        . '"className":"hero-title has-text-align-right"} -->'
+        . '<h2 class="wp-block-heading hero-title has-text-align-right">Right title</h2>'
+        . '<!-- /wp:heading -->';
+
+    $serializer = new Serializer();
+    $result = $serializer->transform($input)->html;
+
+    assert_eq(
+        '<!-- wp:heading {"className":"hero-title has-text-align-right"} -->' . "\n"
+            . '<h2 class="wp-block-heading hero-title has-text-align-right">Right title</h2>' . "\n"
+            . '<!-- /wp:heading -->',
+        $result,
+    );
+    assert_true(!str_contains($result, 'has-text-align-center'));
+    assert_eq($result, $serializer->transform($result)->html);
+});
+
+test('legacy textAlign does not overwrite malformed authored containers', function () {
+    $cases = [
+        '<!-- wp:heading {"textAlign":"center","style":"keep-style"} -->'
+            . '<h2 class="wp-block-heading has-text-align-center">Title</h2>'
+            . '<!-- /wp:heading -->' => 'authored style "keep-style" is not an object',
+        '<!-- wp:paragraph {"textAlign":"center",'
+            . '"style":{"typography":"keep-typography"}} -->'
+            . '<p class="has-text-align-center">Copy</p><!-- /wp:paragraph -->'
+            => 'authored style.typography "keep-typography" is not an object',
+    ];
+
+    foreach ($cases as $input => $message) {
+        $error = assert_throws(static fn () => (new Serializer())->transform($input));
+        assert_true($error instanceof RuntimeException);
+        assert_contains('Cannot canonicalize legacy textAlign', $error->getMessage());
+        assert_contains($message, $error->getMessage());
+    }
+});
+
 test('reviewed legacy image shadow follows the pinned lossy migration', function () {
     $image = '<!-- wp:image {"sizeSlug":"large","className":"reveal-scale",'
         . '"style":{"border":{"color":"var:preset|color|secondary","width":"1px"}},'

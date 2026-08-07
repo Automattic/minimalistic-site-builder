@@ -9,6 +9,7 @@ use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
+use Automattic\SiteBuild\ShapeMarkup;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
@@ -19,9 +20,9 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Input:  theme/templates/*.html + theme/parts/*.html
  * Output: the same files, re-serialized to match WordPress save() exactly.
  *
- * Runs the LayoutFixer width/rhythm normalization FIRST — it edits only the
- * block-comment JSON attributes, and the block re-serialization right after is
- * what syncs the authored HTML (align classes) with those attributes.
+ * Runs the LayoutFixer width/rhythm and design-direction shape normalization
+ * FIRST. Both edit block-comment JSON attributes, and the block
+ * re-serialization right after syncs saved HTML with those attributes.
  *
  * Delegates the effectful repair to an injected BlockFixer.
  */
@@ -48,7 +49,7 @@ final class FixBlocksStep implements Step
             label: $this->label(),
             // Templates are only scanned when they exist; in the default graph
             // they are written by assemble-pages, which runs after this step.
-            reads: ['theme/theme.json', 'theme/parts/*'],
+            reads: ['designDirection.json', 'theme/theme.json', 'theme/parts/*'],
             writes: ['theme/parts/*', 'warnings.json'],
             concurrent: false,
         );
@@ -60,8 +61,17 @@ final class FixBlocksStep implements Step
         $alignmentBaselines = [];
         $outcomes = [];
         $failedFiles = [];
+        $shape = DesignDirectionStep::shapeFor($project);
+        // A failed file is restored to these exact step-entry bytes. Keep the
+        // shape defects observable in that snapshot separate from changes
+        // exposed by LayoutFixer or a successful first fixer pass: only the
+        // former can truthfully describe the file ultimately delivered after
+        // rollback.
+        $entryShapeChanges = self::shapeChangesInSnapshot($beforeInitialPass, $shape);
+        $shapeChanges = [];
         try {
             $layoutNotes = self::normalizeLayouts($project);
+            $shapeChanges = self::normalizeShapes($project, $shape);
             $alignmentBaselines[] = self::snapshotThemeFiles($project);
             $initialOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
             $outcomes[] = $initialOutcome;
@@ -76,19 +86,25 @@ final class FixBlocksStep implements Step
         }
 
         // Structural repair can make previously unparseable markup safe for
-        // LayoutFixer (for example, by balancing a wp:group). Give the layout
-        // contract one more chance, then re-serialize only when that pass
-        // actually changed comment attributes so the authored HTML stays in
-        // sync with them.
+        // LayoutFixer or expose image/button attributes to ShapeMarkup (for
+        // example, by balancing a wp:group). Give both contracts one more
+        // chance, then re-serialize only when that pass actually changed
+        // comment attributes so the saved HTML stays in sync with them.
         try {
             $postRepairLayoutNotes = self::normalizeLayouts($project, self::failurePaths($failedFiles));
+            $postRepairShapeChanges = self::normalizeShapes(
+                $project,
+                $shape,
+                self::failurePaths($failedFiles),
+            );
             $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
-            if ($postRepairLayoutNotes !== []) {
+            $shapeChanges = array_merge($shapeChanges, $postRepairShapeChanges);
+            if ($postRepairLayoutNotes !== [] || $postRepairShapeChanges !== []) {
                 $alignmentBaselines[] = self::snapshotThemeFiles($project);
                 $followUpOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
                 $outcomes[] = $followUpOutcome;
                 $followUpSummary = $followUpOutcome->formatted;
-                $summary .= "\n[layout] post-repair normalization required a second block-fixer pass:\n  "
+                $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass:\n  "
                     . str_replace("\n", "\n  ", $followUpSummary);
                 self::appendFailures($failedFiles, $followUpOutcome);
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
@@ -99,7 +115,7 @@ final class FixBlocksStep implements Step
             // repair can require two fixer passes. A failed follow-up must not
             // leave the first pass committed as a partial step result.
             self::restoreThemeFiles($project, $beforeInitialPass);
-            $summary .= "\n[layout] post-repair normalization required a second block-fixer pass, which failed:\n  "
+            $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass, which failed:\n  "
                 . str_replace("\n", "\n  ", $e->getMessage());
             if ($layoutNotes !== []) {
                 $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  "
@@ -113,6 +129,43 @@ final class FixBlocksStep implements Step
         }
 
         $failedPaths = self::failurePaths($failedFiles);
+        $shapeChanges = self::uniqueShapeChanges($shapeChanges);
+        $failedShapeChanges = self::onlyFailedShapeChanges($entryShapeChanges, $failedPaths);
+        $shapeChanges = self::uniqueShapeChanges(
+            self::withoutFailedShapeChanges($shapeChanges, $failedPaths),
+        );
+        // Every retained shape change is fully resolved in delivered markup,
+        // so it belongs in the fixer report rather than warnings.json (the
+        // future repair queue). A rolled-back file is filtered from that
+        // success report and gets exact unresolved-value evidence below.
+        if ($shapeChanges !== []) {
+            $summary .= "\n[shape] " . count($shapeChanges) . " corner-language normalization(s):\n  "
+                . implode("\n  ", array_map(self::shapeChangeSummary(...), $shapeChanges));
+        }
+        $shapeDeliveryWarnings = array_map(
+            self::shapeDeliveryWarning(...),
+            array_values(array_filter(
+                $shapeChanges,
+                static fn (array $change): bool => ($change['warning'] ?? false) === true,
+            )),
+        );
+        if ($shapeDeliveryWarnings !== []) {
+            $summary .= "\n[shape] WARNING: " . count($shapeDeliveryWarnings)
+                . " lossy corner repair(s) recorded in warnings.json:\n  "
+                . implode("\n  ", $shapeDeliveryWarnings);
+        }
+        $shapeRollbackWarnings = array_map(
+            static fn (array $change): string => self::shapeRollbackWarning(
+                $change,
+                $failedFiles[$change['file']][1] ?? 'unknown transformation failure',
+            ),
+            $failedShapeChanges,
+        );
+        if ($shapeRollbackWarnings !== []) {
+            $summary .= "\n[shape] WARNING: " . count($shapeRollbackWarnings)
+                . " corner-language normalization(s) rolled back with failed file transactions:\n  "
+                . implode("\n  ", $shapeRollbackWarnings);
+        }
 
         // The fixer can silently migrate a mismatched group through a
         // deprecated block version whose schema predates "layout". Re-assert
@@ -155,7 +208,11 @@ final class FixBlocksStep implements Step
         // deterministic fallback; keep that usable output, but make every loss
         // durable for the later repair pass rather than hiding it in this log.
         $paragraphStyleWarnings = self::degradedParagraphStyles($deliveredSummary);
-        $warnings = $paragraphStyleWarnings;
+        $warnings = array_merge(
+            $paragraphStyleWarnings,
+            $shapeDeliveryWarnings,
+            $shapeRollbackWarnings,
+        );
         foreach ($rhythmDrops as $drop) {
             $warnings[] = "block re-serialization dropped vertical rhythm CSS `{$drop}`; "
                 . 'see logs/' . self::LOG_FILE;
@@ -240,6 +297,214 @@ final class FixBlocksStep implements Step
             }
         }
         return $notes;
+    }
+
+    /**
+     * Normalize generated core/image and core/button corner overrides in every
+     * successful file transaction. A null shape is the backwards-compatible
+     * no-op for design directions persisted before the commitment existed.
+     *
+     * @param list<string> $excluded fixer-relative paths whose step
+     *        transaction has already been abandoned
+     * @return list<array{
+     *     file:string,
+     *     blockPath:string,
+     *     blockName:string,
+     *     property:string,
+     *     authored:mixed,
+     *     delivered:mixed,
+     *     disposition:string
+     * }>
+     */
+    public static function normalizeShapes(
+        Project $project,
+        ?string $shape,
+        array $excluded = [],
+    ): array {
+        if ($shape === null) {
+            return [];
+        }
+
+        $changes = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = ShapeMarkup::normalize($markup, $shape);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['changes'] as $change) {
+                $changes[] = ['file' => $rel] + $change;
+            }
+        }
+        return $changes;
+    }
+
+    /**
+     * Inspect exact step-entry bytes without mutating them. A later fixer pass
+     * can expose or synthesize additional shape state, but a failed file is
+     * restored from this snapshot, so intermediate state must never be
+     * reported as delivered rollback evidence.
+     *
+     * @param array<string,string> $snapshot theme-relative path => exact bytes
+     * @return list<array{
+     *     file:string,
+     *     blockPath:string,
+     *     blockName:string,
+     *     property:string,
+     *     authored:mixed,
+     *     delivered:mixed,
+     *     disposition:string
+     * }>
+     */
+    private static function shapeChangesInSnapshot(array $snapshot, ?string $shape): array
+    {
+        if ($shape === null) {
+            return [];
+        }
+
+        $changes = [];
+        foreach ($snapshot as $rel => $markup) {
+            foreach (ShapeMarkup::normalize($markup, $shape)['changes'] as $change) {
+                $changes[] = ['file' => $rel] + $change;
+            }
+        }
+        return self::uniqueShapeChanges($changes);
+    }
+
+    /**
+     * @param list<array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string}> $changes
+     * @param list<string> $failedPaths
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *         authored:mixed,delivered:mixed,disposition:string}>
+     */
+    private static function withoutFailedShapeChanges(array $changes, array $failedPaths): array
+    {
+        $failed = array_fill_keys($failedPaths, true);
+        return array_values(array_filter(
+            $changes,
+            static fn (array $change): bool => !isset($failed[$change['file']]),
+        ));
+    }
+
+    /**
+     * @param list<array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string}> $changes
+     * @param list<string> $failedPaths
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *         authored:mixed,delivered:mixed,disposition:string}>
+     */
+    private static function onlyFailedShapeChanges(array $changes, array $failedPaths): array
+    {
+        $failed = array_fill_keys($failedPaths, true);
+        return array_values(array_filter(
+            $changes,
+            static fn (array $change): bool => isset($failed[$change['file']]),
+        ));
+    }
+
+    /**
+     * @param list<array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string}> $changes
+     * @return list<array{file:string,blockPath:string,blockName:string,property:string,
+     *         authored:mixed,delivered:mixed,disposition:string}>
+     */
+    private static function uniqueShapeChanges(array $changes): array
+    {
+        $unique = [];
+        foreach ($changes as $change) {
+            $key = json_encode($change, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($key === false) {
+                $key = serialize($change);
+            }
+            $unique[$key] = $change;
+        }
+        return array_values($unique);
+    }
+
+    /**
+     * @param array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string} $change
+     */
+    private static function shapeChangeSummary(array $change): string
+    {
+        $authored = $change['authored'] === null
+            && str_starts_with($change['disposition'], 'added deterministic')
+            ? 'missing'
+            : self::shapeValue($change['authored']);
+        return sprintf(
+            '%s block %s (%s): %s %s -> %s (%s)',
+            $change['file'],
+            $change['blockPath'],
+            $change['blockName'],
+            $change['property'],
+            $authored,
+            $change['delivered'] === null ? 'removed' : self::shapeValue($change['delivered']),
+            $change['disposition'],
+        );
+    }
+
+    /**
+     * A successful transform can still lose unrelated authored CSS when the
+     * generated declaration container is structurally unsafe. Keep that loss
+     * actionable for the future repair pass instead of hiding it in the log.
+     *
+     * @param array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string,warning?:bool} $change
+     */
+    private static function shapeDeliveryWarning(array $change): string
+    {
+        return sprintf(
+            '%s block %s (%s): corner property %s; authored %s; delivered %s; '
+                . 'disposition %s; see logs/%s',
+            $change['file'],
+            $change['blockPath'],
+            $change['blockName'],
+            $change['property'],
+            self::shapeValue($change['authored']),
+            $change['delivered'] === null ? 'removed' : self::shapeValue($change['delivered']),
+            $change['disposition'],
+            self::LOG_FILE,
+        );
+    }
+
+    /**
+     * Describe the delivered pre-step value after a file-level transaction
+     * rolls back. Unlike a successful normalization, this is unresolved work
+     * for the future repair pass and therefore belongs in warnings.json.
+     *
+     * @param array{file:string,blockPath:string,blockName:string,property:string,
+     *        authored:mixed,delivered:mixed,disposition:string} $change
+     */
+    private static function shapeRollbackWarning(array $change, string $failure): string
+    {
+        $authored = $change['authored'] === null
+            && str_starts_with($change['disposition'], 'added deterministic')
+            ? 'missing'
+            : self::shapeValue($change['authored']);
+        return sprintf(
+            '%s block %s (%s): corner property %s; authored %s; delivered %s '
+                . '(pre-step value restored); disposition shape normalization rolled back '
+                . 'because block re-serialization abandoned this file (%s); see logs/%s',
+            $change['file'],
+            $change['blockPath'],
+            $change['blockName'],
+            $change['property'],
+            $authored,
+            $authored,
+            $failure,
+            self::LOG_FILE,
+        );
+    }
+
+    private static function shapeValue(mixed $value): string
+    {
+        $encoded = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return $encoded === false ? 'unencodable value' : $encoded;
     }
 
     /**

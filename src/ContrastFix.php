@@ -474,21 +474,34 @@ final class ContrastFix
      */
     public static function swapDimClass(BlockMarkup $doc, int $i, int $oldDim, int $newDim): void
     {
-        $oldClass = self::dimClass($oldDim);
-        if ($oldClass === null || $oldDim === $newDim) {
+        if ($oldDim === $newDim) {
             return;
         }
-        // A duplicate has-background-dim token is harmless — the fixer
-        // re-serializes to the canonical class list anyway; the point is
-        // removing the stale numbered token.
-        $doc->replaceInOwnHtml($i, $oldClass, self::dimClass($newDim) ?? 'has-background-dim');
+        $oldClass = self::dimClass($oldDim);
+        $newClass = self::dimClass($newDim);
+        if ($oldClass !== null) {
+            // The generic token is already present beside every numbered
+            // Core dim class. Moving to the 50% default therefore removes
+            // only the old numbered token instead of duplicating the generic.
+            $doc->replaceClassTokenInOwnHtml($i, $oldClass, $newClass ?? '');
+            return;
+        }
+        if ($newClass !== null) {
+            // Core's 50% default has only the generic token. Preserve it while
+            // adding the numbered opacity token the new value requires.
+            $doc->replaceClassTokenInOwnHtml(
+                $i,
+                'has-background-dim',
+                $newClass . ' has-background-dim',
+            );
+        }
     }
 
-    /** Core cover save(): numbered dim class, absent at 0 and at the 50 default. */
+    /** Core cover save(): numbered dim class, absent only at the 50 default. */
     private static function dimClass(int $dim): ?string
     {
         $rounded = 10 * (int) round($dim / 10);
-        return $rounded === 0 || $rounded === 50 ? null : 'has-background-dim-' . $rounded;
+        return $rounded === 50 ? null : 'has-background-dim-' . $rounded;
     }
 
     /** Drop style/color scaffolding left empty by an unset. @param array<mixed> $attrs */
