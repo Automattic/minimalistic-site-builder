@@ -1,5 +1,14 @@
 [
     {
+        "project": "atlas12",
+        "slug": "atlas12",
+        "asset": "atlas12-playground-20260807T024717Z.zip",
+        "artifact_url": "https://raw.githubusercontent.com/Automattic/minimalistic-site-builder/playground-artifacts/atlas12-playground-20260807T024717Z.zip",
+        "playground_url": "https://playground.wordpress.net/?blueprint-url=https%3A%2F%2Fraw.githubusercontent.com%2FAutomattic%2Fminimalistic-site-builder%2Fplayground-artifacts%2Fatlas12-playground-20260807T024717Z.zip",
+        "size_bytes": 13909001,
+        "created_at": "2026-08-07T02:47:26+00:00"
+    },
+    {
         "project": "pulso12",
         "slug": "pulso12",
         "asset": "pulso12-playground-20260807T024612Z.zip",
