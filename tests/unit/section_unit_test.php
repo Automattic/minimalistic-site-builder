@@ -79,6 +79,18 @@ test('centered-stack prompts keep wrapping copy aligned to the writing-direction
     }
 });
 
+test('section prompt balances media rows without padding or detaching copy', function () {
+    $prompt = (string) file_get_contents(repo_path('prompts/section.md'));
+
+    assert_contains('at the desktop side-by-side state', $prompt, 'the blank-quadrant rule targets the affected layout');
+    assert_contains('NEVER add, repeat, or invent copy', $prompt, 'content cannot be padded to satisfy geometry');
+    assert_contains('smallest composition-only change', $prompt, 'repairs stay in the layout domain');
+    assert_contains('directly UNDER its own media', $prompt, 'stacking retains ownership');
+    assert_contains('preserving its media association and reading order', $prompt, 'moves remain semantics-safe');
+    assert_contains('Stacked mobile columns need no artificial height matching', $prompt, 'mobile stacking is exempt');
+    assert_true(!str_contains($prompt, 'fold the lines into a neighboring column'), 'ambiguous reassignment is absent');
+});
+
 test('SectionUnit generates normalized markup from self-contained input', function () {
     $llm = new FakeLlm();
     $llm->queueText(
