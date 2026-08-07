@@ -134,15 +134,17 @@ test('FixBlocksStep warns but does not fail when block repair drops vertical rhy
 test('FixBlocksStep records a heading that lost its centering', function () {
     $tmp = sys_get_temp_dir() . '/fix-blocks-alignment-' . uniqid();
     $project = new Project($tmp);
-    // A legacy top-level textAlign plus an inline colour no attribute backs:
-    // the deprecated save cannot match either, so the recovered alignment class
-    // is dropped and the heading renders left-aligned instead of centred.
+    // An alignment class that lives ONLY in the saved HTML while the comment
+    // attrs carry an authored style: the deprecation adapter's migration is
+    // clobbered by the raw style overlay, so the class is dropped and the
+    // heading renders left-aligned instead of centred. (A legacy top-level
+    // textAlign attribute no longer loses — the reviewed canonicalization
+    // folds it into style.typography.textAlign.)
     $project->writeText(
         'theme/parts/signature.html',
-        '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
-            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
-            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
-            . 'style="color:var(--wp--preset--color--base)">Signature Flavours</h2>'
+        '<!-- wp:heading {"level":2,"style":{"typography":{"lineHeight":"1.1"}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center" '
+            . 'style="line-height:1.1">Signature Flavours</h2>'
             . '<!-- /wp:heading -->',
     );
 
@@ -178,10 +180,9 @@ test('a paragraph opacity repair does not hide a heading alignment loss in the s
     $project->writeText(
         'theme/parts/mixed.html',
         '<!-- wp:paragraph --><p style="opacity:0.4">Readable</p><!-- /wp:paragraph -->'
-            . '<!-- wp:heading {"level":2,"textAlign":"center","fontFamily":"heading",'
-            . '"style":{"elements":{"heading":{"color":{"text":"var:preset|color|base"}}}}} -->'
-            . '<h2 class="wp-block-heading has-text-align-center has-heading-font-family" '
-            . 'style="color:var(--wp--preset--color--base)">Still centred</h2>'
+            . '<!-- wp:heading {"level":2,"style":{"typography":{"lineHeight":"1.1"}}} -->'
+            . '<h2 class="wp-block-heading has-text-align-center" '
+            . 'style="line-height:1.1">Still centred</h2>'
             . '<!-- /wp:heading -->',
     );
 
@@ -362,6 +363,56 @@ test('FixBlocksStep degrades reviewed paragraph styles and records actionable wa
         $log = $project->readText('logs/fix-blocks.log');
         assert_contains('REPAIR paragraph-style-degraded:', $log);
         assert_contains('[paragraph-styles] WARNING: 3 unsupported style(s) degraded', $log);
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('FixBlocksStep isolates malformed legacy alignment containers with actionable warnings', function () {
+    $tmp = sys_get_temp_dir() . '/builder_fix_legacy_alignment_shape_' . uniqid();
+    $project = new Project($tmp);
+    $badStyle = '<!-- wp:heading {"textAlign":"center","style":"keep-style"} -->'
+        . '<h2 class="wp-block-heading has-text-align-center">Title</h2>'
+        . '<!-- /wp:heading -->';
+    $badTypography = '<!-- wp:paragraph {"textAlign":"center",'
+        . '"style":{"typography":"keep-typography"}} -->'
+        . '<p class="has-text-align-center">Copy</p><!-- /wp:paragraph -->';
+    $safe = '<!-- wp:heading {"textAlign":"center","level":2,'
+        . '"style":{"typography":{"lineHeight":"1.1"}}} -->'
+        . '<h2 class="wp-block-heading has-text-align-center" style="line-height:1.1">'
+        . 'Safe sibling</h2><!-- /wp:heading -->';
+    $project->writeText('theme/parts/a-bad-style.html', $badStyle);
+    $project->writeText('theme/parts/b-bad-typography.html', $badTypography);
+    $project->writeText('theme/parts/c-safe.html', $safe);
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        assert_eq(
+            $badStyle,
+            $project->readText('theme/parts/a-bad-style.html'),
+            'a malformed style container is delivered byte-for-byte',
+        );
+        assert_eq(
+            $badTypography,
+            $project->readText('theme/parts/b-bad-typography.html'),
+            'a malformed typography container is delivered byte-for-byte',
+        );
+        assert_contains(
+            '"typography":{"lineHeight":"1.1","textAlign":"center"}',
+            $project->readText('theme/parts/c-safe.html'),
+            'a valid sibling still receives the safe legacy alignment fold',
+        );
+
+        $joined = implode("\n", $project->readJson('warnings.json')['fix-blocks'] ?? []);
+        assert_contains('left parts/a-bad-style.html unmodified', $joined);
+        assert_contains('core/heading at 0: authored style "keep-style" is not an object', $joined);
+        assert_contains('left parts/b-bad-typography.html unmodified', $joined);
+        assert_contains(
+            'core/paragraph at 0: authored style.typography "keep-typography" is not an object',
+            $joined,
+        );
+        assert_contains('pre-step markup delivered byte-for-byte', $joined);
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }

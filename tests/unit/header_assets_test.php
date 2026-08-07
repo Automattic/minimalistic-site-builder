@@ -66,6 +66,17 @@ test('header CSS keeps positioning progressive and state changes paint-only', fu
     );
     assert_contains('transition-property: background-color, box-shadow', $css);
     assert_true(!str_contains($css, 'transition: all'), 'trusted state kit never transitions all properties');
+
+    $clearOverlay = header_asset_css_block(
+        $css,
+        '.header-behavior-overlay-to-solid.header-top-transparent',
+    );
+    assert_contains('--header-start-surface: transparent', $clearOverlay);
+    assert_contains(
+        'transition-property: box-shadow',
+        $clearOverlay,
+        'a fixed clear header snaps protective paint while retaining the smooth shadow cue',
+    );
 });
 
 test('header CSS maps the closed palette vocabulary and covers accessibility states', function () {

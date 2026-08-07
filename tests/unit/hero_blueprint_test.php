@@ -80,9 +80,12 @@ test('cover blueprint repairs conflicting safe, focal, and anchor fields', funct
     $repairs = [];
     $warnings = [];
     $normalized = HeroBlueprint::normalize($raw, 'cinematic-safe-zone', $repairs, $warnings);
-    assert_eq('bottom-start', $normalized['text_anchor']);
-    assert_eq('start', $normalized['text_safe_region']);
-    assert_eq('end', $normalized['focal_region']);
+    // The mismatched anchor falls back to the recipe's centered default, and
+    // the safe region follows it; the authored focal region no longer
+    // collides with the repaired safe region, so it survives.
+    assert_eq('center', $normalized['text_anchor']);
+    assert_eq('center', $normalized['text_safe_region']);
+    assert_eq('start', $normalized['focal_region']);
     assert_true(count($repairs) >= 2);
 });
 
@@ -98,8 +101,8 @@ test('a legacy signature_device_use field is dropped from the normalized bluepri
 test('an unusable hero blueprint degrades to complete assigned defaults and warns', function () {
     $repairs = [];
     $warnings = [];
-    $normalized = HeroBlueprint::normalize('not an object', 'panorama-rail', $repairs, $warnings);
-    assert_eq(HeroBlueprint::defaultFor('panorama-rail'), $normalized);
+    $normalized = HeroBlueprint::normalize('not an object', 'focal-subject-stage', $repairs, $warnings);
+    assert_eq(HeroBlueprint::defaultFor('focal-subject-stage'), $normalized);
     assert_eq(1, count($warnings));
     assert_contains('hero_blueprint', $warnings[0]);
     assert_contains('synthesized', $warnings[0]);

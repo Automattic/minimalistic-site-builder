@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Units;
 
 use Automattic\SiteBuild\AboveFoldContract;
+use Automattic\SiteBuild\HeaderTagline;
 
 /**
  * Generate the site header from self-contained site/theme/direction/outline
@@ -53,7 +54,8 @@ final class HeaderUnit extends AbstractMarkupUnit
             $repairs[] = self::repair('redundant-header-landmark-removed', $key);
         }
         GeneratedMarkup::assertNoRedundantLandmark($markup, 'header');
-        $archetype = (string) $this->contract($input)['header']['archetype'];
+        $header = $this->contract($input)['header'];
+        $archetype = (string) $header['archetype'];
         $markup = GeneratedMarkup::withRootClassMarker(
             $markup,
             'header-archetype--',
@@ -61,6 +63,10 @@ final class HeaderUnit extends AbstractMarkupUnit
             $key,
             $repairs
         );
+        $tagline = HeaderTagline::ensure($markup, $header, $key);
+        $markup = $tagline['markup'];
+        array_push($repairs, ...$tagline['repairs']);
+        array_push($warnings, ...$tagline['warnings']);
         $before = $markup;
         $markup = GeneratedMarkup::constrainedPart($markup);
         if ($markup !== $before) {
