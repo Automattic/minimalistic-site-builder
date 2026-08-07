@@ -831,27 +831,35 @@ test('theme-json forces useRootPaddingAwareAlignments when root side padding is 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 
-test('normalizeRootPadding only sets the flag on a non-zero side padding', function () {
-    // No styles at all — untouched.
+test('normalizeRootPadding synthesizes side gutters when the model omits them', function () {
+    // No styles at all — md gutters synthesized, flag on. Without this, every
+    // section without its own padding renders flush to the 390px screen edge.
     $theme = ThemeJsonStep::normalizeRootPadding([]);
-    assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'no styles');
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'no styles: left');
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['right'], 'no styles: right');
+    assert_eq('0', $theme['styles']['spacing']['padding']['top'], 'no styles: top');
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments'], 'no styles: flag');
 
-    // Zero-valued side padding (any unit) — no flag.
+    // Zero-valued side padding (any unit) is the same mobile defect — replaced.
     $theme = ThemeJsonStep::normalizeRootPadding(
         ['styles' => ['spacing' => ['padding' => ['left' => '0px', 'right' => '0']]]]
     );
-    assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'zero padding');
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'zero padding: left');
+    assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments'], 'zero padding: flag');
 
-    // Vertical-only padding — no flag (nothing to bleed through).
+    // Vertical-only padding — vertical zeroed, sides synthesized.
     $theme = ThemeJsonStep::normalizeRootPadding(
         ['styles' => ['spacing' => ['padding' => ['top' => '2rem', 'bottom' => '2rem']]]]
     );
-    assert_true(!isset($theme['settings']['useRootPaddingAwareAlignments']), 'vertical only');
+    assert_eq('0', $theme['styles']['spacing']['padding']['top'], 'vertical only: top');
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'vertical only: left');
 
-    // One non-zero side is enough.
+    // An authored non-zero side survives; the missing side is filled.
     $theme = ThemeJsonStep::normalizeRootPadding(
         ['styles' => ['spacing' => ['padding' => ['right' => '1.5rem']]]]
     );
+    assert_eq('1.5rem', $theme['styles']['spacing']['padding']['right'], 'authored side kept');
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'missing side filled');
     assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments']);
 });
 
@@ -869,9 +877,11 @@ test('normalizeRootPadding zeroes vertical root padding — sections own the rhy
     assert_eq('var(--wp--preset--spacing--md)', $theme['styles']['spacing']['padding']['left'], 'side padding kept');
     assert_eq(true, $theme['settings']['useRootPaddingAwareAlignments']);
 
-    // No padding stanza at all — nothing invented.
+    // No padding stanza at all — the BIGR-780 case (atlas/hearth/pulso
+    // authored only blockGap): gutters synthesized, blockGap untouched.
     $theme = ThemeJsonStep::normalizeRootPadding(['styles' => ['spacing' => ['blockGap' => '1rem']]]);
-    assert_true(!isset($theme['styles']['spacing']['padding']), 'no padding invented');
+    assert_eq('var:preset|spacing|md', $theme['styles']['spacing']['padding']['left'], 'gutters synthesized');
+    assert_eq('1rem', $theme['styles']['spacing']['blockGap'], 'blockGap untouched');
 });
 
 test('normalizeGroupBlockPadding removes recursive vertical defaults and preserves siblings', function () {
