@@ -60,10 +60,13 @@
 
         var VIEWPORT_INSET = 0.25;
         var ROW_TOLERANCE = 4;
+        var WATCHDOG_MS = 4000;
         var observer = null;
         var viewportObserver = null;
         var layoutObserver = null;
         var resizeTimer = null;
+        var watchdogTimer = null;
+        var observerDelivered = false;
 
         function viewportHeight() {
             // innerHeight remains the viewport in both standards and quirks
@@ -197,6 +200,7 @@
 
         function stop() {
             window.clearTimeout(resizeTimer);
+            window.clearTimeout(watchdogTimer);
             window.removeEventListener('resize', scheduleObserver);
             window.removeEventListener('scroll', revealAtDocumentEnd);
             window.removeEventListener('load', revealAtDocumentEnd);
@@ -265,6 +269,7 @@
                     viewportObserver.disconnect();
                 }
                 observer = new IntersectionObserver(function (entries) {
+                    observerDelivered = true;
                     try {
                         showBatch(intersectingTargets(entries));
                         stopWhenDone();
@@ -286,6 +291,7 @@
                 // an inner-scroller or position-only change can still expose a
                 // final target without requiring a window scroll/resize event.
                 viewportObserver = new IntersectionObserver(function (entries) {
+                    observerDelivered = true;
                     try {
                         if (atDocumentEnd(viewportHeight())) {
                             showBatch(intersectingTargets(entries));
@@ -361,8 +367,28 @@
             }
         }
 
+        // A healthy IntersectionObserver always delivers an initial batch for
+        // its observed targets, so silence past this deadline means the
+        // observer is broken (occluded/automation window, extension
+        // interference) and pending content would stay at opacity:0 forever.
+        // A hidden page legitimately delivers nothing — re-arm and only fail
+        // open once the page has been visible for a full deadline.
+        function armWatchdog() {
+            watchdogTimer = window.setTimeout(function () {
+                if (observerDelivered) {
+                    return;
+                }
+                if (document.visibilityState === 'hidden') {
+                    armWatchdog();
+                    return;
+                }
+                failOpen();
+            }, WATCHDOG_MS);
+        }
+
         buildObserver();
         if (!stopWhenDone()) {
+            armWatchdog();
             window.addEventListener('resize', scheduleObserver);
             window.addEventListener('scroll', revealAtDocumentEnd, { passive: true });
             window.addEventListener('load', revealAtDocumentEnd, { once: true });
