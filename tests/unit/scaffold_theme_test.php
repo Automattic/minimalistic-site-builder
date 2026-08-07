@@ -248,11 +248,17 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_contains('grid-row: 2;', $css);
     // The cinematic stack-media-first panel owns its copy color (BIGR-788):
     // authored overlay-tuned colors must not survive onto the solid panel.
-    assert_contains(
-        ':is(h1, h2, h3, h4, h5, h6, p, cite):not(.wp-block-button__link)',
-        $css
+    assert_eq(
+        1,
+        preg_match(
+            '/\.hero-composition--cinematic-safe-zone\.hero-mobile--stack-media-first\s+'
+                . '\.wp-block-cover__inner-container\s+'
+                . ':is\(h1, h2, h3, h4, h5, h6, p, cite\):not\(\.wp-block-button__link\)\s*\{\s*'
+                . 'color:\s*var\(--wp--preset--color--base\)\s*!important;\s*\}/',
+            $css
+        ),
+        'the transformed solid panel owns descendant copy color as one scoped rule'
     );
-    assert_contains('color: var(--wp--preset--color--base) !important;', $css);
 
     $readme = $project->readText('theme/readme.txt');
     assert_contains('=== {{THEME_NAME}} ===', $readme);
