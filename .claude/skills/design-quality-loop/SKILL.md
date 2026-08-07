@@ -36,11 +36,21 @@ the start of every invocation:
 
 Then do exactly ONE of these (in priority order) and stop:
 
-1. **If a validated finding is ready to fix** → do one Fix iteration (phases 4–6).
-2. **If a critique backlog exists but is unvalidated/stale** → do a Triage iteration (phase 3).
-3. **If no craft/P0 findings remain and no variety PR is open** → do a Variety iteration (phase V):
-   propose one new archetype/recipe.
-4. **Otherwise** → do a Cohort iteration (phases 1–2) to produce a fresh backlog.
+1. **If this is a variety-cadence turn** (see below) and no unfixed P0/craft finding is open → do a
+   Variety iteration (phase V).
+2. **If a validated finding is ready to fix** → do one Fix iteration (phases 4–6).
+3. **If a critique backlog exists but is unvalidated/stale** → do a Triage iteration (phase 3).
+4. **If no craft/P0 findings remain and no variety PR is open** → do a Variety iteration (phase V).
+5. **Otherwise** → do a Cohort iteration (phases 1–2) to produce a fresh backlog.
+
+**Variety cadence.** Keep an iteration counter in the state file. Every 4th iteration is a variety-cadence
+turn: variety work runs even while hierarchy/spacing/polish findings remain in the backlog — only an
+unfixed P0/craft finding (broken, invisible, overflowing, collapsed) defers it to the next iteration. The
+generator's range must widen on a schedule, not only when the defect backlog happens to be empty; a loop
+that ships only restrictions converges on sterile output. If a variety PR is already open awaiting review,
+the cadence turn still runs phase V through its render-evidence step but **parks** the finished proposal on
+its Linear issue (renders + go/no-go recommendation attached) instead of opening a second PR; when the open
+slot frees, ship the best parked proposal before researching a new one.
 
 Keep the current backlog in that state file with per-finding status
 (`new / filed BIGR-XXX / pr-open #NN / merged / rejected`), which cohort it came from, and what the next
@@ -77,7 +87,9 @@ or so many fixes have merged that the old cohort no longer represents trunk.
 ### Phase 2 — Critique every section of every site
 
 For each site: read the generated front page markup (`projects/<slug>/theme/…`) to enumerate its sections
-(header, hero, each content band, footer). Crop both `home.png` and `home-mobile.png` into per-section images
+(header, hero, each content band, footer), and read `projects/<slug>/designDirection.json` — the site's
+committed creative contract — so every judgment below can compare what shipped against what was promised.
+Crop both `home.png` and `home-mobile.png` into per-section images
 (Python/PIL or ImageMagick, into the scratchpad) so each judgment looks at one section at actual size — plus
 one full-page pass at each viewport for overall composition. Look at every crop; do not critique from
 markup alone.
@@ -107,11 +119,32 @@ root cause (which prompt file / pipeline step / fixer / CSS).
    sameness across sites is a generator defect even when each site looks fine alone).
 8. **Impact & tidiness** — first-screen impression is flat (tiny hero, dead space, weak imagery); ragged
    alignments; inconsistent corner radii/borders/shadows across components.
+9. **Direction fidelity** — audit the render against `designDirection.json` field by field: is the
+   `image_grade` visible and consistent across every image? Does the committed `motion` profile actually
+   move (check `motion_note` too)? Are `card_style`, `shape`, and `canvas` executed literally? Do the
+   heading/body faces render at the committed weights? Does anything on the page speak the
+   `concept_seed`'s world beyond the palette — or would the render look the same under a generic
+   direction? Every broken promise is a **generator defect with a root cause** (a fixer stripping the
+   styling, a step not receiving the field, a missing capability) — the pipeline paid for that ambition
+   and then lost it, and recovering it is the cheapest creativity win available. Record lost commitments
+   with the same rigor as craft errors: field, committed value, what shipped instead, crop path.
+
+**Graded scores, not just findings.** Besides listing failures, score each site 1–5 on two axes:
+**conviction** (rubric 7 — could this page only belong to this brand?) and **impact** (rubric 8 —
+first-screen memorability). Anchor the scale: 1 = interchangeable AI template, 3 = competent but
+forgettable, 5 = a human designer would claim it. Record the per-site scores and the cohort means in a
+small table in `plan/design-quality-loop.md` next to the cohort's trunk commit, so successive cohorts form
+a trend line. A defect-free cohort with flat scores is not a healthy cohort — it is the loop's signal that
+the next priority is variety/ceiling work, not more polish.
 
 ### Phase 3 — Triage into a ranked backlog
 
 - **Cluster across sites.** A defect appearing on 3+ of 7 sites is systemic — rank it above any
   single-site issue. Note the incidence ("5/7 heroes …") — it becomes the PR's evidence baseline.
+- **Check the score trend.** Compare this cohort's mean conviction/impact scores against the previous
+  cohort's table. A drop of ≥0.5 on either mean after a batch of restrictive prompt merges is itself a
+  **P1 systemic finding** ("the generator got safer and duller"): root-cause it to the specific merged
+  restrictions, and the fix is a Variety/ceiling iteration or a loosening PR — never more restrictions.
 - **Root-cause each cluster** by reading the responsible prompt/step/fixer code and the project's
   `logs/` + `warnings.json`. Classify: (a) deterministic bug (CSS, fixer stripping styles, theme.json,
   font loading), (b) prompt-quality issue (stochastic), (c) missing capability (needs design + a Linear
@@ -154,6 +187,14 @@ The change must also be **evident in the screenshots**, and the evidence protoco
 - **Prompt fix** (stochastic): one before/after pair proves nothing. Rebuild **at least 3 affected demos**
   on the branch and report incidence: "before: defect in 5/7 cohort sites (crops attached); after: 0/3
   rebuilds". If the defect still appears in any rebuild, the fix isn't done — iterate before opening a PR.
+- **Restrictive prompt fix** (a ban, cap, or "never X" rule): additionally prove the rule didn't
+  over-reach. Name the nearest *legitimate* behavior adjacent to the banned one (banning centered body
+  paragraphs → centered display type; banning heading dashes → dashes in semantic ranges) and include one
+  after-crop showing it still occurring — a "still-alive" crop under its own heading in the PR. If no
+  rebuild exercises the adjacent behavior, that absence is itself evidence of over-reach: narrow the rule
+  until it reappears. And never counterweight a ban by adding positive examples at creative decision
+  points — listed examples become the new default and trade one kind of sameness for another; the
+  counterweight is the narrower rule plus the still-alive evidence.
 - Capture the failing viewport. For a 390px finding, use phase 1's full mobile command and distinct
   `home-mobile.png` output for every after-project.
 - Crop both images to the affected section so the diff is unmissable; place them side by side or stacked
@@ -223,7 +264,9 @@ site, so a mediocre addition pollutes the generator permanently. Steps:
 
 ## Stop conditions
 
-Stop the loop (report, don't keep spinning) when: the backlog has no findings above "polish" severity;
+Stop the loop (report, don't keep spinning) when: the backlog has no findings above "polish" severity AND
+no variety work is actionable (no parked proposal waiting on a free slot, and the cohort score trend is
+flat-or-rising — a defect-free backlog with declining scores routes to a Variety iteration, not to a stop);
 3+ PRs are open and unreviewed (evidence rebuilds would no longer reflect what merges); or two consecutive
 cohort iterations produce no new systemic findings. When self-pacing with /loop, fix iterations can run
 back-to-back; after opening a PR that blocks others, schedule a long delay rather than polling.
