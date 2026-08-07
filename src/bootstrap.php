@@ -17,6 +17,7 @@ use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\ProjectStore;
 use Automattic\SiteBuild\SiteBuilder;
 use Automattic\SiteBuild\StepDefaults;
+use Automattic\SiteBuild\Steps\GenerateImagesStep;
 use Automattic\SiteBuild\WpcomImageClient;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -45,6 +46,59 @@ function step_temperatures(): array
 function llm_temperature(string $envSuffix, ?float $default): ?float
 {
     return StepDefaults::temperature($envSuffix, $default);
+}
+
+/**
+ * Split a comma-separated CLI flag value into its trimmed, non-blank items.
+ *
+ * Blanks left by a trailing or doubled comma are dropped and the keys are
+ * re-indexed, so position stays meaningful (--pages' first title is the
+ * homepage).
+ *
+ * @return list<string>
+ */
+function split_csv_flag(string $value): array
+{
+    return array_values(array_filter(
+        array_map('trim', explode(',', $value)),
+        static fn (string $item): bool => $item !== '',
+    ));
+}
+
+/**
+ * Reject a `--pages` list handed over without `--multi-page`.
+ *
+ * --pages fixes WHICH pages get built; --multi-page owns WHETHER inner pages
+ * exist at all, so a list without the flag is a contradiction — it throws
+ * rather than let either flag be silently ignored.
+ */
+function require_multi_page_for_pages(?string $pagesArg, bool $multiPage): void
+{
+    if ($pagesArg !== null && !$multiPage) {
+        throw new InvalidArgumentException('--pages requires --multi-page.');
+    }
+}
+
+/**
+ * Validate a `--provider` flag against config/models.json, returning it
+ * lowercased and trimmed (null when the flag was not given).
+ *
+ * Validating only: it throws so every entry point gives the same friendly early
+ * error instead of failing later, deep in the transport.
+ */
+function normalize_provider(?string $provider): ?string
+{
+    if ($provider === null) {
+        return null;
+    }
+
+    $provider = strtolower(trim($provider));
+    if (!ModelConfig::hasProvider($provider)) {
+        throw new InvalidArgumentException("Unknown --provider '{$provider}'. Known: "
+            . implode(', ', ModelConfig::providerNames()));
+    }
+
+    return $provider;
 }
 
 /** Prefer OpenRouter's canonical key name while accepting the earlier alias. */
@@ -137,6 +191,17 @@ function make_image_client(): ImageClient
         apiToken: Env::getRequired('GOOGLE_VERTEX_API_TOKEN'),
         model:    Env::get('IMAGE_MODEL', 'gemini-3.1-flash-image'),
     );
+}
+
+/**
+ * Wire the opt-in image-generation step: the Vertex transport, the Llm that
+ * rewrites prompts the safety filter rejects, and that repair's model.
+ *
+ * A null $llm still generates images, minus the prompt repair.
+ */
+function make_generate_images_step(?Llm $llm): GenerateImagesStep
+{
+    return new GenerateImagesStep(make_image_client(), $llm, step_models()['image-prompt-repair'] ?? null);
 }
 
 /** Project root path helper. */
