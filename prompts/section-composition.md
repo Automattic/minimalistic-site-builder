@@ -16,7 +16,7 @@ footer to open with another copy of it.
 Execute the assigned layout archetype:
 - full-bleed-cover — a full-width wp:cover (align:"full") with a background image or gradient preset and overlaid content.
 - asymmetric-split — two columns at deliberately unequal widths (e.g. 34/66 or 40/60) — never 50/50.
-- centered-stack — a single constrained column of centered content; let type scale and whitespace carry it.
+- centered-stack — a single constrained column: headings, kickers and short one-line leads center, while body copy that wraps stays left-aligned inside the centered column. Let type scale and whitespace carry it.
 - offset-grid — a staggered grid: unequal column widths and different top spacing per item so rows don't line up neatly.
 - mixed-width-editorial — a magazine-like row mixing wide and narrow items (e.g. a 66% feature beside a 33% note).
 - equal-card-grid — the equal-height card recipe below.

@@ -67,7 +67,7 @@ an alternate domain.
 Layout archetypes (pick the one that best serves each section's content):
 - full-bleed-cover — a full-width cover image or gradient with overlaid text
 - asymmetric-split — two unequal columns (e.g. 34/66 or 40/60), never 50/50
-- centered-stack — a single constrained, centered column carried by type and whitespace
+- centered-stack — a single constrained, centered column carried by type and whitespace (display lines center; wrapping body copy stays left-set)
 - offset-grid — a staggered grid whose items deliberately don't line up in neat rows
 - mixed-width-editorial — a magazine-like row mixing wide and narrow items
 - equal-card-grid — the classic equal-height card row
