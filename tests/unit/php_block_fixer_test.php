@@ -177,6 +177,29 @@ test('PhpBlockFixer skips non-block HTML and does not invoke transformation or w
     }
 });
 
+test('PhpBlockFixer does not apply Serializer-specific alignment preflight to an injected transformer', function () {
+    $original = '<!-- wp:heading {"style":{"typography":{"textAlign":"center"}}} -->'
+        . '<h2 class="has-text-align-center" style="text-align:right">Title</h2>'
+        . '<!-- /wp:heading -->';
+    $theme = php_block_fixer_test_theme(['parts/content.html' => $original]);
+    $writer = new PhpBlockFixerTestWriter();
+    $transformer = new PhpBlockFixerTestTransformer(
+        static fn (string $html): TransformResult => new TransformResult($html),
+    );
+
+    try {
+        $report = (new PhpBlockFixer($transformer, writer: $writer))->fix($theme);
+
+        assert_eq([$original], $transformer->calls, 'the injected contract receives its input');
+        assert_contains('ok     parts/content.html', $report);
+        assert_true(!str_contains($report, 'FAILED'));
+        assert_eq(0, $writer->stageCalls, 'an identity transform does not stage output');
+        assert_eq($original, file_get_contents($theme . '/parts/content.html'));
+    } finally {
+        remove_tree(dirname($theme));
+    }
+});
+
 test('PhpBlockFixer reports an empty theme without requiring templates or parts directories', function () {
     $theme = php_block_fixer_test_theme();
     $writer = new PhpBlockFixerTestWriter();
