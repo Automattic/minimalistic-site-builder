@@ -392,7 +392,7 @@ test('theme-json writes valid theme.json and forces version 3', function () {
     $slugs = array_column($theme['settings']['color']['palette'], 'slug');
     assert_true(in_array('accent', $slugs, true));
     assert_eq(true, $theme['settings']['spacing']['blockGap']);
-    assert_eq(['sm', 'md', 'lg', 'xl', 'xxl'], array_column($theme['settings']['spacing']['spacingSizes'], 'slug'));
+    assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($theme['settings']['spacing']['spacingSizes'], 'slug'));
     assert_eq(false, $theme['settings']['color']['defaultPalette']);
     assert_eq(false, $theme['settings']['color']['defaultGradients']);
     assert_eq(false, $theme['settings']['color']['defaultDuotone']);
@@ -650,6 +650,7 @@ test('normalizeSpacingSettings installs the canonical bounded responsive profile
     assert_eq(true, $theme['settings']['spacing']['blockGap']);
     assert_eq(false, $theme['settings']['spacing']['defaultSpacingSizes'], 'core spacing sizes disabled');
     assert_eq([
+        ['slug' => 'xs', 'name' => 'Extra Small', 'size' => 'clamp(0.25rem, 0.5vw, 0.5rem)'],
         ['slug' => 'sm', 'name' => 'Small', 'size' => 'clamp(0.75rem, 1vw, 1rem)'],
         ['slug' => 'md', 'name' => 'Medium', 'size' => 'clamp(1.5rem, 2vw, 2rem)'],
         ['slug' => 'lg', 'name' => 'Compact', 'size' => 'clamp(3rem, 4vw, 4rem)'],
@@ -677,15 +678,15 @@ test('normalizeSpacingSettings repairs malformed and oversized model output', fu
 
     $spacing = $theme['settings']['spacing'];
     assert_eq(true, $spacing['blockGap']);
-    assert_eq(['sm', 'md', 'lg', 'xl', 'xxl'], array_column($spacing['spacingSizes'], 'slug'));
-    assert_eq('clamp(5rem, 7vw, 7rem)', $spacing['spacingSizes'][4]['size']);
+    assert_eq(['xs', 'sm', 'md', 'lg', 'xl', 'xxl'], array_column($spacing['spacingSizes'], 'slug'));
+    assert_eq('clamp(5rem, 7vw, 7rem)', $spacing['spacingSizes'][5]['size']);
     assert_eq(['rem'], $spacing['units'], 'unrelated spacing settings preserved');
     assert_eq(['custom' => false], $theme['settings']['color'], 'non-spacing settings preserved');
     assert_eq(['color' => ['text' => '#123456']], $theme['styles'], 'styles preserved');
 
     $theme = ThemeJsonStep::normalizeSpacingSettings(['settings' => ['spacing' => 'invalid']]);
     assert_eq(true, $theme['settings']['spacing']['blockGap']);
-    assert_eq(5, count($theme['settings']['spacing']['spacingSizes']));
+    assert_eq(6, count($theme['settings']['spacing']['spacingSizes']));
 });
 
 test('canonical spacing profile has monotonic fluid bounds', function () {
