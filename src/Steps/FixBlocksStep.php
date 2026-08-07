@@ -7,6 +7,14 @@ use Automattic\SiteBuild\BlockFixer;
 use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
+use Automattic\SiteBuild\BlockSerializer\Json\JsJsonEncoder;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonObject;
+use Automattic\SiteBuild\BlockSerializer\Json\JsonString;
+use Automattic\SiteBuild\BlockSerializer\JsString;
+use Automattic\SiteBuild\BlockSerializer\Parser\BlockNode;
+use Automattic\SiteBuild\BlockSerializer\Parser\DefaultParser;
+use Automattic\SiteBuild\BlockSerializer\Parser\FreeformNode;
+use Automattic\SiteBuild\BlockSerializer\Serializer;
 use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ShapeMarkup;
@@ -226,6 +234,28 @@ final class FixBlocksStep implements Step
                 $paragraphAlignmentRepairs,
             ),
         ));
+        // A dropped has-text-align-* class on reading copy is deterministic
+        // to repair: the direction is known from the authored class, and
+        // style.typography.textAlign is the canonical shape every pinned
+        // save() derives the class from. Attempt the repair before warning —
+        // only losses the repair could not heal stay durable.
+        if ($alignmentLosses !== []) {
+            $alignmentRepairRows = self::repairAlignmentLosses($project, $alignmentLosses);
+            if ($alignmentRepairRows !== []) {
+                $summary .= "\n[alignment] REPAIR: dropped text alignment re-expressed as "
+                    . "style.typography.textAlign:\n  " . implode("\n  ", $alignmentRepairRows);
+                echo '  [alignment] ' . count($alignmentRepairRows)
+                    . " dropped text alignment(s) repaired\n";
+                $alignmentLosses = array_values(array_filter(
+                    self::alignmentLosses($project, $alignmentBaselines, $failedPaths),
+                    static fn (array $entry): bool => !self::alignmentLossAlreadyWarned(
+                        $entry[0],
+                        $entry[1],
+                        $paragraphAlignmentRepairs,
+                    ),
+                ));
+            }
+        }
         foreach ($alignmentLosses as [$file, $loss]) {
             $warnings[] = self::alignmentWarning($file, $loss);
         }
@@ -636,6 +666,153 @@ final class FixBlocksStep implements Step
             }
         }
         return $covered;
+    }
+
+    /**
+     * Repair dropped has-text-align-* classes on reading-copy blocks by
+     * folding the authored direction into style.typography.textAlign in the
+     * delivered comment JSON and re-serializing the file. The pinned
+     * adapters already preserve most authored alignment shapes; this pass
+     * only fires on the residue the whole transaction still lost, so no
+     * reviewed byte contract changes for cases that already worked. A block
+     * whose delivered family kept a DIFFERENT alignment, whose containers
+     * are malformed, or that already carries a typography.textAlign is left
+     * alone — those stay durable warnings. Serializer::transform is
+     * idempotent on delivered output, so untouched sibling blocks keep
+     * their exact bytes.
+     *
+     * @param list<array{0:string,1:AlignmentClassLoss}> $losses
+     * @return list<string> one human log row per repaired block
+     */
+    private static function repairAlignmentLosses(Project $project, array $losses): array
+    {
+        $byFile = [];
+        foreach ($losses as [$file, $loss]) {
+            if (!in_array($loss->blockName, ['core/paragraph', 'core/heading'], true)
+                || $loss->deliveredClasses !== []
+                || preg_match('/^has-text-align-(left|center|right)$/', $loss->authoredClass, $match) !== 1
+            ) {
+                continue;
+            }
+            $byFile[$file][$loss->blockPath] = $match[1];
+        }
+
+        $rows = [];
+        foreach ($byFile as $file => $targets) {
+            $delivered = $project->readText('theme/' . $file);
+            $patch = self::textAlignPatchedMarkup($delivered, $targets);
+            if ($patch === null) {
+                continue;
+            }
+            [$patched, $patchedPaths] = $patch;
+            try {
+                $transformed = (new Serializer())->transform($patched)->html;
+            } catch (\Throwable) {
+                // Deliver the pre-repair bytes and keep the durable warning.
+                continue;
+            }
+            $project->writeText('theme/' . $file, $transformed);
+            foreach ($patchedPaths as $blockPath => $direction) {
+                $rows[] = "{$file} block {$blockPath}: \"has-text-align-{$direction}\" "
+                    . 're-expressed as style.typography.textAlign';
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * Splice style.typography.textAlign into the comment delimiters of the
+     * targeted blocks. Paths mirror AlignmentClassLossDetector: top-level
+     * indices count blocks and nonblank freeform, child indices are local to
+     * innerBlocks.
+     *
+     * @param array<string,string> $targets blockPath => direction
+     * @return array{0:string,1:array<string,string>}|null patched bytes and
+     *     the targets actually patched, or null when nothing was patchable
+     */
+    private static function textAlignPatchedMarkup(string $markup, array $targets): ?array
+    {
+        try {
+            $document = DefaultParser::parse($markup);
+        } catch (\InvalidArgumentException | \RuntimeException) {
+            return null;
+        }
+
+        $byPath = [];
+        $index = 0;
+        foreach ($document->nodes() as $node) {
+            if ($node instanceof FreeformNode) {
+                if (JsString::trim($node->content) !== '') {
+                    $index++;
+                }
+                continue;
+            }
+            if ($node instanceof BlockNode) {
+                self::collectBlocksByPath($node, (string) $index, $byPath);
+                $index++;
+            }
+        }
+
+        $splices = [];
+        $patchedPaths = [];
+        foreach ($targets as $blockPath => $direction) {
+            $block = $byPath[$blockPath] ?? null;
+            if ($block === null) {
+                continue;
+            }
+            $attributes = $block->attributes ?? new JsonObject();
+            $style = $attributes->get('style');
+            if ($style !== null && !$style instanceof JsonObject) {
+                continue;
+            }
+            $typography = $style?->get('typography');
+            if ($typography !== null && !$typography instanceof JsonObject) {
+                continue;
+            }
+            if ($typography?->has('textAlign') === true) {
+                continue;
+            }
+            if ($style === null) {
+                $style = new JsonObject();
+                $attributes->set('style', $style);
+            }
+            if ($typography === null) {
+                $typography = new JsonObject();
+                $style->set('typography', $typography);
+            }
+            $typography->set('textAlign', new JsonString($direction));
+
+            $shortName = str_starts_with($block->name, 'core/')
+                ? substr($block->name, strlen('core/')) : $block->name;
+            $encoded = JsJsonEncoder::stringify($attributes);
+            if ($encoded === null) {
+                continue;
+            }
+            $splices[] = [
+                $block->openingStart,
+                $block->openingEnd,
+                '<!-- wp:' . $shortName . ' ' . $encoded . ' -->',
+            ];
+            $patchedPaths[$blockPath] = $direction;
+        }
+        if ($splices === []) {
+            return null;
+        }
+
+        usort($splices, static fn (array $a, array $b): int => $b[0] <=> $a[0]);
+        foreach ($splices as [$start, $end, $replacement]) {
+            $markup = substr($markup, 0, $start) . $replacement . substr($markup, $end);
+        }
+        return [$markup, $patchedPaths];
+    }
+
+    /** @param array<string,BlockNode> $byPath */
+    private static function collectBlocksByPath(BlockNode $block, string $path, array &$byPath): void
+    {
+        $byPath[$path] = $block;
+        foreach ($block->innerBlocks as $index => $child) {
+            self::collectBlocksByPath($child, $path . '/' . $index, $byPath);
+        }
     }
 
     /** @param array<string,true> $paragraphAlignmentRepairs */

@@ -131,15 +131,15 @@ test('FixBlocksStep warns but does not fail when block repair drops vertical rhy
     }
 });
 
-test('FixBlocksStep records a heading that lost its centering', function () {
+test('FixBlocksStep preserves a heading centering that lives only in the saved HTML', function () {
     $tmp = sys_get_temp_dir() . '/fix-blocks-alignment-' . uniqid();
     $project = new Project($tmp);
     // An alignment class that lives ONLY in the saved HTML while the comment
-    // attrs carry an authored style: the deprecation adapter's migration is
-    // clobbered by the raw style overlay, so the class is dropped and the
-    // heading renders left-aligned instead of centred. (A legacy top-level
-    // textAlign attribute no longer loses — the reviewed canonicalization
-    // folds it into style.typography.textAlign.)
+    // attrs carry an authored style: before BIGR-779 the deprecation
+    // adapter's migration was clobbered by the raw style overlay and the
+    // class was dropped with a warning. The up-front canonicalization now
+    // folds the class into style.typography.textAlign, so the delivered
+    // markup keeps the centering.
     $project->writeText(
         'theme/parts/signature.html',
         '<!-- wp:heading {"level":2,"style":{"typography":{"lineHeight":"1.1"}}} -->'
@@ -153,28 +153,80 @@ test('FixBlocksStep records a heading that lost its centering', function () {
 
         $fixed = $project->readText('theme/parts/signature.html');
         assert_contains('Signature Flavours', $fixed, 'the heading keeps its content');
-        assert_true(
-            !str_contains($fixed, 'has-text-align-center'),
-            'the alignment class is genuinely gone from the delivered markup'
-        );
-
-        $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
-        $joined = implode("\n", $warnings);
-        assert_contains('has-text-align-center', $joined, 'the lost alignment reaches warnings.json');
         assert_contains(
-            'parts/signature.html block 0 (core/heading)',
-            $joined,
-            'the row locates the block that lost it',
+            'has-text-align-center',
+            $fixed,
+            'the alignment class survives in the delivered markup',
         );
-        assert_contains('authored "has-text-align-center"', $joined);
-        assert_contains('delivered removed', $joined);
-        assert_contains('disposition: authored class removed', $joined);
+        assert_contains(
+            '"textAlign":"center"',
+            $fixed,
+            'the alignment is mirrored into the comment JSON so it is canonical',
+        );
+        assert_contains('"lineHeight":"1.1"', $fixed, 'the authored style keys survive alongside it');
+
+        $warnings = $project->exists('warnings.json')
+            ? ($project->readJson('warnings.json')['fix-blocks'] ?? [])
+            : [];
+        assert_true(
+            !str_contains(implode("\n", $warnings), 'alignment class'),
+            'a preserved alignment cannot be warned about as lost',
+        );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
 });
 
-test('a paragraph opacity repair does not hide a heading alignment loss in the same file', function () {
+test('FixBlocksStep preserves a paragraph alignment authored only as an HTML class (BIGR-779)', function () {
+    $tmp = sys_get_temp_dir() . '/fix-blocks-kicker-alignment-' . uniqid();
+    $project = new Project($tmp);
+    // The cohort shape: a section kicker paragraph whose centering exists
+    // only as a class on the <p>, with no comment JSON at all (pulso
+    // schedule kicker) and one whose comment carries unrelated style keys
+    // (atlas eyebrows). Both must deliver centred, and a right-aligned
+    // price (tbilisi) must deliver right-aligned.
+    $project->writeText(
+        'theme/parts/kickers.html',
+        '<!-- wp:paragraph --><p class="has-text-align-center">Night one &amp; two</p><!-- /wp:paragraph -->'
+            . '<!-- wp:paragraph {"style":{"typography":{"letterSpacing":"0.1em"}}} -->'
+            . '<p class="has-text-align-center" style="letter-spacing:0.1em">Free for 30 days</p>'
+            . '<!-- /wp:paragraph -->'
+            . '<!-- wp:paragraph --><p class="has-text-align-right">14 GEL</p><!-- /wp:paragraph -->'
+            // The dominant cohort shape (pulso schedule kicker): the model
+            // mirrors the alignment as the registered top-level align key,
+            // which save() derives no class from, alongside other style keys
+            // that clobber the adapter migration.
+            . '<!-- wp:paragraph {"align":"center","textColor":"secondary","style":{"typography":{"letterSpacing":"0.18em","textTransform":"uppercase","fontWeight":"500"}}} -->'
+            . '<p class="has-text-align-center has-secondary-color has-text-color" '
+            . 'style="font-weight:500;letter-spacing:0.18em;text-transform:uppercase">Hornstull / Art District</p>'
+            . '<!-- /wp:paragraph -->',
+    );
+
+    try {
+        (new FixBlocksStep(new PhpBlockFixer()))->run($project);
+
+        $fixed = $project->readText('theme/parts/kickers.html');
+        preg_match_all('/<p[^>]*class="[^"]*has-text-align-center/', $fixed, $centred);
+        assert_eq(3, count($centred[0]), 'all three centred kickers render centred');
+        preg_match_all('/<p[^>]*class="[^"]*has-text-align-right/', $fixed, $righted);
+        assert_eq(1, count($righted[0]), 'the right-aligned price renders right-aligned');
+        assert_contains('"letterSpacing":"0.1em"', $fixed, 'authored sibling style keys survive');
+        assert_contains('"letterSpacing":"0.18em"', $fixed, 'the align:center kicker keeps its styles');
+        assert_contains('has-secondary-color', $fixed, 'preset color classes survive the fold');
+
+        $warnings = $project->exists('warnings.json')
+            ? ($project->readJson('warnings.json')['fix-blocks'] ?? [])
+            : [];
+        assert_true(
+            !str_contains(implode("\n", $warnings), 'alignment class'),
+            'no alignment-loss warning remains for preserved classes',
+        );
+    } finally {
+        exec('rm -rf ' . escapeshellarg($tmp));
+    }
+});
+
+test('a paragraph opacity repair leaves a co-located preserved heading alignment unwarned', function () {
     $tmp = sys_get_temp_dir() . '/fix-blocks-mixed-alignment-' . uniqid();
     $project = new Project($tmp);
     $project->writeText(
@@ -189,12 +241,17 @@ test('a paragraph opacity repair does not hide a heading alignment loss in the s
     try {
         (new FixBlocksStep(new PhpBlockFixer()))->run($project);
 
+        $fixed = $project->readText('theme/parts/mixed.html');
+        assert_contains('has-text-align-center', $fixed, 'the heading stays centred');
+
         $warnings = $project->readJson('warnings.json')['fix-blocks'] ?? [];
-        assert_eq(2, count($warnings), 'the opacity and heading losses each keep one warning');
+        assert_eq(1, count($warnings), 'only the opacity degradation warns');
         $joined = implode("\n", $warnings);
         assert_contains('parts/mixed.html block 0: core/paragraph style "opacity"', $joined);
-        assert_contains('parts/mixed.html block 1 (core/heading)', $joined);
-        assert_contains('alignment class "has-text-align-center"', $joined);
+        assert_true(
+            !str_contains($joined, 'alignment class'),
+            'the preserved centering produces no loss warning',
+        );
     } finally {
         exec('rm -rf ' . escapeshellarg($tmp));
     }
