@@ -23,42 +23,38 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$slug = null;
-$repo = null;
-$branch = PlaygroundArtifact::DEFAULT_ARTIFACT_BRANCH;
-$assetName = null;
-$out = null;
-$dryRun = false;
-$list = false;
-$open = false;
-$clobber = false;
-
-foreach (array_slice($argv, 1) as $a) {
-    if ($a === '--help' || $a === '-h') {
-        usage(0);
-    } elseif ($a === '--dry-run') {
-        $dryRun = true;
-    } elseif ($a === '--list') {
-        $list = true;
-    } elseif ($a === '--open') {
-        $open = true;
-    } elseif ($a === '--clobber') {
-        $clobber = true;
-    } elseif (str_starts_with($a, '--repo=')) {
-        $repo = substr($a, 7);
-    } elseif (str_starts_with($a, '--branch=')) {
-        $branch = substr($a, 9);
-    } elseif (str_starts_with($a, '--name=')) {
-        $assetName = substr($a, 7);
-    } elseif (str_starts_with($a, '--out=')) {
-        $out = substr($a, 6);
-    } elseif ($slug === null && !str_starts_with($a, '--')) {
-        $slug = $a;
-    } else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        usage(1);
-    }
+$args = parse_cli_args($argv, [
+    '--help'    => 'bool',
+    '-h'        => 'bool',
+    '--dry-run' => 'bool',
+    '--list'    => 'bool',
+    '--open'    => 'bool',
+    '--clobber' => 'bool',
+    '--repo'    => 'value',
+    '--branch'  => 'value',
+    '--name'    => 'value',
+    '--out'     => 'value',
+], maxPositionals: 1);
+$flags = $args['flags'];
+// Answer --help before reporting a bad argument. parse_cli_args stops at the
+// argument it cannot place, so a --help recorded here was typed before it:
+// `--bogus --help` stays an error.
+if (isset($flags['--help']) || isset($flags['-h'])) {
+    usage(0);
 }
+if ($args['unknown'] !== null) {
+    fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
+    usage(1);
+}
+$slug = $args['positionals'][0] ?? null;
+$repo = $flags['--repo'] ?? null;
+$branch = $flags['--branch'] ?? PlaygroundArtifact::DEFAULT_ARTIFACT_BRANCH;
+$assetName = $flags['--name'] ?? null;
+$out = $flags['--out'] ?? null;
+$dryRun = $flags['--dry-run'] ?? false;
+$list = $flags['--list'] ?? false;
+$open = $flags['--open'] ?? false;
+$clobber = $flags['--clobber'] ?? false;
 
 try {
     assert_branch_name($branch);
@@ -110,29 +106,24 @@ try {
 function usage(int $exit): never
 {
     $branch = PlaygroundArtifact::DEFAULT_ARTIFACT_BRANCH;
-    $themes = glob(repo_path('projects/*/theme/style.css')) ?: [];
-    fwrite($exit === 0 ? STDOUT : STDERR, "Usage:\n");
-    fwrite($exit === 0 ? STDOUT : STDERR, "  php bin/publish-playground.php <slug> [--repo=OWNER/REPO] [--branch={$branch}] [--name=<file.zip>] [--out=<path>] [--dry-run] [--clobber] [--open]\n");
-    fwrite($exit === 0 ? STDOUT : STDERR, "  php bin/publish-playground.php --list [--repo=OWNER/REPO] [--branch={$branch}]\n");
-    if ($themes !== []) {
-        fwrite($exit === 0 ? STDOUT : STDERR, "\nAvailable projects:\n");
-        foreach ($themes as $f) {
-            fwrite($exit === 0 ? STDOUT : STDERR, '  - ' . basename(dirname(dirname($f))) . "\n");
-        }
-    }
+    $out = $exit === 0 ? STDOUT : STDERR;
+    fwrite($out, "Usage:\n");
+    fwrite($out, "  php bin/publish-playground.php <slug> [--repo=OWNER/REPO] [--branch={$branch}] [--name=<file.zip>] [--out=<path>] [--dry-run] [--clobber] [--open]\n");
+    fwrite($out, "  php bin/publish-playground.php --list [--repo=OWNER/REPO] [--branch={$branch}]\n");
+    print_built_projects($out, "\nAvailable projects:");
     exit($exit);
 }
 
 function ensure_gh(): void
 {
-    if (trim((string) shell_exec('command -v gh 2>/dev/null')) === '') {
+    if (!command_exists('gh')) {
         throw new RuntimeException('gh is required to resolve GitHub repository metadata.');
     }
 }
 
 function ensure_git(): void
 {
-    if (trim((string) shell_exec('command -v git 2>/dev/null')) === '') {
+    if (!command_exists('git')) {
         throw new RuntimeException('git is required to publish Playground artifacts.');
     }
 }
@@ -329,11 +320,8 @@ function mkdir_or_fail(string $dir): void
 
 function open_url(string $url): void
 {
-    $opener = trim((string) shell_exec('command -v open 2>/dev/null'));
-    if ($opener === '') {
-        $opener = trim((string) shell_exec('command -v xdg-open 2>/dev/null'));
-    }
-    if ($opener === '') {
+    $opener = command_path('open') ?? command_path('xdg-open');
+    if ($opener === null) {
         fwrite(STDERR, "No open or xdg-open found; open this URL manually:\n{$url}\n");
         return;
     }

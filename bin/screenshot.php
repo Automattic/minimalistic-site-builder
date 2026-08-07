@@ -33,29 +33,27 @@ use Automattic\SiteBuild\ProjectStore;
 
 require_once __DIR__ . '/../src/bootstrap.php';
 
-$slug = null;
-$port = 9400;
-$out = null;
-$timeout = 240;
-$keepAlive = false;
-$workers = null;
-foreach (array_slice($argv, 1) as $a) {
-    if (str_starts_with($a, '--port=')) { $port = (int) substr($a, 7); }
-    elseif (str_starts_with($a, '--out=')) { $out = substr($a, 6); }
-    elseif (str_starts_with($a, '--timeout=')) { $timeout = (int) substr($a, 10); }
-    elseif (str_starts_with($a, '--workers=')) { $workers = substr($a, 10); }
-    elseif ($a === '--keep-alive') { $keepAlive = true; }
-    elseif ($slug === null && !str_starts_with($a, '--')) { $slug = $a; }
-    else {
-        fwrite(STDERR, "Unknown argument: {$a}\n");
-        fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
-        exit(1);
-    }
+$args = parse_cli_args($argv, [
+    '--port'       => 'value',
+    '--out'        => 'value',
+    '--timeout'    => 'value',
+    '--workers'    => 'value',
+    '--keep-alive' => 'bool',
+], maxPositionals: 1);
+if ($args['unknown'] !== null) {
+    fwrite(STDERR, "Unknown argument: {$args['unknown']}\n");
+    usage();
 }
+$flags = $args['flags'];
+$slug = $args['positionals'][0] ?? null;
+$port = (int) ($flags['--port'] ?? 9400);
+$out = $flags['--out'] ?? null;
+$timeout = (int) ($flags['--timeout'] ?? 240);
+$keepAlive = $flags['--keep-alive'] ?? false;
+$workers = $flags['--workers'] ?? null;
 
 if ($slug === null) {
-    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
-    exit(1);
+    usage();
 }
 
 $store = new ProjectStore(repo_path('projects'));
@@ -123,17 +121,9 @@ while (time() < $deadline) {
         echo @file_get_contents($serverLog);
         exit(1);
     }
-    // Playground prints this exact line once it is actually serving; it carries
-    // the real port. (The site's `/` answers 302, not 200, so polling for a 200
-    // would never succeed — the log line is the reliable readiness signal.)
-    // Strip ANSI colour codes first: the CLI wraps "Ready!" and the URL in
-    // colour escapes when stdout is a TTY (and some envs force colour even when
-    // it isn't, e.g. FORCE_COLOR). Those escape sequences sit between "Ready!"
-    // and the URL and would break a naive \s+ match — so remove them up front.
     $log = is_file($serverLog) ? (string) file_get_contents($serverLog) : '';
-    $log = preg_replace('~\x1b\[[0-9;]*m~', '', $log) ?? $log;
-    if (preg_match('~Ready!\s+WordPress is running on (http://127\.0\.0\.1:\d+)~', $log, $m)) {
-        $baseUrl = $m[1] . '/';
+    $baseUrl = playground_ready_url($log);
+    if ($baseUrl !== null) {
         break;
     }
     usleep(500_000);
@@ -173,9 +163,11 @@ if ($keepAlive && is_resource($proc) && $baseUrl !== null) {
 
 exit($exit);
 
-function command_exists(string $bin): bool
+/** The one invocation summary, shared by every path that rejects the line. */
+function usage(): never
 {
-    return trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) !== '';
+    fwrite(STDERR, "Usage: php bin/screenshot.php <slug> [--port=9400] [--out=<path>] [--timeout=240] [--workers=N] [--keep-alive]\n");
+    exit(1);
 }
 
 /** First working Chrome/Chromium binary (CHROME_BIN wins), or null. */
@@ -191,10 +183,8 @@ function chrome_binary(): ?string
         'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser',
     ]);
     foreach ($candidates as $bin) {
-        $path = str_contains($bin, '/')
-            ? $bin
-            : trim((string) shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null'));
-        if ($path === '' || !is_executable($path)) {
+        $path = str_contains($bin, '/') ? $bin : command_path($bin);
+        if ($path === null || !is_executable($path)) {
             continue;
         }
         // Existing and executable isn't enough: a stale Homebrew cask wrapper
