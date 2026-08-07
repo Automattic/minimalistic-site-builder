@@ -9,7 +9,8 @@ namespace Automattic\SiteBuild\Units;
  * Input shape:
  * - site_spec, theme_json, language, design_direction, outline, site_pages:
  *   prompt context (outline is the OWNING page's outline)
- * - card_style: normalized site-wide card construction enforced on delivery
+ * - card_style: normalized site-wide card construction enforced on delivery;
+ *   list-thumb rows also receive their non-stacking and tight-gap invariants
  * - page: slug/title/path of the page the section belongs to
  * - section: slug/title/role/type/purpose/content_notes plus the assigned
  *   layout_archetype/background/vertical_density/handoff. Role is required
@@ -99,6 +100,10 @@ final class SectionUnit extends AbstractPageSectionUnit
         $warnings = [];
         $repairs = [];
         $markup = GeneratedMarkup::normalize($raw, $this->key($input), $warnings, $repairs);
+        $listThumb = ListThumbContract::enforce($markup, $this->key($input));
+        $markup = $listThumb['markup'];
+        array_push($repairs, ...$listThumb['repairs']);
+        array_push($warnings, ...$listThumb['warnings']);
         $contract = CardStyleContract::enforce(
             $markup,
             $cardStyle,

@@ -466,6 +466,21 @@ final class BlockMarkup
     }
 
     /**
+     * Replace a node's attributes from the typed JSON model.
+     *
+     * Callers that deep-merge duplicate generated keys must not project the
+     * result through an ordinary PHP array before rendering: that would lose
+     * empty-object and numeric-string-key identity. Keep the typed native
+     * shapes authoritative while retaining the array projection for attrs().
+     */
+    public function setTypedAttrs(int $i, JsonObject $attrs): void
+    {
+        $native = $attrs->toNative();
+        $this->mutations[$i] = self::typedObjectToArray($attrs);
+        $this->mutationShapes[$i] = get_object_vars($native);
+    }
+
+    /**
      * String-replace inside `class="…"` attribute values of the HTML this
      * node itself owns: from its opening comment up to its first child block
      * (or its closing comment when it has none) — i.e. the block's own root

@@ -688,7 +688,10 @@ test('spacing warnings detect theme-profile and section-root rhythm drift', func
     assert_contains('section root spacing drift', $joined);
 
     $theme = $project->readJson('theme/theme.json');
-    $theme['settings']['spacing']['spacingSizes'][4]['size'] = '12rem';
+    $spacingSlugs = array_column($theme['settings']['spacing']['spacingSizes'], 'slug');
+    $xxlIndex = array_search('xxl', $spacingSlugs, true);
+    assert_true(is_int($xxlIndex), 'canonical spacing profile includes xxl');
+    $theme['settings']['spacing']['spacingSizes'][$xxlIndex]['size'] = '12rem';
     $project->writeJson('theme/theme.json', $theme);
     $joined = implode(' ', ThemeValidator::spacingWarnings($project));
     assert_contains('bounded canonical profile', $joined);
