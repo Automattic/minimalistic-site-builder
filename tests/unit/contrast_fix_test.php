@@ -485,3 +485,93 @@ test('non-overlay headers skip the overlay lint', function () {
     );
     exec('rm -rf ' . escapeshellarg($tmp));
 });
+
+test('an inherited caption inside a dark band gets the caption-text class hook', function () {
+    // The figcaption inherits the theme default (contrast, #111) inside a
+    // contrast-background band — invisible. The image block supports no
+    // textColor, so the repair is the stylesheet hook via className.
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:image {"sizeSlug":"large"} -->'
+        . '<figure class="wp-block-image size-large"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Sorted cullet before the melt.</figcaption></figure>'
+        . '<!-- /wp:image --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(true, $res['changed']);
+    assert_contains('"className":"caption-text-base"', $res['markup']);
+    assert_eq(1, count($res['findings']));
+    assert_contains('image caption', $res['findings'][0]['detail']);
+    assert_contains('caption-text-base', $res['findings'][0]['detail']);
+    assert_eq(true, $res['findings'][0]['repaired']);
+});
+
+test('a readable caption is untouched', function () {
+    // Inherited contrast (#111) on the base page background reads fine.
+    $src = '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Readable on base.</figcaption></figure>'
+        . '<!-- /wp:image -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(false, $res['changed']);
+    assert_eq([], $res['findings']);
+});
+
+test('a caption follows an ancestor textColor when judging its pair', function () {
+    // The band sets textColor=base; the caption inherits base on contrast — passes.
+    $src = '<!-- wp:group {"backgroundColor":"contrast","textColor":"base"} -->' . "\n"
+        . '<div class="wp-block-group has-base-color has-contrast-background-color has-text-color has-background">'
+        . '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Inherits the band color.</figcaption></figure>'
+        . '<!-- /wp:image --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(false, $res['changed']);
+    assert_eq([], $res['findings']);
+});
+
+test('a caption repair replaces a stale hook and keeps other classes', function () {
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:image {"className":"alignwide caption-text-contrast"} -->'
+        . '<figure class="wp-block-image alignwide caption-text-contrast"><img src="x.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Stale hook.</figcaption></figure>'
+        . '<!-- /wp:image --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_contains('"className":"alignwide caption-text-base"', $res['markup']);
+});
+
+test('captions inside an image-backed cover are deferred like other cover text', function () {
+    // The image pixels are unknowable in phase one; no caption finding, and no
+    // dim-floor entry either (an image caption is not TEXT_BLOCKS content).
+    $src = '<!-- wp:cover {"url":"x.jpg","dimRatio":60} -->'
+        . '<div class="wp-block-cover"><div class="wp-block-cover__inner-container">'
+        . '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="y.jpg" alt=""/>'
+        . '<figcaption class="wp-element-caption">Over the photo.</figcaption></figure>'
+        . '<!-- /wp:image --></div></div>'
+        . '<!-- /wp:cover -->';
+    $res = contrast_fix()->process($src);
+    assert_eq([], $res['findings']);
+});
+
+test('a gallery caption is the gallery tail, not a child image caption', function () {
+    // The child image has no caption; the failing caption belongs to the
+    // gallery itself — the hook must land on the gallery, not the child.
+    $src = '<!-- wp:group {"backgroundColor":"contrast"} -->' . "\n"
+        . '<div class="wp-block-group has-contrast-background-color has-background">'
+        . '<!-- wp:gallery {"linkTo":"none"} -->'
+        . '<figure class="wp-block-gallery has-nested-images columns-default is-cropped">'
+        . '<!-- wp:image -->'
+        . '<figure class="wp-block-image"><img src="a.jpg" alt=""/></figure>'
+        . '<!-- /wp:image -->'
+        . '<figcaption class="blocks-gallery-caption wp-element-caption">Two nights of installs.</figcaption></figure>'
+        . '<!-- /wp:gallery --></div>' . "\n"
+        . '<!-- /wp:group -->';
+    $res = contrast_fix()->process($src);
+    assert_eq(1, count($res['findings']));
+    assert_contains('gallery caption', $res['findings'][0]['detail']);
+    assert_contains('wp:gallery {"linkTo":"none","className":"caption-text-base"}', $res['markup']);
+});

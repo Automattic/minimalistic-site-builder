@@ -32,6 +32,11 @@ test('scaffold-theme writes style.css and readme with placeholders', function ()
     assert_true(!str_contains($css, 'height: 200px'), 'fixed card crop heights are gone');
     assert_true(!str_contains($css, 'height: 320px'), 'fixed tall crop heights are gone');
 
+    // The caption color hooks ContrastFix repairs unreadable figcaptions
+    // through (the image block supports no textColor of its own, BIGR-784).
+    assert_contains('.caption-text-base figcaption { color: var(--wp--preset--color--base); }', $css);
+    assert_contains('.caption-text-contrast figcaption { color: var(--wp--preset--color--contrast); }', $css);
+
     // Flush list-thumb rows: the zeroed row padding must beat generated inline
     // padding, the row clips the bleeding thumb under its border radius, and
     // the thumb releases its square crop to stretch to the text-driven row

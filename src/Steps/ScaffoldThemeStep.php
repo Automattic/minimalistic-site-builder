@@ -121,6 +121,16 @@ final class ScaffoldThemeStep implements Step
         .card-media-tall img { aspect-ratio: 4 / 5; height: auto; }
         .card-media-thumb img { aspect-ratio: 1 / 1; height: auto; }
 
+        /* Caption readability (ContrastFix opts a figure in via className).
+           A figcaption inherits the surrounding text color and the image
+           block supports no textColor of its own, so an unreadable inherited
+           caption inside a tinted band is repaired through these class hooks
+           (BIGR-784). The bare figcaption selector covers both caption class
+           spellings the generator emits (wp-element-caption and the legacy
+           wp-block-image__caption). Hooks mirror ContrastFix's candidates. */
+        .caption-text-base figcaption { color: var(--wp--preset--color--base); }
+        .caption-text-contrast figcaption { color: var(--wp--preset--color--contrast); }
+
         /* Equal-height, equal-width card rows (sections opt in via className="equal-cards"). */
         .equal-cards > .wp-block-column {
             display: flex;
