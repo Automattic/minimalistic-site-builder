@@ -134,9 +134,11 @@ final class ImagePromptComposer
         // assets skip it — they are isolated subjects with no scene to dress.
         $letteringClause = (!$transparent && self::subjectNamesTextCarrier($subject))
             ? 'Any sign, board, screen or printed surface in the scene is quiet'
-                . ' set dressing: kept distant, obliquely angled or softly out of'
-                . ' focus so its surface reads as simple shapes, glare and texture,'
-                . ' and the image tells its story through form, light and color alone.'
+                . ' set dressing: its face is unmarked — bare wood, clear glass,'
+                . ' dark glass or blank chalk — or kept so distant, obliquely angled'
+                . ' or softly out of focus that it reads as simple shapes, glare and'
+                . ' texture, and the image tells its story through form, light and'
+                . ' color alone.'
             : '';
 
         // Page and site context only steer mood/composition — they are NOT
