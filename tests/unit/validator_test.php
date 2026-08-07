@@ -466,9 +466,26 @@ test('validator flags raw form markup in generated markup', function () {
 
     $joined = implode(' ', ThemeValidator::validate($project));
     assert_contains('plugin/pages/contact.html', $joined);
-    assert_contains('form markup', $joined);
-    assert_contains('no form backend', $joined);
+    assert_contains('raw form markup', $joined);
+    assert_contains('use Jetpack Forms blocks', $joined);
 
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('validator accepts Jetpack Forms block markup', function () {
+    [$project, $tmp] = validator_project();
+    $project->writeText('plugin/pages/contact.html',
+        '<!-- wp:jetpack/contact-form --><div class="wp-block-jetpack-contact-form">'
+        . '<!-- wp:jetpack/field-name {"label":"Name","required":true} /-->'
+        . '<!-- wp:jetpack/field-email {"label":"Email","required":true} /-->'
+        . '<!-- wp:button {"tagName":"button","type":"submit","className":"form-button-submit is-submit"} -->'
+        . '<div class="wp-block-button form-button-submit is-submit">'
+        . '<button type="submit" class="wp-block-button__link wp-element-button">Send</button>'
+        . '</div><!-- /wp:button -->'
+        . '</div><!-- /wp:jetpack/contact-form -->'
+    );
+
+    assert_eq([], ThemeValidator::validate($project));
     exec('rm -rf ' . escapeshellarg($tmp));
 });
 

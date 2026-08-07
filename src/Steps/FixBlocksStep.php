@@ -10,6 +10,7 @@ use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
 use Automattic\SiteBuild\LayoutFixer;
+use Automattic\SiteBuild\JetpackFormFixer;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ShapeMarkup;
@@ -23,8 +24,8 @@ use Automattic\SiteBuild\Units\GeneratedMarkup;
  * Input:  theme/templates/*.html + theme/parts/*.html
  * Output: the same files, re-serialized to match WordPress save() exactly.
  *
- * Runs the LayoutFixer width/rhythm and design-direction shape normalization
- * FIRST. Both edit block-comment JSON attributes, and the block
+ * Runs Jetpack form, LayoutFixer width/rhythm, and design-direction shape
+ * normalization FIRST. They edit block-comment JSON attributes, and the block
  * re-serialization right after syncs saved HTML with those attributes.
  *
  * Delegates the effectful repair to an injected BlockFixer.
@@ -88,6 +89,7 @@ final class FixBlocksStep implements Step
             ? []
             : SectionLayoutStep::wideClassTokens($designCss);
         try {
+            $formNotes = self::normalizeJetpackForms($project);
             $listReport = self::liftBareListItems($project);
             $listNotes = $listReport['notes'];
             $listWarnings = $listReport['warnings'];
@@ -120,6 +122,7 @@ final class FixBlocksStep implements Step
                 }
             }
             self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
+            $formNotes = self::withoutFailedLayoutNotes($formNotes, self::failurePaths($failedFiles));
             $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
             $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
             $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
@@ -130,11 +133,12 @@ final class FixBlocksStep implements Step
         }
 
         // Structural repair can make previously unparseable markup safe for
-        // LayoutFixer or expose image/button attributes to ShapeMarkup (for
-        // example, by balancing a wp:group). Give both contracts one more
+        // JetpackFormFixer/LayoutFixer or expose image/button attributes to
+        // ShapeMarkup (for example, by balancing a wp:group). Give each contract one more
         // chance, then re-serialize only when that pass actually changed
         // comment attributes so the saved HTML stays in sync with them.
         try {
+            $postRepairFormNotes = self::normalizeJetpackForms($project, self::failurePaths($failedFiles));
             $postRepairLayoutNotes = self::normalizeLayouts(
                 $project,
                 self::failurePaths($failedFiles),
@@ -147,17 +151,19 @@ final class FixBlocksStep implements Step
                 $shape,
                 self::failurePaths($failedFiles),
             );
+            $formNotes = array_merge($formNotes, $postRepairFormNotes);
             $layoutNotes = array_merge($layoutNotes, $postRepairLayoutNotes);
             $shapeChanges = array_merge($shapeChanges, $postRepairShapeChanges);
-            if ($postRepairLayoutNotes !== [] || $postRepairShapeChanges !== []) {
+            if ($postRepairFormNotes !== [] || $postRepairLayoutNotes !== [] || $postRepairShapeChanges !== []) {
                 $alignmentBaselines[] = self::snapshotThemeFiles($project);
                 $followUpOutcome = BlockFixerOutcome::run($this->fixer, $project->themePath());
                 $outcomes[] = $followUpOutcome;
                 $followUpSummary = $followUpOutcome->formatted;
-                $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass:\n  "
+                $summary .= "\n[form/layout/shape] post-repair normalization required a second block-fixer pass:\n  "
                     . str_replace("\n", "\n  ", $followUpSummary);
                 self::appendFailures($failedFiles, $followUpOutcome);
                 self::restoreFailedThemeFiles($project, $beforeInitialPass, self::failurePaths($failedFiles));
+                $formNotes = self::withoutFailedLayoutNotes($formNotes, self::failurePaths($failedFiles));
                 $layoutNotes = self::withoutFailedLayoutNotes($layoutNotes, self::failurePaths($failedFiles));
                 $listNotes = self::withoutFailedLayoutNotes($listNotes, self::failurePaths($failedFiles));
                 $listWarnings = self::withoutFailedLayoutNotes($listWarnings, self::failurePaths($failedFiles));
@@ -167,14 +173,22 @@ final class FixBlocksStep implements Step
             // repair can require two fixer passes. A failed follow-up must not
             // leave the first pass committed as a partial step result.
             self::restoreThemeFiles($project, $beforeInitialPass);
-            $summary .= "\n[layout/shape] post-repair normalization required a second block-fixer pass, which failed:\n  "
+            $summary .= "\n[form/layout/shape] post-repair normalization required a second block-fixer pass, which failed:\n  "
                 . str_replace("\n", "\n  ", $e->getMessage());
+            if ($formNotes !== []) {
+                $summary .= "\n[forms] " . count($formNotes) . " submit-button repair(s):\n  "
+                    . implode("\n  ", $formNotes);
+            }
             if ($layoutNotes !== []) {
                 $summary .= "\n[layout] " . count($layoutNotes) . " width/rhythm fix(es):\n  "
                     . implode("\n  ", $layoutNotes);
             }
             $project->writeText('logs/' . self::LOG_FILE, $summary . "\n");
             throw $e;
+        }
+        if ($formNotes !== []) {
+            $summary .= "\n[forms] " . count($formNotes) . " submit-button repair(s):\n  "
+                . implode("\n  ", $formNotes);
         }
         if ($listNotes !== []) {
             $summary .= "\n[list] " . count($listNotes) . " bare list-item lift(s):\n  " . implode("\n  ", $listNotes);
@@ -364,6 +378,37 @@ final class FixBlocksStep implements Step
         if ($layoutNotes !== []) {
             echo '  layout: ' . count($layoutNotes) . " width/rhythm fix(es) applied\n";
         }
+        if ($formNotes !== []) {
+            echo '  forms: ' . count($formNotes) . " submit button(s) repaired\n";
+        }
+    }
+
+    /**
+     * Default legacy Jetpack buttons inside generated contact forms to real
+     * button elements before the block fixer sees them.
+     *
+     * @param list<string> $excluded fixer-relative paths that have already
+     *        failed this step and must remain at their step-entry bytes
+     * @return list<string>
+     */
+    public static function normalizeJetpackForms(Project $project, array $excluded = []): array
+    {
+        $notes = [];
+        $excluded = array_fill_keys($excluded, true);
+        foreach ($project->themeFiles() as $rel) {
+            if (isset($excluded[$rel])) {
+                continue;
+            }
+            $markup = $project->readText('theme/' . $rel);
+            $result = JetpackFormFixer::fix($markup);
+            if ($result['markup'] !== $markup) {
+                $project->writeText('theme/' . $rel, $result['markup']);
+            }
+            foreach ($result['notes'] as $note) {
+                $notes[] = "{$rel}: {$note}";
+            }
+        }
+        return $notes;
     }
 
     /**
@@ -1103,7 +1148,7 @@ final class FixBlocksStep implements Step
 
     /**
      * A fixer failure abandons this step's complete transaction for that file,
-     * including LayoutFixer mutations made before either fixer pass.
+     * including form/layout mutations made before either fixer pass.
      *
      * @param array<string,string> $snapshot
      * @param list<string> $failedPaths

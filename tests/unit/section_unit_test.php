@@ -250,6 +250,19 @@ test('SectionUnit documents the nested flush-card body contract', function () {
     );
 });
 
+test('SectionUnit documents canonical Jetpack Forms markup', function () {
+    $request = (new SectionUnit(
+        new FakeLlm(),
+        new PromptRenderer(repo_path('prompts')),
+    ))->request(section_unit_input());
+    $prompt = section_unit_request_text($request);
+
+    assert_contains('wp:jetpack/contact-form', $prompt);
+    assert_contains('"tagName":"button","type":"submit"', $prompt);
+    assert_contains('NEVER use `wp:jetpack/button` for a form submit control', $prompt);
+    assert_contains('never emit raw `<form>`', $prompt);
+});
+
 test('SectionUnit documents the complete list-thumb delivery contract', function () {
     $request = (new SectionUnit(
         new FakeLlm(),
