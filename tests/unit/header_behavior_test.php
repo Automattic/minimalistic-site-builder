@@ -341,22 +341,33 @@ test('treatments ride the artifact across overlay, fallback, and static paths', 
         'accent' => '#C2410C',
     ];
 
-    // Overlay: scrim-veiled transparent start, opaque solid landing.
+    // Overlay: plan-time resolve rests behind the kit scrim (a glass
+    // treatment); the truly clear start is earned later from delivered
+    // opening evidence, never assumed here.
     $overlay = HeaderBehavior::resolve(
         [['slug' => 'home', 'sections' => [['slug' => 'hero', 'background' => 'image']]]],
         HeaderBehavior::MODE_OVERLAY,
         $palette,
     );
     assert_eq(HeaderBehavior::OVERLAY_TO_SOLID, $overlay['behavior']);
-    assert_eq(HeaderBehavior::TREATMENT_TRANSPARENT, $overlay['topTreatment']);
+    assert_eq(HeaderBehavior::TREATMENT_GLASS, $overlay['topTreatment']);
     assert_eq(HeaderBehavior::TREATMENT_SOLID, $overlay['scrolledTreatment']);
     $classes = HeaderBehavior::rootClasses($overlay);
     foreach ($classes as $class) {
         assert_true(
             !str_starts_with($class, 'header-top-') && $class !== 'header-scrolled-glass',
-            'treatment hooks are sticky-only; the overlay kit owns its own states',
+            'the scrim-veiled overlay start is kit-automatic and claims no treatment hook',
         );
     }
+
+    // The earned clear start is the one overlay treatment hook: it names the
+    // proven scrim-free resting state for the kit CSS.
+    $clear = $overlay;
+    $clear['topTreatment'] = HeaderBehavior::TREATMENT_TRANSPARENT;
+    assert_true(
+        in_array('header-top-transparent', HeaderBehavior::rootClasses($clear), true),
+        'an earned clear overlay start opts in explicitly',
+    );
 
     // Overlay fallback: white passes the scrim but not its own 'base'
     // openings, and every darker token fails the scrim, so the stacked path
@@ -431,9 +442,12 @@ test('validateArtifact closes the treatment vocabulary per behavior', function (
     assert_eq($overlay, HeaderBehavior::validateArtifact($overlay));
     $overlayGlassTop = $overlay;
     $overlayGlassTop['topTreatment'] = 'glass';
+    assert_eq($overlayGlassTop, HeaderBehavior::validateArtifact($overlayGlassTop), 'the scrim veil is a glass top');
+    $overlaySolidTop = $overlay;
+    $overlaySolidTop['topTreatment'] = 'solid';
     assert_throws(
-        static fn () => HeaderBehavior::validateArtifact($overlayGlassTop),
-        'overlay requires a transparent top treatment',
+        static fn () => HeaderBehavior::validateArtifact($overlaySolidTop),
+        'overlay tops are veiled or earned-clear, never opaque',
     );
     $overlayGlassScrolled = $overlay;
     $overlayGlassScrolled['scrolledTreatment'] = 'glass';
@@ -441,4 +455,44 @@ test('validateArtifact closes the treatment vocabulary per behavior', function (
         static fn () => HeaderBehavior::validateArtifact($overlayGlassScrolled),
         'overlay requires a solid scrolled treatment',
     );
+});
+
+test('the clear overlay resting state is earned from the cover dim, worst case included (BIGR-778)', function () {
+    $white = [255, 255, 255];
+    $ink = [23, 26, 29];
+
+    // A 60% dark dim bounds a pure-white pixel to a readable composite; 50%
+    // does not. The minimal grant is therefore exactly 60.
+    assert_true(HeaderBehavior::clearOverlayTopIsSafe($white, $ink, 60.0, $ink, false));
+    assert_true(!HeaderBehavior::clearOverlayTopIsSafe($white, $ink, 50.0, $ink, false));
+    assert_eq(60, HeaderBehavior::minimalClearOverlayDim($white, $ink, $ink, false));
+
+    // Core renders dimRatio through a 10-point class. The proof must judge
+    // that delivered opacity rather than a slightly more favorable authored
+    // fraction, and values outside Core's class range cannot earn a grant.
+    assert_eq(50, HeaderBehavior::renderedCoverDim(54.0));
+    assert_eq(60, HeaderBehavior::renderedCoverDim(56.0));
+    assert_true(!HeaderBehavior::clearOverlayTopIsSafe($white, [0, 0, 0], 54.0, $ink, false));
+    assert_true(HeaderBehavior::clearOverlayTopIsSafe($white, [0, 0, 0], 56.0, $ink, false));
+    assert_eq(null, HeaderBehavior::renderedCoverDim(-1.0));
+    assert_eq(null, HeaderBehavior::renderedCoverDim(101.0));
+
+    // #222 needs more than the 60% class. Authored 62% previously passed the
+    // raw math but serializes to 60%; the canonical safe repair is 70%.
+    $softInk = [34, 34, 34];
+    assert_true(!HeaderBehavior::clearOverlayTopIsSafe($white, $softInk, 62.0, $softInk, false));
+    assert_eq(70, HeaderBehavior::minimalClearOverlayDim($white, $softInk, $softInk, false));
+
+    // Smooth transitions additionally prove the whole path into the
+    // scrolled solid; a same-family dark landing keeps the grant.
+    assert_true(HeaderBehavior::clearOverlayTopIsSafe($white, $ink, 60.0, $ink, true));
+
+    // A mid-gray protection can never bound a white pixel readably at any
+    // dim the cap allows: no grant, the scrim veil stays.
+    assert_eq(null, HeaderBehavior::minimalClearOverlayDim($white, [102, 102, 102], $ink, false));
+
+    // A full-opacity "dim" is the solid-opening case: the clear state
+    // reveals the protection surface itself.
+    assert_true(HeaderBehavior::clearOverlayTopIsSafe($white, $ink, 100.0, $ink, false));
+    assert_true(!HeaderBehavior::clearOverlayTopIsSafe([23, 26, 29], $ink, 100.0, $ink, false));
 });
