@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -177,9 +178,14 @@ final class CollectImagesStep implements Step
         $targetColor = is_string($targetColor) && preg_match('/^#[0-9a-f]{6}$/i', $targetColor) === 1
             ? strtoupper($targetColor)
             : null;
+        // The tone is described in words, never as a raw hex string: the
+        // model has been observed rendering the prompt itself — hex code
+        // included — as painted-on caption text (fleet-cedar). For the same
+        // reason the subject must never mention "text" or "lettering";
+        // naming text invites text.
         $tone = $targetColor === null
             ? 'a single quiet pale neutral tone'
-            : "a single quiet tone of {$targetColor}, the actual delivered hero surface color";
+            : 'a single quiet tone of ' . self::describeHexTone($targetColor);
         // One concrete material per site, not a menu, and no stock-texture
         // vocabulary: a "seamless tone-on-tone surface texture" prompt is
         // stock-photo title language and trips the image model's
@@ -201,8 +207,8 @@ final class CollectImagesStep implements Step
                 . " uniformly past every edge. The whole surface is {$tone}, and its"
                 . " {$grain} must be clearly visible — a rich tactile material texture that"
                 . ' reads as textured at a glance from normal viewing distance — while'
-                . ' staying even and calm enough that readable text can sit directly on it.'
-                . ' No objects, no lettering, no folds, no stains, no vignette.',
+                . ' staying even and calm, a completely bare untouched surface.'
+                . ' No objects, no markings, no folds, no stains, no vignette.',
             'pageContext' => 'tiled page-canvas texture running behind the site header and the hero copy;'
                 . ' it must stay quiet enough that readable text sits directly on it',
             'style' => 'photorealistic',
@@ -212,6 +218,68 @@ final class CollectImagesStep implements Step
             'purpose' => self::STAGE_TEXTURE_PURPOSE,
             'targetColor' => $targetColor,
         ];
+    }
+
+    /**
+     * A natural-language color description for the texture prompt. The image
+     * model follows color words at least as faithfully as hex codes and,
+     * unlike a hex string, cannot render them as visible painted-on
+     * characters.
+     */
+    public static function describeHexTone(string $hex): string
+    {
+        $rgb = ContrastMath::hexToRgb($hex);
+        if ($rgb === null) {
+            return 'a pale neutral';
+        }
+        [$r, $g, $b] = array_map(static fn (int $v): float => $v / 255.0, $rgb);
+        $max = max($r, $g, $b);
+        $min = min($r, $g, $b);
+        $lightness = ($max + $min) / 2.0;
+        $delta = $max - $min;
+        $saturation = $delta === 0.0
+            ? 0.0
+            : $delta / (1.0 - abs(2.0 * $lightness - 1.0) ?: 1.0);
+        $lightnessWord = match (true) {
+            $lightness > 0.90 => 'very pale',
+            $lightness > 0.70 => 'pale',
+            $lightness > 0.45 => 'medium',
+            $lightness > 0.22 => 'deep',
+            default => 'very dark',
+        };
+        // Neutrality is judged on chroma, not HSL saturation — saturation
+        // inflates near white, where a faint cast must still read neutral.
+        if ($delta < 0.10) {
+            $neutral = $lightness > 0.85 ? 'off-white' : 'gray';
+            // A faint warm or cool cast still reads on large surfaces.
+            $cast = $r > $b + 0.01 ? 'warm ' : ($b > $r + 0.01 ? 'cool ' : '');
+            return "{$lightnessWord} {$cast}{$neutral}";
+        }
+        $hue = 0.0;
+        if ($delta > 0.0) {
+            $hue = match ($max) {
+                $r => fmod(($g - $b) / $delta, 6.0),
+                $g => ($b - $r) / $delta + 2.0,
+                default => ($r - $g) / $delta + 4.0,
+            } * 60.0;
+            if ($hue < 0) {
+                $hue += 360.0;
+            }
+        }
+        $hueWord = match (true) {
+            $hue < 15.0 => 'red',
+            $hue < 40.0 => 'terracotta',
+            $hue < 70.0 => 'golden beige',
+            $hue < 100.0 => 'yellow-green',
+            $hue < 160.0 => 'green',
+            $hue < 200.0 => 'teal',
+            $hue < 250.0 => 'blue',
+            $hue < 290.0 => 'violet',
+            $hue < 330.0 => 'magenta',
+            default => 'red',
+        };
+        $saturationWord = $saturation < 0.30 ? 'muted ' : ($saturation > 0.65 ? 'rich ' : '');
+        return "{$lightnessWord} {$saturationWord}{$hueWord}";
     }
 
     /** @param array<string,mixed> $spec */

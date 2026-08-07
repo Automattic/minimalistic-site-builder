@@ -337,8 +337,12 @@ test('collect-images synthesizes the code-owned stage-texture spec from style re
     assert_eq(CollectImagesStep::STAGE_TEXTURE_PURPOSE, $images[0]['purpose']);
     assert_eq('#F4EFE7', $images[0]['targetColor']);
     assert_contains('photographed head-on', $images[0]['subject']);
-    assert_contains('no lettering', $images[0]['subject']);
-    assert_contains('#F4EFE7', $images[0]['subject']);
+    assert_contains('no markings', $images[0]['subject']);
+    // The surface tone rides in as color words, never as a hex string —
+    // the model has rendered prompt hex codes as painted-on caption text.
+    assert_true(!str_contains($images[0]['subject'], '#F4EFE7'), 'no raw hex in the prompt subject');
+    assert_true(!preg_match('/\btext\b|lettering/i', $images[0]['subject']), 'no text-render bait in the subject');
+    assert_contains('very pale warm off-white', $images[0]['subject']);
     assert_eq(['parts/header.html', 'parts/page-home--hero.html'], $images[0]['sources']);
 
     exec('rm -rf ' . escapeshellarg($tmp));
