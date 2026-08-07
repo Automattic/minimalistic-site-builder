@@ -153,6 +153,27 @@ test('HeroUnit exposes one isolated assigned recipe and no section cache prefixe
     }
 });
 
+test('HeroUnit prompt bounds the standfirst without absorbing overflow', function () {
+    $prompt = (new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->request(hero_unit_contract_input())['prompt'];
+
+    assert_contains('one sentence, about two set lines', $prompt, 'semantic length guidance stays primary');
+    assert_contains('no more than roughly 180 characters', $prompt, 'the character guidance is an upper bound');
+    assert_contains('Do not fold overflow into the standfirst', $prompt, 'section copy cannot fill the sole support slot');
+    assert_true(!str_contains($prompt, 'fold it into the one standfirst'), 'the contradictory overflow option is absent');
+});
+
+test('HeroUnit prompt rejects generic headline registers without inventing differentiation', function () {
+    $prompt = (new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts'))))
+        ->request(hero_unit_contract_input())['prompt'];
+
+    assert_contains('Never open with "Welcome to" (in any language)', $prompt);
+    assert_contains('never let the headline be a bare category label', $prompt);
+    assert_contains('grounded in the supplied SITE SPEC and section brief', $prompt);
+    assert_contains('Specificity is not permission to invent a differentiator', $prompt);
+    assert_contains('history, provenance, awards, superlatives', $prompt);
+});
+
 test('HeroUnit keeps portable identity and exact action facts in self-contained input', function () {
     $input = hero_unit_contract_input();
     $unit = new HeroUnit(new FakeLlm(), new PromptRenderer(repo_path('prompts')));

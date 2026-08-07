@@ -41,7 +41,7 @@ test('StepComposition default matches CLI step order and validates', function ()
     $steps = $c->steps();
     assert_eq([
         'scaffold-theme', 'scaffold-plugin', 'refine-prompt', 'site-spec', 'apply-identity', 'design-direction',
-        'theme-json+page-plan', 'sections', 'section-rhythm',
+        'theme-json+page-plan', 'sections', 'section-rhythm', 'copy-dedupe',
         'collect-images', 'normalize-layout', 'header-hero', 'contrast-fix', 'motion-sanity', 'fix-blocks',
         'assemble-pages', 'page-styles', 'custom-motion', 'bundle-fonts', 'fonts-php', 'finalize-theme',
         'validate-theme',
