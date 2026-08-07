@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Automattic\SiteBuild\Steps;
 
+use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ProjectStore;
@@ -43,6 +44,8 @@ use Automattic\SiteBuild\Warnings;
  */
 final class CollectImagesStep implements Step
 {
+    public const STAGE_TEXTURE_PURPOSE = 'stage-texture-backdrop';
+
     public function id(): string
     {
         return 'collect-images';
@@ -58,7 +61,7 @@ final class CollectImagesStep implements Step
         return new StepDeclaration(
             id: $this->id(),
             label: $this->label(),
-            reads: ['theme/parts/*'],
+            reads: ['theme/parts/*', 'theme/theme.json', 'theme/assets/*'],
             writes: [
                 'images.json',
                 'theme/parts/*',
@@ -74,6 +77,8 @@ final class CollectImagesStep implements Step
         $byFilename = [];
         $warnings = [];
         $textureSources = [];
+        $textureAlreadyServed = false;
+        $reservedOrdinarySources = [];
 
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
@@ -81,8 +86,22 @@ final class CollectImagesStep implements Step
             if ($parsed['content'] !== $content) {
                 $project->writeText('theme/' . $rel, $parsed['content']);
             }
-            if (str_contains($parsed['content'], GeneratedMarkup::STAGE_TEXTURE_ASSET)) {
+            if ($parsed['reservedOrdinaryPlaceholder']) {
+                $reservedOrdinarySources[] = $rel;
+                $warnings[] = "file=" . Warnings::value('theme/' . $rel)
+                    . "; block='AI_IMAGE media owner'; authored source="
+                    . Warnings::value(GeneratedMarkup::STAGE_TEXTURE_ASSET)
+                    . '; delivered source=' . Warnings::value(GeneratedMarkup::STAGE_TEXTURE_ASSET)
+                    . '; disposition=reserved ordinary placeholder retained because its parsed media owner '
+                    . 'could not be atomically synchronized; code-owned stage texture mapping suppressed';
+            }
+            if (self::containsCommittedStageTexture($parsed['content'])) {
                 $textureSources[] = $rel;
+                $textureAlreadyServed = $textureAlreadyServed
+                    || preg_match(
+                        '~/wp-content/themes/[a-z0-9_-]+/assets/stage_backdrop-texture\.jpg~i',
+                        $parsed['content'],
+                    ) === 1;
             }
             foreach ($parsed['images'] as $img) {
                 $cappedForFooter = false;
@@ -120,12 +139,20 @@ final class CollectImagesStep implements Step
         // Textured stage canvas (BIGR-776): the header/hero roots reference
         // the texture through a root background style, not an <img>
         // placeholder, so its code-owned spec is synthesized whenever a part
-        // carries the canonical asset path. The subject is reviewed here —
-        // the design direction's global image grade still applies at
-        // prompt-composition time like every other asset.
+        // carries the exact marker + block-background contract. Ordinary
+        // generated media that copies the reserved filename is renamed before
+        // this synthesis, so it cannot claim the code-owned slot.
         $textureFilename = basename(GeneratedMarkup::STAGE_TEXTURE_ASSET);
-        if ($textureSources !== [] && !isset($byFilename[$textureFilename])) {
-            $byFilename[$textureFilename] = self::stageTextureSpec($textureSources);
+        if ($textureSources !== [] && $reservedOrdinarySources === []) {
+            $textureSpec = self::stageTextureSpec(
+                $textureSources,
+                self::stageTextureTargetColor($project),
+            );
+            if ($textureAlreadyServed && $project->exists('theme/assets/' . $textureFilename)) {
+                $textureSpec['status'] = 'completed';
+                $textureSpec['url'] = "/wp-content/themes/{$project->slug()}/assets/{$textureFilename}";
+            }
+            $byFilename[$textureFilename] = $textureSpec;
         }
 
         $project->writeJson('images.json', array_values($byFilename));
@@ -142,21 +169,180 @@ final class CollectImagesStep implements Step
      * @param list<string> $sources theme-relative markup paths referencing the texture
      * @return array<string,mixed>
      */
-    public static function stageTextureSpec(array $sources): array
+    public static function stageTextureSpec(array $sources, ?string $targetColor = null): array
     {
+        $targetColor = is_string($targetColor) && preg_match('/^#[0-9a-f]{6}$/i', $targetColor) === 1
+            ? strtoupper($targetColor)
+            : null;
+        $tone = $targetColor === null
+            ? 'Keep the whole tile within one narrow, pale neutral tonal range.'
+            : "Use {$targetColor}, the actual delivered hero surface color, as the dominant and average visible tone; "
+                . 'deviate from it only enough for extremely fine material grain.';
         return [
             'filename' => basename(GeneratedMarkup::STAGE_TEXTURE_ASSET),
             'src' => GeneratedMarkup::STAGE_TEXTURE_ASSET,
             'subject' => 'A seamless repeating tone-on-tone surface texture — subtle paper grain, plaster,'
                 . ' linen, or stone — extremely low contrast, near-uniform tone, no objects, no lettering,'
-                . ' no distinct shapes, no vignette',
+                . " no distinct shapes, no vignette. {$tone}",
             'pageContext' => 'tiled page-canvas texture running behind the site header and the hero copy;'
                 . ' it must stay quiet enough that readable text sits directly on it',
             'style' => 'photorealistic',
             'aspectRatio' => 'square',
             'sources' => $sources,
             'status' => 'pending',
+            'purpose' => self::STAGE_TEXTURE_PURPOSE,
+            'targetColor' => $targetColor,
         ];
+    }
+
+    /** @param array<string,mixed> $spec */
+    public static function isStageTextureSpec(array $spec): bool
+    {
+        return ($spec['purpose'] ?? null) === self::STAGE_TEXTURE_PURPOSE
+            && ($spec['src'] ?? null) === GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    }
+
+    /**
+     * True only for the complete code-owned backdrop contract. A plain media
+     * reference to a similarly named file must never synthesize a stage tile.
+     */
+    public static function containsCommittedStageTexture(string $markup): bool
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+        } catch (\Throwable) {
+            return false;
+        }
+        foreach ($document->indices() as $index) {
+            $attrs = $document->attrs($index);
+            if (!$document->isStructurallySafe($index)
+                || !is_array($attrs)
+                || !self::isCommittedStageTextureAttrs($attrs)
+            ) {
+                continue;
+            }
+            $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+            $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+            $image = is_array($background['backgroundImage'] ?? null) ? $background['backgroundImage'] : [];
+            $source = $image['url'] ?? null;
+            $end = $document->endOffset($index);
+            $start = $document->openingOffset($index);
+            if (is_string($source)
+                && $end !== null
+                && GeneratedMarkup::hasExactStageTextureContract(
+                    substr($markup, $start, $end - $start),
+                    $source,
+                )
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Exact delivered hero tone that keeps the opaque tile inside the surface
+     * and contrast contracts. Different hero targets are incompatible: the
+     * generator then rejects the texture and delivers the solid fallbacks.
+     */
+    public static function stageTextureTargetColor(Project $project, bool $allMarkup = false): ?string
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return null;
+        }
+        $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
+        $targets = [];
+        $sawHeroBackdrop = false;
+        $unresolvedHeroSurface = false;
+        $files = $allMarkup
+            ? $project->markupFiles()
+            : (glob($project->themePath('parts/*.html')) ?: []);
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        foreach ($files as $absolute) {
+            $relative = str_starts_with($absolute, $root)
+                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+                : $absolute;
+            if ($relative === 'theme/parts/header.html') {
+                continue;
+            }
+            try {
+                $document = BlockMarkup::parse($project->readText($relative));
+            } catch (\Throwable) {
+                continue;
+            }
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index);
+                if (!$document->isStructurallySafe($index)
+                    || !is_array($attrs)
+                    || !self::isCommittedStageTextureAttrs($attrs)
+                ) {
+                    continue;
+                }
+                $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+                $image = is_array($background['backgroundImage'] ?? null) ? $background['backgroundImage'] : [];
+                $source = $image['url'] ?? null;
+                $end = $document->endOffset($index);
+                $start = $document->openingOffset($index);
+                if (!is_string($source)
+                    || $end === null
+                    || !GeneratedMarkup::hasExactStageTextureContract(
+                        substr($project->readText($relative), $start, $end - $start),
+                        $source,
+                    )
+                ) {
+                    continue;
+                }
+                $sawHeroBackdrop = true;
+                $color = self::stageSurfaceColor($attrs, $palette);
+                if ($color === null) {
+                    $unresolvedHeroSurface = true;
+                } else {
+                    $targets[strtoupper($color)] = true;
+                }
+            }
+        }
+        if (!$sawHeroBackdrop) {
+            return null;
+        }
+        return !$unresolvedHeroSurface && count($targets) === 1 ? array_key_first($targets) : null;
+    }
+
+    /** @param array<string,mixed> $attrs */
+    public static function isCommittedStageTextureAttrs(array $attrs): bool
+    {
+        $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+        $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+        $image = is_array($background['backgroundImage'] ?? null) ? $background['backgroundImage'] : [];
+        $className = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+        $classes = preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        return GeneratedMarkup::isStageTextureSource($image['url'] ?? null)
+            && in_array(GeneratedMarkup::STAGE_TEXTURE_CLASS, $classes, true);
+    }
+
+    /** @param array<string,mixed> $attrs @param array<string,string> $palette */
+    private static function stageSurfaceColor(array $attrs, array $palette): ?string
+    {
+        $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+        $colorStyle = is_array($style['color'] ?? null) ? $style['color'] : [];
+        foreach ([$colorStyle['background'] ?? null, $attrs['backgroundColor'] ?? null] as $value) {
+            if (!is_string($value)) {
+                continue;
+            }
+            $value = trim($value);
+            if (isset($palette[$value])) {
+                return strtoupper($palette[$value]);
+            }
+            if (preg_match('/^var:preset\|color\|([a-z0-9_-]+)$/i', $value, $match) === 1
+                && isset($palette[$match[1]])
+            ) {
+                return strtoupper($palette[$match[1]]);
+            }
+            if (preg_match('/^#[0-9a-f]{6}$/i', $value) === 1) {
+                return strtoupper($value);
+            }
+        }
+        return null;
     }
 
     /** Theme-relative paths of every markup file that may hold image placeholders. */
@@ -186,12 +372,12 @@ final class CollectImagesStep implements Step
      * Parse canonical placeholders and recover malformed URL/source forms,
      * returning the normalized markup alongside their shared image specs.
      *
-     * @return array{content:string,images:array<int,array<string,mixed>>}
+     * @return array{content:string,images:array<int,array<string,mixed>>,reservedOrdinaryPlaceholder:bool}
      */
     private static function parseAndNormalize(string $content): array
     {
         if (!str_contains($content, 'AI_IMAGE:')) {
-            return ['content' => $content, 'images' => []];
+            return ['content' => $content, 'images' => [], 'reservedOrdinaryPlaceholder' => false];
         }
 
         // Canonical placeholders in the original markup double as recovery
@@ -218,7 +404,47 @@ final class CollectImagesStep implements Step
             }
         }
 
-        return ['content' => $recovered['content'], 'images' => $images];
+        // The stage tile's filename is reserved even if generated content
+        // copies it into an ordinary AI_IMAGE media block. Rename that media
+        // deterministically and only at media url/src boundaries; a true
+        // marker + Group background keeps the code-owned source untouched.
+        $reservedReplacement = null;
+        foreach ($images as &$image) {
+            if (($image['src'] ?? null) !== GeneratedMarkup::STAGE_TEXTURE_ASSET) {
+                continue;
+            }
+            $reservedReplacement ??= 'theme:./assets/' . self::synthesizeFilename(
+                (string) ($image['subject'] ?? 'stage texture media'),
+                'reserved-stage-texture-media|' . json_encode($image, JSON_UNESCAPED_SLASHES),
+            );
+            $image['src'] = $reservedReplacement;
+            $image['filename'] = basename($reservedReplacement);
+        }
+        unset($image);
+        $normalized = $recovered['content'];
+        if ($reservedReplacement !== null) {
+            $renamed = self::renameReservedMediaSource(
+                $normalized,
+                GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                $reservedReplacement,
+            );
+            $normalized = $renamed['content'];
+            if ($renamed['rewritten'] === 0) {
+                // Do not pay for an image whose only generated reference was
+                // retained at the old source because its owner was unsafe to
+                // synchronize. The durable warning is the repair queue row.
+                $images = array_values(array_filter(
+                    $images,
+                    static fn (array $image): bool => ($image['src'] ?? null) !== $reservedReplacement,
+                ));
+            }
+        }
+
+        return [
+            'content' => $normalized,
+            'images' => $images,
+            'reservedOrdinaryPlaceholder' => self::containsReservedOrdinaryAiPlaceholder($normalized),
+        ];
     }
 
     /**
@@ -238,7 +464,7 @@ final class CollectImagesStep implements Step
             $imgTag = $match[0];
             $alt    = html_entity_decode($match[2], ENT_QUOTES | ENT_HTML5);
 
-            if (!preg_match('/src=(["\'])(theme:\.\/assets\/([a-z0-9-]+\.(?:jpe?g|png)))\1/i', $imgTag, $srcMatch)) {
+            if (!preg_match('/src=(["\'])(theme:\.\/assets\/([a-z0-9_-]+\.(?:jpe?g|png)))\1/i', $imgTag, $srcMatch)) {
                 continue; // no theme-relative asset src — skip
             }
             $src      = $srcMatch[2];
@@ -270,6 +496,165 @@ final class CollectImagesStep implements Step
         }
 
         return $images;
+    }
+
+    /**
+     * Rewrite a reserved source only where the exact img is bare or its
+     * smallest parsed media owner can be updated in the same transaction.
+     *
+     * A crossed or missing closer does not make the two independently bounded
+     * edits unsafe: the opening comment and img tag are still exact byte
+     * ranges. Conversely, rewriting the img without its parsed owner's source
+     * attribute would create a split-brain block, so that tag is retained and
+     * surfaced through containsReservedOrdinaryAiPlaceholder().
+     *
+     * @return array{content:string,rewritten:int}
+     */
+    private static function renameReservedMediaSource(string $content, string $old, string $new): array
+    {
+        try {
+            $document = BlockMarkup::parse($content);
+            /** @var array<int,true> $owners */
+            $owners = [];
+            /** @var array<int,bool> $rewriteTags exact reserved AI img ordinal => rewrite */
+            $rewriteTags = [];
+            $tagOrdinal = 0;
+            preg_match_all('/<img\b[^>]*>/is', $content, $tags, PREG_OFFSET_CAPTURE);
+            foreach ($tags[0] ?? [] as [$tag, $tagStart]) {
+                if (!self::isReservedAiImageTag($tag, $old)) {
+                    continue;
+                }
+
+                // A media block owns only the saved HTML before its first
+                // child block. Looking through all inner HTML would let a
+                // nested placeholder rename an unrelated ancestor Cover's
+                // own background URL. Pick the smallest media owner whose
+                // independently bounded own-HTML range contains the img.
+                $tagEnd = $tagStart + strlen($tag);
+                $owner = null;
+                $ownerLength = PHP_INT_MAX;
+                foreach ($document->indices() as $index) {
+                    if (!in_array($document->name($index), ['image', 'cover', 'media-text'], true)) {
+                        continue;
+                    }
+                    $ownStart = $document->openingOffset($index) + $document->openingLength($index);
+                    $children = $document->children($index);
+                    $ownEnd = $children === []
+                        ? $document->innerEndOffset($index)
+                        : $document->openingOffset($children[0]);
+                    if ($tagStart < $ownStart || $tagEnd > $ownEnd) {
+                        continue;
+                    }
+                    $length = $ownEnd - $ownStart;
+                    if ($length < $ownerLength) {
+                        $owner = $index;
+                        $ownerLength = $length;
+                    }
+                }
+                if ($owner === null) {
+                    // No parsed media owner means the exact img tag itself is
+                    // the smallest complete unit and can be renamed directly.
+                    $rewriteTags[$tagOrdinal++] = true;
+                    continue;
+                }
+
+                $attrs = $document->attrs($owner);
+                $ownerCanChange = false;
+                if (is_array($attrs)) {
+                    foreach (['url', 'src', 'mediaUrl'] as $key) {
+                        if (($attrs[$key] ?? null) === $old) {
+                            $ownerCanChange = true;
+                            break;
+                        }
+                    }
+                }
+                $rewriteTags[$tagOrdinal++] = $ownerCanChange;
+                if ($ownerCanChange) {
+                    $owners[$owner] = true;
+                }
+            }
+
+            foreach (array_keys($owners) as $index) {
+                $attrs = $document->attrs($index);
+                if (!is_array($attrs)) {
+                    continue;
+                }
+                $changed = false;
+                foreach (['url', 'src', 'mediaUrl'] as $key) {
+                    if (($attrs[$key] ?? null) === $old) {
+                        $attrs[$key] = $new;
+                        $changed = true;
+                    }
+                }
+                if ($changed) {
+                    $document->setAttrs($index, $attrs);
+                }
+            }
+            $rendered = $document->render();
+
+            $tagOrdinal = 0;
+            $rewritten = 0;
+            $delivered = preg_replace_callback(
+                '/<img\b[^>]*>/is',
+                static function (array $match) use (
+                    $old,
+                    $new,
+                    $rewriteTags,
+                    &$tagOrdinal,
+                    &$rewritten,
+                ): string {
+                    if (!self::isReservedAiImageTag($match[0], $old)) {
+                        return $match[0];
+                    }
+                    $rewrite = $rewriteTags[$tagOrdinal++] ?? false;
+                    if (!$rewrite) {
+                        return $match[0];
+                    }
+                    $rewritten++;
+                    return (string) preg_replace(
+                        '/(\bsrc\s*=\s*["\'])' . preg_quote($old, '/') . '(["\'])/i',
+                        '$1' . $new . '$2',
+                        $match[0],
+                        1,
+                    );
+                },
+                $rendered,
+            );
+            return is_string($delivered)
+                ? ['content' => $delivered, 'rewritten' => $rewritten]
+                : ['content' => $content, 'rewritten' => 0];
+        } catch (\Throwable) {
+            // Without a parsed ownership map we cannot prove that a tag is
+            // truly bare. Retain the whole pre-normalization unit; the caller
+            // warns and suppresses stage-texture mapping.
+            return ['content' => $content, 'rewritten' => 0];
+        }
+    }
+
+    /** Whether unresolved ordinary generated media still claims the code-owned source. */
+    public static function containsReservedOrdinaryAiPlaceholder(string $content): bool
+    {
+        if (!str_contains($content, 'AI_IMAGE:')
+            || !str_contains($content, GeneratedMarkup::STAGE_TEXTURE_ASSET)
+        ) {
+            return false;
+        }
+        preg_match_all('/<img\b[^>]*>/is', $content, $tags);
+        foreach ($tags[0] ?? [] as $tag) {
+            if (self::isReservedAiImageTag($tag, GeneratedMarkup::STAGE_TEXTURE_ASSET)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether one saved img is the ordinary AI placeholder claiming the reserved source. */
+    private static function isReservedAiImageTag(string $tag, string $source): bool
+    {
+        return preg_match(
+            '~\bsrc\s*=\s*(["\'])' . preg_quote($source, '~') . '\1~i',
+            $tag,
+        ) === 1 && preg_match('/\balt\s*=\s*(["\'])AI_IMAGE:/i', $tag) === 1;
     }
 
     /**

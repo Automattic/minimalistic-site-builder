@@ -1007,8 +1007,11 @@ test('motionProfileFor fails closed to none', function () {
 
 test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', function () {
     [$project, $llm, $tmp] = make_designdir_fixture();
+    $direction = designdir_direction();
+    $direction['hero_blueprint'] = HeroBlueprint::defaultFor('focal-subject-stage');
+    $direction['hero_blueprint']['stage_backdrop'] = 'texture';
     $llm->queueJson(['seeds' => designdir_seeds()]);
-    $llm->queueJson(['direction' => designdir_direction()]);
+    $llm->queueJson(['direction' => $direction]);
 
     putenv('HERO_RECIPE=focal-subject-stage');
     try {
@@ -1020,7 +1023,13 @@ test('HERO_RECIPE is exact, persisted, and isolated to one recipe fragment', fun
     $direction = $project->readJson('designDirection.json');
     assert_eq('focal-subject-stage', $direction['hero_blueprint']['recipe']);
     assert_eq('foreground-image', $direction['hero_blueprint']['media_mode']);
+    assert_eq('texture', $direction['hero_blueprint']['stage_backdrop']);
     assert_contains('focal-subject-stage', $llm->calls[1]['prompt']);
+    assert_contains(
+        '"stage_backdrop": "Use one bounded backdrop value allowed by the selected recipe"',
+        $llm->calls[1]['prompt'],
+        'the explicit response skeleton exposes the texture opt-in instead of silently defaulting it away',
+    );
     foreach (HeroComposition::RECIPES as $recipe) {
         if ($recipe !== 'focal-subject-stage') {
             assert_true(!str_contains($llm->calls[1]['prompt'], $recipe), "{$recipe} is not exposed");

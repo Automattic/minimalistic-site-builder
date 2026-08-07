@@ -130,4 +130,14 @@ test('stage_backdrop texture survives on focal-subject-stage and repairs elsewhe
     $garbage['stage_backdrop'] = 'wallpaper';
     $normalized = HeroBlueprint::normalize($garbage, 'focal-subject-stage', $repairs, $warnings);
     assert_eq('solid', $normalized['stage_backdrop'], 'unknown backdrop values repair to the default');
+
+    $missing = HeroBlueprint::defaultFor('focal-subject-stage');
+    unset($missing['stage_backdrop']);
+    $repairs = [];
+    $normalized = HeroBlueprint::normalize($missing, 'focal-subject-stage', $repairs, $warnings);
+    assert_eq('solid', $normalized['stage_backdrop']);
+    assert_true(
+        count(array_filter($repairs, static fn (string $repair): bool => str_contains($repair, 'stage_backdrop'))) === 1,
+        'a keyless blueprint is repaired to the new complete fixed point instead of being mislabeled as one',
+    );
 });

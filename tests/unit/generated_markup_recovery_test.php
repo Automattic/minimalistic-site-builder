@@ -1551,21 +1551,113 @@ test('stripTextBlockShadow removes shadow presets from text blocks but not media
 });
 
 test('withStageTextureBackdrop tiles a root group and stays idempotent (BIGR-776)', function () {
-    $doc = '<!-- wp:group {"backgroundColor":"base","anchor":"hero","className":"hero-composition--focal-subject-stage","layout":{"type":"constrained"}} -->'
-        . '<div class="wp-block-group has-base-background-color has-background" id="hero">'
+    $doc = '<!-- wp:group {"backgroundColor":"base","gradient":"cool-to-warm-spectrum",'
+        . '"customGradient":"linear-gradient(#fff,#ddd)","anchor":"hero",'
+        . '"className":"hero-composition--focal-subject-stage",'
+        . '"style":{"spacing":{"padding":{"top":"var:preset|spacing|md"}},'
+        . '"color":{"gradient":"linear-gradient(#eee,#ccc)"},"background":{'
+        . '"gradient":"linear-gradient(#fff,#eee)","backgroundPosition":"right top"}},'
+        . '"layout":{"type":"constrained"}} -->'
+        . '<div class="wp-block-group has-base-background-color has-background '
+        . 'has-cool-to-warm-spectrum-gradient-background has-background-gradient safe-&quot;-sentinel" '
+        . 'style="background:linear-gradient(#fff,#eee);border-color:#123" id="hero">'
         . '<!-- wp:heading {"level":1} --><h1 class="wp-block-heading">Exhibit</h1><!-- /wp:heading -->'
         . '</div><!-- /wp:group -->';
     $repairs = [];
     $out = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop($doc, 'p', $repairs);
-    assert_contains('theme:./assets/hero-backdrop-texture.jpg', $out, 'texture url in root attrs');
+    assert_contains('theme:./assets/stage_backdrop-texture.jpg', $out, 'texture url in root attrs');
     assert_contains('"backgroundAttachment":"fixed"', $out, 'fixed attachment anchors the shared canvas');
+    assert_contains('"backgroundPosition":"0% 0%"', $out, 'both parts use the same viewport origin');
     assert_contains('"backgroundColor":"base"', $out, 'the solid fallback surface stays beneath the image');
+    assert_contains('has-stage-texture-backdrop', $out, 'the reviewed texture gets the scoped header CSS hook');
+    assert_true(
+        preg_match('~<div[^>]*class="[^"]*has-stage-texture-backdrop[^"]*"[^>]*>~', $out) === 1,
+        'the marker is present on saved HTML, not only comment attrs',
+    );
+    assert_contains(
+        'background-image:url(theme:./assets/stage_backdrop-texture.jpg)',
+        $out,
+        'the saved wrapper paints the same tile as the block attrs',
+    );
+    assert_contains('var:preset|spacing|md', $out, 'unrelated style families survive texture canonicalization');
+    assert_true(!str_contains($out, 'linear-gradient'), 'competing root paint is deterministically replaced');
+    assert_true(!str_contains($out, 'gradient-background'), 'saved preset-gradient classes are removed');
+    assert_contains('border-color:#123', $out, 'unrelated inline declarations survive');
+    assert_contains('safe-&quot;-sentinel', $out, 'decoded class content is safely re-escaped');
     assert_true(in_array('stage-texture-backdrop-applied', array_column($repairs, 'code'), true));
 
     // Idempotent.
     $again = [];
     assert_eq($out, Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop($out, 'p', $again));
     assert_eq([], $again);
+
+    // A served prior-run contract is removed using each saved/comment alias
+    // independently; unrelated attrs, classes and declarations survive.
+    $served = preg_replace(
+        '~theme:\./assets/stage_backdrop-texture\.jpg~',
+        '/wp-content/themes/old-a/assets/stage_backdrop-texture.jpg',
+        $out,
+        1,
+    );
+    $served = str_replace(
+        'theme:./assets/stage_backdrop-texture.jpg',
+        '/wp-content/themes/old-b/assets/stage_backdrop-texture.jpg',
+        (string) $served,
+    );
+    $cleaned = Automattic\SiteBuild\Units\GeneratedMarkup::withoutStageTextureBackdrop($served);
+    assert_true(is_string($cleaned));
+    assert_true(!Automattic\SiteBuild\Units\GeneratedMarkup::hasStageTextureEvidence($cleaned));
+    assert_contains('"backgroundColor":"base"', $cleaned);
+    assert_contains('border-color:#123', $cleaned);
+    assert_contains('safe-&quot;-sentinel', $cleaned);
+    assert_true(!str_contains($cleaned, ' onmouseover='), 'decoded class bytes cannot become an attribute');
+
+    // Duplicate effective attributes make the saved wrapper unsafe to edit,
+    // so the whole root transaction is retained.
+    $duplicate = str_replace('<div class=', '<div class="duplicate" class=', $doc);
+    $duplicateRepairs = [];
+    assert_eq(
+        $duplicate,
+        Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+            $duplicate,
+            'p',
+            $duplicateRepairs,
+        ),
+    );
+    assert_eq([], $duplicateRepairs);
+
+    foreach ([
+        '<!-- wp:group {"backgroundColor":"base"} --><div class="wp-block-group"><p>Keep',
+        '<!-- wp:group {"backgroundColor":"base","style":"oops"} -->'
+            . '<div class="wp-block-group">Keep</div><!-- /wp:group -->',
+    ] as $unsafe) {
+        $unsafeRepairs = [];
+        assert_eq(
+            $unsafe,
+            Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+                $unsafe,
+                'p',
+                $unsafeRepairs,
+            ),
+            'unsafe structure or scalar style is retained transactionally',
+        );
+        assert_eq([], $unsafeRepairs);
+    }
+
+    assert_true(!Automattic\SiteBuild\Units\GeneratedMarkup::hasStageTextureInlineStyleSource(
+        'background-image:linear-gradient(#fff,#eee),url(theme:./assets/stage_backdrop-texture.jpg)',
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+    ), 'a competing image layer cannot satisfy the one-tile contract');
+    $scalarCleanup = '<!-- wp:group {"className":"has-stage-texture-backdrop","style":"oops"} -->'
+        . '<div class="wp-block-group has-stage-texture-backdrop" style="background-image:url('
+        . Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET
+        . ');background-position:0% 0%;background-size:420px;background-repeat:repeat;'
+        . 'background-attachment:fixed"></div><!-- /wp:group -->';
+    assert_eq(
+        null,
+        Automattic\SiteBuild\Units\GeneratedMarkup::withoutStageTextureBackdrop($scalarCleanup),
+        'malformed generated attr shapes retain the whole cleanup transaction',
+    );
 
     // A non-group root is left alone.
     $coverRoot = '<!-- wp:cover {"url":"x.jpg"} --><div class="wp-block-cover"></div><!-- /wp:cover -->';

@@ -31,6 +31,51 @@ function generate_fixture(): array
     return [$project, $tmp];
 }
 
+function stage_texture_markup_fixture(string $source, string $surface): string
+{
+    return '<!-- wp:group {"className":"has-stage-texture-backdrop","backgroundColor":"' . $surface
+        . '","textColor":"contrast","style":{"spacing":{"padding":{"top":"7px"}},"background":{'
+        . '"backgroundImage":{"url":"' . $source . '"},"backgroundPosition":"0% 0%",'
+        . '"backgroundSize":"420px","backgroundRepeat":"repeat","backgroundAttachment":"fixed"}}} -->'
+        . '<div class="wp-block-group has-stage-texture-backdrop has-' . $surface
+        . '-background-color has-contrast-color" style="--proof:\'a;b\';padding-top:7px;'
+        . 'background-image:url(' . $source . ');background-position:0% 0%;background-size:420px;'
+        . 'background-repeat:repeat;background-attachment:fixed">'
+        . '<!-- wp:paragraph --><p class="keep  spacing">Keep this copy.</p><!-- /wp:paragraph -->'
+        . '</div><!-- /wp:group -->';
+}
+
+function stage_texture_checker_jpeg(string $dark = '#000000', string $light = '#FFFFFF'): string
+{
+    if (!extension_loaded('imagick')) {
+        skip_test('stage texture pixel validation needs Imagick');
+    }
+    $image = new Imagick();
+    $image->newImage(32, 32, new ImagickPixel('#FFFFFF'));
+    $iterator = $image->getPixelIterator();
+    foreach ($iterator as $rowIndex => $row) {
+        foreach ($row as $columnIndex => $pixel) {
+            $pixel->setColor((($rowIndex + $columnIndex) % 2) === 0 ? $dark : $light);
+        }
+        $iterator->syncIterator();
+    }
+    $image->setImageFormat('jpeg');
+    $image->setImageCompressionQuality(100);
+    return $image->getImagesBlob();
+}
+
+function stage_texture_solid_jpeg(string $color): string
+{
+    if (!extension_loaded('imagick')) {
+        skip_test('stage texture pixel validation needs Imagick');
+    }
+    $image = new Imagick();
+    $image->newImage(32, 32, new ImagickPixel($color));
+    $image->setImageFormat('jpeg');
+    $image->setImageCompressionQuality(100);
+    return $image->getImagesBlob();
+}
+
 test('generate-images declaration marks its batched work as concurrent', function () {
     $declaration = (new GenerateImagesStep(new FakeImageClient()))->declaration();
 
@@ -982,46 +1027,173 @@ test('generate-images synthesizes the stage-texture spec painted after collect-i
     // hero roots. The generator must synthesize the code-owned spec for the
     // reference it finds in markup, generate the tile, and rewrite the URL.
     [$project, $tmp] = generate_fixture();
-    $texturedHeader = '<!-- wp:group {"backgroundColor":"base","style":{"background":{'
-        . '"backgroundImage":{"url":"theme:./assets/hero-backdrop-texture.jpg"},'
-        . '"backgroundSize":"420px","backgroundRepeat":"repeat","backgroundAttachment":"fixed"}},'
-        . '"layout":{"type":"constrained"}} -->' . "\n"
-        . '<div class="wp-block-group has-base-background-color has-background" '
-        . 'style="background-image:url(theme:./assets/hero-backdrop-texture.jpg);background-position:50% 50%;'
-        . 'background-repeat:repeat;background-size:420px;background-attachment:fixed">'
-        . '<!-- wp:site-title /--></div>' . "\n" . '<!-- /wp:group -->';
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'secondary', 'color' => '#F8F8F8'],
+        ['slug' => 'contrast', 'color' => '#000000'],
+    ]]]]);
+    $texturedHeader = stage_texture_markup_fixture(
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+        'base',
+    );
     $project->writeText('theme/parts/header.html', $texturedHeader);
+    $texturedHero = stage_texture_markup_fixture(
+        Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET,
+        'secondary',
+    );
+    $project->writeText('plugin/pages/home.html', $texturedHero);
 
     $images = new FakeImageClient('JPEGDATA');
     (new GenerateImagesStep($images))->run($project);
 
     assert_true(
-        $project->exists('theme/assets/hero-backdrop-texture.jpg'),
+        $project->exists('theme/assets/stage_backdrop-texture.jpg'),
         'the texture tile is generated from the synthesized spec',
     );
     $specs = $project->readJson('images.json');
     $texture = array_values(array_filter(
         $specs,
-        static fn (array $spec): bool => ($spec['filename'] ?? '') === 'hero-backdrop-texture.jpg',
+        static fn (array $spec): bool => ($spec['filename'] ?? '') === 'stage_backdrop-texture.jpg',
     ));
     assert_eq(1, count($texture), 'exactly one synthesized texture spec');
     assert_eq('completed', $texture[0]['status']);
-    assert_eq(['parts/header.html'], $texture[0]['sources']);
+    assert_eq('#F8F8F8', $texture[0]['targetColor'], 'post-assemble tinted hero owns the tile target');
+    assert_true(in_array('#000000', $texture[0]['foregroundColors'], true));
+    assert_eq(['parts/header.html', 'plugin/pages/home.html'], $texture[0]['sources']);
 
     $header = $project->readText('theme/parts/header.html');
-    assert_contains('/wp-content/themes/demo/assets/hero-backdrop-texture.jpg', $header);
+    assert_contains('/wp-content/themes/demo/assets/stage_backdrop-texture.jpg', $header);
     assert_true(
-        !str_contains($header, 'theme:./assets/hero-backdrop-texture.jpg'),
+        !str_contains($header, 'theme:./assets/stage_backdrop-texture.jpg'),
         'no unresolved texture placeholder remains in the header',
     );
 
     // A re-run with the spec now on file must not duplicate it.
-    (new GenerateImagesStep(new FakeImageClient('JPEGDATA')))->run($project);
+    $rerunImages = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($rerunImages))->run($project);
     $again = array_values(array_filter(
         $project->readJson('images.json'),
-        static fn (array $spec): bool => ($spec['filename'] ?? '') === 'hero-backdrop-texture.jpg',
+        static fn (array $spec): bool => ($spec['filename'] ?? '') === 'stage_backdrop-texture.jpg',
     ));
     assert_eq(1, count($again), 'backstop is idempotent');
+    assert_eq(0, count($rerunImages->calls), 'valid completed texture bytes are revalidated, not regenerated');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images rejects a busy stage tile and transactionally delivers the solid roots (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'base', 'color' => '#FFFFFF'],
+        ['slug' => 'secondary', 'color' => '#808080'],
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $canonical = Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $served = '/wp-content/themes/old-theme/assets/stage_backdrop-texture.jpg';
+    $sibling = '<!-- wp:group {"className":"other-shell","style":{"background":{'
+        . '"backgroundImage":{"url":"theme:./assets/other.jpg"},"backgroundPosition":"right top",'
+        . '"backgroundSize":"88px","backgroundRepeat":"no-repeat"}}} -->'
+        . '<div class="other-shell  keep-spacing" style="background-image:url(theme:./assets/other.jpg);'
+        . 'background-position:right top;background-size:88px;background-repeat:no-repeat"></div>'
+        . '<!-- /wp:group -->';
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture($canonical, 'base') . $sibling);
+    $project->writeText('plugin/pages/home.html', stage_texture_markup_fixture($served, 'secondary'));
+
+    $images = new FakeImageClient(stage_texture_checker_jpeg());
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(1, count($images->calls), 'the rejected tile was generated exactly once');
+    $header = $project->readText('theme/parts/header.html');
+    $hero = $project->readText('plugin/pages/home.html');
+    foreach ([$header, $hero] as $delivered) {
+        assert_true(!str_contains($delivered, 'stage_backdrop-texture.jpg'), 'failed source removed');
+        assert_true(!str_contains($delivered, 'has-stage-texture-backdrop'), 'failed marker removed');
+        assert_contains('Keep this copy.', $delivered, 'root children survive');
+        assert_contains('"backgroundColor":', $delivered, 'solid block surface survives');
+        assert_contains("--proof:'a;b';padding-top:7px", $delivered, 'unrelated complex inline declarations survive');
+    }
+    assert_contains($sibling, $header, 'unrelated sibling background bytes survive exactly');
+    assert_eq('failed', $project->readJson('images.json')[0]['status']);
+    assert_true($project->exists(GenerateImagesStep::COMPLETION_ARTIFACT), 'rejection continues the build');
+    $warningsBefore = $project->readJson('warnings.json')['generate-images'] ?? [];
+    assert_eq(1, count($warningsBefore));
+    assert_contains("path=\"hero_blueprint.stage_backdrop\"", $warningsBefore[0]);
+    assert_contains('authored="texture"', $warningsBefore[0]);
+    assert_contains('solid where safely isolated', $warningsBefore[0]);
+
+    $before = [$header, $hero];
+    $rerun = new FakeImageClient(stage_texture_checker_jpeg());
+    (new GenerateImagesStep($rerun))->run($project);
+    assert_eq(0, count($rerun->calls), 'an orphan failed stage spec is not retried');
+    assert_eq($before, [
+        $project->readText('theme/parts/header.html'),
+        $project->readText('plugin/pages/home.html'),
+    ], 'cleanup reaches a fixed point');
+    assert_eq($warningsBefore, $project->readJson('warnings.json')['generate-images'] ?? []);
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images revalidates a completed served stage asset before trusting it (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'secondary', 'color' => '#C00000'],
+    ]]]]);
+    $served = '/wp-content/themes/old-theme/assets/stage_backdrop-texture.jpg';
+    $project->writeText('plugin/pages/home.html', stage_texture_markup_fixture($served, 'secondary'));
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture($served, 'base'));
+    $project->writeText(
+        'theme/assets/stage_backdrop-texture.jpg',
+        stage_texture_checker_jpeg('#800000', '#FF0000'),
+    );
+
+    $images = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(0, count($images->calls), 'existing bytes are validated instead of regenerated');
+    assert_eq('failed', $project->readJson('images.json')[0]['status']);
+    assert_true(!str_contains($project->readText('plugin/pages/home.html'), 'stage_backdrop-texture.jpg'));
+    assert_contains('source pixels are too visually busy',
+        implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []));
+
+    // A later HeaderHero pass can re-commit the texture. A known-failed cache
+    // entry must be regenerated, not promoted back to completed by existence.
+    $project->writeText('plugin/pages/home.html', stage_texture_markup_fixture($served, 'secondary'));
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture($served, 'base'));
+    $retry = new FakeImageClient(stage_texture_solid_jpeg('#C00000'));
+    (new GenerateImagesStep($retry))->run($project);
+    assert_eq(1, count($retry->calls), 'known-failed cached bytes are regenerated after a repaint');
+    assert_eq('completed', $project->readJson('images.json')[0]['status']);
+    assert_contains('/wp-content/themes/demo/assets/stage_backdrop-texture.jpg',
+        $project->readText('plugin/pages/home.html'), 'a copied project receives its current theme slug');
+    assert_true(!str_contains($project->readText('plugin/pages/home.html'), '/old-theme/'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('generate-images degrades an unresolved textured hero target without an image call (BIGR-776)', function () {
+    $tmp = sys_get_temp_dir() . '/builder_gi_stage_' . uniqid();
+    $project = (new ProjectStore($tmp))->create('demo');
+    $project->writeJson('images.json', []);
+    $project->writeJson('theme/theme.json', ['settings' => ['color' => ['palette' => [
+        ['slug' => 'contrast', 'color' => '#111111'],
+    ]]]]);
+    $source = Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET;
+    $project->writeText('theme/parts/header.html', stage_texture_markup_fixture($source, 'base'));
+    $project->writeText('plugin/pages/home.html', stage_texture_markup_fixture($source, 'missing-tone'));
+
+    $images = new FakeImageClient('JPEGDATA');
+    (new GenerateImagesStep($images))->run($project);
+
+    assert_eq(0, count($images->calls));
+    assert_eq('failed', $project->readJson('images.json')[0]['status']);
+    assert_true(!str_contains($project->readText('plugin/pages/home.html'), 'stage_backdrop-texture.jpg'));
+    assert_contains('no single resolvable delivered hero surface color',
+        implode("\n", $project->readJson('warnings.json')['generate-images'] ?? []));
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });

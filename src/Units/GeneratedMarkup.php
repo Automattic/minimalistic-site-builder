@@ -787,7 +787,7 @@ final class GeneratedMarkup
         }
         $changed = false;
         $attrs = $document->attrs($root) ?? [];
-        $tokens = self::classTokens((string) ($attrs['className'] ?? ''));
+        $tokens = self::classTokens(is_string($attrs['className'] ?? null) ? $attrs['className'] : '');
         if (!in_array($token, $tokens, true)) {
             $tokens[] = $token;
             $attrs['className'] = implode(' ', $tokens);
@@ -2531,7 +2531,609 @@ final class GeneratedMarkup
      * and GenerateImagesStep's strtr rewrite resolves it in style attributes
      * the same way it resolves img srcs.
      */
-    public const STAGE_TEXTURE_ASSET = 'theme:./assets/hero-backdrop-texture.jpg';
+    public const STAGE_TEXTURE_ASSET = 'theme:./assets/stage_backdrop-texture.jpg';
+
+    /** CSS hook that lets the reviewed header texture opt out of generic paint suppression. */
+    public const STAGE_TEXTURE_CLASS = 'has-stage-texture-backdrop';
+
+    /**
+     * Whether a block background URL names the one code-owned stage tile.
+     *
+     * The underscore makes the code-owned purpose visually explicit;
+     * CollectImagesStep deterministically renames any ordinary AI_IMAGE media
+     * placeholder that nevertheless copies this reserved path.
+     */
+    public static function isStageTextureSource(mixed $source): bool
+    {
+        return $source === self::STAGE_TEXTURE_ASSET
+            || (is_string($source)
+                && preg_match(
+                    '~^/wp-content/themes/[a-z0-9_-]+/assets/stage_backdrop-texture\.jpg$~i',
+                    $source,
+                ) === 1);
+    }
+
+    /** @return list<string> */
+    private static function stageTextureSourcesInCss(string $css): array
+    {
+        $css = html_entity_decode($css, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        preg_match_all(
+            '~url\(\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s)]+))\s*\)~i',
+            $css,
+            $matches,
+            PREG_SET_ORDER,
+        );
+        $sources = [];
+        foreach ($matches as $match) {
+            $doubleQuoted = $match[1] ?? '';
+            $singleQuoted = $match[2] ?? '';
+            $source = trim((string) ($doubleQuoted !== ''
+                ? $doubleQuoted
+                : ($singleQuoted !== '' ? $singleQuoted : ($match[3] ?? ''))));
+            if (self::isStageTextureSource($source)) {
+                $sources[] = $source;
+            }
+        }
+        return array_values(array_unique($sources));
+    }
+
+    /** Whether the root has any complete or stale fragment of the code-owned texture contract. */
+    public static function hasStageTextureEvidence(string $markup): bool
+    {
+        $rawEvidence = str_contains($markup, self::STAGE_TEXTURE_CLASS)
+            || str_contains($markup, basename(self::STAGE_TEXTURE_ASSET));
+        try {
+            $document = BlockMarkup::parse($markup);
+            $root = $document->topLevel();
+            if ($root === null || $document->name($root) !== 'group') {
+                return $rawEvidence;
+            }
+            $attrs = $document->attrs($root);
+            if (is_array($attrs)) {
+                $tokens = self::classTokens(is_string($attrs['className'] ?? null) ? $attrs['className'] : '');
+                $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+                $image = is_array($background['backgroundImage'] ?? null)
+                    ? $background['backgroundImage']
+                    : [];
+                if (in_array(self::STAGE_TEXTURE_CLASS, $tokens, true)
+                    || self::isStageTextureSource($image['url'] ?? null)
+                ) {
+                    return true;
+                }
+            }
+            $ownHtml = $document->ownHtml($root);
+            if (preg_match(
+                '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                    . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                $ownHtml,
+                $opening,
+            ) !== 1) {
+                return $rawEvidence;
+            }
+            foreach (self::htmlAttributes($opening['tag'], 'class') as $class) {
+                if (in_array(self::STAGE_TEXTURE_CLASS, self::classTokens($class['value']), true)) {
+                    return true;
+                }
+            }
+            foreach (self::htmlAttributes($opening['tag'], 'style') as $style) {
+                if (self::stageTextureSourcesInCss($style['value']) !== []) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (\Throwable) {
+            return $rawEvidence;
+        }
+    }
+
+    /**
+     * Remove only the inline declarations owned by the stage tile. The shared
+     * declaration scanner does not split at semicolons inside strings,
+     * comments, escapes, or function arguments; null means the style was too
+     * malformed to isolate safely and the caller must retain the unit.
+     */
+    public static function withoutStageTextureInlineStyle(string $style, string $source): ?string
+    {
+        if (!str_contains(html_entity_decode($style, ENT_QUOTES | ENT_HTML5, 'UTF-8'), $source)) {
+            return $style;
+        }
+        $filtered = self::withoutInlineStyleProperties($style, [
+            'background',
+            'background-image',
+            'background-position',
+            'background-size',
+            'background-repeat',
+            'background-attachment',
+        ]);
+        return $filtered === null ? null : $filtered['style'];
+    }
+
+    /** @param callable(string):string $transform */
+    private static function transformStageTextureInlineStyle(string $style, callable $transform): ?string
+    {
+        $segments = [];
+        $start = 0;
+        $quote = null;
+        $parentheses = 0;
+        $inComment = false;
+        $length = strlen($style);
+        for ($index = 0; $index < $length; $index++) {
+            $character = $style[$index];
+            if ($inComment) {
+                if ($character === '*' && ($style[$index + 1] ?? '') === '/') {
+                    $inComment = false;
+                    $index++;
+                }
+                continue;
+            }
+            if ($quote !== null) {
+                if ($character === '\\') {
+                    if ($index + 1 >= $length) {
+                        return null;
+                    }
+                    $index++;
+                } elseif ($character === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($character === '/' && ($style[$index + 1] ?? '') === '*') {
+                $inComment = true;
+                $index++;
+            } elseif ($character === '"' || $character === "'") {
+                $quote = $character;
+            } elseif ($character === '\\') {
+                if ($index + 1 >= $length) {
+                    return null;
+                }
+                $index++;
+            } elseif ($character === '(') {
+                $parentheses++;
+            } elseif ($character === ')') {
+                if ($parentheses === 0) {
+                    return null;
+                }
+                $parentheses--;
+            } elseif ($character === ';' && $parentheses === 0) {
+                $segments[] = ['declaration' => substr($style, $start, $index - $start), 'separator' => ';'];
+                $start = $index + 1;
+            }
+        }
+        if ($quote !== null || $inComment || $parentheses !== 0) {
+            return null;
+        }
+        $segments[] = ['declaration' => substr($style, $start), 'separator' => ''];
+
+        $out = '';
+        foreach ($segments as $segment) {
+            $declaration = trim($segment['declaration']);
+            if ($declaration !== '' && preg_match(
+                '/^(?:\/\*.*?\*\/\s*)*([\-\w]+)(?:\s|\/\*.*?\*\/)*:(.*)\z/s',
+                $declaration,
+                $property,
+            ) !== 1) {
+                return null;
+            }
+            $rendered = $segment['declaration'];
+            if ($declaration !== '' && strtolower($property[1]) === 'background-image') {
+                $rendered = $transform($rendered);
+            }
+            $out .= $rendered . $segment['separator'];
+        }
+        return $out;
+    }
+
+    /** Canonicalize only a stage URL inside a safely parsed background-image declaration. */
+    public static function canonicalizeStageTextureInlineStyle(string $style): ?string
+    {
+        return self::transformStageTextureInlineStyle(
+            $style,
+            static fn (string $declaration): string => (string) preg_replace(
+                '~/wp-content/themes/[a-z0-9_-]+/assets/stage_backdrop-texture\.jpg~i',
+                self::STAGE_TEXTURE_ASSET,
+                $declaration,
+            ),
+        );
+    }
+
+    /** Resolve the canonical stage source only inside its background-image declaration. */
+    public static function serveStageTextureInlineStyle(string $style, string $served): ?string
+    {
+        return self::transformStageTextureInlineStyle(
+            $style,
+            static fn (string $declaration): string => str_replace(
+                self::STAGE_TEXTURE_ASSET,
+                $served,
+                $declaration,
+            ),
+        );
+    }
+
+    /** Whether exactly one background-image declaration owns the expected stage source. */
+    public static function hasStageTextureInlineStyleSource(string $style, string $source): bool
+    {
+        $filtered = self::withoutInlineStyleProperties($style, ['background', 'background-image']);
+        if ($filtered === null) {
+            return false;
+        }
+        $images = array_values(array_filter(
+            $filtered['removed'],
+            static fn (array $declaration): bool => $declaration['property'] === 'background-image',
+        ));
+        if (count($images) !== 1) {
+            return false;
+        }
+        $value = html_entity_decode($images[0]['value'], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (preg_match(
+            '~^\s*url\(\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s)]+))\s*\)\s*$~i',
+            $value,
+            $url,
+        ) !== 1) {
+            return false;
+        }
+        $actual = (string) (($url[1] ?? '') !== ''
+            ? $url[1]
+            : (($url[2] ?? '') !== '' ? $url[2] : ($url[3] ?? '')));
+        return $actual === $source
+            && count(array_filter(
+                $filtered['removed'],
+                static fn (array $declaration): bool => $declaration['property'] === 'background',
+            )) === 0;
+    }
+
+    /** Whether the saved wrapper carries exactly the reviewed tile geometry. */
+    public static function hasExactStageTextureInlineStyle(string $style, string $source): bool
+    {
+        if (!self::hasStageTextureInlineStyleSource($style, $source)) {
+            return false;
+        }
+        $filtered = self::withoutInlineStyleProperties($style, [
+            'background',
+            'background-image',
+            'background-position',
+            'background-size',
+            'background-repeat',
+            'background-attachment',
+        ]);
+        if ($filtered === null) {
+            return false;
+        }
+        $expected = [
+            'background-image' => null,
+            'background-position' => '0% 0%',
+            'background-size' => '420px',
+            'background-repeat' => 'repeat',
+            'background-attachment' => 'fixed',
+        ];
+        $seen = [];
+        foreach ($filtered['removed'] as $declaration) {
+            $property = $declaration['property'];
+            if ($property === 'background' || !array_key_exists($property, $expected) || isset($seen[$property])) {
+                return false;
+            }
+            $seen[$property] = trim($declaration['value']);
+        }
+        foreach ($expected as $property => $value) {
+            if (!array_key_exists($property, $seen)
+                || ($value !== null && strtolower($seen[$property]) !== $value)
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Whether comment attrs and saved HTML carry one exact tile contract. */
+    public static function hasExactStageTextureContract(string $markup, string $source): bool
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+            $root = $document->topLevel();
+            if ($root === null
+                || $document->name($root) !== 'group'
+                || !$document->isStructurallySafe($root)
+            ) {
+                return false;
+            }
+            $attrs = $document->attrs($root);
+            if (!is_array($attrs)) {
+                return false;
+            }
+            $tokens = self::classTokens(is_string($attrs['className'] ?? null) ? $attrs['className'] : '');
+            $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+            $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+            $image = is_array($background['backgroundImage'] ?? null) ? $background['backgroundImage'] : [];
+            if (!in_array(self::STAGE_TEXTURE_CLASS, $tokens, true)
+                || ($image['url'] ?? null) !== $source
+                || ($background['backgroundPosition'] ?? null) !== '0% 0%'
+                || ($background['backgroundSize'] ?? null) !== '420px'
+                || ($background['backgroundRepeat'] ?? null) !== 'repeat'
+                || ($background['backgroundAttachment'] ?? null) !== 'fixed'
+                || array_key_exists('gradient', $attrs)
+                || array_key_exists('customGradient', $attrs)
+                || isset($style['color']['gradient'])
+                || array_key_exists('gradient', $background)
+            ) {
+                return false;
+            }
+            $ownHtml = $document->ownHtml($root);
+        } catch (\Throwable) {
+            return false;
+        }
+        if (preg_match(
+            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            $ownHtml,
+            $opening,
+        ) !== 1) {
+            return false;
+        }
+        $classes = self::htmlAttributes($opening['tag'], 'class');
+        $styles = self::htmlAttributes($opening['tag'], 'style');
+        if (count($classes) !== 1
+            || count($styles) !== 1
+            || !in_array(self::STAGE_TEXTURE_CLASS, self::classTokens($classes[0]['value']), true)
+        ) {
+            return false;
+        }
+        foreach (self::classTokens($classes[0]['value']) as $token) {
+            if ($token === 'has-background-gradient'
+                || preg_match('/^has-[a-z0-9-]+-gradient-background$/', $token) === 1
+            ) {
+                return false;
+            }
+        }
+        return self::hasExactStageTextureInlineStyle($styles[0]['value'], $source);
+    }
+
+    /** Whether comment attrs and saved HTML carry the canonical pre-generation contract. */
+    public static function hasStageTextureSavedHtml(string $markup): bool
+    {
+        return self::hasExactStageTextureContract($markup, self::STAGE_TEXTURE_ASSET);
+    }
+
+    /** Add the tile CSS to the root's saved opening tag without touching descendants. */
+    private static function withStageTextureSavedHtml(string $markup): ?string
+    {
+        $document = BlockMarkup::parse($markup);
+        $root = $document->topLevel();
+        if ($root === null || $document->name($root) !== 'group') {
+            return null;
+        }
+        $ownHtml = $document->ownHtml($root);
+        if (preg_match(
+            '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+            $ownHtml,
+            $opening,
+            PREG_OFFSET_CAPTURE,
+        ) !== 1) {
+            return null;
+        }
+        $tag = $opening['tag'][0];
+        $classes = self::htmlAttributes($tag, 'class');
+        if (count($classes) > 1) {
+            return null;
+        }
+        if ($classes !== []) {
+            $kept = array_values(array_filter(
+                self::classTokens($classes[0]['value']),
+                static fn (string $token): bool => $token !== 'has-background-gradient'
+                    && preg_match('/^has-[a-z0-9-]+-gradient-background$/', $token) !== 1,
+            ));
+            $replacement = $kept === []
+                ? ''
+                : ' class="' . htmlspecialchars(
+                    implode(' ', $kept),
+                    ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
+                    'UTF-8',
+                ) . '"';
+            $tag = substr_replace(
+                $tag,
+                $replacement,
+                $classes[0]['attributeOffset'],
+                strlen($classes[0]['attribute']),
+            );
+        }
+        $styles = self::htmlAttributes($tag, 'style');
+        if (count($styles) > 1) {
+            return null;
+        }
+        $owned = 'background-image:url(' . self::STAGE_TEXTURE_ASSET . ');background-position:0% 0%;'
+            . 'background-size:420px;background-repeat:repeat;background-attachment:fixed';
+        if ($styles === []) {
+            $tag = substr_replace($tag, ' style="' . $owned . '"', strrpos($tag, '>'), 0);
+        } else {
+            $style = $styles[0];
+            $filtered = self::withoutInlineStyleProperties($style['value'], [
+                'background',
+                'background-image',
+                'background-position',
+                'background-size',
+                'background-repeat',
+                'background-attachment',
+            ]);
+            if ($filtered === null) {
+                return null;
+            }
+            $value = $filtered['style'];
+            if (trim($value) !== '' && preg_match('/;\s*$/', $value) !== 1) {
+                $value .= ';';
+            }
+            $value .= $owned;
+            $attribute = substr_replace(
+                $style['attribute'],
+                $value,
+                $style['valueOffset'] - $style['attributeOffset'],
+                strlen($style['value']),
+            );
+            $tag = substr_replace(
+                $tag,
+                $attribute,
+                $style['attributeOffset'],
+                strlen($style['attribute']),
+            );
+        }
+        $tagStart = $document->openingOffset($root)
+            + $document->openingLength($root)
+            + $opening['tag'][1];
+        return substr_replace($markup, $tag, $tagStart, strlen($opening['tag'][0]));
+    }
+
+    /**
+     * Remove the exact code-owned tile contract from one root Group. Null
+     * means saved HTML was too malformed for a transactional smallest-unit
+     * cleanup, so callers must retain the pre-cleanup bytes and warn.
+     */
+    public static function withoutStageTextureBackdrop(string $markup): ?string
+    {
+        if (!self::hasStageTextureEvidence($markup)) {
+            return $markup;
+        }
+        try {
+            $document = BlockMarkup::parse($markup);
+            $root = $document->topLevel();
+            if ($root === null
+                || $document->name($root) !== 'group'
+                || !$document->isStructurallySafe($root)
+            ) {
+                return null;
+            }
+            $attrs = $document->attrs($root);
+            if (!is_array($attrs)) {
+                return null;
+            }
+            if ((array_key_exists('style', $attrs) && !is_array($attrs['style']))
+                || (isset($attrs['style']['background']) && !is_array($attrs['style']['background']))
+                || (isset($attrs['style']['background']['backgroundImage'])
+                    && !is_array($attrs['style']['background']['backgroundImage']))
+                || (array_key_exists('className', $attrs) && !is_string($attrs['className']))
+            ) {
+                return null;
+            }
+            $className = is_string($attrs['className'] ?? null) ? $attrs['className'] : '';
+            $tokens = self::classTokens($className);
+            $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+            $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+            $image = is_array($background['backgroundImage'] ?? null) ? $background['backgroundImage'] : [];
+            $source = $image['url'] ?? null;
+            if (self::isStageTextureSource($source)) {
+                unset(
+                    $background['backgroundImage'],
+                    $background['backgroundPosition'],
+                    $background['backgroundSize'],
+                    $background['backgroundRepeat'],
+                    $background['backgroundAttachment'],
+                );
+                if ($background === []) {
+                    unset($style['background']);
+                } else {
+                    $style['background'] = $background;
+                }
+            }
+            if ($style === []) {
+                unset($attrs['style']);
+            } else {
+                $attrs['style'] = $style;
+            }
+            $tokens = array_values(array_filter(
+                $tokens,
+                static fn (string $token): bool => $token !== self::STAGE_TEXTURE_CLASS,
+            ));
+            if ($tokens === []) {
+                unset($attrs['className']);
+            } else {
+                $attrs['className'] = implode(' ', $tokens);
+            }
+            $document->setAttrs($root, $attrs);
+            $rendered = $document->render();
+
+            $document = BlockMarkup::parse($rendered);
+            $root = $document->topLevel();
+            if ($root === null) {
+                return null;
+            }
+            $ownHtml = $document->ownHtml($root);
+            if (preg_match(
+                '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                    . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                $ownHtml,
+                $opening,
+                PREG_OFFSET_CAPTURE,
+            ) !== 1) {
+                return null;
+            }
+            $tag = $opening['tag'][0];
+            $ops = [];
+            $classes = self::htmlAttributes($tag, 'class');
+            if (count($classes) > 1) {
+                return null;
+            }
+            if ($classes !== []) {
+                $kept = array_values(array_filter(
+                    self::classTokens($classes[0]['value']),
+                    static fn (string $token): bool => $token !== self::STAGE_TEXTURE_CLASS,
+                ));
+                $ops[] = [
+                    'offset' => $classes[0]['attributeOffset'],
+                    'length' => strlen($classes[0]['attribute']),
+                    'replacement' => $kept === []
+                        ? ''
+                        : ' class="' . htmlspecialchars(
+                            implode(' ', $kept),
+                            ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
+                            'UTF-8',
+                        ) . '"',
+                ];
+            }
+            $styles = self::htmlAttributes($tag, 'style');
+            if (count($styles) > 1) {
+                return null;
+            }
+            if ($styles !== []) {
+                $savedSources = self::stageTextureSourcesInCss($styles[0]['value']);
+                $filtered = $styles[0]['value'];
+                if ($savedSources !== []) {
+                    $removed = self::withoutInlineStyleProperties($styles[0]['value'], [
+                        'background',
+                        'background-image',
+                        'background-position',
+                        'background-size',
+                        'background-repeat',
+                        'background-attachment',
+                    ]);
+                    if ($removed === null) {
+                        return null;
+                    }
+                    $filtered = $removed['style'];
+                }
+                $ops[] = [
+                    'offset' => $styles[0]['attributeOffset'],
+                    'length' => strlen($styles[0]['attribute']),
+                    'replacement' => trim($filtered) === ''
+                        ? ''
+                        : substr_replace(
+                            $styles[0]['attribute'],
+                            $filtered,
+                            $styles[0]['valueOffset'] - $styles[0]['attributeOffset'],
+                            strlen($styles[0]['value']),
+                        ),
+                ];
+            }
+            usort($ops, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+            foreach ($ops as $op) {
+                $tag = substr_replace($tag, $op['replacement'], $op['offset'], $op['length']);
+            }
+            $tagStart = $document->openingOffset($root)
+                + $document->openingLength($root)
+                + $opening['tag'][1];
+            $delivered = substr_replace($rendered, $tag, $tagStart, strlen($opening['tag'][0]));
+            return self::hasStageTextureEvidence($delivered) ? null : $delivered;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
 
     /**
      * Paint the textured stage canvas on a part's root group (BIGR-776).
@@ -2550,29 +3152,79 @@ final class GeneratedMarkup
     {
         $document = BlockMarkup::parse($markup);
         $root = $document->topLevel();
-        if ($root === null || $document->name($root) !== 'group') {
+        if ($root === null
+            || $document->name($root) !== 'group'
+            || !$document->isStructurallySafe($root)
+        ) {
             return $markup;
         }
         $attrs = $document->attrs($root) ?? [];
-        $background = (array) ($attrs['style']['background'] ?? []);
-        if ((($background['backgroundImage'] ?? [])['url'] ?? null) === self::STAGE_TEXTURE_ASSET) {
+        if ((array_key_exists('style', $attrs) && !is_array($attrs['style']))
+            || (isset($attrs['style']['background']) && !is_array($attrs['style']['background']))
+            || (isset($attrs['style']['background']['backgroundImage'])
+                && !is_array($attrs['style']['background']['backgroundImage']))
+            || (array_key_exists('className', $attrs) && !is_string($attrs['className']))
+        ) {
             return $markup;
         }
-        $attrs['style']['background'] = [
-            'backgroundImage' => ['url' => self::STAGE_TEXTURE_ASSET],
+        $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+        $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+        $authoredBackground = $background;
+        // The theme slug is unavailable at this pure markup boundary, so even
+        // a served-looking URL could name another or stale theme. Canonicalize
+        // it back to the project-relative source; GenerateImagesStep resolves
+        // the URL for the current project after validating the asset bytes.
+        $textureUrl = self::STAGE_TEXTURE_ASSET;
+
+        // Canonicalize only the competing background layer and its geometry.
+        // Other style families (spacing, dimensions, border, typography, …)
+        // remain byte-for-byte represented in the attrs instead of being
+        // collateral damage from replacing the whole style.background array.
+        unset($attrs['gradient'], $attrs['customGradient'], $background['gradient']);
+        if (is_array($style['color'] ?? null)) {
+            unset($style['color']['gradient']);
+            if ($style['color'] === []) {
+                unset($style['color']);
+            }
+        }
+        $background = array_replace($background, [
+            'backgroundImage' => ['url' => $textureUrl],
+            'backgroundPosition' => '0% 0%',
             'backgroundSize' => '420px',
             'backgroundRepeat' => 'repeat',
             'backgroundAttachment' => 'fixed',
-        ];
+        ]);
+        $style['background'] = $background;
+        $attrs['style'] = $style;
+
         $document->setAttrs($root, $attrs);
+        $delivered = self::withStageTextureSavedHtml($document->render());
+        if ($delivered === null) {
+            return $markup;
+        }
+        $classRepairs = [];
+        $delivered = self::withRootClassToken(
+            $delivered,
+            self::STAGE_TEXTURE_CLASS,
+            $part,
+            $classRepairs,
+        );
+        if ($delivered === $markup || !self::hasStageTextureSavedHtml($delivered)) {
+            return $markup;
+        }
         $repairs[] = [
             'code' => 'stage-texture-backdrop-applied',
             'part' => $part,
-            'authored' => 'a plain solid stage surface',
-            'delivered' => 'the committed texture canvas tiled behind the part (solid surface retained beneath)',
+            'authored' => $authoredBackground === []
+                ? 'a plain solid stage surface'
+                : ['style.background' => $authoredBackground],
+            'delivered' => [
+                'style.background' => $background,
+                'solid surface' => 'retained beneath the texture',
+            ],
             'disposition' => 'repaired',
         ];
-        return $document->render();
+        return $delivered;
     }
 
     /**

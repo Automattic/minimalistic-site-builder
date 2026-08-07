@@ -101,11 +101,19 @@ html.header-state-js .site-header-shell--overlay-to-solid {
     min-inline-size: 0;
     color: var(--header-foreground) !important;
     background-color: var(--header-start-surface) !important;
-    background-image: none !important;
     box-shadow: var(--header-start-shadow);
     transition-property: background-color, box-shadow;
     transition-duration: var(--header-state-duration);
     transition-timing-function: var(--header-state-ease);
+}
+
+/* Generated header paint is suppressed unless the build marked the one
+ * reviewed stage texture. Its fixed-position tile may show at the page top so
+ * it joins the hero canvas; scrolled/forced states below still snap to the
+ * verified solid surface before the global header crosses later sections. */
+.site-header-shell
+    :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid):not(.has-stage-texture-backdrop) {
+    background-image: none !important;
 }
 
 .site-header-shell .header-behavior-overlay-to-solid {
@@ -187,12 +195,14 @@ html.header-is-scrolled
     .site-header-shell
     :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
     background-color: var(--header-scrolled-surface) !important;
+    background-image: none !important;
     box-shadow: var(--header-scrolled-shadow);
 }
 
 .site-header-shell--force-solid
     :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid) {
     background-color: var(--header-scrolled-solid) !important;
+    background-image: none !important;
     box-shadow: var(--header-scrolled-shadow);
 }
 

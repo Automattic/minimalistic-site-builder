@@ -4,12 +4,14 @@ declare(strict_types=1);
 namespace Automattic\SiteBuild\Steps;
 
 use Automattic\SiteBuild\BlockMarkup;
+use Automattic\SiteBuild\ContrastMath;
 use Automattic\SiteBuild\ImageClient;
 use Automattic\SiteBuild\ImageLogger;
 use Automattic\SiteBuild\GeminiImage;
 use Automattic\SiteBuild\ImagePromptComposer;
 use Automattic\SiteBuild\ImageTransparency;
 use Automattic\SiteBuild\Llm;
+use Automattic\SiteBuild\MarkupSanitizer;
 use Automattic\SiteBuild\Narrator;
 use Automattic\SiteBuild\Package;
 use Automattic\SiteBuild\Project;
@@ -17,6 +19,7 @@ use Automattic\SiteBuild\PromptRenderer;
 use Automattic\SiteBuild\Step;
 use Automattic\SiteBuild\StepDeclaration;
 use Automattic\SiteBuild\ThemeValidator;
+use Automattic\SiteBuild\Warnings;
 use Automattic\SiteBuild\Units\GeneratedMarkup;
 
 /**
@@ -90,6 +93,8 @@ final class GenerateImagesStep implements Step
                 'images.json',
                 'siteSpec.json',
                 'designDirection.json',
+                'theme/theme.json',
+                'theme/assets/*',
                 'plugin/images.json',
                 'theme/parts/*',
                 'theme/templates/*',
@@ -120,6 +125,12 @@ final class GenerateImagesStep implements Step
         }
 
         $specs = $project->readJson('images.json');
+        $specsBeforeCollision = $specs;
+        self::canonicalizeStageTextureUrls($project);
+        $specs = $this->degradeReservedStageCollision($project, $specs);
+        if ($specs !== $specsBeforeCollision) {
+            $project->writeJsonAtomic('images.json', $specs);
+        }
 
         // Textured stage canvas backstop (BIGR-776): in the default graph
         // HeaderHeroStep paints the canonical texture path onto the header
@@ -127,25 +138,47 @@ final class GenerateImagesStep implements Step
         // first full-pipeline run reaches this step with the reference in
         // markup but no spec on file. Synthesize the same code-owned spec so
         // the tile actually generates; a later re-collect owns it as usual.
-        $textureFilename = basename(GeneratedMarkup::STAGE_TEXTURE_ASSET);
-        $hasTextureSpec = false;
-        foreach ($specs as $spec) {
-            if (($spec['filename'] ?? null) === $textureFilename) {
-                $hasTextureSpec = true;
-                break;
-            }
-        }
-        if (!$hasTextureSpec) {
-            $textureSources = [];
-            foreach ($project->themeFiles() as $rel) {
-                if (str_contains($project->readText('theme/' . $rel), GeneratedMarkup::STAGE_TEXTURE_ASSET)) {
-                    $textureSources[] = $rel;
+        $textureSources = self::stageTextureSources($project);
+        if ($textureSources !== []) {
+            $textureIndex = null;
+            foreach ($specs as $i => $spec) {
+                if (is_array($spec) && CollectImagesStep::isStageTextureSpec($spec)) {
+                    $textureIndex = $i;
+                    break;
                 }
             }
-            if ($textureSources !== []) {
-                $specs[] = CollectImagesStep::stageTextureSpec($textureSources);
-                $project->writeJson('images.json', $specs);
+            $canonical = CollectImagesStep::stageTextureSpec(
+                $textureSources,
+                CollectImagesStep::stageTextureTargetColor($project, allMarkup: true),
+            );
+            $canonical['foregroundColors'] = self::stageTextureForegroundColors($project);
+            if ($textureIndex === null) {
+                $specs[] = $canonical;
+            } else {
+                // Keep durable progress fields while refreshing the code-owned
+                // prompt contract and the complete set of current references.
+                foreach (['status', 'url', 'error'] as $runtimeField) {
+                    if (array_key_exists($runtimeField, $specs[$textureIndex])) {
+                        $canonical[$runtimeField] = $specs[$textureIndex][$runtimeField];
+                    }
+                }
+                $specs[$textureIndex] = $canonical;
             }
+            $textureIndex ??= array_key_last($specs);
+            $textureFilename = basename(GeneratedMarkup::STAGE_TEXTURE_ASSET);
+            if ($textureIndex !== null
+                && in_array(($specs[$textureIndex]['status'] ?? 'pending'), ['', 'pending'], true)
+                && $project->exists('theme/assets/' . $textureFilename)
+            ) {
+                // Recover an interrupted/full rerun without paying for the
+                // same tile again. The completed branch below still verifies
+                // MIME, target, visual quietness, and every foreground before
+                // trusting these existing bytes.
+                $specs[$textureIndex]['status'] = 'completed';
+                $specs[$textureIndex]['url'] = $this->servedUrl($project, $textureFilename);
+                unset($specs[$textureIndex]['error']);
+            }
+            $project->writeJson('images.json', $specs);
         }
 
         if ($specs === []) {
@@ -166,8 +199,9 @@ final class GenerateImagesStep implements Step
             $project->exists('siteSpec.json') ? $project->readJson('siteSpec.json') : []
         );
 
-        // The design direction's photographic grade, injected into EVERY prompt
-        // so the independently generated images read as one photographic series.
+        // The design direction's photographic grade, injected into ordinary
+        // imagery so those assets read as one series. The code-owned surface
+        // texture stays bound to its exact delivered palette target instead.
         $imageGrade = DesignDirectionStep::imageGradeFor($project);
 
         $assetDir = $project->themePath('assets');
@@ -180,11 +214,58 @@ final class GenerateImagesStep implements Step
         // Already-completed images need no work — just record them for the rewrite.
         $pending = [];
         foreach ($specs as $i => $spec) {
-            if (($spec['status'] ?? 'pending') === 'completed') {
-                $resolved[$spec['src']] = $this->servedUrl($project, $spec['filename']);
+            $isStageTexture = CollectImagesStep::isStageTextureSpec($spec);
+            if ($isStageTexture && $textureSources === []) {
+                // Cleanup from a previous failed run removed the complete
+                // marker/background contract. Do not regenerate an unused
+                // orphan on subsequent invocations.
                 continue;
             }
-            $pending[$i] = $spec; // preserve the original images.json index
+            $targetColor = is_string($spec['targetColor'] ?? null) ? $spec['targetColor'] : '';
+            if ($isStageTexture && ContrastMath::hexToRgb($targetColor) === null) {
+                $error = 'stage texture has no single resolvable delivered hero surface color';
+                $specs[$i]['status'] = 'failed';
+                $specs[$i]['error'] = $error;
+                unset($specs[$i]['url']);
+                $this->warnFailure(
+                    $project,
+                    $specs[$i],
+                    $i,
+                    GeminiImage::mimeForFilename((string) ($spec['filename'] ?? '')),
+                    $error,
+                );
+                continue;
+            }
+            if (($spec['status'] ?? 'pending') === 'completed') {
+                if ($isStageTexture) {
+                    $filename = (string) ($spec['filename'] ?? '');
+                    $mime = GeminiImage::mimeForFilename($filename);
+                    if (!$project->exists('theme/assets/' . $filename)) {
+                        // A missing cache entry is repairable: generate it in
+                        // this run. An actual read failure remains fatal I/O.
+                        $specs[$i]['status'] = 'pending';
+                        unset($specs[$i]['url']);
+                        $spec = $specs[$i];
+                    } else {
+                        $bytes = $project->readText('theme/assets/' . $filename);
+                        try {
+                            $this->assertDeliveryMime($bytes, $mime);
+                            self::assertStageTextureDelivery($spec, $bytes);
+                        } catch (\Throwable $error) {
+                            $specs[$i]['status'] = 'failed';
+                            $specs[$i]['error'] = $error->getMessage();
+                            unset($specs[$i]['url']);
+                            $this->warnFailure($project, $specs[$i], $i, $mime, $error->getMessage());
+                            continue;
+                        }
+                    }
+                }
+                if (($specs[$i]['status'] ?? null) === 'completed') {
+                    $resolved[$spec['src']] = $this->servedUrl($project, $spec['filename']);
+                    continue;
+                }
+            }
+            $pending[$i] = $specs[$i]; // preserve the original images.json index
         }
 
         // Generate every pending image through ONE pooled batch: concurrency
@@ -247,6 +328,75 @@ final class GenerateImagesStep implements Step
 
         $this->shipPluginImages($project);
         $this->markComplete($project);
+    }
+
+    /**
+     * A residual ordinary AI placeholder cannot share the reserved stage
+     * source. Drop that smallest dead tag, remove safe stage paint, and keep
+     * the reserved mapping out of the generation batch.
+     *
+     * @param array<int,array<string,mixed>> $specs
+     * @return array<int,array<string,mixed>>
+     */
+    private function degradeReservedStageCollision(Project $project, array $specs): array
+    {
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        $collisions = [];
+        $warnings = [];
+        foreach ($project->markupFiles() as $absolute) {
+            $relative = str_starts_with($absolute, $root)
+                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+                : $absolute;
+            if (CollectImagesStep::containsReservedOrdinaryAiPlaceholder($project->readText($relative))) {
+                $collisions[] = $relative;
+            }
+        }
+        if ($collisions === []) {
+            return $specs;
+        }
+
+        foreach ($project->markupFiles() as $absolute) {
+            $relative = str_starts_with($absolute, $root)
+                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+                : $absolute;
+            $content = $project->readText($relative);
+            $hadStage = self::containsStageTextureMarkerEvidence($content);
+            $updated = self::removeMatchingBlockBackgroundImages(
+                $content,
+                GeneratedMarkup::STAGE_TEXTURE_ASSET,
+            );
+            if (in_array($relative, $collisions, true)) {
+                $updated = self::removeOrdinarySourceFromMarkup(
+                    $updated,
+                    GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                );
+                $retained = CollectImagesStep::containsReservedOrdinaryAiPlaceholder($updated);
+                $warnings[] = "file=" . Warnings::value($relative)
+                    . "; block='reserved ordinary AI_IMAGE media owner'; authored source="
+                    . Warnings::value(GeneratedMarkup::STAGE_TEXTURE_ASSET)
+                    . '; delivered=' . Warnings::value($retained ? 'pre-cleanup media retained' : 'media removed')
+                    . '; disposition=ambiguous ordinary media was isolated at its smallest safe owner so the '
+                    . 'code-owned stage URL cannot be mapped into it';
+            }
+            $hasStage = self::containsStageTextureMarkerEvidence($updated);
+            if ($hadStage) {
+                $warnings[] = "file=" . Warnings::value($relative)
+                    . "; block='stage-texture root'; authored=\"texture\"; delivered=\""
+                    . ($hasStage ? 'pre-cleanup texture retained' : 'solid')
+                    . '"; disposition=reserved ordinary media made the stage mapping ambiguous; '
+                    . ($hasStage
+                        ? 'unsafe root bytes were retained for later repair'
+                        : 'the safe code-owned root paint was removed transactionally');
+            }
+            if ($updated !== $content) {
+                $project->writeText($relative, $updated);
+            }
+        }
+        $project->addWarnings($this->id(), $warnings);
+        return array_values(array_filter(
+            $specs,
+            static fn (mixed $spec): bool => !is_array($spec) || !CollectImagesStep::isStageTextureSpec($spec),
+        ));
     }
 
     /**
@@ -370,6 +520,352 @@ final class GenerateImagesStep implements Step
         return preg_match(self::WEB_ARTIFACT_CONTEXT, $candidate) !== 1;
     }
 
+    /** @return list<string> markup paths that carry the exact marker + background contract */
+    private static function stageTextureSources(Project $project): array
+    {
+        $sources = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        foreach ($project->markupFiles() as $absolute) {
+            $relative = str_starts_with($absolute, $root)
+                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+                : $absolute;
+            if (!self::containsCanonicalStageTextureContract($project->readText($relative))) {
+                continue;
+            }
+            // Existing image specs name theme markup relative to theme/, while
+            // assembled plugin pages already use project-relative paths.
+            $sources[] = str_starts_with($relative, 'theme/') ? substr($relative, 6) : $relative;
+        }
+        return array_values(array_unique($sources));
+    }
+
+    /** Whether one markup file contains a safe synchronized canonical stage root. */
+    private static function containsCanonicalStageTextureContract(string $markup): bool
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+            foreach ($document->indices() as $index) {
+                $end = $document->endOffset($index);
+                if (!$document->isStructurallySafe($index) || $end === null) {
+                    continue;
+                }
+                $block = substr(
+                    $markup,
+                    $document->openingOffset($index),
+                    $end - $document->openingOffset($index),
+                );
+                if (GeneratedMarkup::hasExactStageTextureContract(
+                    $block,
+                    GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                )) {
+                    return true;
+                }
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+        return false;
+    }
+
+    /**
+     * A copied project can retain the previous theme slug in an already-served
+     * stage URL. Bring every reserved served alias back to the canonical
+     * source before discovery; the ordinary resolved-map pass then writes the
+     * current project slug after byte validation.
+     */
+    private static function canonicalizeStageTextureUrls(Project $project): void
+    {
+        foreach ($project->markupFiles() as $absolute) {
+            $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+            $relative = str_starts_with($absolute, $root)
+                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+                : $absolute;
+            $content = $project->readText($relative);
+            try {
+                $document = BlockMarkup::parse($content);
+                $htmlEdits = [];
+                $safeIndices = [];
+                foreach ($document->indices() as $index) {
+                    $attrs = $document->attrs($index);
+                    if (!is_array($attrs) || !CollectImagesStep::isCommittedStageTextureAttrs($attrs)) {
+                        continue;
+                    }
+                    if (!$document->isStructurallySafe($index)) {
+                        throw new \RuntimeException("stage-texture block {$index} is structurally unsafe");
+                    }
+                    $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                    $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+                    $image = is_array($background['backgroundImage'] ?? null)
+                        ? $background['backgroundImage']
+                        : [];
+                    $old = $image['url'] ?? null;
+                    if (!is_string($old)) {
+                        continue;
+                    }
+                    $ownHtml = $document->ownHtml($index);
+                    if (preg_match(
+                        '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                            . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                        $ownHtml,
+                        $opening,
+                        PREG_OFFSET_CAPTURE,
+                    ) !== 1) {
+                        if ($old !== GeneratedMarkup::STAGE_TEXTURE_ASSET) {
+                            throw new \RuntimeException("stage-texture block {$index} has no isolated saved wrapper");
+                        }
+                        continue;
+                    }
+                    $safeIndices[$index] = true;
+                    $canonicalTag = $opening['tag'][0];
+                    $styleAttributes = array_values(array_filter(
+                        MarkupSanitizer::openingTagAttributes($canonicalTag),
+                        static fn (array $attribute): bool => $attribute['name'] === 'style'
+                            && $attribute['valueStart'] !== null
+                            && $attribute['valueEnd'] !== null,
+                    ));
+                    if (count($styleAttributes) !== 1) {
+                        throw new \RuntimeException("stage-texture block {$index} has no unique saved style");
+                    }
+                    $styleAttribute = $styleAttributes[0];
+                    $savedStyle = substr(
+                        $canonicalTag,
+                        $styleAttribute['valueStart'],
+                        $styleAttribute['valueEnd'] - $styleAttribute['valueStart'],
+                    );
+                    $canonicalStyle = GeneratedMarkup::canonicalizeStageTextureInlineStyle($savedStyle);
+                    if ($canonicalStyle === null
+                        || !GeneratedMarkup::hasStageTextureInlineStyleSource(
+                            $canonicalStyle,
+                            GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                        )
+                    ) {
+                        throw new \RuntimeException("stage-texture block {$index} has no safe saved background-image");
+                    }
+                    $canonicalTag = substr_replace(
+                        $canonicalTag,
+                        $canonicalStyle,
+                        $styleAttribute['valueStart'],
+                        $styleAttribute['valueEnd'] - $styleAttribute['valueStart'],
+                    );
+                    if ($canonicalTag !== $opening['tag'][0]) {
+                        $htmlEdits[] = [
+                            'offset' => $document->openingOffset($index)
+                                + $document->openingLength($index)
+                                + $opening['tag'][1],
+                            'length' => strlen($opening['tag'][0]),
+                            'tag' => $canonicalTag,
+                        ];
+                    }
+                }
+                usort($htmlEdits, static fn (array $a, array $b): int => $b['offset'] <=> $a['offset']);
+                $updated = $content;
+                foreach ($htmlEdits as $edit) {
+                    $updated = substr_replace($updated, $edit['tag'], $edit['offset'], $edit['length']);
+                }
+                $document = BlockMarkup::parse($updated);
+                foreach ($document->indices() as $index) {
+                    if (!isset($safeIndices[$index])) {
+                        continue;
+                    }
+                    $attrs = $document->attrs($index);
+                    if (!is_array($attrs) || !CollectImagesStep::isCommittedStageTextureAttrs($attrs)) {
+                        continue;
+                    }
+                    $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                    $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+                    $currentImage = is_array($background['backgroundImage'] ?? null)
+                        ? $background['backgroundImage']
+                        : [];
+                    if (($currentImage['url'] ?? null) === GeneratedMarkup::STAGE_TEXTURE_ASSET) {
+                        continue;
+                    }
+                    $background['backgroundImage'] = ['url' => GeneratedMarkup::STAGE_TEXTURE_ASSET];
+                    $style['background'] = $background;
+                    $attrs['style'] = $style;
+                    $document->setAttrs($index, $attrs);
+                }
+                $updated = $document->render();
+                $verified = BlockMarkup::parse($updated);
+                foreach (array_keys($safeIndices) as $index) {
+                    $attrs = $verified->attrs($index);
+                    $style = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                    $background = is_array($style['background'] ?? null) ? $style['background'] : [];
+                    $image = is_array($background['backgroundImage'] ?? null)
+                        ? $background['backgroundImage']
+                        : [];
+                    if (!$verified->isStructurallySafe($index)
+                        || ($image['url'] ?? null) !== GeneratedMarkup::STAGE_TEXTURE_ASSET
+                    ) {
+                        throw new \RuntimeException("stage-texture block {$index} failed canonical attr verification");
+                    }
+                    $ownHtml = $verified->ownHtml($index);
+                    if (preg_match(
+                        '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                            . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                        $ownHtml,
+                        $opening,
+                    ) !== 1) {
+                        throw new \RuntimeException("stage-texture block {$index} failed saved-wrapper verification");
+                    }
+                    $savedStyles = array_values(array_filter(
+                        MarkupSanitizer::openingTagAttributes($opening['tag']),
+                        static fn (array $attribute): bool => $attribute['name'] === 'style'
+                            && $attribute['valueStart'] !== null
+                            && $attribute['valueEnd'] !== null,
+                    ));
+                    if (count($savedStyles) !== 1) {
+                        throw new \RuntimeException("stage-texture block {$index} failed saved-style verification");
+                    }
+                    $savedStyle = substr(
+                        $opening['tag'],
+                        $savedStyles[0]['valueStart'],
+                        $savedStyles[0]['valueEnd'] - $savedStyles[0]['valueStart'],
+                    );
+                    if (GeneratedMarkup::canonicalizeStageTextureInlineStyle($savedStyle) !== $savedStyle
+                        || !GeneratedMarkup::hasStageTextureInlineStyleSource(
+                            $savedStyle,
+                            GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                        )
+                    ) {
+                        throw new \RuntimeException("stage-texture block {$index} retained a stale saved source");
+                    }
+                    $end = $verified->endOffset($index);
+                    $start = $verified->openingOffset($index);
+                    if ($end === null || !GeneratedMarkup::hasExactStageTextureContract(
+                        substr($updated, $start, $end - $start),
+                        GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                    )) {
+                        throw new \RuntimeException("stage-texture block {$index} failed exact contract verification");
+                    }
+                }
+            } catch (\Throwable $error) {
+                $updated = $content;
+                if (str_contains($content, GeneratedMarkup::STAGE_TEXTURE_CLASS)
+                    && preg_match(
+                        '~(?:theme:\./assets|/wp-content/themes/[a-z0-9_-]+/assets)'
+                            . '/stage_backdrop-texture\.jpg~i',
+                        $content,
+                        $oldSource,
+                    ) === 1
+                ) {
+                    $project->addWarnings('generate-images', [
+                        "file='{$relative}'; block='unparsed stage-texture root'; authored source="
+                            . json_encode($oldSource[0], JSON_UNESCAPED_SLASHES)
+                            . '; delivered=retained in pre-canonicalization bytes; disposition=unsafe generated '
+                            . 'markup prevented a transactional theme-slug repair; error=' . $error->getMessage(),
+                    ]);
+                }
+            }
+            if ($updated !== $content) {
+                $project->writeText($relative, $updated);
+            }
+        }
+    }
+
+    /**
+     * Palette colors actually used by text inside roots painted with the
+     * texture. These become a post-generation contrast boundary; an opaque
+     * tile that cannot carry every delivered foreground degrades to solid.
+     *
+     * @return list<string> canonical #RRGGBB values
+     */
+    private static function stageTextureForegroundColors(Project $project): array
+    {
+        if (!$project->exists('theme/theme.json')) {
+            return [];
+        }
+        $palette = ContrastFixStep::paletteMap($project->readJson('theme/theme.json'));
+        $colors = [];
+        $root = rtrim($project->root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        foreach ($project->markupFiles() as $absolute) {
+            $relative = str_starts_with($absolute, $root)
+                ? str_replace(DIRECTORY_SEPARATOR, '/', substr($absolute, strlen($root)))
+                : $absolute;
+            $markup = $project->readText($relative);
+            if (!CollectImagesStep::containsCommittedStageTexture($markup)) {
+                continue;
+            }
+            try {
+                $document = BlockMarkup::parse($markup);
+            } catch (\Throwable) {
+                continue;
+            }
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index);
+                $end = $document->endOffset($index);
+                $start = $document->openingOffset($index);
+                if (!$document->isStructurallySafe($index)
+                    || $end === null
+                    || !is_array($attrs)
+                    || !GeneratedMarkup::hasExactStageTextureContract(
+                        substr($markup, $start, $end - $start),
+                        GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                    )
+                ) {
+                    continue;
+                }
+                $rootStyle = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                $rootColorStyle = is_array($rootStyle['color'] ?? null) ? $rootStyle['color'] : [];
+                $inherited = self::resolvePaletteColor($attrs['textColor'] ?? null, $palette)
+                    ?? self::resolvePaletteColor($rootColorStyle['text'] ?? null, $palette)
+                    ?? (isset($palette['contrast']) ? strtoupper($palette['contrast']) : null);
+                if ($inherited !== null) {
+                    $colors[$inherited] = true;
+                }
+                $subtree = [$index];
+                for ($cursor = 0; $cursor < count($subtree); $cursor++) {
+                    array_push($subtree, ...$document->children($subtree[$cursor]));
+                }
+                foreach ($subtree as $candidate) {
+                    $candidateAttrs = $document->attrs($candidate);
+                    if (!is_array($candidateAttrs)) {
+                        continue;
+                    }
+                    $candidateStyle = is_array($candidateAttrs['style'] ?? null)
+                        ? $candidateAttrs['style']
+                        : [];
+                    $candidateColor = is_array($candidateStyle['color'] ?? null)
+                        ? $candidateStyle['color']
+                        : [];
+                    $elements = is_array($candidateStyle['elements'] ?? null)
+                        ? $candidateStyle['elements']
+                        : [];
+                    $link = is_array($elements['link'] ?? null) ? $elements['link'] : [];
+                    $linkColor = is_array($link['color'] ?? null) ? $link['color'] : [];
+                    foreach ([
+                        $candidateAttrs['textColor'] ?? null,
+                        $candidateColor['text'] ?? null,
+                        $linkColor['text'] ?? null,
+                    ] as $value) {
+                        $resolved = self::resolvePaletteColor($value, $palette);
+                        if ($resolved !== null) {
+                            $colors[$resolved] = true;
+                        }
+                    }
+                }
+            }
+        }
+        return array_keys($colors);
+    }
+
+    /** @param array<string,string> $palette */
+    private static function resolvePaletteColor(mixed $value, array $palette): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+        if (isset($palette[$value])) {
+            return strtoupper($palette[$value]);
+        }
+        if (preg_match('/^var:preset\|color\|([a-z0-9_-]+)$/i', $value, $match) === 1
+            && isset($palette[$match[1]])
+        ) {
+            return strtoupper($palette[$match[1]]);
+        }
+        return ContrastMath::hexToRgb($value) === null ? null : strtoupper($value);
+    }
+
     /**
      * Turn one images.json row into the generation spec the client sends:
      * the composed prompt plus the structured parameters. $subject overrides
@@ -385,13 +881,14 @@ final class GenerateImagesStep implements Step
         // bytes, prompt for a flat white background (the image model cannot render
         // alpha), and key that background out after generation.
         $mime = GeminiImage::mimeForFilename((string) ($spec['filename'] ?? ''));
+        $isStageTexture = CollectImagesStep::isStageTextureSpec($spec);
         return [
             'prompt'            => ImagePromptComposer::compose(
                 $subject ?? (string) ($spec['subject'] ?? ''),
                 (string) ($spec['pageContext'] ?? ''),
                 (string) ($spec['style'] ?? ''),
-                $siteContext,
-                $imageGrade,
+                $isStageTexture ? '' : $siteContext,
+                $isStageTexture ? '' : $imageGrade,
                 $mime === 'image/png',
             ),
             'aspect_ratio'      => $ratio,
@@ -425,7 +922,7 @@ final class GenerateImagesStep implements Step
             'subject'           => $subject ?? (string) ($spec['subject'] ?? ''),
             'page_context'      => (string) ($spec['pageContext'] ?? ''),
             'style'             => (string) ($spec['style'] ?? ''),
-            'image_grade'       => $imageGrade,
+            'image_grade'       => CollectImagesStep::isStageTextureSpec($spec) ? '' : $imageGrade,
         ];
     }
 
@@ -462,6 +959,9 @@ final class GenerateImagesStep implements Step
             // than introducing a second conversion path.
             $bytes = (string) $result['bytes'];
             $this->assertDeliveryMime($bytes, $genSpec['mime']);
+            if (CollectImagesStep::isStageTextureSpec($specs[$i])) {
+                self::assertStageTextureDelivery($specs[$i], $bytes);
+            }
             if ($genSpec['mime'] === 'image/png') {
                 // The image model cannot render real alpha: the prompt asked for a flat
                 // solid white background instead, keyed out here so the asset
@@ -647,6 +1147,148 @@ final class GenerateImagesStep implements Step
         );
     }
 
+    /**
+     * The texture is opaque paint directly beneath header/hero copy, so a
+     * syntactically valid JPEG is not sufficient. Bound its palette drift,
+     * tonal spread and contrast against the foregrounds actually delivered in
+     * the textured roots. Failure is caught by finish() and degrades to solid.
+     *
+     * @param array<string,mixed> $spec
+     */
+    private static function assertStageTextureDelivery(array $spec, string $bytes): void
+    {
+        if (!extension_loaded('imagick')) {
+            throw new \RuntimeException(
+                'stage texture validation unavailable because Imagick is not loaded; delivered solid fallback'
+            );
+        }
+        try {
+            $image = new \Imagick();
+            $image->readImageBlob($bytes);
+            $image->setIteratorIndex(0);
+            $image->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
+            $quantum = (float) (\Imagick::getQuantumRange()['quantumRangeLong'] ?? 65535);
+            $sourceChannelSpread = 0.0;
+            $sourceChannelDeviation = 0.0;
+            foreach ([\Imagick::CHANNEL_RED, \Imagick::CHANNEL_GREEN, \Imagick::CHANNEL_BLUE] as $channel) {
+                $range = $image->getImageChannelRange($channel);
+                $mean = $image->getImageChannelMean($channel);
+                if (!is_array($range) || !is_array($mean)) {
+                    throw new \RuntimeException('stage texture channel statistics are unavailable');
+                }
+                $sourceChannelSpread = max(
+                    $sourceChannelSpread,
+                    ((float) $range['maxima'] - (float) $range['minima']) / $quantum,
+                );
+                $sourceChannelDeviation = max(
+                    $sourceChannelDeviation,
+                    (float) $mean['standardDeviation'] / $quantum,
+                );
+            }
+            $image->thumbnailImage(24, 24, true);
+            $pixels = [];
+            $sum = [0, 0, 0];
+            foreach ($image->getPixelIterator() as $row) {
+                foreach ($row as $pixel) {
+                    $color = $pixel->getColor();
+                    $rgb = [(int) $color['r'], (int) $color['g'], (int) $color['b']];
+                    $pixels[] = ['rgb' => $rgb, 'luminance' => ContrastMath::luminance($rgb)];
+                    $sum[0] += $rgb[0];
+                    $sum[1] += $rgb[1];
+                    $sum[2] += $rgb[2];
+                }
+            }
+        } catch (\Throwable $error) {
+            throw new \RuntimeException('stage texture pixels could not be inspected: ' . $error->getMessage());
+        }
+        if ($pixels === []) {
+            throw new \RuntimeException('stage texture decoded with no inspectable pixels');
+        }
+        if ($sourceChannelSpread > 0.28 || $sourceChannelDeviation > 0.08) {
+            throw new \RuntimeException(sprintf(
+                'stage texture source pixels are too visually busy (channel spread %.3f, deviation %.3f)',
+                $sourceChannelSpread,
+                $sourceChannelDeviation,
+            ));
+        }
+
+        usort($pixels, static fn (array $a, array $b): int => $a['luminance'] <=> $b['luminance']);
+        $count = count($pixels);
+        $mean = [
+            (int) round($sum[0] / $count),
+            (int) round($sum[1] / $count),
+            (int) round($sum[2] / $count),
+        ];
+        $target = ContrastMath::hexToRgb((string) ($spec['targetColor'] ?? ''));
+        if ($target === null) {
+            throw new \RuntimeException('stage texture has no single resolvable delivered hero surface color');
+        }
+        $channelDrift = max(
+            abs($mean[0] - $target[0]),
+            abs($mean[1] - $target[1]),
+            abs($mean[2] - $target[2]),
+        );
+        if ($channelDrift > 20) {
+            throw new \RuntimeException(
+                'stage texture mean color drifted too far from target '
+                . (string) $spec['targetColor'] . " (max channel drift {$channelDrift})"
+            );
+        }
+
+        $low = $pixels[(int) floor(($count - 1) * 0.05)];
+        $high = $pixels[(int) ceil(($count - 1) * 0.95)];
+        $centralSpread = $high['luminance'] - $low['luminance'];
+        $fullSpread = $pixels[$count - 1]['luminance'] - $pixels[0]['luminance'];
+        if ($centralSpread > 0.12 || $fullSpread > 0.28) {
+            throw new \RuntimeException(sprintf(
+                'stage texture is too visually busy (central luminance spread %.3f, full spread %.3f)',
+                $centralSpread,
+                $fullSpread,
+            ));
+        }
+
+        // Equal-luminance hue changes can be every bit as loud as light/dark
+        // contrast. Bound each channel's central and full spread as well, so a
+        // red/green checker cannot pass merely because its luminance is flat.
+        $channelCentralSpread = 0;
+        $channelFullSpread = 0;
+        foreach ([0, 1, 2] as $channel) {
+            $values = array_column(array_column($pixels, 'rgb'), $channel);
+            sort($values, SORT_NUMERIC);
+            $channelCentralSpread = max(
+                $channelCentralSpread,
+                $values[(int) ceil(($count - 1) * 0.95)]
+                    - $values[(int) floor(($count - 1) * 0.05)],
+            );
+            $channelFullSpread = max($channelFullSpread, $values[$count - 1] - $values[0]);
+        }
+        if ($channelCentralSpread > 36 || $channelFullSpread > 72) {
+            throw new \RuntimeException(
+                "stage texture is too chromatically busy (central channel spread {$channelCentralSpread}, "
+                . "full channel spread {$channelFullSpread})"
+            );
+        }
+
+        foreach ((array) ($spec['foregroundColors'] ?? []) as $foregroundHex) {
+            $foreground = ContrastMath::hexToRgb((string) $foregroundHex);
+            if ($foreground === null) {
+                continue;
+            }
+            $minimum = INF;
+            foreach ($pixels as $pixel) {
+                $minimum = min($minimum, ContrastMath::ratio($foreground, $pixel['rgb']));
+            }
+            if ($minimum < ContrastMath::NORMAL_TEXT) {
+                throw new \RuntimeException(sprintf(
+                    'stage texture contrast %.2f:1 against delivered foreground %s is below %.1f:1',
+                    $minimum,
+                    (string) $foregroundHex,
+                    ContrastMath::NORMAL_TEXT,
+                ));
+            }
+        }
+    }
+
     /** @param array<string,mixed> $spec */
     private function warnFailure(
         Project $project,
@@ -662,6 +1304,17 @@ final class GenerateImagesStep implements Step
             static fn (string $value): bool => $value !== '',
         ));
         $where = $locations === [] ? '' : ' at ' . implode(', ', $locations);
+        if (CollectImagesStep::isStageTextureSpec($spec)) {
+            $project->addWarnings($this->id(), [
+                "file='designDirection.json'; path=\"hero_blueprint.stage_backdrop\"; "
+                    . "block='header/hero root groups{$where}'; authored=\"texture\"; "
+                    . 'delivered="solid where safely isolated; pre-cleanup bytes otherwise"; '
+                    . 'disposition=generated stage texture rejected and code-owned background cleanup requested; '
+                    . 'any unsafe retained reference is recorded separately with its file context '
+                    . "(asset theme/assets/{$filename}, MIME {$mime}); error: {$error}",
+            ]);
+            return;
+        }
         $project->addWarnings($this->id(), [
             "images.json[{$i}] / theme/assets/{$filename}: authored MIME {$mime} "
             . "for {$source}{$where}; delivered removed; disposition: failed generated asset omitted; "
@@ -688,6 +1341,14 @@ final class GenerateImagesStep implements Step
             if ($source !== '') {
                 $sources[$source] = true;
             }
+            $url = (string) ($spec['url'] ?? '');
+            if ($url !== '') {
+                $sources[$url] = true;
+            }
+            if (CollectImagesStep::isStageTextureSpec($spec)) {
+                $filename = (string) ($spec['filename'] ?? basename(GeneratedMarkup::STAGE_TEXTURE_ASSET));
+                $sources[$this->servedUrl($project, $filename)] = true;
+            }
         }
         if ($sources === []) {
             return;
@@ -702,7 +1363,11 @@ final class GenerateImagesStep implements Step
             $updated = $content;
             foreach (array_keys($sources) as $source) {
                 $candidate = self::removeSourceFromMarkup($updated, $source);
-                if (self::firstMediaSourcePosition($candidate, $source) !== null) {
+                $stageSource = GeneratedMarkup::isStageTextureSource($source);
+                $unsafeResidual = $stageSource
+                    ? self::containsStageTextureMarkerEvidence($candidate)
+                    : self::firstMediaSourcePosition($candidate, $source) !== null;
+                if ($unsafeResidual) {
                     // The source sits in malformed/unclosed markup without a
                     // safe block span. Keep this source's pre-cleanup bytes and
                     // report the residual instead of half-mutating the file.
@@ -711,6 +1376,13 @@ final class GenerateImagesStep implements Step
                         . 'disposition: pre-cleanup bytes kept because no safe media isolation was available',
                     ]);
                     continue;
+                }
+                if ($stageSource && self::firstMediaSourcePosition($candidate, $source) !== null) {
+                    $project->addWarnings($this->id(), [
+                        "{$relative}: authored ordinary media source {$source}; delivered retained and unwired; "
+                            . 'disposition: the reserved source was not part of a committed stage root, so stage '
+                            . 'failure cleanup left its bytes intact and the scoped URL resolver will not map it',
+                    ]);
                 }
                 $updated = $candidate;
             }
@@ -723,7 +1395,21 @@ final class GenerateImagesStep implements Step
     /** Remove every safely isolated occurrence of one failed asset source. */
     private static function removeSourceFromMarkup(string $markup, string $source): string
     {
+        if (GeneratedMarkup::isStageTextureSource($source)) {
+            return self::removeMatchingBlockBackgroundImages($markup, $source);
+        }
+        return self::removeOrdinarySourceFromMarkup($markup, $source);
+    }
+
+    /** Remove an ordinary failed/colliding media source at its smallest safe owner. */
+    private static function removeOrdinarySourceFromMarkup(string $markup, string $source): string
+    {
         while (($position = self::firstMediaSourcePosition($markup, $source)) !== null) {
+            $withoutBlockBackground = self::removeMatchingBlockBackgroundImages($markup, $source);
+            if ($withoutBlockBackground !== $markup) {
+                $markup = $withoutBlockBackground;
+                continue;
+            }
             $document = BlockMarkup::parse($markup);
             $best = null;
             foreach ($document->indices() as $index) {
@@ -825,6 +1511,148 @@ final class GenerateImagesStep implements Step
         return $markup;
     }
 
+    /**
+     * Remove a failed source used as block-support background paint while
+     * retaining the block, its children, its solid fallback and unrelated
+     * style families. The stage texture's code-owned geometry/class leave
+     * with its failed image so a later CSS rule cannot treat the root as live.
+     */
+    private static function removeMatchingBlockBackgroundImages(string $markup, string $source): string
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+            $stageTexture = GeneratedMarkup::isStageTextureSource($source);
+            if ($stageTexture) {
+                $spans = [];
+                foreach ($document->indices() as $index) {
+                    $attrs = $document->attrs($index);
+                    $end = $document->endOffset($index);
+                    if (!$document->isStructurallySafe($index)
+                        || $end === null
+                        || !is_array($attrs)
+                        || !CollectImagesStep::isCommittedStageTextureAttrs($attrs)
+                    ) {
+                        continue;
+                    }
+                    $spans[] = [
+                        'start' => $document->openingOffset($index),
+                        'end' => $end,
+                    ];
+                }
+                usort($spans, static fn (array $a, array $b): int => $a['start'] <=> $b['start']);
+                $previousEnd = -1;
+                foreach ($spans as $span) {
+                    if ($span['start'] < $previousEnd) {
+                        return $markup;
+                    }
+                    $previousEnd = $span['end'];
+                }
+                $spans = array_reverse($spans);
+                foreach ($spans as $span) {
+                    $block = substr($markup, $span['start'], $span['end'] - $span['start']);
+                    $cleaned = GeneratedMarkup::withoutStageTextureBackdrop($block);
+                    if ($cleaned === null || GeneratedMarkup::hasStageTextureEvidence($cleaned)) {
+                        return $markup;
+                    }
+                    $markup = substr_replace(
+                        $markup,
+                        $cleaned,
+                        $span['start'],
+                        $span['end'] - $span['start'],
+                    );
+                }
+                return $markup;
+            }
+
+            $changed = false;
+            foreach ($document->indices() as $index) {
+                $attrs = $document->attrs($index);
+                if (!is_array($attrs)) {
+                    continue;
+                }
+                $style = $attrs['style'] ?? null;
+                $background = is_array($style) ? ($style['background'] ?? null) : null;
+                $image = is_array($background) && is_array($background['backgroundImage'] ?? null)
+                    ? $background['backgroundImage']
+                    : [];
+                $blockStageTexture = false;
+                $backgroundMatches = ($image['url'] ?? null) === $source;
+                if ($backgroundMatches) {
+                    unset($background['backgroundImage']);
+                }
+                if ($backgroundMatches) {
+                    if ($background === []) {
+                        unset($style['background']);
+                    } else {
+                        $style['background'] = $background;
+                    }
+                    if ($style === []) {
+                        unset($attrs['style']);
+                    } else {
+                        $attrs['style'] = $style;
+                    }
+                }
+                if ($backgroundMatches) {
+                    $document->setAttrs($index, $attrs);
+                    $changed = true;
+                }
+            }
+            return $changed ? $document->render() : $markup;
+        } catch (\Throwable) {
+            return $markup;
+        }
+    }
+
+    /** Root/block-scoped marker evidence, excluding harmless descendant text. */
+    private static function containsStageTextureMarkerEvidence(string $markup): bool
+    {
+        try {
+            $document = BlockMarkup::parse($markup);
+            $sawBlock = false;
+            foreach ($document->indices() as $index) {
+                $sawBlock = true;
+                $attrs = $document->attrs($index);
+                $className = is_array($attrs) && is_string($attrs['className'] ?? null)
+                    ? $attrs['className']
+                    : '';
+                $tokens = preg_split('/\s+/', trim($className), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if (in_array(GeneratedMarkup::STAGE_TEXTURE_CLASS, $tokens, true)) {
+                    return true;
+                }
+                $ownHtml = $document->ownHtml($index);
+                if (preg_match(
+                    '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                    $ownHtml,
+                    $opening,
+                ) !== 1) {
+                    continue;
+                }
+                foreach (MarkupSanitizer::openingTagAttributes($opening['tag']) as $attribute) {
+                    if ($attribute['name'] !== 'class'
+                        || $attribute['valueStart'] === null
+                        || $attribute['valueEnd'] === null
+                    ) {
+                        continue;
+                    }
+                    $value = substr(
+                        $opening['tag'],
+                        $attribute['valueStart'],
+                        $attribute['valueEnd'] - $attribute['valueStart'],
+                    );
+                    $htmlTokens = preg_split('/\s+/', trim(html_entity_decode($value)), -1, PREG_SPLIT_NO_EMPTY)
+                        ?: [];
+                    if (in_array(GeneratedMarkup::STAGE_TEXTURE_CLASS, $htmlTokens, true)) {
+                        return true;
+                    }
+                }
+            }
+            return !$sawBlock && str_contains($markup, GeneratedMarkup::STAGE_TEXTURE_CLASS);
+        } catch (\Throwable) {
+            return str_contains($markup, GeneratedMarkup::STAGE_TEXTURE_CLASS);
+        }
+    }
+
     /** Remove bare/rendered img tags whose src is this exact failed source. */
     private static function removeMatchingImageTags(string $markup, string $source): string
     {
@@ -851,6 +1679,8 @@ final class GenerateImagesStep implements Step
         $patterns = [
             '/"(?:url|src)"\s*:\s*"' . $quoted . '"/i',
             '/\bsrc\s*=\s*(?:(["\'])' . $quoted . '\1|' . $quoted . '(?=\s|\/?>))/i',
+            '/background-image\s*:\s*url\(\s*(["\']?)' . $quoted . '\1\s*\)/i',
+            '/background\s*:[^;]*url\(\s*(["\']?)' . $quoted . '\1\s*\)/i',
         ];
         $positions = [];
         foreach ($patterns as $pattern) {
@@ -884,9 +1714,19 @@ final class GenerateImagesStep implements Step
      */
     private function rewriteMarkup(Project $project, array $resolved): void
     {
+        $stageServed = $resolved[GeneratedMarkup::STAGE_TEXTURE_ASSET] ?? null;
+        unset($resolved[GeneratedMarkup::STAGE_TEXTURE_ASSET]);
         foreach ($project->themeFiles() as $rel) {
             $content = $project->readText('theme/' . $rel);
             $updated = strtr($content, $resolved);
+            if (is_string($stageServed)) {
+                $updated = $this->rewriteStageTextureContracts(
+                    $project,
+                    'theme/' . $rel,
+                    $updated,
+                    $stageServed,
+                );
+            }
             if ($updated !== $content) {
                 $project->writeText('theme/' . $rel, $updated);
             }
@@ -899,9 +1739,129 @@ final class GenerateImagesStep implements Step
             $rel = 'plugin/pages/' . basename($abs);
             $content = $project->readText($rel);
             $updated = strtr($content, $resolved);
+            if (is_string($stageServed)) {
+                $updated = $this->rewriteStageTextureContracts($project, $rel, $updated, $stageServed);
+            }
             if ($updated !== $content) {
                 $project->writeText($rel, $updated);
             }
+        }
+    }
+
+    /** Resolve the code-owned source only inside complete committed stage roots. */
+    private function rewriteStageTextureContracts(
+        Project $project,
+        string $relative,
+        string $markup,
+        string $served,
+    ): string {
+        $before = $markup;
+        try {
+            $document = BlockMarkup::parse($markup);
+            $spans = [];
+            foreach ($document->indices() as $index) {
+                $end = $document->endOffset($index);
+                if (!$document->isStructurallySafe($index) || $end === null) {
+                    continue;
+                }
+                $start = $document->openingOffset($index);
+                $block = substr($markup, $start, $end - $start);
+                if (GeneratedMarkup::hasExactStageTextureContract(
+                    $block,
+                    GeneratedMarkup::STAGE_TEXTURE_ASSET,
+                )) {
+                    $spans[] = ['start' => $start, 'end' => $end];
+                }
+            }
+            usort($spans, static fn (array $a, array $b): int => $a['start'] <=> $b['start']);
+            $previousEnd = -1;
+            foreach ($spans as $span) {
+                if ($span['start'] < $previousEnd) {
+                    throw new \RuntimeException('nested stage roots have overlapping transaction spans');
+                }
+                $previousEnd = $span['end'];
+            }
+            $spans = array_reverse($spans);
+            foreach ($spans as $span) {
+                $block = substr($markup, $span['start'], $span['end'] - $span['start']);
+                $blockDocument = BlockMarkup::parse($block);
+                $root = $blockDocument->topLevel();
+                if ($root === null || !$blockDocument->isStructurallySafe($root)) {
+                    throw new \RuntimeException('stage root lost its safe boundary');
+                }
+                $ownHtml = $blockDocument->ownHtml($root);
+                if (preg_match(
+                    '~\A(?:(?:\s+)|(?:<!--(?:(?!-->).)*-->))*(?<tag><[a-z][a-z0-9:-]*(?=[\s>])'
+                        . '(?:[^>"\']+|"[^"]*"|\'[^\']*\')*>)~is',
+                    $ownHtml,
+                    $opening,
+                    PREG_OFFSET_CAPTURE,
+                ) !== 1) {
+                    throw new \RuntimeException('stage root has no isolated saved wrapper');
+                }
+                $tag = $opening['tag'][0];
+                $styles = array_values(array_filter(
+                    MarkupSanitizer::openingTagAttributes($tag),
+                    static fn (array $attribute): bool => $attribute['name'] === 'style'
+                        && $attribute['valueStart'] !== null
+                        && $attribute['valueEnd'] !== null,
+                ));
+                if (count($styles) !== 1) {
+                    throw new \RuntimeException('stage root has no unique saved style');
+                }
+                $style = substr(
+                    $tag,
+                    $styles[0]['valueStart'],
+                    $styles[0]['valueEnd'] - $styles[0]['valueStart'],
+                );
+                $servedStyle = GeneratedMarkup::serveStageTextureInlineStyle($style, $served);
+                if ($servedStyle === null
+                    || !GeneratedMarkup::hasStageTextureInlineStyleSource($servedStyle, $served)
+                ) {
+                    throw new \RuntimeException('stage root saved source could not be resolved safely');
+                }
+                $tag = substr_replace(
+                    $tag,
+                    $servedStyle,
+                    $styles[0]['valueStart'],
+                    $styles[0]['valueEnd'] - $styles[0]['valueStart'],
+                );
+                $tagStart = $blockDocument->openingOffset($root)
+                    + $blockDocument->openingLength($root)
+                    + $opening['tag'][1];
+                $block = substr_replace($block, $tag, $tagStart, strlen($opening['tag'][0]));
+                $blockDocument = BlockMarkup::parse($block);
+                $root = $blockDocument->topLevel();
+                $attrs = $root === null ? null : $blockDocument->attrs($root);
+                if ($root === null || !is_array($attrs)) {
+                    throw new \RuntimeException('stage root attrs disappeared during URL resolution');
+                }
+                $styleAttrs = is_array($attrs['style'] ?? null) ? $attrs['style'] : [];
+                $background = is_array($styleAttrs['background'] ?? null) ? $styleAttrs['background'] : [];
+                $background['backgroundImage'] = ['url' => $served];
+                $styleAttrs['background'] = $background;
+                $attrs['style'] = $styleAttrs;
+                $blockDocument->setAttrs($root, $attrs);
+                $delivered = $blockDocument->render();
+                if (!GeneratedMarkup::hasExactStageTextureContract($delivered, $served)) {
+                    throw new \RuntimeException('stage root failed served URL verification');
+                }
+                $markup = substr_replace(
+                    $markup,
+                    $delivered,
+                    $span['start'],
+                    $span['end'] - $span['start'],
+                );
+            }
+            return $markup;
+        } catch (\Throwable $error) {
+            $project->addWarnings($this->id(), [
+                "file='{$relative}'; block='stage-texture root'; authored source="
+                    . Warnings::value(GeneratedMarkup::STAGE_TEXTURE_ASSET)
+                    . '; delivered="pre-resolution bytes retained"; disposition=served stage URL could not '
+                    . 'be wired transactionally; error=' . $error->getMessage(),
+            ]);
+            return $before;
         }
     }
 }

@@ -108,6 +108,7 @@ Respond with ONLY a JSON object. No explanation, no commentary, no text before o
       "text_safe_region": "start",
       "height_profile": "standard",
       "cta_treatment": "prominent",
+      "stage_backdrop": "Use one bounded backdrop value allowed by the selected recipe",
       "mobile_transformation": "Use one bounded value allowed by the selected recipe"
     }
   }

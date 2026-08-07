@@ -59,6 +59,7 @@ test('header CSS keeps positioning progressive and state changes paint-only', fu
 
     $state = header_asset_css_block($css, 'html.header-is-scrolled');
     assert_contains('background-color: var(--header-scrolled-surface)', $state);
+    assert_contains('background-image: none !important', $state, 'the texture snaps off before crossing later sections');
     assert_contains('box-shadow: var(--header-scrolled-shadow)', $state);
     assert_true(
         preg_match('/\b(?:height|padding|margin|position|top|inset|border-width)\s*:/', $state) !== 1,
@@ -66,6 +67,19 @@ test('header CSS keeps positioning progressive and state changes paint-only', fu
     );
     assert_contains('transition-property: background-color, box-shadow', $css);
     assert_true(!str_contains($css, 'transition: all'), 'trusted state kit never transitions all properties');
+
+    $behavior = header_asset_css_block(
+        $css,
+        '.site-header-shell :is(.header-behavior-sticky-soft, .header-behavior-overlay-to-solid)',
+    );
+    assert_true(
+        !str_contains($behavior, 'background-image: none'),
+        'the behavior base no longer suppresses the reviewed top-of-page texture',
+    );
+    $unreviewedPaint = header_asset_css_block($css, ':not(.has-stage-texture-backdrop)');
+    assert_contains('background-image: none !important', $unreviewedPaint, 'arbitrary generated header paint stays suppressed');
+    $forced = header_asset_css_block($css, '.site-header-shell--force-solid');
+    assert_contains('background-image: none !important', $forced, 'forced-solid pages never carry the front-stage texture');
 
     $clearOverlay = header_asset_css_block(
         $css,

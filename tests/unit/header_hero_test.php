@@ -1511,8 +1511,19 @@ test('a committed texture backdrop tiles the stacked header and hero as one canv
         ]);
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'focal-subject-stage');
-        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
-        $project->writeText('theme/parts/page-home--hero.html', $heroPart);
+        $priorRepairs = [];
+        $priorHeader = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+            hh_header('{"layout":{"type":"constrained"}}'),
+            'header',
+            $priorRepairs,
+        );
+        $priorHero = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+            $heroPart,
+            'page-home--hero',
+            $priorRepairs,
+        );
+        $project->writeText('theme/parts/header.html', $priorHeader);
+        $project->writeText('theme/parts/page-home--hero.html', $priorHero);
 
         putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
@@ -1520,14 +1531,16 @@ test('a committed texture backdrop tiles the stacked header and hero as one canv
         $header = $project->readText('theme/parts/header.html');
         $hero = $project->readText('theme/parts/page-home--hero.html');
         foreach (['header' => $header, 'hero' => $hero] as $label => $part) {
-            assert_contains('theme:./assets/hero-backdrop-texture.jpg', $part, "{$label} carries the texture tile");
+            assert_contains('theme:./assets/stage_backdrop-texture.jpg', $part, "{$label} carries the texture tile");
             assert_contains('"backgroundAttachment":"fixed"', $part, "{$label} anchors the shared canvas");
+            assert_contains('has-stage-texture-backdrop', $part, "{$label} carries the reviewed texture hook");
         }
         assert_contains('"backgroundColor":"base"', $hero, 'the hero keeps its solid fallback surface');
         assert_contains('stage-texture-backdrop-applied', $project->readText('logs/header-hero.txt'));
     });
 
-    // A solid blueprint (the default) leaves both parts untouched.
+    // A solid blueprint (the default) removes a prior served texture from
+    // both parts and reaches a fixed point.
     with_project('builder_hh_solid_', function ($project) use ($pages, $heroPart) {
         $project->writeJson('siteSpec.json', ['name' => 'Demo']);
         $project->writeJson('theme/theme.json', hh_theme_json());
@@ -1537,14 +1550,69 @@ test('a committed texture backdrop tiles the stacked header and hero as one canv
         ]);
         $project->writeJson('pages.json', ['pages' => $pages]);
         hh_above_fold($project, $pages, 'focal-subject-stage');
-        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
-        $project->writeText('theme/parts/page-home--hero.html', $heroPart);
+        $priorRepairs = [];
+        $priorHeader = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+            hh_header('{"layout":{"type":"constrained"}}'),
+            'header',
+            $priorRepairs,
+        );
+        $priorHero = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+            $heroPart,
+            'page-home--hero',
+            $priorRepairs,
+        );
+        $served = '/wp-content/themes/old-theme/assets/stage_backdrop-texture.jpg';
+        $project->writeText(
+            'theme/parts/header.html',
+            str_replace(Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET, $served, $priorHeader),
+        );
+        $project->writeText(
+            'theme/parts/page-home--hero.html',
+            str_replace(Automattic\SiteBuild\Units\GeneratedMarkup::STAGE_TEXTURE_ASSET, $served, $priorHero),
+        );
 
         putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
-        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'hero-backdrop-texture'));
-        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'hero-backdrop-texture'));
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'stage_backdrop-texture'));
+        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'stage_backdrop-texture'));
+        assert_contains('Exhibit', $project->readText('theme/parts/page-home--hero.html'));
+        $header = $project->readText('theme/parts/header.html');
+        $hero = $project->readText('theme/parts/page-home--hero.html');
+        $delivery = $project->readJson('aboveFold.json');
+        $delivery['phase'] = Automattic\SiteBuild\AboveFoldContract::PHASE_DELIVERY;
+        $project->writeJson('aboveFold.json', $delivery);
+        (new HeaderHeroStep())->run($project);
+        assert_eq($header, $project->readText('theme/parts/header.html'));
+        assert_eq($hero, $project->readText('theme/parts/page-home--hero.html'));
+    });
+
+    // The plan's semantic tinted surface remains eligible after delivered
+    // markup resolves it to a concrete secondary token.
+    $tintedSections = [['slug' => 'hero', 'role' => 'hero', 'layout_archetype' => 'asymmetric-split', 'background' => 'tinted']];
+    $tintedPages = [['slug' => 'home', 'title' => 'Home', 'front' => true, 'sections' => $tintedSections]];
+    $tintedHeroPart = str_replace(
+        ['"backgroundColor":"base"', 'has-base-background-color'],
+        ['"backgroundColor":"secondary"', 'has-secondary-background-color'],
+        $heroPart,
+    );
+    with_project('builder_hh_texture_tinted_', function ($project) use ($tintedPages, $tintedHeroPart, $texturedBlueprint) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', [
+            'canvas' => 'full-bleed', 'motion' => 'calm', 'hero_blueprint' => $texturedBlueprint,
+        ]);
+        $project->writeJson('pages.json', ['pages' => $tintedPages]);
+        hh_above_fold($project, $tintedPages, 'focal-subject-stage');
+        $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
+        $project->writeText('theme/parts/page-home--hero.html', $tintedHeroPart);
+
+        putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_contains('stage_backdrop-texture', $project->readText('theme/parts/header.html'));
+        assert_contains('stage_backdrop-texture', $project->readText('theme/parts/page-home--hero.html'));
+        assert_true(!$project->exists('warnings.json'), 'a valid semantic tinted plan does not silently degrade');
     });
 
     // A contrast front surface never receives the tone-on-tone texture. The
@@ -1565,14 +1633,56 @@ test('a committed texture backdrop tiles the stacked header and hero as one canv
         ]);
         $project->writeJson('pages.json', ['pages' => $contrastPages]);
         hh_above_fold($project, $contrastPages, 'focal-subject-stage');
+        $priorRepairs = [];
+        $priorHeader = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+            hh_header('{"layout":{"type":"constrained"}}'),
+            'header',
+            $priorRepairs,
+        );
+        $priorHero = Automattic\SiteBuild\Units\GeneratedMarkup::withStageTextureBackdrop(
+            $contrastHeroPart,
+            'page-home--hero',
+            $priorRepairs,
+        );
+        $project->writeText('theme/parts/header.html', $priorHeader);
+        $project->writeText('theme/parts/page-home--hero.html', $priorHero);
+
+        putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
+        (new HeaderHeroStep())->run($project);
+
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'stage_backdrop-texture'));
+        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'stage_backdrop-texture'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+        assert_contains('path="hero_blueprint.stage_backdrop"', $warnings);
+        assert_contains('authored="texture"', $warnings);
+        assert_contains('delivered="solid"', $warnings);
+        assert_contains('surface="contrast"', $warnings);
+        assert_contains('both parts kept their transactionally cleaned solid baseline', $warnings);
+    });
+
+    // A light semantic plan cannot override objective markup drift. This is
+    // the regression that keeps the gate from consulting the plan alone.
+    with_project('builder_hh_texture_surface_drift_', function ($project) use ($pages, $contrastHeroPart, $texturedBlueprint) {
+        $project->writeJson('siteSpec.json', ['name' => 'Demo']);
+        $project->writeJson('theme/theme.json', hh_theme_json());
+        $project->writeJson('designDirection.json', [
+            'canvas' => 'full-bleed', 'motion' => 'calm', 'hero_blueprint' => $texturedBlueprint,
+        ]);
+        $project->writeJson('pages.json', ['pages' => $pages]);
+        hh_above_fold($project, $pages, 'focal-subject-stage');
         $project->writeText('theme/parts/header.html', hh_header('{"layout":{"type":"constrained"}}'));
         $project->writeText('theme/parts/page-home--hero.html', $contrastHeroPart);
 
         putenv(Automattic\SiteBuild\AboveFoldContract::HEADER_ARCHETYPE_ENV);
         (new HeaderHeroStep())->run($project);
 
-        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'hero-backdrop-texture'));
-        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'hero-backdrop-texture'));
+        assert_true(!str_contains($project->readText('theme/parts/header.html'), 'stage_backdrop-texture'));
+        assert_true(!str_contains($project->readText('theme/parts/page-home--hero.html'), 'stage_backdrop-texture'));
+        assert_contains('Exhibit', $project->readText('theme/parts/page-home--hero.html'));
+        $warnings = implode("\n", $project->readJson('warnings.json')['header-hero'] ?? []);
+        assert_contains('surface="base"', $warnings, 'semantic plan is recorded');
+        assert_contains('actual_surface="contrast"', $warnings, 'objective drift is recorded');
+        assert_contains('both parts kept their transactionally cleaned solid baseline', $warnings);
     });
 });
 

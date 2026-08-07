@@ -478,6 +478,41 @@ final class HeaderHeroStep implements Step
             $pages = self::withoutFrontPrimaryAction($pages, $warnings);
         }
 
+        // Every run starts from a transactionally stripped solid baseline.
+        // This makes texture -> solid and texture -> ineligible reruns honest:
+        // prior code-owned paint cannot survive merely because no new texture
+        // was applied. If either root cannot be cleaned safely, keep both
+        // pre-cleanup writes and report that retained state.
+        $solidWrites = $writes;
+        $textureCleanupFailure = null;
+        $textureCleanupReport = [];
+        foreach ([$headerRel, $heroRel] as $texturedRel) {
+            if (!isset($solidWrites[$texturedRel])) {
+                continue;
+            }
+            $hadTextureEvidence = GeneratedMarkup::hasStageTextureEvidence($solidWrites[$texturedRel]);
+            $cleaned = GeneratedMarkup::withoutStageTextureBackdrop($solidWrites[$texturedRel]);
+            if ($cleaned === null
+                || ($hadTextureEvidence && GeneratedMarkup::hasStageTextureEvidence($cleaned))
+            ) {
+                $textureCleanupFailure = "theme/{$texturedRel} prior texture could not be isolated safely";
+                break;
+            }
+            if ($cleaned !== $solidWrites[$texturedRel]) {
+                $textureCleanupReport[] = "[{$texturedRel}] prior code-owned stage texture removed for rerun baseline";
+                $solidWrites[$texturedRel] = $cleaned;
+            }
+        }
+        if ($textureCleanupFailure === null) {
+            $writes = $solidWrites;
+            array_push($report, ...$textureCleanupReport);
+        } elseif (self::stageBackdrop($project) !== 'texture') {
+            $warnings[] = "file='designDirection.json'; path=\"hero_blueprint.stage_backdrop\"; "
+                . "block='theme/{$headerRel} + theme/{$heroRel} roots'; authored=\"prior texture\"; "
+                . 'delivered="pre-cleanup texture retained"; disposition=' . $textureCleanupFailure
+                . '; both parts kept their pre-cleanup bytes';
+        }
+
         // Textured stage canvas (BIGR-776): when the committed blueprint
         // swaps the solid stage for a texture, the stacked header root and
         // the hero root carry the same repeating fixed-attachment tile so the
@@ -487,25 +522,74 @@ final class HeaderHeroStep implements Step
         // the stacked relation over a base/tinted front surface — a
         // tone-on-tone light texture has no business under an overlay veil
         // or over a contrast stage.
-        if (self::stageBackdrop($project) === 'texture'
-            && ($final['header']['mode'] ?? '') === AboveFoldContract::MODE_STACKED
-            && $heroPart !== ''
-            && isset($writes[$heroRel])
-            && in_array(self::frontOpeningSurface($final), ['base', 'tinted'], true)
-        ) {
-            foreach ([$headerRel, $heroRel] as $texturedRel) {
-                $textureRepairs = [];
-                $writes[$texturedRel] = GeneratedMarkup::withStageTextureBackdrop(
-                    $writes[$texturedRel],
-                    basename($texturedRel, '.html'),
-                    $textureRepairs,
-                );
-                foreach ($textureRepairs as $repair) {
-                    $report[] = "[{$texturedRel}] " . (string) json_encode(
-                        $repair,
-                        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-                    );
+        if (self::stageBackdrop($project) === 'texture') {
+            $plannedSurface = self::frontOpeningPlannedSurface($pages, $final);
+            $deliveredSurface = self::frontOpeningDeliveredSurface($final);
+            $fallbackReason = $textureCleanupFailure;
+            if ($fallbackReason === null
+                && ($final['header']['mode'] ?? '') !== AboveFoldContract::MODE_STACKED
+            ) {
+                $fallbackReason = 'the delivered header relation is not stacked';
+            } elseif ($fallbackReason === null && ($heroPart === '' || !isset($writes[$heroRel]))) {
+                $fallbackReason = 'the delivered front-page hero part is unavailable';
+            } elseif ($fallbackReason === null && !in_array($plannedSurface, ['base', 'tinted'], true)) {
+                $fallbackReason = "the planned front-stage surface '{$plannedSurface}' is not a light base/tinted surface";
+            } elseif ($fallbackReason === null && (
+                in_array($deliveredSurface, ['', 'image', 'contrast'], true)
+                    || ($plannedSurface === 'base' && $deliveredSurface !== 'base')
+                    || ($plannedSurface === 'tinted' && $deliveredSurface !== 'secondary')
+            )) {
+                $fallbackReason = "the delivered front-stage surface '{$deliveredSurface}' does not match the light plan";
+            }
+
+            $textureWrites = $writes;
+            $textureReport = [];
+            if ($fallbackReason === null) {
+                foreach ([$headerRel, $heroRel] as $texturedRel) {
+                    $textureRepairs = [];
+                    try {
+                        $textureWrites[$texturedRel] = GeneratedMarkup::withStageTextureBackdrop(
+                            $textureWrites[$texturedRel],
+                            basename($texturedRel, '.html'),
+                            $textureRepairs,
+                        );
+                    } catch (\Throwable $error) {
+                        $fallbackReason = "theme/{$texturedRel} texture repair failed safely: "
+                            . $error->getMessage();
+                        break;
+                    }
+                    foreach ($textureRepairs as $repair) {
+                        $textureReport[] = "[{$texturedRel}] " . (string) json_encode(
+                            $repair,
+                            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+                        );
+                    }
                 }
+                if ($fallbackReason === null) {
+                    foreach ([$headerRel, $heroRel] as $texturedRel) {
+                        if (!GeneratedMarkup::hasStageTextureSavedHtml($textureWrites[$texturedRel])) {
+                            $fallbackReason = "theme/{$texturedRel} has no safely paintable root Group";
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if ($fallbackReason === null) {
+                $writes = $textureWrites;
+                array_push($report, ...$textureReport);
+            } else {
+                $deliveredBackdrop = $textureCleanupFailure === null
+                    ? 'solid'
+                    : 'pre-cleanup texture retained';
+                $warnings[] = "file='designDirection.json'; path=\"hero_blueprint.stage_backdrop\"; "
+                    . "block='theme/{$headerRel} + theme/{$heroRel} roots'; authored=\"texture\"; "
+                    . 'delivered=' . Warnings::value($deliveredBackdrop) . '; surface=' . Warnings::value($plannedSurface)
+                    . '; actual_surface=' . Warnings::value($deliveredSurface)
+                    . "; disposition=texture canvas not applied because {$fallbackReason}; both parts kept "
+                    . ($textureCleanupFailure === null
+                        ? 'their transactionally cleaned solid baseline'
+                        : 'their pre-cleanup bytes');
             }
         }
 
@@ -2500,14 +2584,51 @@ final class HeaderHeroStep implements Step
             : 'solid';
     }
 
-    /** The contract's delivered front-opening surface token (BIGR-776). */
-    private static function frontOpeningSurface(array $contract): string
+    /** The page plan's semantic front-stage surface, before markup token resolution (BIGR-776). */
+    private static function frontOpeningPlannedSurface(array $pages, array $contract): string
     {
-        $heroPart = (string) ($contract['hero_part'] ?? '');
-        foreach ((array) ($contract['openings'] ?? []) as $opening) {
-            if (is_array($opening) && (string) ($opening['part'] ?? '') === $heroPart) {
-                return (string) ($opening['surface'] ?? '');
+        $frontPage = is_string($contract['front_page'] ?? null) ? $contract['front_page'] : '';
+        $heroSection = is_string($contract['hero_section'] ?? null) ? $contract['hero_section'] : '';
+        foreach ($pages as $page) {
+            $pageSlug = is_array($page) && is_string($page['slug'] ?? null) ? $page['slug'] : '';
+            if (!is_array($page)
+                || ($frontPage !== '' && $pageSlug !== $frontPage)
+                || ($frontPage === '' && !($page['front'] ?? false))
+            ) {
+                continue;
             }
+            foreach ((array) ($page['sections'] ?? []) as $section) {
+                $sectionSlug = is_array($section) && is_string($section['slug'] ?? null)
+                    ? $section['slug']
+                    : '';
+                if (!is_array($section)
+                    || ($heroSection !== '' && $sectionSlug !== $heroSection)
+                ) {
+                    continue;
+                }
+                return is_string($section['background'] ?? null) ? trim($section['background']) : '';
+            }
+        }
+        return '';
+    }
+
+    /** The finalized front opening's actual surface after markup inspection. */
+    private static function frontOpeningDeliveredSurface(array $contract): string
+    {
+        $frontPage = is_string($contract['front_page'] ?? null) ? $contract['front_page'] : '';
+        $heroSection = is_string($contract['hero_section'] ?? null) ? $contract['hero_section'] : '';
+        foreach ((array) ($contract['openings'] ?? []) as $opening) {
+            $openingPage = is_array($opening) && is_string($opening['page'] ?? null) ? $opening['page'] : '';
+            $openingSection = is_array($opening) && is_string($opening['section'] ?? null)
+                ? $opening['section']
+                : '';
+            if (!is_array($opening)
+                || ($frontPage !== '' && $openingPage !== $frontPage)
+                || ($heroSection !== '' && $openingSection !== $heroSection)
+            ) {
+                continue;
+            }
+            return is_string($opening['surface'] ?? null) ? trim($opening['surface']) : '';
         }
         return '';
     }
