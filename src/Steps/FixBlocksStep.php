@@ -9,8 +9,8 @@ use Automattic\SiteBuild\BlockFixerOutcome;
 use Automattic\SiteBuild\BlockMarkup;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLoss;
 use Automattic\SiteBuild\BlockSerializer\AlignmentClassLossDetector;
-use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\JetpackFormFixer;
+use Automattic\SiteBuild\LayoutFixer;
 use Automattic\SiteBuild\PhpBlockFixer;
 use Automattic\SiteBuild\Project;
 use Automattic\SiteBuild\ShapeMarkup;
@@ -134,9 +134,9 @@ final class FixBlocksStep implements Step
 
         // Structural repair can make previously unparseable markup safe for
         // JetpackFormFixer/LayoutFixer or expose image/button attributes to
-        // ShapeMarkup (for example, by balancing a wp:group). Give each contract one more
-        // chance, then re-serialize only when that pass actually changed
-        // comment attributes so the saved HTML stays in sync with them.
+        // ShapeMarkup (for example, by balancing a wp:group). Give each
+        // contract one more chance, then re-serialize only when that pass
+        // actually changed comment attributes so saved HTML stays in sync.
         try {
             $postRepairFormNotes = self::normalizeJetpackForms($project, self::failurePaths($failedFiles));
             $postRepairLayoutNotes = self::normalizeLayouts(
@@ -391,7 +391,7 @@ final class FixBlocksStep implements Step
      *        failed this step and must remain at their step-entry bytes
      * @return list<string>
      */
-    public static function normalizeJetpackForms(Project $project, array $excluded = []): array
+    private static function normalizeJetpackForms(Project $project, array $excluded = []): array
     {
         $notes = [];
         $excluded = array_fill_keys($excluded, true);

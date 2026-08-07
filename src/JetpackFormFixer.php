@@ -29,7 +29,7 @@ final class JetpackFormFixer
         foreach ($blocks->indices() as $index) {
             if ($blocks->name($index) !== 'jetpack/button'
                 || !$blocks->isStructurallySafe($index)
-                || self::contactFormAncestor($blocks, $index) === null) {
+                || !self::isInsideContactForm($blocks, $index)) {
                 continue;
             }
 
@@ -46,16 +46,16 @@ final class JetpackFormFixer
         return ['markup' => $blocks->render(), 'notes' => $notes];
     }
 
-    private static function contactFormAncestor(BlockMarkup $blocks, int $index): ?int
+    private static function isInsideContactForm(BlockMarkup $blocks, int $index): bool
     {
         for ($parent = $blocks->parent($index); $parent !== null; $parent = $blocks->parent($parent)) {
             if (!$blocks->isStructurallySafe($parent)) {
-                return null;
+                return false;
             }
             if ($blocks->name($parent) === 'jetpack/contact-form') {
-                return $parent;
+                return true;
             }
         }
-        return null;
+        return false;
     }
 }
