@@ -77,9 +77,7 @@ final class CollectImagesStep implements Step
         foreach ($this->themeHtmlFiles($project) as $rel) {
             $content = $project->readText('theme/' . $rel);
             $parsed = self::parseAndNormalize($content);
-            // Renames applied to THIS part when one of its filenames collides
-            // with a different subject already collected from another part.
-            $renames = [];
+            $updated = $parsed['content'];
             foreach ($parsed['images'] as $img) {
                 $cappedForFooter = false;
                 $authoredRatio = $img['aspectRatio'] ?? null;
@@ -100,10 +98,12 @@ final class CollectImagesStep implements Step
                 if (isset($byFilename[$filename])) {
                     $sameSubject = self::normalizeSubject((string) $img['subject'])
                         === self::normalizeSubject((string) $byFilename[$filename]['subject']);
-                    if ($sameSubject || in_array($rel, $byFilename[$filename]['sources'], true)) {
-                        // The same asset genuinely shared (or re-referenced
-                        // within one part) — just record the source.
-                        $byFilename[$filename]['sources'][] = $rel;
+                    if ($sameSubject) {
+                        // The same asset genuinely shared — just record the
+                        // source once, even when one part renders it twice.
+                        if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
+                            $byFilename[$filename]['sources'][] = $rel;
+                        }
                         if ($cappedForFooter) {
                             // A shared asset must use the footer-safe shape even
                             // if a non-footer source introduced it first.
@@ -117,24 +117,57 @@ final class CollectImagesStep implements Step
                     // the name would render one photo in both slots
                     // (BIGR-793); give the newcomer a deterministic variant
                     // name and its own spec instead.
-                    $variant = self::variantFilename($filename, (string) $img['subject']);
-                    $renames['theme:./assets/' . $filename] = 'theme:./assets/' . $variant;
-                    $warnings[] = "file='theme/{$rel}'; asset=" . Warnings::value($filename)
-                        . '; delivered as ' . Warnings::value($variant)
-                        . '; disposition=another section already claimed this filename for a different '
+                    $variant = self::availableVariantFilename(
+                        $filename,
+                        (string) $img['subject'],
+                        $byFilename,
+                    );
+                    $rewritten = self::renameCanonicalPlaceholder(
+                        $updated,
+                        $filename,
+                        (string) $img['subject'],
+                        $variant,
+                    );
+                    if ($rewritten === null) {
+                        if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
+                            $byFilename[$filename]['sources'][] = $rel;
+                        }
+                        if ($cappedForFooter) {
+                            $byFilename[$filename]['aspectRatio'] = 'square';
+                        }
+                        $warnings[] = "file='theme/{$rel}'; block="
+                            . Warnings::value('AI_IMAGE placeholder for ' . (string) $img['subject'])
+                            . '; authored asset=' . Warnings::value($filename)
+                            . '; delivered asset=' . Warnings::value($filename)
+                            . '; disposition=different-subject filename collision retained because the '
+                            . 'individual placeholder could not be isolated safely; the first image may repeat';
+                        continue;
+                    }
+                    $updated = $rewritten;
+                    $warnings[] = "file='theme/{$rel}'; block="
+                        . Warnings::value('AI_IMAGE placeholder for ' . (string) $img['subject'])
+                        . '; authored asset=' . Warnings::value($filename)
+                        . '; delivered asset=' . Warnings::value($variant)
+                        . '; disposition=another placeholder already claimed this filename for a different '
                         . 'subject, so this reference was renamed to generate its own image instead of '
                         . 'repeating that photo';
                     $img['filename'] = $variant;
                     $img['src'] = 'theme:./assets/' . $variant;
                     $filename = $variant;
+                    if (isset($byFilename[$filename])) {
+                        if (!in_array($rel, $byFilename[$filename]['sources'], true)) {
+                            $byFilename[$filename]['sources'][] = $rel;
+                        }
+                        if ($cappedForFooter) {
+                            $byFilename[$filename]['aspectRatio'] = 'square';
+                        }
+                        continue;
+                    }
                 }
                 $img['sources'] = [$rel];
                 $img['status']  = 'pending';
                 $byFilename[$filename] = $img;
             }
-            $updated = $renames === []
-                ? $parsed['content']
-                : strtr($parsed['content'], $renames);
             if ($updated !== $content) {
                 $project->writeText('theme/' . $rel, $updated);
             }
@@ -452,6 +485,80 @@ final class CollectImagesStep implements Step
         $stem = $dot === false ? $filename : substr($filename, 0, $dot);
         $ext = $dot === false ? '' : substr($filename, $dot);
         return $stem . '-' . substr(sha1(self::normalizeSubject($subject)), 0, 6) . $ext;
+    }
+
+    /**
+     * Pick the stable subject variant unless that exact filename already
+     * belongs to another subject; never overwrite a collected manifest row.
+     *
+     * @param array<string,array<string,mixed>> $byFilename
+     */
+    private static function availableVariantFilename(string $filename, string $subject, array $byFilename): string
+    {
+        $variant = self::variantFilename($filename, $subject);
+        if (
+            !isset($byFilename[$variant])
+            || self::normalizeSubject((string) $byFilename[$variant]['subject']) === self::normalizeSubject($subject)
+        ) {
+            return $variant;
+        }
+
+        $dot = strrpos($variant, '.');
+        $stem = $dot === false ? $variant : substr($variant, 0, $dot);
+        $ext = $dot === false ? '' : substr($variant, $dot);
+        for ($suffix = 2; ; $suffix++) {
+            $candidate = $stem . '-' . $suffix . $ext;
+            if (
+                !isset($byFilename[$candidate])
+                || self::normalizeSubject((string) $byFilename[$candidate]['subject']) === self::normalizeSubject($subject)
+            ) {
+                return $candidate;
+            }
+        }
+    }
+
+    /**
+     * Rename only canonical placeholders for the colliding subject. Bare
+     * references and placeholders for another subject stay byte-for-byte.
+     */
+    private static function renameCanonicalPlaceholder(
+        string $content,
+        string $filename,
+        string $subject,
+        string $variant,
+    ): ?string {
+        $changed = false;
+        $oldSrc = 'theme:./assets/' . $filename;
+        $newSrc = 'theme:./assets/' . $variant;
+        $normalizedSubject = self::normalizeSubject($subject);
+        $updated = preg_replace_callback(
+            '/<img\b[^>]*>/is',
+            static function (array $match) use (
+                &$changed,
+                $filename,
+                $normalizedSubject,
+                $oldSrc,
+                $newSrc,
+            ): string {
+                $images = self::parseCanonicalPlaceholders($match[0]);
+                if (count($images) !== 1) {
+                    return $match[0];
+                }
+                $image = $images[0];
+                if (
+                    $image['filename'] !== $filename
+                    || self::normalizeSubject((string) $image['subject']) !== $normalizedSubject
+                ) {
+                    return $match[0];
+                }
+                $renamed = str_replace($oldSrc, $newSrc, $match[0]);
+                $changed = $changed || $renamed !== $match[0];
+                return $renamed;
+            },
+            $content,
+        );
+
+        return $changed && is_string($updated) ? $updated : null;
     }
 
     /**

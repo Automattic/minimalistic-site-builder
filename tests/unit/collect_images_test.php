@@ -329,10 +329,103 @@ test('collect-images renames a cross-part filename collision with a different su
     assert_contains($variant['filename'], $visit);
     assert_true(!str_contains($visit, '"theme:./assets/street-doorway.jpg"'), 'old reference rewritten');
     $warnings = $project->readJson('warnings.json')['collect-images'] ?? [];
-    assert_contains('renamed', implode(' ', $warnings));
+    $joined = implode(' ', $warnings);
+    foreach ([
+        "file='theme/parts/page-home--visit.html'",
+        'block=',
+        'authored asset="street-doorway.jpg"',
+        'delivered asset=',
+        'disposition=',
+    ] as $context) {
+        assert_contains($context, $joined);
+    }
 
-    // Deterministic: a rerun of the parse yields the same variant name.
+    // Deterministic and fixed-point safe.
     assert_eq($variant['filename'], CollectImagesStep::variantFilename('street-doorway.jpg', $variant['subject']));
+    $firstMarkup = $visit;
+    (new CollectImagesStep())->run($project);
+    assert_eq($firstMarkup, $project->readText('theme/parts/page-home--visit.html'));
+    assert_eq(array_column($images, 'filename'), array_column($project->readJson('images.json'), 'filename'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images isolates different subjects within one part and preserves bare siblings', function () {
+    [$project, $tmp] = collect_fixture();
+    $project->writeText('theme/parts/page-home--gallery.html',
+        '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: An aged stone doorway | concept image | photorealistic | landscape"/>'
+        . '<img src="theme:./assets/street-doorway.jpg" alt="A reused reference with no placeholder"/>'
+        . '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: A painted steel doorway | location image | photorealistic | portrait"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(2, count($images), 'different subjects in one part receive independent specs');
+    $variant = $images[1]['filename'];
+    $markup = $project->readText('theme/parts/page-home--gallery.html');
+    assert_eq(2, substr_count($markup, 'theme:./assets/street-doorway.jpg'), 'first placeholder and bare sibling stay put');
+    assert_eq(1, substr_count($markup, 'theme:./assets/' . $variant), 'only the colliding placeholder is renamed');
+
+    (new CollectImagesStep())->run($project);
+    assert_eq($markup, $project->readText('theme/parts/page-home--gallery.html'), 'scoped rename reaches a fixed point');
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images never overwrites an occupied variant filename', function () {
+    [$project, $tmp] = collect_fixture();
+    $newSubject = 'A painted steel doorway';
+    $occupied = CollectImagesStep::variantFilename('street-doorway.jpg', $newSubject);
+    $project->writeText('theme/parts/a-original.html',
+        '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: An aged stone doorway | concept | photorealistic | landscape"/>'
+    );
+    $project->writeText('theme/parts/b-occupied.html',
+        '<img src="theme:./assets/' . $occupied . '" '
+        . 'alt="AI_IMAGE: A carved timber gate | archive | photorealistic | landscape"/>'
+    );
+    $project->writeText('theme/parts/c-new.html',
+        '<img src="theme:./assets/street-doorway.jpg" '
+        . 'alt="AI_IMAGE: ' . $newSubject . ' | location | photorealistic | portrait"/>'
+    );
+
+    (new CollectImagesStep())->run($project);
+
+    $images = $project->readJson('images.json');
+    assert_eq(3, count($images), 'every subject survives the occupied variant');
+    $bySubject = array_column($images, 'filename', 'subject');
+    assert_eq($occupied, $bySubject['A carved timber gate'], 'the existing variant claimant is untouched');
+    assert_true($bySubject[$newSubject] !== $occupied, 'the newcomer receives another deterministic name');
+    assert_contains($bySubject[$newSubject], $project->readText('theme/parts/c-new.html'));
+
+    exec('rm -rf ' . escapeshellarg($tmp));
+});
+
+test('collect-images retains and warns when a colliding recovered placeholder cannot be isolated', function () {
+    [$project, $tmp] = collect_fixture();
+    $rawRecovered = '<img src="AI_IMAGE:A painted steel doorway|ratio:portrait|role:location" alt=""/>';
+    $recoveredSpec = CollectImagesStep::parsePlaceholders($rawRecovered)[0];
+    $project->writeText('theme/parts/a-first.html',
+        '<img src="' . $recoveredSpec['src'] . '" '
+        . 'alt="AI_IMAGE: An aged stone doorway | concept | photorealistic | landscape"/>'
+    );
+    $project->writeText('theme/parts/b-recovered.html', $rawRecovered);
+
+    (new CollectImagesStep())->run($project);
+
+    assert_eq(1, count($project->readJson('images.json')), 'the existing manifest row is preserved');
+    $markup = $project->readText('theme/parts/b-recovered.html');
+    assert_contains($recoveredSpec['src'], $markup, 'the unsafe collision degrades to the existing image');
+    assert_true(!str_contains($markup, 'AI_IMAGE:'), 'raw source prompt still normalizes safely');
+    $warnings = implode(' ', $project->readJson('warnings.json')['collect-images'] ?? []);
+    assert_contains("file='theme/parts/b-recovered.html'", $warnings);
+    assert_contains('block=', $warnings);
+    assert_contains('authored asset=', $warnings);
+    assert_contains('delivered asset=', $warnings);
+    assert_contains('retained because', $warnings);
 
     exec('rm -rf ' . escapeshellarg($tmp));
 });
